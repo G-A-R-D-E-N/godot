@@ -1465,6 +1465,13 @@ Color TreeItem::get_button_color(int p_column, int p_index) const {
 	return cells[p_column].buttons[p_index].color;
 }
 
+Color TreeItem::get_button_hover_color(int p_column, int p_index) const {
+	ERR_FAIL_INDEX_V(p_column, cells.size(), Color());
+	ERR_FAIL_INDEX_V(p_index, cells[p_column].buttons.size(), Color());
+	const Cell::Button &button = cells[p_column].buttons[p_index];
+	return button.has_hover_color ? button.hover_color : button.color;
+}
+
 void TreeItem::set_button_tooltip_text(int p_column, int p_index, const String &p_tooltip) {
 	ERR_FAIL_INDEX(p_column, cells.size());
 	if (p_index < 0) {
@@ -1525,6 +1532,32 @@ void TreeItem::set_button_color(int p_column, int p_index, const Color &p_color)
 	}
 
 	cells.write[p_column].buttons.write[p_index].color = p_color;
+	_changed_notify(p_column);
+}
+
+void TreeItem::set_button_hover_color(int p_column, int p_index, const Color &p_color) {
+	ERR_FAIL_INDEX(p_column, cells.size());
+	ERR_FAIL_INDEX(p_index, cells[p_column].buttons.size());
+
+	const Cell::Button &button = cells[p_column].buttons[p_index];
+	if (button.has_hover_color && button.hover_color == p_color) {
+		return;
+	}
+
+	cells.write[p_column].buttons.write[p_index].hover_color = p_color;
+	cells.write[p_column].buttons.write[p_index].has_hover_color = true;
+	_changed_notify(p_column);
+}
+
+void TreeItem::clear_button_hover_color(int p_column, int p_index) {
+	ERR_FAIL_INDEX(p_column, cells.size());
+	ERR_FAIL_INDEX(p_index, cells[p_column].buttons.size());
+
+	if (!cells[p_column].buttons[p_index].has_hover_color) {
+		return;
+	}
+
+	cells.write[p_column].buttons.write[p_index].has_hover_color = false;
 	_changed_notify(p_column);
 }
 
@@ -1975,6 +2008,7 @@ void TreeItem::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_button_id", "column", "button_index"), &TreeItem::get_button_id);
 	ClassDB::bind_method(D_METHOD("get_button_by_id", "column", "id"), &TreeItem::get_button_by_id);
 	ClassDB::bind_method(D_METHOD("get_button_color", "column", "id"), &TreeItem::get_button_color);
+	ClassDB::bind_method(D_METHOD("get_button_hover_color", "column", "id"), &TreeItem::get_button_hover_color);
 	ClassDB::bind_method(D_METHOD("get_button", "column", "button_index"), &TreeItem::get_button);
 	ClassDB::bind_method(D_METHOD("set_button_tooltip_text", "column", "button_index", "tooltip"), &TreeItem::set_button_tooltip_text);
 	ClassDB::bind_method(D_METHOD("set_button", "column", "button_index", "button"), &TreeItem::set_button);
@@ -1982,6 +2016,8 @@ void TreeItem::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_button_description", "column", "button_index", "description"), &TreeItem::set_button_description);
 	ClassDB::bind_method(D_METHOD("set_button_disabled", "column", "button_index", "disabled"), &TreeItem::set_button_disabled);
 	ClassDB::bind_method(D_METHOD("set_button_color", "column", "button_index", "color"), &TreeItem::set_button_color);
+	ClassDB::bind_method(D_METHOD("set_button_hover_color", "column", "button_index", "color"), &TreeItem::set_button_hover_color);
+	ClassDB::bind_method(D_METHOD("clear_button_hover_color", "column", "button_index"), &TreeItem::clear_button_hover_color);
 	ClassDB::bind_method(D_METHOD("is_button_disabled", "column", "button_index"), &TreeItem::is_button_disabled);
 
 	ClassDB::bind_method(D_METHOD("set_tooltip_text", "column", "tooltip"), &TreeItem::set_tooltip_text);
@@ -2747,7 +2783,9 @@ int Tree::draw_item(const Point2i &p_pos, const Point2 &p_draw_ofs, const Size2 
 				button_ofs += theme_cache.button_pressed->get_offset();
 
 				button_ofs = convert_rtl_position(button_ofs, button_texture->get_width());
-				button_texture->draw(ci, button_ofs, p_item->cells[i].buttons[j].disabled ? Color(1, 1, 1, 0.5) : p_item->cells[i].buttons[j].color);
+				const TreeItem::Cell::Button &draw_button = p_item->cells[i].buttons[j];
+				Color button_draw_color = (draw_button.has_hover_color && is_row_hovered) ? draw_button.hover_color : draw_button.color;
+				button_texture->draw(ci, button_ofs, draw_button.disabled ? Color(1, 1, 1, 0.5) : button_draw_color);
 				item_width_with_buttons -= button_size.width + theme_cache.button_margin;
 			}
 

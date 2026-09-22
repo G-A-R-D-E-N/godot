@@ -1707,6 +1707,10 @@ LightmapGI::BakeError LightmapGI::bake(Node *p_from_node, String p_image_data_pa
 	return BAKE_ERROR_OK;
 }
 
+LightmapGI::BakeError LightmapGI::bake_from_script(Node *p_from_node, String p_image_data_path) {
+	return bake(p_from_node, p_image_data_path, nullptr, nullptr);
+}
+
 void LightmapGI::_notification(int p_what) {
 	switch (p_what) {
 		case NOTIFICATION_POST_ENTER_TREE: {
@@ -2148,7 +2152,7 @@ void LightmapGI::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_specular_intensity", "specular_intensity"), &LightmapGI::set_specular_intensity);
 	ClassDB::bind_method(D_METHOD("get_specular_intensity"), &LightmapGI::get_specular_intensity);
 
-	//	ClassDB::bind_method(D_METHOD("bake", "from_node"), &LightmapGI::bake, DEFVAL(Variant()));
+	ClassDB::bind_method(D_METHOD("bake", "from_node", "data_save_path"), &LightmapGI::bake_from_script, DEFVAL(String()));
 
 	ADD_GROUP("Tweaks", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "quality", PROPERTY_HINT_ENUM, "Low,Medium,High,Ultra"), "set_bake_quality", "get_bake_quality");

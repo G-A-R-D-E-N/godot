@@ -925,6 +925,20 @@ void ThemeModern::populate_standard_styles(const Ref<EditorTheme> &p_theme, Edit
 		p_theme->set_constant("outline_size", "LineEdit", 0);
 		p_theme->set_constant("caret_width", "LineEdit", 1);
 
+		Ref<StyleBoxFlat> filter_normal;
+		filter_normal.instantiate();
+		filter_normal->set_bg_color(Color::html("#1a1a1e"));
+		filter_normal->set_corner_radius_all(0);
+		filter_normal->set_border_width_all(0);
+		filter_normal->set_border_width(SIDE_BOTTOM, Math::round(EDSCALE));
+		filter_normal->set_border_color(Color::html("#2a2a30"));
+		filter_normal->set_content_margin_individual(p_config.base_margin * 2 * EDSCALE, p_config.base_margin * EDSCALE, p_config.base_margin * 2 * EDSCALE, p_config.base_margin * EDSCALE);
+		Ref<StyleBoxFlat> filter_focus = filter_normal->duplicate();
+		filter_focus->set_border_color(p_config.accent_color);
+		p_theme->set_stylebox(CoreStringName(normal), "FilterLineEdit", filter_normal);
+		p_theme->set_stylebox("focus", "FilterLineEdit", filter_focus);
+		p_theme->set_stylebox("read_only", "FilterLineEdit", filter_normal);
+
 		// TextEdit.
 
 		p_theme->set_stylebox(CoreStringName(normal), "TextEdit", text_editor_style);
@@ -1970,6 +1984,30 @@ void ThemeModern::populate_editor_styles(const Ref<EditorTheme> &p_theme, Editor
 			p_theme->set_stylebox("pressed_mirrored", "FlatMenuButton", p_config.flat_button_pressed);
 			p_theme->set_stylebox("hover_pressed_mirrored", "FlatMenuButton", p_config.flat_button_hover_pressed);
 			p_theme->set_stylebox("disabled_mirrored", "FlatMenuButton", p_config.base_empty_wide_style);
+
+			{
+				p_theme->set_type_variation("FilterBarButton", "FlatMenuButton");
+
+				Ref<StyleBoxEmpty> filter_button_empty = EditorThemeManager::make_empty_stylebox(0, 0, 0, 0);
+				Ref<StyleBoxFlat> filter_button_hover = p_config.flat_button_hover->duplicate();
+				filter_button_hover->set_content_margin_all(0);
+				Ref<StyleBoxFlat> filter_button_pressed = p_config.flat_button_pressed->duplicate();
+				filter_button_pressed->set_content_margin_all(0);
+				Ref<StyleBoxFlat> filter_button_hover_pressed = p_config.flat_button_hover_pressed->duplicate();
+				filter_button_hover_pressed->set_content_margin_all(0);
+
+				p_theme->set_stylebox(CoreStringName(normal), "FilterBarButton", filter_button_empty);
+				p_theme->set_stylebox(SceneStringName(hover), "FilterBarButton", filter_button_hover);
+				p_theme->set_stylebox(SceneStringName(pressed), "FilterBarButton", filter_button_pressed);
+				p_theme->set_stylebox("hover_pressed", "FilterBarButton", filter_button_hover_pressed);
+				p_theme->set_stylebox("disabled", "FilterBarButton", filter_button_empty);
+
+				p_theme->set_stylebox("normal_mirrored", "FilterBarButton", filter_button_empty);
+				p_theme->set_stylebox("hover_mirrored", "FilterBarButton", filter_button_hover);
+				p_theme->set_stylebox("pressed_mirrored", "FilterBarButton", filter_button_pressed);
+				p_theme->set_stylebox("hover_pressed_mirrored", "FilterBarButton", filter_button_hover_pressed);
+				p_theme->set_stylebox("disabled_mirrored", "FilterBarButton", filter_button_empty);
+			}
 
 			// Variations for buttons that shouldn't tint their icons.
 

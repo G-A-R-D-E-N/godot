@@ -61,6 +61,13 @@
 #include "scene/main/window.h"
 #include "scene/resources/packed_scene.h"
 
+namespace {
+const Color SCENE_TREE_ICON_TINT = Color::html("#a0a0aa");
+const Color SCENE_TREE_VISIBILITY_IDLE = Color::html("#5a5a62");
+const Color SCENE_TREE_VISIBILITY_ACTIVE = Color(1, 1, 1, 1);
+constexpr int SCENE_TREE_CLASS_ICON_SIZE = 12;
+}
+
 Node *SceneTreeEditor::get_scene_node() const {
 	ERR_FAIL_COND_V(!is_inside_tree(), nullptr);
 
@@ -517,6 +524,7 @@ void SceneTreeEditor::_update_node(Node *p_node, TreeItem *p_item, bool p_part_o
 
 	Ref<Texture2D> icon = EditorNode::get_singleton()->get_object_icon(p_node);
 	p_item->set_icon(0, icon);
+	p_item->set_icon_modulate(0, SCENE_TREE_ICON_TINT);
 	p_item->set_metadata(0, _get_node_path(p_node));
 
 	if (!p_node->is_connected("child_order_changed", callable_mp(this, &SceneTreeEditor::_node_child_order_changed))) {
@@ -851,15 +859,23 @@ void SceneTreeEditor::_node_visibility_changed(Node *p_node) {
 }
 
 void SceneTreeEditor::_update_visibility_color(Node *p_node, TreeItem *p_item) {
-	if (p_node->has_method(SNAME("is_visible_in_tree"))) {
-		Color color(1, 1, 1, 1);
-		bool visible_on_screen = p_node->call("is_visible_in_tree");
-		if (!visible_on_screen) {
-			color.a = 0.6;
-		}
-		int idx = p_item->get_button_by_id(0, BUTTON_VISIBILITY);
-		p_item->set_button_color(0, idx, color);
+	if (!p_node->has_method(SNAME("is_visible_in_tree"))) {
+		return;
 	}
+
+	int idx = p_item->get_button_by_id(0, BUTTON_VISIBILITY);
+	if (idx == -1) {
+		return;
+	}
+
+	bool node_hidden = p_node->has_method(SceneStringName(is_visible)) && !bool(p_node->call(SceneStringName(is_visible)));
+	Color color = node_hidden ? SCENE_TREE_VISIBILITY_ACTIVE : SCENE_TREE_VISIBILITY_IDLE;
+	if (!node_hidden && !bool(p_node->call(SNAME("is_visible_in_tree")))) {
+		color.a = 0.6;
+	}
+
+	p_item->set_button_color(0, idx, color);
+	p_item->set_button_hover_color(0, idx, SCENE_TREE_VISIBILITY_ACTIVE);
 }
 
 void SceneTreeEditor::_set_item_custom_color(TreeItem *p_item, Color p_color) {
@@ -1505,7 +1521,7 @@ void SceneTreeEditor::_notification(int p_what) {
 		case NOTIFICATION_THEME_CHANGED: {
 			// Wait for the node to be inspected before triggering the unfolding.
 			tree->add_theme_constant_override("dragging_unfold_wait_msec", (float)EDITOR_GET("interface/editor/timers/dragging_hover_wait_seconds") * 1000 * 2);
-			tree->add_theme_constant_override("icon_max_width", get_theme_constant(SNAME("class_icon_size"), EditorStringName(Editor)));
+			tree->add_theme_constant_override("icon_max_width", SCENE_TREE_CLASS_ICON_SIZE * EDSCALE);
 			[[fallthrough]];
 		}
 		case NOTIFICATION_TRANSLATION_CHANGED: {

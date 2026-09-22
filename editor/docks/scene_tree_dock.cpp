@@ -77,6 +77,10 @@
 #include "scene/resources/style_box_flat.h"
 #include "servers/display/display_server.h"
 
+namespace {
+constexpr int FILTER_BAR_BUTTON_SIZE = 20;
+}
+
 void SceneTreeDock::_nodes_drag_begin() {
 	pending_click_select = nullptr;
 	edited_object_at_drag_start = InspectorDock::get_inspector_singleton()->get_edited_object();
@@ -5276,14 +5280,16 @@ SceneTreeDock::SceneTreeDock(Node *p_scene_root, EditorSelection *p_editor_selec
 	ED_SHORTCUT("scene_tree/delete", TTRC("Delete"), Key::KEY_DELETE);
 
 	button_add = memnew(Button);
-	button_add->set_theme_type_variation("FlatMenuButton");
+	button_add->set_theme_type_variation("FilterBarButton");
+	button_add->set_custom_minimum_size(Size2(FILTER_BAR_BUTTON_SIZE, FILTER_BAR_BUTTON_SIZE) * EDSCALE);
 	button_add->connect(SceneStringName(pressed), callable_mp(this, &SceneTreeDock::_tool_selected).bind(TOOL_NEW, false));
 	button_add->set_tooltip_text(TTRC("Add/Create a New Node."));
 	button_add->set_shortcut(ED_GET_SHORTCUT("scene_tree/add_child_node"));
 	filter_hbc->add_child(button_add);
 
 	button_instance = memnew(Button);
-	button_instance->set_theme_type_variation("FlatMenuButton");
+	button_instance->set_theme_type_variation("FilterBarButton");
+	button_instance->set_custom_minimum_size(Size2(FILTER_BAR_BUTTON_SIZE, FILTER_BAR_BUTTON_SIZE) * EDSCALE);
 	button_instance->connect(SceneStringName(pressed), callable_mp(this, &SceneTreeDock::_tool_selected).bind(TOOL_INSTANTIATE, false));
 	button_instance->set_tooltip_text(TTRC("Instantiate a scene file as a Node. Creates an inherited scene if no root node exists."));
 	button_instance->set_shortcut(ED_GET_SHORTCUT("scene_tree/instantiate_scene"));
@@ -5292,6 +5298,7 @@ SceneTreeDock::SceneTreeDock(Node *p_scene_root, EditorSelection *p_editor_selec
 
 	// The "Filter Nodes" text input above the Scene Tree Editor.
 	filter = memnew(LineEdit);
+	filter->set_theme_type_variation("FilterLineEdit");
 	filter->set_h_size_flags(SIZE_EXPAND_FILL);
 	filter->set_placeholder(TTRC("Filter Nodes"));
 	filter->set_accessibility_name(TTRC("Filter Nodes"));
@@ -5304,7 +5311,8 @@ SceneTreeDock::SceneTreeDock(Node *p_scene_root, EditorSelection *p_editor_selec
 	_append_filter_options_to(filter->get_menu());
 
 	button_create_script = memnew(Button);
-	button_create_script->set_theme_type_variation("FlatMenuButton");
+	button_create_script->set_theme_type_variation("FilterBarButton");
+	button_create_script->set_custom_minimum_size(Size2(FILTER_BAR_BUTTON_SIZE, FILTER_BAR_BUTTON_SIZE) * EDSCALE);
 	button_create_script->connect(SceneStringName(pressed), callable_mp(this, &SceneTreeDock::_tool_selected).bind(TOOL_ATTACH_SCRIPT, false));
 	button_create_script->set_tooltip_text(TTRC("Attach a new or existing script to the selected node."));
 	button_create_script->set_shortcut(ED_GET_SHORTCUT("scene_tree/attach_script"));
@@ -5312,7 +5320,8 @@ SceneTreeDock::SceneTreeDock(Node *p_scene_root, EditorSelection *p_editor_selec
 	button_create_script->hide();
 
 	button_detach_script = memnew(Button);
-	button_detach_script->set_theme_type_variation("FlatMenuButton");
+	button_detach_script->set_theme_type_variation("FilterBarButton");
+	button_detach_script->set_custom_minimum_size(Size2(FILTER_BAR_BUTTON_SIZE, FILTER_BAR_BUTTON_SIZE) * EDSCALE);
 	button_detach_script->connect(SceneStringName(pressed), callable_mp(this, &SceneTreeDock::_tool_selected).bind(TOOL_DETACH_SCRIPT, false));
 	button_detach_script->set_tooltip_text(TTRC("Detach the script from the selected node."));
 	button_detach_script->set_shortcut(ED_GET_SHORTCUT("scene_tree/detach_script"));
@@ -5320,7 +5329,8 @@ SceneTreeDock::SceneTreeDock(Node *p_scene_root, EditorSelection *p_editor_selec
 	button_detach_script->hide();
 
 	button_extend_script = memnew(Button);
-	button_extend_script->set_theme_type_variation("FlatMenuButton");
+	button_extend_script->set_theme_type_variation("FilterBarButton");
+	button_extend_script->set_custom_minimum_size(Size2(FILTER_BAR_BUTTON_SIZE, FILTER_BAR_BUTTON_SIZE) * EDSCALE);
 	button_extend_script->connect(SceneStringName(pressed), callable_mp(this, &SceneTreeDock::_tool_selected).bind(TOOL_EXTEND_SCRIPT, false));
 	button_extend_script->set_tooltip_text(TTRC("Extend the script of the selected node."));
 	button_extend_script->set_shortcut(ED_GET_SHORTCUT("scene_tree/extend_script"));
@@ -5329,7 +5339,8 @@ SceneTreeDock::SceneTreeDock(Node *p_scene_root, EditorSelection *p_editor_selec
 
 	button_tree_menu = memnew(MenuButton);
 	button_tree_menu->set_flat(false);
-	button_tree_menu->set_theme_type_variation("FlatMenuButton");
+	button_tree_menu->set_theme_type_variation("FilterBarButton");
+	button_tree_menu->set_custom_minimum_size(Size2(FILTER_BAR_BUTTON_SIZE, FILTER_BAR_BUTTON_SIZE) * EDSCALE);
 	button_tree_menu->set_tooltip_text(TTRC("Extra scene options."));
 	_setup_tree_menu();
 	button_tree_menu->connect("about_to_popup", callable_mp(this, &SceneTreeDock::_update_tree_menu));

@@ -119,6 +119,8 @@ private:
 			bool disabled = false;
 			Ref<Texture2D> texture;
 			Color color = Color(1, 1, 1, 1);
+			Color hover_color = Color(1, 1, 1, 1);
+			bool has_hover_color = false;
 			String tooltip;
 			String description;
 		};
@@ -337,10 +339,13 @@ public:
 	void erase_button(int p_column, int p_index);
 	int get_button_by_id(int p_column, int p_id) const;
 	Color get_button_color(int p_column, int p_index) const;
+	Color get_button_hover_color(int p_column, int p_index) const;
 	void set_button_tooltip_text(int p_column, int p_index, const String &p_tooltip);
 	void set_button(int p_column, int p_index, const Ref<Texture2D> &p_button);
 	void set_button_description(int p_column, int p_index, const String &p_description);
 	void set_button_color(int p_column, int p_index, const Color &p_color);
+	void set_button_hover_color(int p_column, int p_index, const Color &p_color);
+	void clear_button_hover_color(int p_column, int p_index);
 	void set_button_disabled(int p_column, int p_index, bool p_disabled);
 	bool is_button_disabled(int p_column, int p_index) const;
 
