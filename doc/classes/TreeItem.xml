@@ -136,9 +136,9 @@
 		<method name="get_button_hover_color" qualifiers="const">
 			<return type="Color" />
 			<param index="0" name="column" type="int" />
-			<param index="1" name="id" type="int" />
+			<param index="1" name="button_index" type="int" />
 			<description>
-				Returns the color used to draw the button with ID [param id] in column [param column] while the pointer hovers that item's row. Falls back to [method get_button_color] when no hover color was set. If the specified button does not exist, returns [constant Color.BLACK].
+				Returns the color used to draw the button at index [param button_index] in column [param column] while the pointer hovers that item's row. Falls back to [method get_button_color] when no hover color was set. If the specified button does not exist, returns [constant Color.BLACK].
 			</description>
 		</method>
 		<method name="get_button_count" qualifiers="const">
