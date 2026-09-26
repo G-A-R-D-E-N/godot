@@ -66,7 +66,7 @@ const Color SCENE_TREE_ICON_TINT = Color::html("#a0a0aa");
 const Color SCENE_TREE_VISIBILITY_IDLE = Color::html("#5a5a62");
 const Color SCENE_TREE_VISIBILITY_ACTIVE = Color(1, 1, 1, 1);
 constexpr int SCENE_TREE_CLASS_ICON_SIZE = 12;
-}
+} //namespace
 
 Node *SceneTreeEditor::get_scene_node() const {
 	ERR_FAIL_COND_V(!is_inside_tree(), nullptr);
