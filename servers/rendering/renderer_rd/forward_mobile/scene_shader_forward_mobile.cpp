@@ -720,6 +720,7 @@ void SceneShaderForwardMobile::init(const String p_defines) {
 		actions.renames["INDIRECT_SPECULAR_WEIGHT"] = "indirect_specular_weight_highp";
 		actions.renames["INDIRECT_COAT_WEIGHT"] = "indirect_coat_weight_highp";
 		actions.renames["INDIRECT_COAT_ROUGHNESS"] = "indirect_coat_roughness_highp";
+		actions.renames["DECAL_COVERAGE"] = "decal_coverage";
 		actions.renames["BONE_INDICES"] = "bone_attrib";
 		actions.renames["BONE_WEIGHTS"] = "weight_attrib";
 		actions.renames["CUSTOM0"] = "custom0_attrib";
@@ -803,6 +804,7 @@ void SceneShaderForwardMobile::init(const String p_defines) {
 		actions.usage_defines["INDIRECT_SPECULAR_WEIGHT"] = "#define INDIRECT_SPECULAR_WEIGHT_USED\n";
 		actions.usage_defines["INDIRECT_COAT_WEIGHT"] = "#define INDIRECT_COAT_USED\n#define LIGHT_CLEARCOAT_USED\n";
 		actions.usage_defines["INDIRECT_COAT_ROUGHNESS"] = "@INDIRECT_COAT_WEIGHT";
+		actions.usage_defines["DECAL_COVERAGE"] = "#define DECAL_COVERAGE_USED\n";
 
 		actions.usage_defines["MODEL_MATRIX"] = "#define MODEL_MATRIX_USED\n";
 

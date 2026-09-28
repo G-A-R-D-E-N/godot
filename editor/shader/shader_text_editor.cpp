@@ -195,6 +195,7 @@ HashMap<String, String> TextShaderPreview::builtin_spatial_types = {
 	{ "INDIRECT_SPECULAR_WEIGHT", "vec3" },
 	{ "INDIRECT_COAT_WEIGHT", "vec3" },
 	{ "INDIRECT_COAT_ROUGHNESS", "float" },
+	{ "DECAL_COVERAGE", "float" },
 	{ "SSS_TRANSMITTANCE_COLOR", "vec4" },
 };
 

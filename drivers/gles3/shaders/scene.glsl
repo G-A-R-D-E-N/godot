@@ -1555,6 +1555,11 @@ layout(location = 0) out vec4 motion_vectors;
 
 /* clang-format on */
 
+#if !defined(MODE_RENDER_DEPTH) && (defined(INDIRECT_DIFFUSE_WEIGHT_USED) || defined(INDIRECT_SPECULAR_WEIGHT_USED) || defined(INDIRECT_COAT_USED) || defined(DECAL_COVERAGE_USED))
+#define DECAL_COVERAGE_TRACKED
+float decal_coverage;
+#endif
+
 #ifndef RENDER_MOTION_VECTORS
 vec3 F0(float metallic, float specular, vec3 albedo) {
 	float dielectric = 0.16 * specular * specular;
@@ -2459,6 +2464,11 @@ void main() {
 	albedo = srgb_to_linear(albedo);
 	emission = srgb_to_linear(emission);
 
+#ifdef DECAL_COVERAGE_TRACKED
+	decal_coverage = 0.0;
+	vec3 decal_base_albedo = albedo;
+#endif
+
 #ifdef USE_DECALS
 
 	vec3 vertex_ddx = dFdx(vertex);
@@ -2496,6 +2506,9 @@ void main() {
 			decal_albedo.rgb = srgb_to_linear(decal_albedo.rgb) * decal_data_block.data[decal_index].modulate.rgb;
 			decal_albedo.a *= fade * decal_data_block.data[decal_index].modulate.a;
 			albedo = vec3(mix(vec3(albedo), decal_albedo.rgb, decal_albedo.a * decal_data_block.data[decal_index].albedo_mix));
+#ifdef DECAL_COVERAGE_TRACKED
+			decal_coverage = mix(decal_coverage, 1.0, decal_albedo.a);
+#endif
 
 			if (decal_data_block.data[decal_index].normal_rect != vec4(0.0)) {
 				vec3 decal_normal;
@@ -2822,7 +2835,7 @@ void main() {
 #endif // BENT_NORMAL_MAP_USED
 #endif // !SPECULAR_OCCLUSION_DISABLED
 #ifdef INDIRECT_DIFFUSE_WEIGHT_USED
-	ambient_light *= indirect_diffuse_weight;
+	ambient_light *= indirect_diffuse_weight * (1.0 - decal_coverage) + (albedo - decal_base_albedo * (1.0 - decal_coverage)) * (1.0 - metallic);
 #else
 	ambient_light *= albedo.rgb;
 #endif
@@ -2837,9 +2850,6 @@ void main() {
 		//simplify for toon, as
 		specular_light *= specular * metallic * albedo * 2.0;
 #else
-#ifdef INDIRECT_SPECULAR_WEIGHT_USED
-		specular_light *= indirect_specular_weight;
-#else
 
 		// scales the specular reflections, needs to be be computed before lighting happens,
 		// but after environment, GI, and reflection probes are added
@@ -2852,10 +2862,13 @@ void main() {
 
 		float a004 = min(r.x * r.x, exp2(-9.28 * ndotv)) * r.x + r.y;
 		vec2 env = vec2(-1.04, 1.04) * a004 + r.zw;
-		specular_light *= env.x * f0 + env.y * clamp(50.0 * f0.g, metallic, 1.0);
+		vec3 specular_weight = env.x * f0 + env.y * clamp(50.0 * f0.g, metallic, 1.0);
+#ifdef INDIRECT_SPECULAR_WEIGHT_USED
+		specular_weight = mix(indirect_specular_weight, specular_weight, decal_coverage);
 #endif
+		specular_light *= specular_weight;
 #if defined(INDIRECT_COAT_USED)
-		specular_light += cc_specular_light * indirect_coat_weight;
+		specular_light += cc_specular_light * indirect_coat_weight * (1.0 - decal_coverage);
 #endif
 #endif
 	}

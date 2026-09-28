@@ -1037,6 +1037,11 @@ layout(location = 2) out vec2 motion_vector;
 
 #include "../scene_forward_aa_inc.glsl"
 
+#if !defined(MODE_RENDER_DEPTH) && (defined(INDIRECT_DIFFUSE_WEIGHT_USED) || defined(INDIRECT_SPECULAR_WEIGHT_USED) || defined(INDIRECT_COAT_USED) || defined(DECAL_COVERAGE_USED))
+#define DECAL_COVERAGE_TRACKED
+float decal_coverage;
+#endif
+
 #if !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED)
 
 // Default to SPECULAR_SCHLICK_GGX.
@@ -1567,6 +1572,11 @@ void fragment_shader(in SceneData scene_data) {
 	vec3 vertex_ddx = dFdx(vertex);
 	vec3 vertex_ddy = dFdy(vertex);
 
+#ifdef DECAL_COVERAGE_TRACKED
+	decal_coverage = 0.0;
+	vec3 decal_base_albedo = albedo;
+#endif
+
 	{ // process decals
 
 		uint cluster_decal_offset = cluster_offset + implementation_data.cluster_type_size * 3;
@@ -1626,6 +1636,9 @@ void fragment_shader(in SceneData scene_data) {
 					decal_albedo *= decals.data[decal_index].modulate;
 					decal_albedo.a *= fade;
 					albedo = mix(albedo, decal_albedo.rgb, decal_albedo.a * decals.data[decal_index].albedo_mix);
+#ifdef DECAL_COVERAGE_TRACKED
+					decal_coverage = mix(decal_coverage, 1.0, decal_albedo.a);
+#endif
 
 					if (decals.data[decal_index].normal_rect != vec4(0.0)) {
 						vec3 decal_normal;
@@ -2054,26 +2067,38 @@ void fragment_shader(in SceneData scene_data) {
 
 		vec4 amb_accum = vec4(0.0);
 		vec4 spec_accum = vec4(0.0);
-		voxel_gi_compute(index1, cam_pos, cam_normal, ref_vec, normal_mat, roughness * roughness, ambient_light, indirect_specular_light, spec_accum, amb_accum);
-
 		uint index2 = instances.data[instance_index].gi_offset >> 16;
+#ifdef VOXEL_GI_ENVIRONMENT_WEIGHT
+		float environment_weight = 0.0;
+		voxel_gi_compute(index1, cam_pos, cam_normal, ref_vec, normal_mat, roughness * roughness, ambient_light, indirect_specular_light, spec_accum, amb_accum, environment_weight);
+		if (index2 != 0xFFFF) {
+			voxel_gi_compute(index2, cam_pos, cam_normal, ref_vec, normal_mat, roughness * roughness, ambient_light, indirect_specular_light, spec_accum, amb_accum, environment_weight);
+		}
+#else
+		voxel_gi_compute(index1, cam_pos, cam_normal, ref_vec, normal_mat, roughness * roughness, ambient_light, indirect_specular_light, spec_accum, amb_accum);
 
 		if (index2 != 0xFFFF) {
 			voxel_gi_compute(index2, cam_pos, cam_normal, ref_vec, normal_mat, roughness * roughness, ambient_light, indirect_specular_light, spec_accum, amb_accum);
 		}
+#endif
 
 		if (amb_accum.a > 0.0) {
 			amb_accum.rgb /= amb_accum.a;
 		}
 
+#ifdef VOXEL_GI_ENVIRONMENT_WEIGHT
+		vec3 cc_environment = cc_specular_light - indirect_specular_light;
+#endif
 		if (spec_accum.a > 0.0) {
 			spec_accum.rgb /= spec_accum.a;
+#ifdef VOXEL_GI_ENVIRONMENT_WEIGHT
+			cc_specular_light = spec_accum.rgb + cc_environment * (environment_weight / spec_accum.a);
+		} else {
+			cc_specular_light = spec_accum.rgb;
+#endif
 		}
 
 		indirect_specular_light = spec_accum.rgb;
-#if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
-		cc_specular_light = spec_accum.rgb;
-#endif
 		ambient_light = amb_accum.rgb;
 	}
 
@@ -2303,7 +2328,7 @@ void fragment_shader(in SceneData scene_data) {
 #endif // BENT_NORMAL_MAP_USED
 #endif // SPECULAR_OCCLUSION_DISABLED
 #ifdef INDIRECT_DIFFUSE_WEIGHT_USED
-		vec3 ambient_weight = indirect_diffuse_weight;
+		vec3 ambient_weight = indirect_diffuse_weight * (1.0 - decal_coverage) + (albedo.rgb - decal_base_albedo * (1.0 - decal_coverage)) * (1.0 - metallic);
 #else
 		vec3 ambient_weight = albedo.rgb;
 #endif
@@ -2383,16 +2408,16 @@ void fragment_shader(in SceneData scene_data) {
 		// Multiscattering
 		energy_compensation = get_energy_compensation(f0, envBRDF.y);
 
-#ifdef INDIRECT_SPECULAR_WEIGHT_USED
-		indirect_specular_light *= indirect_specular_weight;
-#else
 		// cheap luminance approximation
 		float f90 = clamp(50.0 * f0.g, metallic, 1.0);
-		indirect_specular_light *= energy_compensation * ((f90 - f0) * envBRDF.x + f0 * envBRDF.y);
+		vec3 specular_weight = energy_compensation * ((f90 - f0) * envBRDF.x + f0 * envBRDF.y);
+#ifdef INDIRECT_SPECULAR_WEIGHT_USED
+		specular_weight = mix(indirect_specular_weight, specular_weight, decal_coverage);
 #endif
+		indirect_specular_light *= specular_weight;
 
 #if defined(INDIRECT_COAT_USED)
-		indirect_specular_light += cc_specular_light * indirect_coat_weight;
+		indirect_specular_light += cc_specular_light * indirect_coat_weight * (1.0 - decal_coverage);
 #elif defined(LIGHT_CLEARCOAT_USED)
 		float geo_NdotV = max(dot(geo_normal, view), 0.0001); // We want to use geometric normal, not normal_map
 		// The clearcoat layer assumes an IOR of 1.5 (4% reflectance).
