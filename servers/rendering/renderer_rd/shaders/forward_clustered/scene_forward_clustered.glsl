@@ -913,7 +913,7 @@ layout(location = 2) in vec4 color_interp;
 layout(location = 3) in vec2 uv_interp;
 #endif
 
-#if defined(TEXTURE_STREAMING)
+#if defined(TEXTURE_STREAMING) || defined(STREAMING_UV_USED)
 vec2 streaming_uv;
 #endif
 
@@ -1206,6 +1206,16 @@ void fragment_shader(in SceneData scene_data) {
 #endif
 #if defined(CUSTOM_IRRADIANCE_USED)
 	vec4 custom_irradiance = vec4(0.0);
+#endif
+#if defined(INDIRECT_DIFFUSE_WEIGHT_USED)
+	vec3 indirect_diffuse_weight = vec3(1.0);
+#endif
+#if defined(INDIRECT_SPECULAR_WEIGHT_USED)
+	vec3 indirect_specular_weight = vec3(1.0);
+#endif
+#if defined(INDIRECT_COAT_USED)
+	vec3 indirect_coat_weight = vec3(0.0);
+	float indirect_coat_roughness = 0.0;
 #endif
 
 	float ao = 1.0;
@@ -1772,15 +1782,25 @@ void fragment_shader(in SceneData scene_data) {
 #endif
 
 #ifdef LIGHT_CLEARCOAT_USED
+#ifdef INDIRECT_COAT_USED
+#define CLEARCOAT_IBL_ROUGHNESS indirect_coat_roughness
+#define CLEARCOAT_IBL_BEND (indirect_coat_roughness * indirect_coat_roughness)
+#else
+#define CLEARCOAT_IBL_ROUGHNESS mix(0.001, 0.1, clearcoat_roughness)
+#define CLEARCOAT_IBL_BEND mix(0.001, 0.1, clearcoat_roughness)
+#endif
 	vec3 cc_specular_light = vec3(0.0);
 	vec3 cc_ref_vec = vec3(0.0);
+#ifdef INDIRECT_COAT_USED
+	cc_ref_vec = mix(reflect(-view, geo_normal), geo_normal, CLEARCOAT_IBL_BEND);
+#endif
 
 	if (bool(scene_data.flags & SCENE_DATA_FLAGS_USE_REFLECTION_CUBEMAP)) {
 		cc_ref_vec = reflect(-view, geo_normal);
-		cc_ref_vec = mix(cc_ref_vec, geo_normal, mix(0.001, 0.1, clearcoat_roughness));
+		cc_ref_vec = mix(cc_ref_vec, geo_normal, CLEARCOAT_IBL_BEND);
 
 		vec3 cc_radiance_ref_vec = scene_data.radiance_inverse_xform * cc_ref_vec;
-		float roughness_lod = sqrt(mix(0.001, 0.1, clearcoat_roughness)) * MAX_ROUGHNESS_LOD;
+		float roughness_lod = sqrt(CLEARCOAT_IBL_ROUGHNESS) * MAX_ROUGHNESS_LOD;
 #ifdef USE_RADIANCE_OCTMAP_ARRAY
 
 		float lod, blend;
@@ -2012,6 +2032,9 @@ void fragment_shader(in SceneData scene_data) {
 			ambient_light = diffuse;
 			if (use_specular) {
 				indirect_specular_light = specular;
+#if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+				cc_specular_light = specular;
+#endif
 			}
 		}
 	}
@@ -2048,6 +2071,9 @@ void fragment_shader(in SceneData scene_data) {
 		}
 
 		indirect_specular_light = spec_accum.rgb;
+#if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+		cc_specular_light = spec_accum.rgb;
+#endif
 		ambient_light = amb_accum.rgb;
 	}
 
@@ -2094,6 +2120,9 @@ void fragment_shader(in SceneData scene_data) {
 
 		ambient_light = mix(ambient_light, buffer_ambient.rgb, buffer_ambient.a);
 		indirect_specular_light = mix(indirect_specular_light, buffer_reflection.rgb, buffer_reflection.a);
+#if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+		cc_specular_light = mix(cc_specular_light, buffer_reflection.rgb, buffer_reflection.a);
+#endif
 	}
 #endif // !USE_LIGHTMAP
 
@@ -2171,7 +2200,7 @@ void fragment_shader(in SceneData scene_data) {
 
 				reflection_process(reflection_index, vertex, ref_vec, normal, roughness, ambient_light,
 #ifdef LIGHT_CLEARCOAT_USED
-						cc_ref_vec, mix(0.001, 0.1, clearcoat_roughness), cc_reflection_accum,
+						cc_ref_vec, CLEARCOAT_IBL_ROUGHNESS, cc_reflection_accum,
 #endif
 						ambient_accum, reflection_accum);
 			}
@@ -2256,6 +2285,9 @@ void fragment_shader(in SceneData scene_data) {
 
 		float specular_occlusion = area / (M_TAU * (1.0 - cos_a_s));
 		indirect_specular_light *= specular_occlusion;
+#if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+		cc_specular_light *= specular_occlusion;
+#endif
 #else // BENT_NORMAL_MAP_USED
 		float specular_occlusion = (ambient_light.r * 0.3 + ambient_light.g * 0.59 + ambient_light.b * 0.11) * 2.0; // Luminance of ambient light.
 		specular_occlusion = min(specular_occlusion * 4.0, 1.0); // This multiplication preserves speculars on bright areas.
@@ -2265,9 +2297,17 @@ void fragment_shader(in SceneData scene_data) {
 		// Low enough for occlusion, high enough for reaction to lights and shadows.
 		specular_occlusion = max(min(reflective_f * specular_occlusion * 10.0, 1.0), specular_occlusion);
 		indirect_specular_light *= specular_occlusion;
+#if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+		cc_specular_light *= specular_occlusion;
+#endif
 #endif // BENT_NORMAL_MAP_USED
 #endif // SPECULAR_OCCLUSION_DISABLED
-		ambient_light *= albedo.rgb;
+#ifdef INDIRECT_DIFFUSE_WEIGHT_USED
+		vec3 ambient_weight = indirect_diffuse_weight;
+#else
+		vec3 ambient_weight = albedo.rgb;
+#endif
+		ambient_light *= ambient_weight;
 
 		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSIL)) {
 #ifdef USE_MULTIVIEW
@@ -2276,7 +2316,7 @@ void fragment_shader(in SceneData scene_data) {
 			vec4 ssil = textureLod(sampler2D(ssil_buffer, SAMPLER_LINEAR_CLAMP), screen_uv, 0.0);
 #endif // USE_MULTIVIEW
 			ambient_light *= 1.0 - ssil.a;
-			ambient_light += ssil.rgb * albedo.rgb;
+			ambient_light += ssil.rgb * ambient_weight;
 		}
 
 		//process ssr
@@ -2310,6 +2350,9 @@ void fragment_shader(in SceneData scene_data) {
 
 			// Alpha is premultiplied.
 			indirect_specular_light = indirect_specular_light * (1.0 - ssr.a) + ssr.rgb;
+#if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+			cc_specular_light = cc_specular_light * (1.0 - ssr.a) + ssr.rgb;
+#endif
 		}
 	}
 #endif // AMBIENT_LIGHT_DISABLED
@@ -2340,11 +2383,17 @@ void fragment_shader(in SceneData scene_data) {
 		// Multiscattering
 		energy_compensation = get_energy_compensation(f0, envBRDF.y);
 
+#ifdef INDIRECT_SPECULAR_WEIGHT_USED
+		indirect_specular_light *= indirect_specular_weight;
+#else
 		// cheap luminance approximation
 		float f90 = clamp(50.0 * f0.g, metallic, 1.0);
 		indirect_specular_light *= energy_compensation * ((f90 - f0) * envBRDF.x + f0 * envBRDF.y);
+#endif
 
-#ifdef LIGHT_CLEARCOAT_USED
+#if defined(INDIRECT_COAT_USED)
+		indirect_specular_light += cc_specular_light * indirect_coat_weight;
+#elif defined(LIGHT_CLEARCOAT_USED)
 		float geo_NdotV = max(dot(geo_normal, view), 0.0001); // We want to use geometric normal, not normal_map
 		// The clearcoat layer assumes an IOR of 1.5 (4% reflectance).
 		// Attenuate underlying diffuse/specular by clearcoat fresnel (ONLY fresnel, hence we don't just invert the BRDF below).
@@ -3150,7 +3199,9 @@ void fragment_shader(in SceneData scene_data) {
 
 	// apply metallic
 	diffuse_light *= 1.0 - metallic;
+#ifndef INDIRECT_DIFFUSE_WEIGHT_USED
 	ambient_light *= 1.0 - metallic;
+#endif
 
 #ifndef FOG_DISABLED
 	//restore fog
