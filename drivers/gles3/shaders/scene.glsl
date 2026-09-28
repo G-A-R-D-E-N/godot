@@ -2271,6 +2271,16 @@ void main() {
 #if defined(CUSTOM_IRRADIANCE_USED)
 	vec4 custom_irradiance = vec4(0.0);
 #endif
+#if defined(INDIRECT_DIFFUSE_WEIGHT_USED)
+	vec3 indirect_diffuse_weight = vec3(1.0);
+#endif
+#if defined(INDIRECT_SPECULAR_WEIGHT_USED)
+	vec3 indirect_specular_weight = vec3(1.0);
+#endif
+#if defined(INDIRECT_COAT_USED)
+	vec3 indirect_coat_weight = vec3(0.0);
+	float indirect_coat_roughness = 0.0;
+#endif
 
 	float ao = 1.0;
 	float ao_light_affect = 0.0;
@@ -2296,6 +2306,10 @@ void main() {
 
 #ifdef UV_USED
 	vec2 uv = uv_interp;
+#endif
+
+#ifdef STREAMING_UV_USED
+	vec2 streaming_uv = vec2(0.0);
 #endif
 
 #if defined(UV2_USED) || defined(USE_LIGHTMAP)
@@ -2562,11 +2576,12 @@ void main() {
 		specular_light = srgb_to_linear(specular_light);
 		specular_light *= horizon * horizon;
 		specular_light *= scene_data_block.data.ambient_light_color_energy.a;
-	} else if (scene_data_block.data.use_reflection_color) {
+	}
+#endif
+	if (scene_data_block.data.use_reflection_color) {
 		specular_light = scene_data_block.data.reflection_color.rgb;
 		specular_light *= scene_data_block.data.ambient_light_color_energy.a;
 	}
-#endif // USE_RADIANCE_MAP
 
 	// Calculate Reflection probes
 #ifndef DISABLE_REFLECTION_PROBE
@@ -2597,6 +2612,46 @@ void main() {
 #if defined(CUSTOM_RADIANCE_USED)
 	specular_light = mix(specular_light, custom_radiance.rgb, custom_radiance.a);
 #endif // CUSTOM_RADIANCE_USED
+
+#if defined(INDIRECT_COAT_USED)
+	vec3 cc_specular_light = vec3(0.0);
+#ifdef USE_RADIANCE_MAP
+	if (scene_data_block.data.use_reflection_cubemap) {
+		vec3 cc_ref_vec = mix(reflect(-view, geo_normal), geo_normal, indirect_coat_roughness * indirect_coat_roughness);
+		float cc_horizon = min(1.0 + dot(cc_ref_vec, geo_normal), 1.0);
+		cc_ref_vec = mat3(scene_data_block.data.radiance_inverse_xform) * cc_ref_vec;
+		cc_specular_light = srgb_to_linear(textureLod(radiance_map, cc_ref_vec, sqrt(indirect_coat_roughness) * RADIANCE_MAX_LOD).rgb);
+		cc_specular_light *= cc_horizon * cc_horizon * scene_data_block.data.ambient_light_color_energy.a;
+	}
+#endif
+	if (scene_data_block.data.use_reflection_color) {
+		cc_specular_light = scene_data_block.data.reflection_color.rgb * scene_data_block.data.ambient_light_color_energy.a;
+	}
+#ifndef DISABLE_REFLECTION_PROBE
+	{
+		vec4 cc_reflection_accum = vec4(0.0);
+		vec4 cc_ambient_accum = vec4(0.0);
+
+		reflection_process(refprobe1_texture, geo_normal, vertex_interp, refprobe1_local_matrix,
+				refprobe1_use_box_project, refprobe1_box_extents, refprobe1_box_offset,
+				refprobe1_exterior, refprobe1_intensity, refprobe1_blend_distance, refprobe1_ambient_mode, refprobe1_ambient_color,
+				indirect_coat_roughness, ambient_light, cc_specular_light, cc_reflection_accum, cc_ambient_accum);
+
+#ifdef SECOND_REFLECTION_PROBE
+
+		reflection_process(refprobe2_texture, geo_normal, vertex_interp, refprobe2_local_matrix,
+				refprobe2_use_box_project, refprobe2_box_extents, refprobe2_box_offset,
+				refprobe2_exterior, refprobe2_intensity, refprobe2_blend_distance, refprobe2_ambient_mode, refprobe2_ambient_color,
+				indirect_coat_roughness, ambient_light, cc_specular_light, cc_reflection_accum, cc_ambient_accum);
+
+#endif
+
+		if (cc_reflection_accum.a > 0.0) {
+			cc_specular_light = cc_reflection_accum.rgb / cc_reflection_accum.a;
+		}
+	}
+#endif
+#endif
 
 #if !defined(USE_LIGHTMAP) && !defined(USE_LIGHTMAP_CAPTURE)
 	//lightmap overrides everything
@@ -2749,6 +2804,9 @@ void main() {
 	float specular_occlusion = clamp((ao - (1.0 - cos_b)) / roughness, 0.0, 1.0);
 	specular_occlusion = mix(specular_occlusion, cos_b * (1.0 - ao), roughness);
 	specular_light *= specular_occlusion;
+#if defined(INDIRECT_COAT_USED)
+	cc_specular_light *= specular_occlusion;
+#endif
 #else // BENT_NORMAL_MAP_USED
 	float specular_occlusion = (ambient_light.r * 0.3 + ambient_light.g * 0.59 + ambient_light.b * 0.11) * 2.0; // Luminance of ambient light.
 	specular_occlusion = min(specular_occlusion * 4.0, 1.0); // This multiplication preserves speculars on bright areas.
@@ -2758,9 +2816,16 @@ void main() {
 	// Low enough for occlusion, high enough for reaction to lights and shadows.
 	specular_occlusion = max(min(reflective_f * specular_occlusion * 10.0, 1.0), specular_occlusion);
 	specular_light *= specular_occlusion;
+#if defined(INDIRECT_COAT_USED)
+	cc_specular_light *= specular_occlusion;
+#endif
 #endif // BENT_NORMAL_MAP_USED
 #endif // !SPECULAR_OCCLUSION_DISABLED
+#ifdef INDIRECT_DIFFUSE_WEIGHT_USED
+	ambient_light *= indirect_diffuse_weight;
+#else
 	ambient_light *= albedo.rgb;
+#endif
 
 #endif // !AMBIENT_LIGHT_DISABLED
 
@@ -2771,6 +2836,9 @@ void main() {
 #if defined(DIFFUSE_TOON)
 		//simplify for toon, as
 		specular_light *= specular * metallic * albedo * 2.0;
+#else
+#ifdef INDIRECT_SPECULAR_WEIGHT_USED
+		specular_light *= indirect_specular_weight;
 #else
 
 		// scales the specular reflections, needs to be be computed before lighting happens,
@@ -2785,6 +2853,10 @@ void main() {
 		float a004 = min(r.x * r.x, exp2(-9.28 * ndotv)) * r.x + r.y;
 		vec2 env = vec2(-1.04, 1.04) * a004 + r.zw;
 		specular_light *= env.x * f0 + env.y * clamp(50.0 * f0.g, metallic, 1.0);
+#endif
+#if defined(INDIRECT_COAT_USED)
+		specular_light += cc_specular_light * indirect_coat_weight;
+#endif
 #endif
 	}
 #endif // !AMBIENT_LIGHT_DISABLED
@@ -2964,7 +3036,9 @@ void main() {
 	specular_light *= ao;
 
 	diffuse_light *= 1.0 - metallic;
+#ifndef INDIRECT_DIFFUSE_WEIGHT_USED
 	ambient_light *= 1.0 - metallic;
+#endif
 
 	frag_color = vec4(diffuse_light + specular_light, alpha);
 	frag_color.rgb += emission + ambient_light;
