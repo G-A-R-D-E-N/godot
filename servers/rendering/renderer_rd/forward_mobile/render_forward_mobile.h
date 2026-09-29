@@ -74,6 +74,7 @@ private:
 
 	SceneShaderForwardMobile scene_shader;
 	bool disable_ubershaders = false;
+	bool dithered_instance_fade = false;
 
 	/* Render Buffer */
 
@@ -120,6 +121,12 @@ private:
 		PASS_MODE_MOTION_VECTORS,
 	};
 
+	enum ShadowFade {
+		SHADOW_FADE_NONE,
+		SHADOW_FADE_INSTANCE,
+		SHADOW_FADE_FULL,
+	};
+
 	struct RenderElementInfo;
 
 	struct RenderListParameters {
@@ -162,9 +169,9 @@ private:
 
 	/* Render shadows */
 
-	void _render_shadow_pass(RID p_light, RID p_shadow_atlas, int p_pass, const PagedArray<RenderGeometryInstance *> &p_instances, float p_lod_distance_multiplier = 0, float p_screen_mesh_lod_threshold = 0.0, bool p_open_pass = true, bool p_close_pass = true, bool p_clear_region = true, RenderingServerTypes::RenderInfo *p_render_info = nullptr, const Transform3D &p_main_cam_transform = Transform3D());
+	void _render_shadow_pass(RID p_light, RID p_shadow_atlas, int p_pass, const PagedArray<RenderGeometryInstance *> &p_instances, float p_lod_distance_multiplier = 0, float p_screen_mesh_lod_threshold = 0.0, bool p_open_pass = true, bool p_close_pass = true, bool p_clear_region = true, RenderingServerTypes::RenderInfo *p_render_info = nullptr, const Transform3D &p_main_cam_transform = Transform3D(), float p_range_scale = 1.0f);
 	void _render_shadow_begin();
-	void _render_shadow_append(RID p_framebuffer, const PagedArray<RenderGeometryInstance *> &p_instances, const Projection &p_projection, const Transform3D &p_transform, float p_zfar, float p_bias, float p_normal_bias, bool p_use_dp, bool p_use_dp_flip, bool p_use_pancake, float p_lod_distance_multiplier = 0.0, float p_screen_mesh_lod_threshold = 0.0, const Rect2i &p_rect = Rect2i(), bool p_flip_y = false, bool p_clear_region = true, bool p_begin = true, bool p_end = true, RenderingServerTypes::RenderInfo *p_render_info = nullptr, const Transform3D &p_main_cam_transform = Transform3D());
+	void _render_shadow_append(RID p_framebuffer, const PagedArray<RenderGeometryInstance *> &p_instances, const Projection &p_projection, const Transform3D &p_transform, float p_zfar, float p_bias, float p_normal_bias, bool p_use_dp, bool p_use_dp_flip, bool p_use_pancake, float p_lod_distance_multiplier = 0.0, float p_screen_mesh_lod_threshold = 0.0, const Rect2i &p_rect = Rect2i(), bool p_flip_y = false, bool p_clear_region = true, bool p_begin = true, bool p_end = true, RenderingServerTypes::RenderInfo *p_render_info = nullptr, const Transform3D &p_main_cam_transform = Transform3D(), ShadowFade p_shadow_fade = SHADOW_FADE_NONE, float p_range_scale = 1.0f);
 	void _render_shadow_process();
 	void _render_shadow_end();
 
@@ -178,7 +185,7 @@ private:
 	void _update_render_base_uniform_set();
 
 	void _fill_instance_data(RenderListType p_render_list, uint32_t p_offset = 0, int32_t p_max_elements = -1, bool p_update_buffer = true);
-	void _fill_render_list(RenderListType p_render_list, const RenderDataRD *p_render_data, PassMode p_pass_mode, bool p_append = false);
+	void _fill_render_list(RenderListType p_render_list, const RenderDataRD *p_render_data, PassMode p_pass_mode, bool p_append = false, ShadowFade p_shadow_fade = SHADOW_FADE_NONE);
 
 	void _setup_environment(const RenderDataRD *p_render_data, bool p_no_fog, const Size2i &p_screen_size, const Size2 &p_viewport_size, const Color &p_default_bg_color, bool p_opaque_render_buffers = false, bool p_pancake_shadows = false);
 	void _setup_lightmaps(const RenderDataRD *p_render_data, const PagedArray<RID> &p_lightmaps, const Transform3D &p_cam_transform);
@@ -407,7 +414,8 @@ private:
 				uint32_t lod_index : 8;
 				uint32_t uses_lightmap : 1;
 				uint32_t uses_lightmap_specular : 1;
-				uint32_t reserved : 22;
+				uint32_t uses_dithered_fade : 1;
+				uint32_t reserved : 21;
 			};
 			uint32_t value;
 		};
@@ -463,6 +471,8 @@ protected:
 		INSTANCE_DATA_FLAG_MULTIMESH_HAS_CUSTOM_DATA = 1 << 15,
 		INSTANCE_DATA_FLAGS_PARTICLE_TRAIL_SHIFT = 16,
 		INSTANCE_DATA_FLAGS_PARTICLE_TRAIL_MASK = 0xFF,
+		INSTANCE_DATA_FLAGS_FADE_SHIFT = 24,
+		INSTANCE_DATA_FLAGS_FADE_MASK = 0xFFUL << INSTANCE_DATA_FLAGS_FADE_SHIFT,
 	};
 
 	struct GeometryInstanceLightmapSH {
@@ -551,6 +561,7 @@ protected:
 
 		// lightmap
 		uint32_t gi_offset_cache = 0; // !BAS! Should rename this to lightmap_offset_cache, in forward clustered this was shared between gi and lightmap
+		bool dithered_fade_cache = false;
 		RID lightmap_instance;
 		Rect2 lightmap_uv_scale;
 		uint32_t lightmap_slice_index;
