@@ -2889,6 +2889,15 @@
 			[b]Note:[/b] [Control] nodes are snapped to the nearest pixel by default. This is controlled by [member gui/common/snap_controls_to_pixels].
 			[b]Note:[/b] It is not recommended to use this setting together with [member rendering/2d/snap/snap_2d_transforms_to_pixel], as movement may appear even less smooth. Prefer only enabling that setting instead.
 		</member>
+		<member name="rendering/anti_aliasing/quality/garden_taa" type="bool" setter="" getter="" default="false">
+			If [code]true[/code] and [member rendering/anti_aliasing/quality/temporal_transition_metadata] is enabled, temporal antialiasing uses the transition mask and object ID that surfaces write to the velocity buffer ([code]TEMPORAL_MASK[/code] and [code]TEMPORAL_ID[/code] in spatial shaders). Where a pixel or the front-most pixel around it is masked, the history is reprojected with the velocity of that front-most pixel and neither a change in velocity nor a change in brightness reduces how much history is kept, so a dithered cross-fade (such as [member rendering/visibility/dithered_instance_fade] with its per-frame noise) averages into a blend. Where the current and the reprojected object IDs are both non-zero and differ, the history is discarded. The closest velocity in each 3×3 neighborhood is taken from the nearest surface.
+			Without [member rendering/anti_aliasing/quality/temporal_transition_metadata], this setting has no effect. Can be changed at run-time.
+			[b]Note:[/b] Only supported in the Forward+ rendering method, with [member rendering/anti_aliasing/quality/use_taa] or [member Viewport.use_taa]. MSAA averages the object IDs at polygon edges; use it together with this setting with care.
+		</member>
+		<member name="rendering/anti_aliasing/quality/history_reset_serial" type="int" setter="" getter="" default="0">
+			Whenever this value changes, temporal antialiasing, FSR 2 and MetalFX temporal upscaling discard their accumulated history for one frame. Increase it after a camera cut or a teleport, for example with [code]ProjectSettings.set_setting("rendering/anti_aliasing/quality/history_reset_serial", serial + 1)[/code]. Can be changed at run-time; the value itself has no meaning.
+			[b]Note:[/b] Only supported in the Forward+ rendering method. With multithreaded rendering the reset can apply one frame later than the change.
+		</member>
 		<member name="rendering/anti_aliasing/quality/msaa_2d" type="int" setter="" getter="" default="0">
 			Sets the number of multisample antialiasing (MSAA) samples to use for 2D/Canvas rendering (as a power of two). MSAA is used to reduce aliasing around the edges of polygons. A higher MSAA value results in smoother edges but can be significantly slower on some hardware, especially integrated graphics due to their limited memory bandwidth. This has no effect on shader-induced aliasing or texture aliasing.
 			[b]Note:[/b] MSAA is only supported in the Forward+ and Mobile rendering methods, not Compatibility.
@@ -2907,6 +2916,12 @@
 		<member name="rendering/anti_aliasing/quality/smaa_edge_detection_threshold" type="float" setter="" getter="" default="0.05">
 			Sets the sensitivity to edges when using SMAA for antialiasing. Lower values will catch more edges, at a potentially higher performance cost.
 			[b]Note:[/b] This property is only read when the project starts. There is currently no way to change this setting at run-time.
+		</member>
+		<member name="rendering/anti_aliasing/quality/temporal_transition_metadata" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], the 3D velocity buffer uses the [code]RGBA16F[/code] format instead of [code]RG16F[/code]. Red and green keep the motion vector; blue holds a transition mask and alpha a logical object ID, which spatial shaders write with the fragment built-ins [code]TEMPORAL_MASK[/code] and [code]TEMPORAL_ID[/code] (both [code skip-lint]float[/code]). Draws that use [member rendering/visibility/dithered_instance_fade] default to a mask of [code]1.0[/code], all other draws to [code]0.0[/code]; the ID defaults to [code]0.0[/code], meaning unknown. Use whole numbers from [code]1[/code] to [code]2048[/code] for IDs, which half floats store exactly. The shader preprocessor defines [code]TEMPORAL_METADATA_AVAILABLE[/code] in engines that have these built-ins.
+			[member rendering/anti_aliasing/quality/garden_taa] reads the mask and ID. With FSR 2, opaque surfaces write their motion vectors in the opaque pass so static pixels carry the mask too, and the mask is passed as FSR 2's transparency-and-composition mask.
+			[b]Note:[/b] Only supported in the Forward+ rendering method. The Mobile and Compatibility rendering methods accept the built-ins and ignore them.
+			[b]Note:[/b] This property is only read when the project starts. It doubles the size of the velocity buffer.
 		</member>
 		<member name="rendering/anti_aliasing/quality/use_debanding" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], uses a fast dithering filter just before transforming floating point color values to integer color values to make banding significantly less visible. Debanding is applied at different steps of the rendering process depending on the rendering method and [member rendering/viewport/hdr_2d] setting.
@@ -3592,6 +3607,19 @@
 		</member>
 		<member name="rendering/viewport/transparent_background" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], enables [member Viewport.transparent_bg] on the root viewport. This allows per-pixel transparency to be effective after also enabling [member display/window/size/transparent] and [member display/window/per_pixel_transparency/allowed].
+		</member>
+		<member name="rendering/visibility/dithered_instance_fade" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], an instance that is fading ([member GeometryInstance3D.transparency] above [code]0.0[/code], or a [member GeometryInstance3D.visibility_range_fade_mode] self fade) keeps its opaque materials in the opaque pass, the depth prepass and the shadow passes, and discards the pixels whose interleaved gradient noise [code]fract(52.9829189 * fract(dot(FRAGCOORD.xy + vec2(TEMPORAL_FRAME * 5.588238), vec2(0.06711056, 0.00583715))))[/code] is greater than or equal to the fade alpha (quantized to 1/255). [code]TEMPORAL_FRAME[/code] is the spatial shader built-in that holds the temporal antialiasing or upscaling jitter phase; it is [code]0.0[/code] without jitter and in shadow passes, so the pattern only changes from frame to frame under TAA or FSR 2, where it averages into a blend. A second representation that draws the complementary noise interval therefore cross-fades with it pixel for pixel. Shadows fade with the same alpha, measured from the main camera. Materials that use the transparent pass keep the alpha-blended fade. Instances that are not fading use the same pipelines as before.
+			[b]Note:[/b] Only supported when using the Forward+ and Mobile rendering methods. The Mobile rendering method has no alpha-blended instance fade, so there every material of a fading instance dithers, including materials that use the transparent pass. The Compatibility rendering method keeps its existing behavior.
+		</member>
+		<member name="rendering/visibility/zoom_aware_ranges" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], visibility ranges follow the camera zoom: when a perspective camera's vertical field of view is narrower than [member rendering/visibility/zoom_reference_fov], the distance used for [member GeometryInstance3D.visibility_range_begin], [member GeometryInstance3D.visibility_range_end], their margins and the range fades is multiplied by [code]tan(fov / 2) / tan(zoom_reference_fov / 2)[/code], so an instance leaves its range at the same on-screen size as at the reference field of view. The factor is never below [code]1.0 / zoom_max_scale[/code]. Wider fields of view, orthogonal cameras and reflection probes use unscaled distances, and mesh LOD is not affected. Each viewport uses its own camera. Can be changed at run-time.
+		</member>
+		<member name="rendering/visibility/zoom_max_scale" type="float" setter="" getter="" default="3.0">
+			The largest factor by which [member rendering/visibility/zoom_aware_ranges] can extend a visibility range. For example, set it to the loaded radius divided by the largest range end so that no zoomed range reaches past the loaded area. Can be changed at run-time.
+		</member>
+		<member name="rendering/visibility/zoom_reference_fov" type="float" setter="" getter="" default="75.0">
+			The vertical field of view, in degrees, at which [member rendering/visibility/zoom_aware_ranges] leaves visibility ranges unchanged. Match it to the field of view the ranges were authored for. Can be changed at run-time.
 		</member>
 		<member name="rendering/vrs/mode" type="int" setter="" getter="" default="0">
 			Set the default Variable Rate Shading (VRS) mode for the main viewport. See [member Viewport.vrs_mode] to change this at runtime, and [enum Viewport.VRSMode] for possible values.
