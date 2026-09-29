@@ -160,6 +160,7 @@ public:
 		RID depth;
 		RID velocity;
 		RID reactive;
+		RID transparency_composition;
 		RID exposure;
 		RID output;
 		float z_near = 0.0f;
