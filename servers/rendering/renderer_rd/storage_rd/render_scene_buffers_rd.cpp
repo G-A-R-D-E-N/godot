@@ -31,6 +31,7 @@
 #include "render_scene_buffers_rd.h"
 #include "render_scene_buffers_rd.compat.inc"
 
+#include "core/config/project_settings.h"
 #include "core/object/class_db.h"
 #include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
 #include "servers/rendering/rendering_device_binds.h"
@@ -843,8 +844,13 @@ uint32_t RenderSceneBuffersRD::get_depth_usage_bits(bool p_resolve, bool p_msaa,
 	return usage_bits;
 }
 
+bool RenderSceneBuffersRD::get_temporal_metadata() {
+	static const bool temporal_metadata = GLOBAL_GET("rendering/anti_aliasing/quality/temporal_transition_metadata");
+	return temporal_metadata;
+}
+
 RD::DataFormat RenderSceneBuffersRD::get_velocity_format() {
-	return RD::DATA_FORMAT_R16G16_SFLOAT;
+	return get_temporal_metadata() ? RD::DATA_FORMAT_R16G16B16A16_SFLOAT : RD::DATA_FORMAT_R16G16_SFLOAT;
 }
 
 uint32_t RenderSceneBuffersRD::get_velocity_usage_bits(bool p_resolve, bool p_msaa, bool p_storage) {
