@@ -1295,6 +1295,7 @@ MaterialStorage::MaterialStorage() {
 		actions.renames["OUTPUT_IS_SRGB"] = "SHADER_IS_SRGB";
 		actions.renames["CLIP_SPACE_FAR"] = "SHADER_SPACE_FAR";
 		actions.renames["IN_SHADOW_PASS"] = "IN_SHADOW_PASS";
+		actions.renames["TEMPORAL_FRAME"] = "0.0";
 		actions.renames["VIEWPORT_SIZE"] = "scene_data_block.data.viewport_size";
 
 		actions.renames["FRAGCOORD"] = "gl_FragCoord";
@@ -1334,6 +1335,8 @@ MaterialStorage::MaterialStorage() {
 		actions.renames["INDIRECT_COAT_WEIGHT"] = "indirect_coat_weight";
 		actions.renames["INDIRECT_COAT_ROUGHNESS"] = "indirect_coat_roughness";
 		actions.renames["DECAL_COVERAGE"] = "decal_coverage";
+		actions.renames["TEMPORAL_MASK"] = "temporal_mask";
+		actions.renames["TEMPORAL_ID"] = "temporal_id";
 		actions.renames["STREAMING_UV"] = "streaming_uv";
 		actions.renames["BONE_INDICES"] = "bone_attrib";
 		actions.renames["BONE_WEIGHTS"] = "weight_attrib";
@@ -1419,6 +1422,8 @@ MaterialStorage::MaterialStorage() {
 		actions.usage_defines["INDIRECT_COAT_WEIGHT"] = "#define INDIRECT_COAT_USED\n#define LIGHT_CLEARCOAT_USED\n";
 		actions.usage_defines["INDIRECT_COAT_ROUGHNESS"] = "@INDIRECT_COAT_WEIGHT";
 		actions.usage_defines["DECAL_COVERAGE"] = "#define DECAL_COVERAGE_USED\n";
+		actions.usage_defines["TEMPORAL_MASK"] = "#define TEMPORAL_METADATA_USED\n";
+		actions.usage_defines["TEMPORAL_ID"] = "@TEMPORAL_MASK";
 
 		actions.render_mode_defines["skip_vertex_transform"] = "#define SKIP_TRANSFORM_USED\n";
 		actions.render_mode_defines["world_vertex_coords"] = "#define VERTEX_WORLD_COORDS_USED\n";
