@@ -745,6 +745,7 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 		actions.renames["OUTPUT_IS_SRGB"] = "SHADER_IS_SRGB";
 		actions.renames["CLIP_SPACE_FAR"] = "SHADER_SPACE_FAR";
 		actions.renames["IN_SHADOW_PASS"] = "bool(scene_data_block.data.flags & SCENE_DATA_FLAGS_IN_SHADOW_PASS)";
+		actions.renames["TEMPORAL_FRAME"] = "scene_data_block.data.taa_frame_count";
 		actions.renames["VIEWPORT_SIZE"] = "read_viewport_size";
 
 		actions.renames["FRAGCOORD"] = "gl_FragCoord";
@@ -784,6 +785,8 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 		actions.renames["INDIRECT_COAT_WEIGHT"] = "indirect_coat_weight";
 		actions.renames["INDIRECT_COAT_ROUGHNESS"] = "indirect_coat_roughness";
 		actions.renames["DECAL_COVERAGE"] = "decal_coverage";
+		actions.renames["TEMPORAL_MASK"] = "temporal_mask";
+		actions.renames["TEMPORAL_ID"] = "temporal_id";
 		actions.renames["BONE_INDICES"] = "bone_attrib";
 		actions.renames["BONE_WEIGHTS"] = "weight_attrib";
 		actions.renames["CUSTOM0"] = "custom0_attrib";
@@ -868,6 +871,8 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 		actions.usage_defines["INDIRECT_COAT_WEIGHT"] = "#define INDIRECT_COAT_USED\n#define LIGHT_CLEARCOAT_USED\n";
 		actions.usage_defines["INDIRECT_COAT_ROUGHNESS"] = "@INDIRECT_COAT_WEIGHT";
 		actions.usage_defines["DECAL_COVERAGE"] = "#define DECAL_COVERAGE_USED\n";
+		actions.usage_defines["TEMPORAL_MASK"] = "#define TEMPORAL_METADATA_USED\n";
+		actions.usage_defines["TEMPORAL_ID"] = "@TEMPORAL_MASK";
 
 		actions.usage_defines["MODEL_MATRIX"] = "#define MODEL_MATRIX_USED\n";
 
