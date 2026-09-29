@@ -835,12 +835,12 @@ FSR2Context *FSR2Effect::create_context(Size2i p_internal_size, Size2i p_target_
 }
 
 void FSR2Effect::upscale(const Parameters &p_params) {
-	// TODO: Transparency & Composition mask is not implemented.
 	FfxFsr2DispatchDescription dispatch_desc = {};
 	RID color = p_params.color;
 	RID depth = p_params.depth;
 	RID velocity = p_params.velocity;
 	RID reactive = p_params.reactive;
+	RID transparency_composition = p_params.transparency_composition;
 	RID exposure = p_params.exposure;
 	RID output = p_params.output;
 	dispatch_desc.commandList = nullptr;
@@ -849,7 +849,7 @@ void FSR2Effect::upscale(const Parameters &p_params) {
 	dispatch_desc.motionVectors = get_resource_rd(&velocity, L"velocity");
 	dispatch_desc.reactive = get_resource_rd(&reactive, L"reactive");
 	dispatch_desc.exposure = get_resource_rd(&exposure, L"exposure");
-	dispatch_desc.transparencyAndComposition = {};
+	dispatch_desc.transparencyAndComposition = get_resource_rd(&transparency_composition, L"transparency_composition");
 	dispatch_desc.output = get_resource_rd(&output, L"output");
 	dispatch_desc.colorOpaqueOnly = {};
 	dispatch_desc.jitterOffset.x = p_params.jitter.x;
