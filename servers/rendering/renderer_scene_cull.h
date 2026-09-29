@@ -1013,6 +1013,7 @@ public:
 	RendererSceneRender::RenderSDFGIUpdateData sdfgi_update_data;
 
 	uint32_t thread_cull_threshold = 200;
+	bool dithered_instance_fade = false;
 
 	mutable RID_Owner<Instance, true> instance_owner{ 65536, 4194304 };
 
@@ -1129,6 +1130,7 @@ public:
 		uint64_t viewport_mask;
 		Scenario *scenario = nullptr;
 		Vector3 camera_position;
+		float visibility_range_scale = 1.0f;
 		uint32_t cull_offset;
 		uint32_t cull_count;
 	};
@@ -1136,7 +1138,7 @@ public:
 	void _visibility_cull_threaded(uint32_t p_thread, VisibilityCullData *cull_data);
 	void _visibility_cull(const VisibilityCullData &cull_data, uint64_t p_from, uint64_t p_to);
 	template <bool p_fade_check>
-	_FORCE_INLINE_ int _visibility_range_check(InstanceVisibilityData &r_vis_data, const Vector3 &p_camera_pos, uint64_t p_viewport_mask);
+	_FORCE_INLINE_ int _visibility_range_check(InstanceVisibilityData &r_vis_data, const Vector3 &p_camera_pos, uint64_t p_viewport_mask, float p_distance_scale);
 
 	struct CullData {
 		Cull *cull = nullptr;
@@ -1148,6 +1150,7 @@ public:
 		const RendererSceneOcclusionCull::HZBuffer *occlusion_buffer;
 		const Projection *camera_matrix;
 		uint64_t visibility_viewport_mask;
+		float visibility_range_scale = 1.0f;
 	};
 
 	void _scene_cull_threaded(uint32_t p_thread, CullData *cull_data);
@@ -1160,6 +1163,7 @@ public:
 	void _render_scene(const RendererSceneRender::CameraData *p_camera_data, const Ref<RenderSceneBuffers> &p_render_buffers, RID p_environment, RID p_force_camera_attributes, RID p_compositor, uint32_t p_visible_layers, RID p_scenario, RID p_viewport, RID p_shadow_atlas, RID p_reflection_probe, int p_reflection_probe_pass, float p_screen_mesh_lod_threshold, float p_window_output_max_value, bool p_using_shadows = true, RenderingServerTypes::RenderInfo *r_render_info = nullptr);
 	void render_empty_scene(const Ref<RenderSceneBuffers> &p_render_buffers, RID p_scenario, RID p_shadow_atlas, float p_window_output_max_value);
 
+	static float zoom_visibility_range_scale(const Projection &p_projection, bool p_orthogonal, float p_reference_fov, float p_max_scale);
 	void render_camera(const Ref<RenderSceneBuffers> &p_render_buffers, RID p_camera, RID p_scenario, RID p_viewport, Size2 p_viewport_size, uint32_t p_jitter_phase_count, float p_screen_mesh_lod_threshold, RID p_shadow_atlas, float p_window_output_max_value, RenderingServerTypes::RenderInfo *r_render_info = nullptr);
 	void update_dirty_instances() const;
 
