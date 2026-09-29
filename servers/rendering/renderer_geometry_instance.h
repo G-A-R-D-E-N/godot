@@ -153,4 +153,6 @@ public:
 
 	virtual Transform3D get_transform() override;
 	virtual AABB get_aabb() override;
+
+	float get_fade_alpha(const Vector3 &p_origin, float p_distance_scale, bool p_range_fade) const;
 };
