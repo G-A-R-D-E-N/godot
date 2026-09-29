@@ -3774,6 +3774,9 @@ void RenderingServer::init() {
 	GLOBAL_DEF_RST(PropertyInfo(Variant::FLOAT, "rendering/anti_aliasing/quality/smaa_edge_detection_threshold", PROPERTY_HINT_RANGE, "0.01,0.2,0.01"), 0.05);
 
 	GLOBAL_DEF("rendering/anti_aliasing/quality/use_debanding", false);
+	GLOBAL_DEF_RST("rendering/anti_aliasing/quality/temporal_transition_metadata", false);
+	GLOBAL_DEF("rendering/anti_aliasing/quality/garden_taa", false);
+	GLOBAL_DEF("rendering/anti_aliasing/quality/history_reset_serial", 0);
 
 	{
 		String mode_hints;
@@ -3799,6 +3802,11 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/textures/light_projectors/filter", PROPERTY_HINT_ENUM, "Nearest (Fast),Linear (Fast),Nearest Mipmap (Fast),Linear Mipmap (Fast),Nearest Mipmap Anisotropic (Average),Linear Mipmap Anisotropic (Average)"), RSE::LIGHT_PROJECTOR_FILTER_LINEAR_MIPMAPS);
 
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/occlusion_culling/occlusion_rays_per_thread", PROPERTY_HINT_RANGE, "1,2048,1,or_greater"), 512);
+
+	GLOBAL_DEF_RST("rendering/visibility/dithered_instance_fade", false);
+	GLOBAL_DEF("rendering/visibility/zoom_aware_ranges", false);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/visibility/zoom_reference_fov", PROPERTY_HINT_RANGE, "1,179,0.1,degrees"), 75.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/visibility/zoom_max_scale", PROPERTY_HINT_RANGE, "1,16,0.01,or_greater"), 3.0);
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/glow/upscale_mode", PROPERTY_HINT_ENUM, "Linear (Fast),Bicubic (Slow)"), 1);
 	GLOBAL_DEF("rendering/environment/glow/upscale_mode.mobile", 0);
