@@ -233,6 +233,10 @@ bool sc_material_feedback() {
 	return ((sc_packed_2() >> 1) & 1U) != 0;
 }
 
+bool sc_dithered_instance_fade() {
+	return ((sc_packed_2() >> 2) & 1U) != 0;
+}
+
 layout(constant_id = 3) const bool sc_emulate_point_size = false;
 
 #ifdef POINT_SIZE_USED
@@ -269,6 +273,7 @@ layout(set = 0, binding = 2) uniform sampler shadow_sampler;
 #define INSTANCE_FLAGS_PARTICLE_TRAIL_SHIFT 16
 //3 bits of stride
 #define INSTANCE_FLAGS_PARTICLE_TRAIL_MASK 0xFF
+#define INSTANCE_FLAGS_FADE_SHIFT 24
 
 layout(set = 0, binding = 3, std430) restrict readonly buffer OmniLights {
 	LightData data[];
