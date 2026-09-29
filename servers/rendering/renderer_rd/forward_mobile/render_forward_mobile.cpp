@@ -817,7 +817,7 @@ void RenderForwardMobile::_pre_opaque_render(RenderDataRD *p_render_data) {
 
 		//cube shadows are rendered in their own way
 		for (const int &index : p_render_data->cube_shadows) {
-			_render_shadow_pass(p_render_data->render_shadows[index].light, p_render_data->shadow_atlas, p_render_data->render_shadows[index].pass, p_render_data->render_shadows[index].instances, lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, true, true, true, p_render_data->render_info, p_render_data->scene_data->cam_transform);
+			_render_shadow_pass(p_render_data->render_shadows[index].light, p_render_data->shadow_atlas, p_render_data->render_shadows[index].pass, p_render_data->render_shadows[index].instances, lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, true, true, true, p_render_data->render_info, p_render_data->scene_data->cam_transform, p_render_data->scene_data->visibility_range_scale);
 		}
 
 		if (p_render_data->directional_shadows.size()) {
@@ -838,11 +838,11 @@ void RenderForwardMobile::_pre_opaque_render(RenderDataRD *p_render_data) {
 
 		//render directional shadows
 		for (uint32_t i = 0; i < p_render_data->directional_shadows.size(); i++) {
-			_render_shadow_pass(p_render_data->render_shadows[p_render_data->directional_shadows[i]].light, p_render_data->shadow_atlas, p_render_data->render_shadows[p_render_data->directional_shadows[i]].pass, p_render_data->render_shadows[p_render_data->directional_shadows[i]].instances, lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, false, i == p_render_data->directional_shadows.size() - 1, false, p_render_data->render_info, p_render_data->scene_data->cam_transform);
+			_render_shadow_pass(p_render_data->render_shadows[p_render_data->directional_shadows[i]].light, p_render_data->shadow_atlas, p_render_data->render_shadows[p_render_data->directional_shadows[i]].pass, p_render_data->render_shadows[p_render_data->directional_shadows[i]].instances, lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, false, i == p_render_data->directional_shadows.size() - 1, false, p_render_data->render_info, p_render_data->scene_data->cam_transform, p_render_data->scene_data->visibility_range_scale);
 		}
 		//render positional shadows
 		for (uint32_t i = 0; i < p_render_data->shadows.size(); i++) {
-			_render_shadow_pass(p_render_data->render_shadows[p_render_data->shadows[i]].light, p_render_data->shadow_atlas, p_render_data->render_shadows[p_render_data->shadows[i]].pass, p_render_data->render_shadows[p_render_data->shadows[i]].instances, lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, i == 0, i == p_render_data->shadows.size() - 1, true, p_render_data->render_info, p_render_data->scene_data->cam_transform);
+			_render_shadow_pass(p_render_data->render_shadows[p_render_data->shadows[i]].light, p_render_data->shadow_atlas, p_render_data->render_shadows[p_render_data->shadows[i]].pass, p_render_data->render_shadows[p_render_data->shadows[i]].instances, lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, i == 0, i == p_render_data->shadows.size() - 1, true, p_render_data->render_info, p_render_data->scene_data->cam_transform, p_render_data->scene_data->visibility_range_scale);
 		}
 
 		_render_shadow_process();
@@ -1434,7 +1434,7 @@ void RenderForwardMobile::_render_scene(RenderDataRD *p_render_data, const Color
 
 /* these are being called from RendererSceneRenderRD::_pre_opaque_render */
 
-void RenderForwardMobile::_render_shadow_pass(RID p_light, RID p_shadow_atlas, int p_pass, const PagedArray<RenderGeometryInstance *> &p_instances, float p_lod_distance_multiplier, float p_screen_mesh_lod_threshold, bool p_open_pass, bool p_close_pass, bool p_clear_region, RenderingServerTypes::RenderInfo *p_render_info, const Transform3D &p_main_cam_transform) {
+void RenderForwardMobile::_render_shadow_pass(RID p_light, RID p_shadow_atlas, int p_pass, const PagedArray<RenderGeometryInstance *> &p_instances, float p_lod_distance_multiplier, float p_screen_mesh_lod_threshold, bool p_open_pass, bool p_close_pass, bool p_clear_region, RenderingServerTypes::RenderInfo *p_render_info, const Transform3D &p_main_cam_transform, float p_range_scale) {
 	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
 
 	ERR_FAIL_COND(!light_storage->owns_light_instance(p_light));
@@ -1460,6 +1460,8 @@ void RenderForwardMobile::_render_shadow_pass(RID p_light, RID p_shadow_atlas, i
 
 	Projection light_projection;
 	Transform3D light_transform;
+
+	const ShadowFade shadow_fade = light_storage->light_get_type(base) == RSE::LIGHT_DIRECTIONAL ? SHADOW_FADE_FULL : SHADOW_FADE_INSTANCE;
 
 	if (light_storage->light_get_type(base) == RSE::LIGHT_DIRECTIONAL) {
 		//set pssm stuff
@@ -1598,7 +1600,7 @@ void RenderForwardMobile::_render_shadow_pass(RID p_light, RID p_shadow_atlas, i
 
 	if (render_cubemap) {
 		//rendering to cubemap
-		_render_shadow_append(render_fb, p_instances, light_projection, light_transform, zfar, 0, 0, false, false, use_pancake, p_lod_distance_multiplier, p_screen_mesh_lod_threshold, Rect2(), false, true, true, true, p_render_info, p_main_cam_transform);
+		_render_shadow_append(render_fb, p_instances, light_projection, light_transform, zfar, 0, 0, false, false, use_pancake, p_lod_distance_multiplier, p_screen_mesh_lod_threshold, Rect2(), false, true, true, true, p_render_info, p_main_cam_transform, shadow_fade, p_range_scale);
 		if (finalize_cubemap) {
 			_render_shadow_process();
 			_render_shadow_end();
@@ -1617,7 +1619,7 @@ void RenderForwardMobile::_render_shadow_pass(RID p_light, RID p_shadow_atlas, i
 
 	} else {
 		//render shadow
-		_render_shadow_append(render_fb, p_instances, light_projection, light_transform, zfar, 0, 0, using_dual_paraboloid, using_dual_paraboloid_flip, use_pancake, p_lod_distance_multiplier, p_screen_mesh_lod_threshold, atlas_rect, flip_y, p_clear_region, p_open_pass, p_close_pass, p_render_info, p_main_cam_transform);
+		_render_shadow_append(render_fb, p_instances, light_projection, light_transform, zfar, 0, 0, using_dual_paraboloid, using_dual_paraboloid_flip, use_pancake, p_lod_distance_multiplier, p_screen_mesh_lod_threshold, atlas_rect, flip_y, p_clear_region, p_open_pass, p_close_pass, p_render_info, p_main_cam_transform, shadow_fade, p_range_scale);
 	}
 }
 
@@ -1629,7 +1631,7 @@ void RenderForwardMobile::_render_shadow_begin() {
 	render_list[RENDER_LIST_SECONDARY].clear();
 }
 
-void RenderForwardMobile::_render_shadow_append(RID p_framebuffer, const PagedArray<RenderGeometryInstance *> &p_instances, const Projection &p_projection, const Transform3D &p_transform, float p_zfar, float p_bias, float p_normal_bias, bool p_use_dp, bool p_use_dp_flip, bool p_use_pancake, float p_lod_distance_multiplier, float p_screen_mesh_lod_threshold, const Rect2i &p_rect, bool p_flip_y, bool p_clear_region, bool p_begin, bool p_end, RenderingServerTypes::RenderInfo *p_render_info, const Transform3D &p_main_cam_transform) {
+void RenderForwardMobile::_render_shadow_append(RID p_framebuffer, const PagedArray<RenderGeometryInstance *> &p_instances, const Projection &p_projection, const Transform3D &p_transform, float p_zfar, float p_bias, float p_normal_bias, bool p_use_dp, bool p_use_dp_flip, bool p_use_pancake, float p_lod_distance_multiplier, float p_screen_mesh_lod_threshold, const Rect2i &p_rect, bool p_flip_y, bool p_clear_region, bool p_begin, bool p_end, RenderingServerTypes::RenderInfo *p_render_info, const Transform3D &p_main_cam_transform, ShadowFade p_shadow_fade, float p_range_scale) {
 	SceneState::ShadowPass shadow_pass;
 
 	if (p_render_info) {
@@ -1650,6 +1652,7 @@ void RenderForwardMobile::_render_shadow_append(RID p_framebuffer, const PagedAr
 	scene_data.time = time;
 	scene_data.time_step = time_step;
 	scene_data.main_cam_transform = p_main_cam_transform;
+	scene_data.visibility_range_scale = p_range_scale;
 
 	RenderDataRD render_data;
 	render_data.scene_data = &scene_data;
@@ -1672,7 +1675,7 @@ void RenderForwardMobile::_render_shadow_append(RID p_framebuffer, const PagedAr
 	PassMode pass_mode = p_use_dp ? PASS_MODE_SHADOW_DP : PASS_MODE_SHADOW;
 
 	uint32_t render_list_from = render_list[RENDER_LIST_SECONDARY].elements.size();
-	_fill_render_list(RENDER_LIST_SECONDARY, &render_data, pass_mode, true);
+	_fill_render_list(RENDER_LIST_SECONDARY, &render_data, pass_mode, true, p_shadow_fade);
 	uint32_t render_list_size = render_list[RENDER_LIST_SECONDARY].elements.size() - render_list_from;
 	render_list[RENDER_LIST_SECONDARY].sort_by_key_range(render_list_from, render_list_size);
 	_fill_instance_data(RENDER_LIST_SECONDARY, render_list_from, render_list_size, false);
@@ -2134,7 +2137,9 @@ void RenderForwardMobile::_fill_instance_data(RenderListType p_render_list, uint
 
 		SceneState::InstanceData instance_data;
 
-		if (inst->prev_transform_dirty && frame > inst->prev_transform_change_frame && inst->prev_transform_change_frame) {
+		if (unlikely(inst->prev_transform_change_frame == UINT_MAX)) {
+			inst->prev_transform_change_frame = frame;
+		} else if (inst->prev_transform_dirty && frame > inst->prev_transform_change_frame && inst->prev_transform_change_frame) {
 			inst->prev_transform = inst->transform;
 			inst->prev_transform_dirty = false;
 		}
@@ -2195,7 +2200,7 @@ void RenderForwardMobile::_fill_instance_data(RenderListType p_render_list, uint
 		RenderElementInfo &element_info = rl->element_info[p_offset + i];
 
 		// Sets lod_index, uses_lightmap, and uses_lightmap_specular at once.
-		element_info.value = uint32_t(surface->sort.sort_key1 & 0x3FF);
+		element_info.value = uint32_t(surface->sort.sort_key1 & 0x3FF) | (uint32_t(inst->dithered_fade_cache) << 10);
 	}
 
 	if (p_update_buffer && element_total > 0u) {
@@ -2209,7 +2214,7 @@ _FORCE_INLINE_ static uint32_t _indices_to_primitives(RSE::PrimitiveType p_primi
 	return (p_indices - subtractor[p_primitive]) / divisor[p_primitive];
 }
 
-void RenderForwardMobile::_fill_render_list(RenderListType p_render_list, const RenderDataRD *p_render_data, PassMode p_pass_mode, bool p_append) {
+void RenderForwardMobile::_fill_render_list(RenderListType p_render_list, const RenderDataRD *p_render_data, PassMode p_pass_mode, bool p_append, ShadowFade p_shadow_fade) {
 	RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
 
 	if (p_render_list == RENDER_LIST_OPAQUE) {
@@ -2222,6 +2227,10 @@ void RenderForwardMobile::_fill_render_list(RenderListType p_render_list, const 
 	Plane near_plane(-p_render_data->scene_data->cam_transform.basis.get_column(Vector3::AXIS_Z), p_render_data->scene_data->cam_transform.origin);
 	near_plane.d += p_render_data->scene_data->cam_projection.get_z_near();
 	float z_max = p_render_data->scene_data->cam_projection.get_z_far() - p_render_data->scene_data->cam_projection.get_z_near();
+
+	const bool shadow_fill = p_pass_mode == PASS_MODE_SHADOW || p_pass_mode == PASS_MODE_SHADOW_DP;
+	const bool dither_fill = dithered_instance_fade && (p_pass_mode == PASS_MODE_COLOR || (shadow_fill && p_shadow_fade != SHADOW_FADE_NONE));
+	const bool range_fade = !shadow_fill || p_shadow_fade == SHADOW_FADE_FULL;
 
 	RenderList *rl = &render_list[p_render_list];
 
@@ -2301,6 +2310,15 @@ void RenderForwardMobile::_fill_render_list(RenderListType p_render_list, const 
 					lightmap_captures_used++;
 					uses_lightmap = true;
 				}
+			}
+		}
+
+		inst->dithered_fade_cache = false;
+		if (dither_fill) {
+			const uint32_t fade_byte = uint32_t(inst->get_fade_alpha(p_render_data->scene_data->main_cam_transform.origin, p_render_data->scene_data->visibility_range_scale, range_fade) * 255.0);
+			if (fade_byte < 255) {
+				flags = (flags & ~INSTANCE_DATA_FLAGS_FADE_MASK) | (fade_byte << INSTANCE_DATA_FLAGS_FADE_SHIFT);
+				inst->dithered_fade_cache = true;
 			}
 		}
 		inst->flags_cache = flags;
@@ -2503,6 +2521,7 @@ void RenderForwardMobile::_render_list_template(RenderingDevice::DrawListID p_dr
 		pipeline_specialization.multimesh_has_color = bool(inst->flags_cache & INSTANCE_DATA_FLAG_MULTIMESH_HAS_COLOR);
 		pipeline_specialization.multimesh_has_custom_data = bool(inst->flags_cache & INSTANCE_DATA_FLAG_MULTIMESH_HAS_CUSTOM_DATA);
 		pipeline_specialization.material_feedback = p_params->use_material_feedback && surf->material->material_feedback_rid.is_valid();
+		pipeline_specialization.dithered_instance_fade = element_info.uses_dithered_fade;
 
 		SceneState::PushConstant push_constant;
 		push_constant.base_index = i + p_params->element_offset;
@@ -2767,7 +2786,9 @@ RenderGeometryInstance *RenderForwardMobile::geometry_instance_create(RID p_base
 
 void RendererSceneRenderImplementation::RenderForwardMobile::GeometryInstanceForwardMobile::set_transform(const Transform3D &p_transform, const AABB &p_aabb, const AABB &p_transformed_aabb) {
 	uint64_t frame = RSG::rasterizer->get_frame_number();
-	if (frame != prev_transform_change_frame) {
+	if (unlikely(prev_transform_change_frame == UINT_MAX)) {
+		prev_transform = p_transform;
+	} else if (frame != prev_transform_change_frame) {
 		prev_transform = transform;
 		prev_transform_change_frame = frame;
 		prev_transform_dirty = true;
@@ -3602,6 +3623,7 @@ RenderForwardMobile::RenderForwardMobile() {
 	singleton = this;
 
 	disable_ubershaders = RD::get_singleton()->get_driver_workarounds().disable_ubershaders;
+	dithered_instance_fade = GLOBAL_GET("rendering/visibility/dithered_instance_fade");
 	if (disable_ubershaders) {
 		print_verbose("Ubershaders: Disabled");
 	} else {
