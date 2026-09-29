@@ -48,7 +48,12 @@ vec4 voxel_cone_trace_45_degrees(texture3D probe, vec3 cell_size, vec3 pos, vec3
 	return color;
 }
 
+#if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+#define VOXEL_GI_ENVIRONMENT_WEIGHT
+void voxel_gi_compute(uint index, vec3 position, vec3 normal, vec3 ref_vec, mat3 normal_xform, float roughness, vec3 ambient, vec3 environment, inout vec4 out_spec, inout vec4 out_diff, inout float out_environment_weight) {
+#else
 void voxel_gi_compute(uint index, vec3 position, vec3 normal, vec3 ref_vec, mat3 normal_xform, float roughness, vec3 ambient, vec3 environment, inout vec4 out_spec, inout vec4 out_diff) {
+#endif
 	position = (voxel_gi_instances.data[index].xform * vec4(position, 1.0)).xyz;
 	ref_vec = normalize((voxel_gi_instances.data[index].xform * vec4(ref_vec, 0.0)).xyz);
 	normal = normalize((voxel_gi_instances.data[index].xform * vec4(normal, 0.0)).xyz);
@@ -100,7 +105,11 @@ void voxel_gi_compute(uint index, vec3 position, vec3 normal, vec3 ref_vec, mat3
 	//irradiance
 	vec4 irr_light = voxel_cone_trace(voxel_gi_textures[index], cell_size, position, ref_vec, tan(roughness * 0.5 * M_PI * 0.99), max_distance, voxel_gi_instances.data[index].bias);
 	if (voxel_gi_instances.data[index].blend_ambient) {
-		irr_light.rgb = mix(environment, irr_light.rgb, min(1.0, irr_light.a / 0.95));
+		float trace_weight = min(1.0, irr_light.a / 0.95);
+		irr_light.rgb = mix(environment, irr_light.rgb, trace_weight);
+#ifdef VOXEL_GI_ENVIRONMENT_WEIGHT
+		out_environment_weight += (1.0 - trace_weight) * voxel_gi_instances.data[index].dynamic_range * voxel_gi_instances.data[index].exposure_normalization * blend;
+#endif
 	}
 	irr_light.rgb *= voxel_gi_instances.data[index].dynamic_range * voxel_gi_instances.data[index].exposure_normalization;
 	//irr_light=vec3(0.0);

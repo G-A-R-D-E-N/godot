@@ -1329,6 +1329,12 @@ MaterialStorage::MaterialStorage() {
 		actions.renames["FOG"] = "fog";
 		actions.renames["RADIANCE"] = "custom_radiance";
 		actions.renames["IRRADIANCE"] = "custom_irradiance";
+		actions.renames["INDIRECT_DIFFUSE_WEIGHT"] = "indirect_diffuse_weight";
+		actions.renames["INDIRECT_SPECULAR_WEIGHT"] = "indirect_specular_weight";
+		actions.renames["INDIRECT_COAT_WEIGHT"] = "indirect_coat_weight";
+		actions.renames["INDIRECT_COAT_ROUGHNESS"] = "indirect_coat_roughness";
+		actions.renames["DECAL_COVERAGE"] = "decal_coverage";
+		actions.renames["STREAMING_UV"] = "streaming_uv";
 		actions.renames["BONE_INDICES"] = "bone_attrib";
 		actions.renames["BONE_WEIGHTS"] = "weight_attrib";
 		actions.renames["CUSTOM0"] = "custom0_attrib";
@@ -1408,6 +1414,11 @@ MaterialStorage::MaterialStorage() {
 		actions.usage_defines["FOG"] = "#define CUSTOM_FOG_USED\n";
 		actions.usage_defines["RADIANCE"] = "#define CUSTOM_RADIANCE_USED\n";
 		actions.usage_defines["IRRADIANCE"] = "#define CUSTOM_IRRADIANCE_USED\n";
+		actions.usage_defines["INDIRECT_DIFFUSE_WEIGHT"] = "#define INDIRECT_DIFFUSE_WEIGHT_USED\n";
+		actions.usage_defines["INDIRECT_SPECULAR_WEIGHT"] = "#define INDIRECT_SPECULAR_WEIGHT_USED\n";
+		actions.usage_defines["INDIRECT_COAT_WEIGHT"] = "#define INDIRECT_COAT_USED\n#define LIGHT_CLEARCOAT_USED\n";
+		actions.usage_defines["INDIRECT_COAT_ROUGHNESS"] = "@INDIRECT_COAT_WEIGHT";
+		actions.usage_defines["DECAL_COVERAGE"] = "#define DECAL_COVERAGE_USED\n";
 
 		actions.render_mode_defines["skip_vertex_transform"] = "#define SKIP_TRANSFORM_USED\n";
 		actions.render_mode_defines["world_vertex_coords"] = "#define VERTEX_WORLD_COORDS_USED\n";

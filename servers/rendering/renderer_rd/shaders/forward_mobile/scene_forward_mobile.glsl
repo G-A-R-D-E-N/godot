@@ -889,7 +889,7 @@ layout(location = 2) in vec4 color_interp;
 layout(location = 3) in vec2 uv_interp;
 #endif
 
-#if defined(TEXTURE_STREAMING)
+#if defined(TEXTURE_STREAMING) || defined(STREAMING_UV_USED)
 vec2 streaming_uv;
 #endif
 
@@ -1000,6 +1000,11 @@ layout(location = 0) out vec4 frag_color;
 #endif // RENDER DEPTH
 
 #include "../scene_forward_aa_inc.glsl"
+
+#if !defined(MODE_RENDER_DEPTH) && (defined(INDIRECT_DIFFUSE_WEIGHT_USED) || defined(INDIRECT_SPECULAR_WEIGHT_USED) || defined(INDIRECT_COAT_USED) || defined(DECAL_COVERAGE_USED))
+#define DECAL_COVERAGE_TRACKED
+float decal_coverage;
+#endif
 
 #if !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED) // && !defined(USE_VERTEX_LIGHTING)
 
@@ -1134,6 +1139,16 @@ void main() {
 #endif
 #if defined(CUSTOM_IRRADIANCE_USED)
 	vec4 custom_irradiance_highp = vec4(0.0);
+#endif
+#if defined(INDIRECT_DIFFUSE_WEIGHT_USED)
+	vec3 indirect_diffuse_weight_highp = vec3(1.0);
+#endif
+#if defined(INDIRECT_SPECULAR_WEIGHT_USED)
+	vec3 indirect_specular_weight_highp = vec3(1.0);
+#endif
+#if defined(INDIRECT_COAT_USED)
+	vec3 indirect_coat_weight_highp = vec3(0.0);
+	float indirect_coat_roughness_highp = 0.0;
 #endif
 
 	float ao_highp = 1.0;
@@ -1486,6 +1501,11 @@ void main() {
 
 #ifndef MODE_RENDER_DEPTH
 
+#ifdef DECAL_COVERAGE_TRACKED
+	decal_coverage = 0.0;
+	vec3 decal_base_albedo = vec3(albedo);
+#endif
+
 	vec3 vertex_ddx = dFdx(vertex);
 	vec3 vertex_ddy = dFdy(vertex);
 
@@ -1523,6 +1543,9 @@ void main() {
 			decal_albedo *= decals.data[decal_index].modulate;
 			decal_albedo.a *= fade;
 			albedo = hvec3(mix(vec3(albedo), decal_albedo.rgb, decal_albedo.a * decals.data[decal_index].albedo_mix));
+#ifdef DECAL_COVERAGE_TRACKED
+			decal_coverage = mix(decal_coverage, 1.0, decal_albedo.a);
+#endif
 
 			if (decals.data[decal_index].normal_rect != vec4(0.0)) {
 				vec3 decal_normal;
@@ -1667,15 +1690,27 @@ void main() {
 	ambient_light = mix(ambient_light, custom_irradiance.rgb, custom_irradiance.a);
 #endif // CUSTOM_IRRADIANCE_USED
 #ifdef LIGHT_CLEARCOAT_USED
+#ifdef INDIRECT_COAT_USED
+#define CLEARCOAT_IBL_ROUGHNESS half(indirect_coat_roughness_highp)
+#define CLEARCOAT_IBL_LOD_ROUGHNESS indirect_coat_roughness_highp
+#define CLEARCOAT_IBL_BEND half(indirect_coat_roughness_highp *indirect_coat_roughness_highp)
+#else
+#define CLEARCOAT_IBL_ROUGHNESS mix(half(0.001), half(0.1), clearcoat_roughness)
+#define CLEARCOAT_IBL_LOD_ROUGHNESS mix(0.001, 0.1, float(clearcoat_roughness))
+#define CLEARCOAT_IBL_BEND mix(half(0.001), half(0.1), clearcoat_roughness)
+#endif
 	hvec3 cc_specular_light = hvec3(0.0);
 	hvec3 cc_ref_vec = hvec3(0.0);
+#ifdef INDIRECT_COAT_USED
+	cc_ref_vec = mix(reflect(-view, geo_normal), geo_normal, CLEARCOAT_IBL_BEND);
+#endif
 
 	if (sc_scene_use_reflection_cubemap()) {
 		cc_ref_vec = reflect(-view, geo_normal);
-		cc_ref_vec = mix(cc_ref_vec, geo_normal, mix(half(0.001), half(0.1), clearcoat_roughness));
+		cc_ref_vec = mix(cc_ref_vec, geo_normal, CLEARCOAT_IBL_BEND);
 
 		hvec3 cc_radiance_ref_vec = hvec3(scene_data.radiance_inverse_xform * vec3(cc_ref_vec));
-		float roughness_lod = sqrt(mix(0.001, 0.1, float(clearcoat_roughness))) * MAX_ROUGHNESS_LOD;
+		float roughness_lod = sqrt(CLEARCOAT_IBL_LOD_ROUGHNESS) * MAX_ROUGHNESS_LOD;
 #ifdef USE_RADIANCE_OCTMAP_ARRAY
 
 		float lod;
@@ -1692,6 +1727,9 @@ void main() {
 
 #endif //USE_RADIANCE_OCTMAP_ARRAY
 		cc_specular_light += clearcoat_light * half(scene_data.IBL_exposure_normalization) * half(scene_data.ambient_light_color_energy.a);
+#ifdef INDIRECT_COAT_USED
+		cc_specular_light *= REFLECTION_MULTIPLIER;
+#endif
 	} else if (sc_scene_use_reflection_color()) {
 		cc_specular_light = hvec3(scene_data.reflection_color.rgb);
 	}
@@ -1876,7 +1914,7 @@ void main() {
 
 			reflection_process(reflection_index, vertex, ref_vec, normal, roughness, ambient_light,
 #ifdef LIGHT_CLEARCOAT_USED
-					cc_ref_vec, mix(half(0.001), half(0.1), clearcoat_roughness), cc_reflection_accum,
+					cc_ref_vec, CLEARCOAT_IBL_ROUGHNESS, cc_reflection_accum,
 #endif
 					ambient_accum, reflection_accum);
 		}
@@ -1921,6 +1959,9 @@ void main() {
 	half specular_occlusion = clamp((ao - (half(1.0) - cos_b)) / roughness, half(0.0), half(1.0));
 	specular_occlusion = mix(specular_occlusion, cos_b * (half(1.0) - ao), roughness);
 	indirect_specular_light *= specular_occlusion;
+#if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+	cc_specular_light *= specular_occlusion;
+#endif
 #else // BENT_NORMAL_MAP_USED
 	half specular_occlusion = (ambient_light.r * half(0.3) + ambient_light.g * half(0.59) + ambient_light.b * half(0.11)) * half(2.0); // Luminance of ambient light.
 	specular_occlusion = min(specular_occlusion * half(4.0), half(1.0)); // This multiplication preserves speculars on bright areas.
@@ -1930,9 +1971,16 @@ void main() {
 	// Low enough for occlusion, high enough for reaction to lights and shadows.
 	specular_occlusion = max(min(reflective_f * specular_occlusion * half(10.0), half(1.0)), specular_occlusion);
 	indirect_specular_light *= specular_occlusion;
+#if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+	cc_specular_light *= specular_occlusion;
+#endif
 #endif // BENT_NORMAL_MAP_USED
 #endif // USE_SPECULAR_OCCLUSION
+#ifdef INDIRECT_DIFFUSE_WEIGHT_USED
+	ambient_light *= hvec3(indirect_diffuse_weight_highp * (1.0 - decal_coverage) + (vec3(albedo) - decal_base_albedo * (1.0 - decal_coverage)) * (1.0 - float(metallic)));
+#else
 	ambient_light *= albedo.rgb;
+#endif
 
 #endif // !AMBIENT_LIGHT_DISABLED
 
@@ -1968,9 +2016,15 @@ void main() {
 		half a004 = min(r.x * r.x, exp2(half(-9.28) * ndotv)) * r.x + r.y;
 		hvec2 env = hvec2(-1.04, 1.04) * a004 + r.zw;
 
+#ifdef INDIRECT_SPECULAR_WEIGHT_USED
+		indirect_specular_light *= hvec3(mix(indirect_specular_weight_highp, vec3(env.x * f0 + env.y * clamp(half(50.0) * f0.g, metallic, half(1.0))), decal_coverage));
+#else
 		indirect_specular_light *= env.x * f0 + env.y * clamp(half(50.0) * f0.g, metallic, half(1.0));
+#endif
 
-#ifdef LIGHT_CLEARCOAT_USED
+#if defined(INDIRECT_COAT_USED)
+		indirect_specular_light += cc_specular_light * hvec3(indirect_coat_weight_highp * (1.0 - decal_coverage));
+#elif defined(LIGHT_CLEARCOAT_USED)
 		half geo_NdotV = max(dot(geo_normal, view), half(0.0001)); // We want to use geometric normal, not normal_map
 		// The clearcoat layer assumes an IOR of 1.5 (4% reflectance).
 		// Attenuate underlying diffuse/specular by clearcoat fresnel (ONLY fresnel, hence we don't just invert the BRDF below).
@@ -2388,7 +2442,9 @@ void main() {
 
 	// apply metallic
 	diffuse_light *= half(1.0) - metallic;
+#ifndef INDIRECT_DIFFUSE_WEIGHT_USED
 	ambient_light *= half(1.0) - metallic;
+#endif
 
 #ifdef MODE_MULTIPLE_RENDER_TARGETS
 
