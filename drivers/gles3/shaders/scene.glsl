@@ -2286,6 +2286,10 @@ void main() {
 	vec3 indirect_coat_weight = vec3(0.0);
 	float indirect_coat_roughness = 0.0;
 #endif
+#ifdef TEMPORAL_METADATA_USED
+	float temporal_mask = 0.0;
+	float temporal_id = 0.0;
+#endif
 
 	float ao = 1.0;
 	float ao_light_affect = 0.0;
