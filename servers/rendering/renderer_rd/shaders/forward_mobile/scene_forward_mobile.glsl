@@ -1090,6 +1090,10 @@ hvec4 fog_process(vec3 vertex) {
 
 #endif //!MODE_RENDER DEPTH
 
+float dithered_instance_fade_noise(vec2 p) {
+	return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+}
+
 void main() {
 #ifdef UBERSHADER
 	bool front_facing = gl_FrontFacing;
@@ -1150,11 +1154,21 @@ void main() {
 	vec3 indirect_coat_weight_highp = vec3(0.0);
 	float indirect_coat_roughness_highp = 0.0;
 #endif
+#ifdef TEMPORAL_METADATA_USED
+	float temporal_mask = 0.0;
+	float temporal_id = 0.0;
+#endif
 
 	float ao_highp = 1.0;
 	float ao_light_affect_highp = 0.0;
 
 	float alpha_highp = 1.0;
+
+	if (sc_dithered_instance_fade()) {
+		if (dithered_instance_fade_noise(gl_FragCoord.xy + vec2(scene_data_block.data.taa_frame_count * 5.588238)) >= float(instances.data[draw_call.instance_index].flags >> INSTANCE_FLAGS_FADE_SHIFT) / float(255.0)) {
+			discard;
+		}
+	}
 
 #if defined(TANGENT_USED) || defined(NORMAL_MAP_USED) || defined(LIGHT_ANISOTROPY_USED) || defined(BENT_NORMAL_MAP_USED)
 	vec3 binormal_highp = binormal_interp;
