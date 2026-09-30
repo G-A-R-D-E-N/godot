@@ -38,7 +38,7 @@ MotionVectorsStore::MotionVectorsStore() {
 	Vector<String> modes;
 	modes.push_back("");
 
-	motion_shader.initialize(modes);
+	motion_shader.initialize(modes, RenderSceneBuffersRD::get_temporal_metadata() ? "\n#define TEMPORAL_METADATA\n" : "");
 	shader_version = motion_shader.version_create();
 
 	pipeline = RD::get_singleton()->compute_pipeline_create(motion_shader.version_get_shader(shader_version, 0));
