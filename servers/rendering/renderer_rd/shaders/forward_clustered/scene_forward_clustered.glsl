@@ -1239,11 +1239,9 @@ void fragment_shader(in SceneData scene_data) {
 	float ao_light_affect = 0.0;
 
 	float alpha_highp = float(instances.data[instance_index].flags >> INSTANCE_FLAGS_FADE_SHIFT) / float(255.0);
+	float dithered_fade_alpha = alpha_highp;
 
 	if (sc_dithered_instance_fade()) {
-		if (dithered_instance_fade_noise(gl_FragCoord.xy + vec2(scene_data_block.data.taa_frame_count * 5.588238)) >= alpha_highp) {
-			discard;
-		}
 		alpha_highp = 1.0;
 	}
 
@@ -1346,6 +1344,10 @@ void fragment_shader(in SceneData scene_data) {
 
 	{
 #CODE : FRAGMENT
+	}
+
+	if (sc_dithered_instance_fade() && dithered_instance_fade_noise(gl_FragCoord.xy + vec2(scene_data_block.data.taa_frame_count * 5.588238)) >= dithered_fade_alpha) {
+		discard;
 	}
 
 	float roughness = roughness_highp;

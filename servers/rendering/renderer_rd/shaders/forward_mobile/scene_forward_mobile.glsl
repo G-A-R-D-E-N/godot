@@ -1164,12 +1164,6 @@ void main() {
 
 	float alpha_highp = 1.0;
 
-	if (sc_dithered_instance_fade()) {
-		if (dithered_instance_fade_noise(gl_FragCoord.xy + vec2(scene_data_block.data.taa_frame_count * 5.588238)) >= float(instances.data[draw_call.instance_index].flags >> INSTANCE_FLAGS_FADE_SHIFT) / float(255.0)) {
-			discard;
-		}
-	}
-
 #if defined(TANGENT_USED) || defined(NORMAL_MAP_USED) || defined(LIGHT_ANISOTROPY_USED) || defined(BENT_NORMAL_MAP_USED)
 	vec3 binormal_highp = binormal_interp;
 	vec3 tangent_highp = tangent_interp;
@@ -1269,6 +1263,10 @@ void main() {
 
 	{
 #CODE : FRAGMENT
+	}
+
+	if (sc_dithered_instance_fade() && dithered_instance_fade_noise(gl_FragCoord.xy + vec2(scene_data_block.data.taa_frame_count * 5.588238)) >= float(instances.data[draw_call.instance_index].flags >> INSTANCE_FLAGS_FADE_SHIFT) / float(255.0)) {
+		discard;
 	}
 
 	// Store variables in half precision after user shader code is run.
