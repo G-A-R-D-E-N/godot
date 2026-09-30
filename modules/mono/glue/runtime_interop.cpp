@@ -246,7 +246,9 @@ GCHandleIntPtr godotsharp_internal_unmanaged_get_instance_binding_managed(Object
 	void *data = CSharpLanguage::get_instance_binding_with_setup(p_unmanaged);
 	ERR_FAIL_NULL_V(data, { nullptr });
 	CSharpScriptBinding &script_binding = ((RBMap<Object *, CSharpScriptBinding>::Element *)data)->value();
-	ERR_FAIL_COND_V(!script_binding.inited.is_set(), { nullptr });
+	if (!script_binding.inited.is_set()) {
+		return { nullptr };
+	}
 
 	return script_binding.gchandle.get_intptr();
 }
@@ -255,6 +257,8 @@ GCHandleIntPtr godotsharp_internal_unmanaged_instance_binding_create_managed(Obj
 #ifdef DEBUG_ENABLED
 	CRASH_COND(!p_unmanaged);
 #endif
+
+	MutexLock language_lock(CSharpLanguage::get_singleton()->get_language_bind_mutex());
 
 	void *data = CSharpLanguage::get_instance_binding_with_setup(p_unmanaged);
 	ERR_FAIL_NULL_V(data, { nullptr });
