@@ -271,14 +271,6 @@ public:
 		alpha_only_view.swizzle_a = RD::TEXTURE_SWIZZLE_A;
 		return get_texture_slice_view(RB_SCOPE_BUFFERS, RB_TEX_COLOR, p_layer, 0, 1, 1, alpha_only_view);
 	}
-	_FORCE_INLINE_ RID get_velocity_mask(const uint32_t p_layer) {
-		RD::TextureView mask_only_view;
-		mask_only_view.swizzle_r = RD::TEXTURE_SWIZZLE_B;
-		mask_only_view.swizzle_g = RD::TEXTURE_SWIZZLE_B;
-		mask_only_view.swizzle_b = RD::TEXTURE_SWIZZLE_B;
-		mask_only_view.swizzle_a = RD::TEXTURE_SWIZZLE_B;
-		return get_texture_slice_view(RB_SCOPE_BUFFERS, RB_TEX_VELOCITY, p_layer, 0, 1, 1, mask_only_view);
-	}
 	_FORCE_INLINE_ RID get_color_msaa() const {
 		return get_texture(RB_SCOPE_BUFFERS, RB_TEX_COLOR_MSAA);
 	}

@@ -1921,7 +1921,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	bool using_voxelgi = false;
 	bool reverse_cull = p_render_data->scene_data->cam_transform.basis.determinant() < 0;
 	bool using_ssil = !is_reflection_probe && p_render_data->environment.is_valid() && environment_get_ssil_enabled(p_render_data->environment);
-	bool using_motion_pass = rb_data.is_valid() && using_upscaling && !(scale_type == SCALE_FSR2 && RenderSceneBuffersRD::get_temporal_metadata());
+	bool using_motion_pass = rb_data.is_valid() && using_upscaling;
 
 	if (is_reflection_probe) {
 		uint32_t resolution = light_storage->reflection_probe_instance_get_resolution(p_render_data->reflection_probe);
@@ -2284,7 +2284,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	// Shadow pass can change the base uniform set samplers.
 	_update_render_base_uniform_set();
 
-	uint32_t opaque_pass_uniform_buffer_index = _setup_environment(p_render_data, is_reflection_probe, screen_size, screen_size, p_default_bg_color, true, rb_data.is_valid() && using_upscaling);
+	uint32_t opaque_pass_uniform_buffer_index = _setup_environment(p_render_data, is_reflection_probe, screen_size, screen_size, p_default_bg_color, true, using_motion_pass);
 
 	RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, p_render_data, is_multiview, radiance_texture, samplers, opaque_pass_uniform_buffer_index, true);
 
@@ -2310,7 +2310,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			RID opaque_framebuffer = using_motion_pass ? rb_data->get_color_pass_fb(opaque_color_pass_flags) : color_framebuffer;
 			BitField<RD::DrawFlags> opaque_draw_flags = RD::DrawFlags(load_color ? RD::DRAW_DEFAULT_ALL : RD::DRAW_CLEAR_COLOR_ALL) | (depth_pre_pass ? RD::DRAW_DEFAULT_ALL : RD::DRAW_CLEAR_DEPTH);
 			if (RenderSceneBuffersRD::get_temporal_metadata() && (opaque_color_pass_flags & COLOR_PASS_FLAG_MOTION_VECTORS)) {
-				RD::get_singleton()->draw_list_begin(rb_data->get_velocity_only_fb(), RD::DRAW_CLEAR_ALL, Vector<Color>({ scale_type == SCALE_FSR2 ? Color(-1, -1, 0, 0) : Color(0, 0, 0, 0) }));
+				RD::get_singleton()->draw_list_begin(rb_data->get_velocity_only_fb(), RD::DRAW_CLEAR_ALL, Vector<Color>({ Color(0, 0, 0, 0) }));
 				RD::get_singleton()->draw_list_end();
 				opaque_draw_flags.clear_flag(RD::DrawFlags(RD::DRAW_CLEAR_COLOR_0 << ((opaque_color_pass_flags & COLOR_PASS_FLAG_SEPARATE_SPECULAR) ? 2 : 1)));
 			}
@@ -2581,9 +2581,6 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 				params.depth = rb->get_depth_texture(v);
 				params.velocity = rb->get_velocity_buffer(false, v);
 				params.reactive = rb->get_internal_texture_reactive(v);
-				if (RenderSceneBuffersRD::get_temporal_metadata()) {
-					params.transparency_composition = rb->get_velocity_mask(v);
-				}
 				params.exposure = exposure;
 				params.output = rb->get_upscaled_texture(v);
 				params.z_near = p_render_data->scene_data->z_near;

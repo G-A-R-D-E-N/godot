@@ -2919,7 +2919,7 @@
 		</member>
 		<member name="rendering/anti_aliasing/quality/temporal_transition_metadata" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], the 3D velocity buffer uses the [code]RGBA16F[/code] format instead of [code]RG16F[/code]. Red and green keep the motion vector; blue holds a transition mask and alpha a logical object ID, which spatial shaders write with the fragment built-ins [code]TEMPORAL_MASK[/code] and [code]TEMPORAL_ID[/code] (both [code skip-lint]float[/code]). Draws that use [member rendering/visibility/dithered_instance_fade] default to a mask of [code]1.0[/code], all other draws to [code]0.0[/code]; the ID defaults to [code]0.0[/code], meaning unknown. Use whole numbers from [code]1[/code] to [code]2048[/code] for IDs, which half floats store exactly. The shader preprocessor defines [code]TEMPORAL_METADATA_AVAILABLE[/code] in engines that have these built-ins.
-			[member rendering/anti_aliasing/quality/garden_taa] reads the mask and ID. With FSR 2, opaque surfaces write their motion vectors in the opaque pass so static pixels carry the mask too, and the mask is passed as FSR 2's transparency-and-composition mask.
+			[member rendering/anti_aliasing/quality/garden_taa] reads the mask and ID. FSR 2 and MetalFX ignore them.
 			[b]Note:[/b] Only supported in the Forward+ rendering method. The Mobile and Compatibility rendering methods accept the built-ins and ignore them.
 			[b]Note:[/b] This property is only read when the project starts. It doubles the size of the velocity buffer.
 		</member>

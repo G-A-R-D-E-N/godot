@@ -840,7 +840,6 @@ void FSR2Effect::upscale(const Parameters &p_params) {
 	RID depth = p_params.depth;
 	RID velocity = p_params.velocity;
 	RID reactive = p_params.reactive;
-	RID transparency_composition = p_params.transparency_composition;
 	RID exposure = p_params.exposure;
 	RID output = p_params.output;
 	dispatch_desc.commandList = nullptr;
@@ -849,7 +848,7 @@ void FSR2Effect::upscale(const Parameters &p_params) {
 	dispatch_desc.motionVectors = get_resource_rd(&velocity, L"velocity");
 	dispatch_desc.reactive = get_resource_rd(&reactive, L"reactive");
 	dispatch_desc.exposure = get_resource_rd(&exposure, L"exposure");
-	dispatch_desc.transparencyAndComposition = get_resource_rd(&transparency_composition, L"transparency_composition");
+	dispatch_desc.transparencyAndComposition = {};
 	dispatch_desc.output = get_resource_rd(&output, L"output");
 	dispatch_desc.colorOpaqueOnly = {};
 	dispatch_desc.jitterOffset.x = p_params.jitter.x;
