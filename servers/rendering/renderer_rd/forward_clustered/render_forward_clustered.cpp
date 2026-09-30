@@ -5273,6 +5273,9 @@ RenderForwardClustered::RenderForwardClustered() {
 		bool texture_streaming = GLOBAL_GET("rendering/textures/streaming/enabled");
 		if (texture_streaming) {
 			defines += "\n#define TEXTURE_STREAMING\n";
+			if (dithered_instance_fade) {
+				defines += "\n#define DITHERED_INSTANCE_FADE\n";
+			}
 
 			bool prepass_enabled = GLOBAL_GET("rendering/driver/depth_prepass/enable");
 			if (prepass_enabled) {

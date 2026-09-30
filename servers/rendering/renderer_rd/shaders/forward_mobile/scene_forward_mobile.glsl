@@ -857,7 +857,7 @@ void main() {
 //
 // To Early-Z, or Not To Early-Z
 //  - https://therealmjp.github.io/posts/to-earlyz-or-not-to-earlyz/#uavsstorage-texturesstorage-buffers
-#if defined(ALPHA_SCISSOR_USED) || defined(ALPHA_HASH_USED) || defined(ENABLE_CLIP_ALPHA) || defined(UBERSHADER) || defined(DISCARD_USED)
+#if defined(ALPHA_SCISSOR_USED) || defined(ALPHA_HASH_USED) || defined(ENABLE_CLIP_ALPHA) || defined(UBERSHADER) || defined(DISCARD_USED) || defined(DITHERED_INSTANCE_FADE)
 #define TEXTURE_STREAMING_MAY_DISCARD
 #endif
 
