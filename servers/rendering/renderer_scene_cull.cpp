@@ -1000,12 +1000,20 @@ void RendererSceneCull::instance_geometry_set_transparency(RID p_instance, float
 	Instance *instance = instance_owner.get_or_null(p_instance);
 	ERR_FAIL_NULL(instance);
 
+	const bool changed = uint32_t(CLAMP(1.0f - instance->transparency, 0.0f, 1.0f) * 255.0) != uint32_t(CLAMP(1.0f - p_transparency, 0.0f, 1.0f) * 255.0);
 	instance->transparency = p_transparency;
 
 	if ((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK && instance->base_data) {
 		InstanceGeometryData *geom = static_cast<InstanceGeometryData *>(instance->base_data);
 		ERR_FAIL_NULL(geom->geometry_instance);
 		geom->geometry_instance->set_transparency(p_transparency);
+
+		if (changed && dithered_instance_fade && geom->can_cast_shadows) {
+			for (const Instance *E : geom->lights) {
+				InstanceLightData *light = static_cast<InstanceLightData *>(E->base_data);
+				light->make_shadow_dirty();
+			}
+		}
 	}
 }
 
@@ -2791,6 +2799,10 @@ void RendererSceneCull::render_camera(const Ref<RenderSceneBuffers> &p_render_bu
 		ERR_FAIL_MSG("Unsupported camera setup.");
 	}
 
+	if (GLOBAL_GET_CACHED(bool, "rendering/visibility/zoom_aware_ranges")) {
+		camera_data.visibility_range_scale = zoom_visibility_range_scale(camera_data.main_projection, camera_data.is_orthogonal, GLOBAL_GET_CACHED(float, "rendering/visibility/zoom_reference_fov"), GLOBAL_GET_CACHED(float, "rendering/visibility/zoom_max_scale"));
+	}
+
 	RID environment = _render_get_environment(p_camera, p_scenario);
 	RID compositor = _render_get_compositor(p_camera, p_scenario);
 
@@ -2801,6 +2813,15 @@ void RendererSceneCull::render_camera(const Ref<RenderSceneBuffers> &p_render_bu
 
 	_render_scene(&camera_data, p_render_buffers, environment, camera->attributes, compositor, camera->visible_layers, p_scenario, p_viewport, p_shadow_atlas, RID(), -1, p_screen_mesh_lod_threshold, p_window_output_max_value, true, r_render_info);
 #endif
+}
+
+float RendererSceneCull::zoom_visibility_range_scale(const Projection &p_projection, bool p_orthogonal, float p_reference_fov, float p_max_scale) {
+	const real_t cot_half_fov = p_projection.columns[1][1];
+	if (p_orthogonal || cot_half_fov <= 0.0) {
+		return 1.0f;
+	}
+	const float reference_tan = Math::tan(Math::deg_to_rad(CLAMP(p_reference_fov, 1.0f, 179.0f)) * 0.5f);
+	return CLAMP(1.0f / (float(cot_half_fov) * reference_tan), 1.0f / MAX(p_max_scale, 1.0f), 1.0f);
 }
 
 void RendererSceneCull::_visibility_cull_threaded(uint32_t p_thread, VisibilityCullData *cull_data) {
@@ -2828,7 +2849,7 @@ void RendererSceneCull::_visibility_cull(const VisibilityCullData &cull_data, ui
 			}
 		}
 
-		int range_check = _visibility_range_check<true>(vd, cull_data.camera_position, cull_data.viewport_mask);
+		int range_check = _visibility_range_check<true>(vd, cull_data.camera_position, cull_data.viewport_mask, cull_data.visibility_range_scale);
 
 		if (range_check == -1) {
 			idata.flags |= InstanceData::FLAG_VISIBILITY_DEPENDENCY_HIDDEN;
@@ -2851,8 +2872,8 @@ void RendererSceneCull::_visibility_cull(const VisibilityCullData &cull_data, ui
 }
 
 template <bool p_fade_check>
-int RendererSceneCull::_visibility_range_check(InstanceVisibilityData &r_vis_data, const Vector3 &p_camera_pos, uint64_t p_viewport_mask) {
-	float dist = p_camera_pos.distance_to(r_vis_data.position);
+int RendererSceneCull::_visibility_range_check(InstanceVisibilityData &r_vis_data, const Vector3 &p_camera_pos, uint64_t p_viewport_mask, float p_distance_scale) {
+	float dist = p_camera_pos.distance_to(r_vis_data.position) * p_distance_scale;
 	const RSE::VisibilityRangeFadeMode &fade_mode = r_vis_data.fade_mode;
 
 	float begin_offset = -r_vis_data.range_begin_margin;
@@ -2940,7 +2961,7 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 #define HIDDEN_BY_VISIBILITY_CHECKS (visibility_flags == InstanceData::FLAG_VISIBILITY_DEPENDENCY_HIDDEN_CLOSE_RANGE || visibility_flags == InstanceData::FLAG_VISIBILITY_DEPENDENCY_HIDDEN)
 #define LAYER_CHECK (cull_data.visible_layers & idata.layer_mask)
 #define IN_FRUSTUM(f) (cull_data.scenario->instance_aabbs[i].in_frustum(f))
-#define VIS_RANGE_CHECK ((idata.visibility_index == -1) || _visibility_range_check<false>(cull_data.scenario->instance_visibility[idata.visibility_index], cull_data.cam_transform.origin, cull_data.visibility_viewport_mask) == 0)
+#define VIS_RANGE_CHECK ((idata.visibility_index == -1) || _visibility_range_check<false>(cull_data.scenario->instance_visibility[idata.visibility_index], cull_data.cam_transform.origin, cull_data.visibility_viewport_mask, cull_data.visibility_range_scale) == 0)
 #define VIS_PARENT_CHECK (_visibility_parent_check(cull_data, idata))
 #define VIS_CHECK (visibility_check < 0 ? (visibility_check = (visibility_flags != InstanceData::FLAG_VISIBILITY_DEPENDENCY_NEEDS_CHECK || (VIS_RANGE_CHECK && VIS_PARENT_CHECK))) : visibility_check)
 #define OCCLUSION_CULLED (cull_data.occlusion_buffer != nullptr && (cull_data.scenario->instance_data[i].flags & InstanceData::FLAG_IGNORE_OCCLUSION_CULLING) == 0 && cull_data.occlusion_buffer->is_occluded(cull_data.scenario->instance_aabbs[i].bounds, cull_data.cam_transform.origin, inv_cam_transform, *cull_data.camera_matrix, z_near, is_orthogonal, cull_data.scenario->instance_data[i].occlusion_timeout))
@@ -3345,6 +3366,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		visibility_cull_data.scenario = scenario;
 		visibility_cull_data.viewport_mask = scenario->viewport_visibility_masks[p_viewport];
 		visibility_cull_data.camera_position = camera_position;
+		visibility_cull_data.visibility_range_scale = p_camera_data->visibility_range_scale;
 
 		for (int i = scenario->instance_visibility.get_bin_count() - 1; i > 0; i--) { // We skip bin 0
 			visibility_cull_data.cull_offset = scenario->instance_visibility.get_bin_start(i);
@@ -3451,6 +3473,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		cull_data.occlusion_buffer = RendererSceneOcclusionCull::get_singleton()->buffer_get_ptr(p_viewport);
 		cull_data.camera_matrix = &p_camera_data->main_projection;
 		cull_data.visibility_viewport_mask = scenario->viewport_visibility_masks.has(p_viewport) ? scenario->viewport_visibility_masks[p_viewport] : 0;
+		cull_data.visibility_range_scale = p_camera_data->visibility_range_scale;
 #ifdef DEBUG_CULL_TIME
 		uint64_t time_from = OS::get_singleton()->get_ticks_usec();
 #endif
@@ -4536,6 +4559,7 @@ RendererSceneCull::RendererSceneCull() {
 	thread_cull_threshold = GLOBAL_GET("rendering/limits/spatial_indexer/threaded_cull_minimum_instances");
 	thread_cull_threshold = MAX(thread_cull_threshold, (uint32_t)WorkerThreadPool::get_singleton()->get_thread_count()); //make sure there is at least one thread per CPU
 	RendererSceneOcclusionCull::HZBuffer::occlusion_jitter_enabled = GLOBAL_GET("rendering/occlusion_culling/jitter_projection");
+	dithered_instance_fade = GLOBAL_GET("rendering/visibility/dithered_instance_fade");
 
 	dummy_occlusion_culling = memnew(RendererSceneOcclusionCull);
 

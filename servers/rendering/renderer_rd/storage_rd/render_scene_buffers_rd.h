@@ -353,6 +353,7 @@ public:
 	static uint32_t get_color_usage_bits(bool p_resolve, bool p_msaa, bool p_storage);
 	static RD::DataFormat get_depth_format(bool p_resolve, bool p_msaa, bool p_storage);
 	static uint32_t get_depth_usage_bits(bool p_resolve, bool p_msaa, bool p_storage);
+	static bool get_temporal_metadata();
 	static RD::DataFormat get_velocity_format();
 	static uint32_t get_velocity_usage_bits(bool p_resolve, bool p_msaa, bool p_storage);
 	static RD::DataFormat get_vrs_format();

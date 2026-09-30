@@ -838,6 +838,7 @@ public:
 	void set_instance_binding(void *p_token, void *p_binding, const GDExtensionInstanceBindingCallbacks *p_callbacks);
 	bool has_instance_binding(void *p_token);
 	void free_instance_binding(void *p_token);
+	BinaryMutex &get_instance_binding_mutex() { return _instance_binding_mutex; }
 
 #ifdef TOOLS_ENABLED
 	void clear_internal_extension();

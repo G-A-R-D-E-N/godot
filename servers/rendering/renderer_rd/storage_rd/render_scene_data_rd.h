@@ -52,6 +52,7 @@ public:
 
 	// For billboards to cast correct shadows.
 	Transform3D main_cam_transform;
+	float visibility_range_scale = 1.0;
 
 	// For stereo rendering
 	uint32_t view_count = 1;

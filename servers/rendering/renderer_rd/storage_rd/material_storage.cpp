@@ -2454,14 +2454,12 @@ void MaterialStorage::_material_queue_update(Material *material, bool p_uniform,
 }
 
 void MaterialStorage::_update_queued_materials() {
+	MutexLock lock(material_update_list_mutex);
 	SelfList<Material>::List copy;
-	{
-		MutexLock lock(material_update_list_mutex);
-		while (SelfList<Material> *E = material_update_list.first()) {
-			DEV_ASSERT(E == &E->self()->update_element);
-			material_update_list.remove(E);
-			copy.add(E);
-		}
+	while (SelfList<Material> *E = material_update_list.first()) {
+		DEV_ASSERT(E == &E->self()->update_element);
+		material_update_list.remove(E);
+		copy.add(E);
 	}
 
 	while (SelfList<Material> *E = copy.first()) {
@@ -2508,6 +2506,7 @@ void MaterialStorage::material_free(RID p_rid) {
 	material_set_shader(p_rid, RID()); //clean up shader
 	material->dependency.deleted_notify(p_rid);
 
+	MutexLock lock(material_update_list_mutex);
 	material_owner.free(p_rid);
 }
 

@@ -886,7 +886,7 @@ void main() {
 //
 // To Early-Z, or Not To Early-Z
 //  - https://therealmjp.github.io/posts/to-earlyz-or-not-to-earlyz/#uavsstorage-texturesstorage-buffers
-#if defined(ALPHA_SCISSOR_USED) || defined(ALPHA_HASH_USED) || defined(ENABLE_CLIP_ALPHA) || defined(UBERSHADER) || defined(DISCARD_USED)
+#if defined(ALPHA_SCISSOR_USED) || defined(ALPHA_HASH_USED) || defined(ENABLE_CLIP_ALPHA) || defined(UBERSHADER) || defined(DISCARD_USED) || defined(DITHERED_INSTANCE_FADE)
 #define TEXTURE_STREAMING_MAY_DISCARD
 #endif
 
@@ -1032,7 +1032,11 @@ layout(location = 0) out vec4 frag_color;
 #endif // RENDER DEPTH
 
 #ifdef MOTION_VECTORS
+#ifdef TEMPORAL_METADATA
+layout(location = 2) out vec4 motion_vector;
+#else
 layout(location = 2) out vec2 motion_vector;
+#endif
 #endif
 
 #include "../scene_forward_aa_inc.glsl"
@@ -1170,6 +1174,10 @@ vec3 encode24(vec3 v) {
 }
 #endif // MODE_RENDER_NORMAL_ROUGHNESS
 
+float dithered_instance_fade_noise(vec2 p) {
+	return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+}
+
 void fragment_shader(in SceneData scene_data) {
 	uint instance_index = instance_index_interp;
 
@@ -1222,11 +1230,20 @@ void fragment_shader(in SceneData scene_data) {
 	vec3 indirect_coat_weight = vec3(0.0);
 	float indirect_coat_roughness = 0.0;
 #endif
+#if defined(TEMPORAL_METADATA) || defined(TEMPORAL_METADATA_USED)
+	float temporal_mask = sc_dithered_instance_fade() ? 1.0 : 0.0;
+	float temporal_id = 0.0;
+#endif
 
 	float ao = 1.0;
 	float ao_light_affect = 0.0;
 
 	float alpha_highp = float(instances.data[instance_index].flags >> INSTANCE_FLAGS_FADE_SHIFT) / float(255.0);
+	float dithered_fade_alpha = alpha_highp;
+
+	if (sc_dithered_instance_fade()) {
+		alpha_highp = 1.0;
+	}
 
 #ifdef TANGENT_USED
 	vec3 binormal = binormal_interp;
@@ -1327,6 +1344,10 @@ void fragment_shader(in SceneData scene_data) {
 
 	{
 #CODE : FRAGMENT
+	}
+
+	if (sc_dithered_instance_fade() && dithered_instance_fade_noise(gl_FragCoord.xy + vec2(scene_data_block.data.taa_frame_count * 5.588238)) >= dithered_fade_alpha) {
+		discard;
 	}
 
 	float roughness = roughness_highp;
@@ -3282,7 +3303,11 @@ void fragment_shader(in SceneData scene_data) {
 	vec2 position_uv = position_clip * vec2(0.5, 0.5);
 	vec2 prev_position_uv = prev_position_clip * vec2(0.5, 0.5);
 
+#ifdef TEMPORAL_METADATA
+	motion_vector = vec4(prev_position_uv - position_uv, temporal_mask, temporal_id);
+#else
 	motion_vector = prev_position_uv - position_uv;
+#endif
 #endif
 }
 

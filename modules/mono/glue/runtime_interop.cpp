@@ -128,7 +128,7 @@ GCHandleIntPtr godotsharp_internal_object_get_associated_gchandle(Object *p_ptr)
 
 	if (data) {
 		CSharpScriptBinding &script_binding = ((RBMap<Object *, CSharpScriptBinding>::Element *)data)->get();
-		if (script_binding.inited) {
+		if (script_binding.inited.is_set()) {
 			MonoGCHandleData &gchandle = script_binding.gchandle;
 			return !gchandle.is_released() ? gchandle.get_intptr() : GCHandleIntPtr{ nullptr };
 		}
@@ -157,7 +157,7 @@ void godotsharp_internal_object_disposed(Object *p_ptr, GCHandleIntPtr p_gchandl
 
 	if (data) {
 		CSharpScriptBinding &script_binding = ((RBMap<Object *, CSharpScriptBinding>::Element *)data)->get();
-		if (script_binding.inited) {
+		if (script_binding.inited.is_set()) {
 			if (!script_binding.gchandle.is_released()) {
 				CSharpLanguage::release_binding_gchandle_thread_safe(p_gchandle_to_free, script_binding);
 			}
@@ -194,27 +194,23 @@ void godotsharp_internal_refcounted_disposed(Object *p_ptr, GCHandleIntPtr p_gch
 		}
 	}
 
-	// Unsafe refcount decrement. The managed instance also counts as a reference.
-	// See: CSharpLanguage::alloc_instance_binding_data(Object *p_object)
+	void *data = p_gchandle_to_free.value ? CSharpLanguage::get_existing_instance_binding(rc) : nullptr;
+
+	if (data) {
+		CSharpScriptBinding &script_binding = ((RBMap<Object *, CSharpScriptBinding>::Element *)data)->get();
+		MutexLock binding_lock(rc->get_instance_binding_mutex());
+		if (script_binding.inited.is_set() && !script_binding.gchandle.is_released()) {
+			GCHandleIntPtr current_gchandle = script_binding.gchandle.get_intptr();
+			if (current_gchandle != p_gchandle_to_free && !p_is_finalizer) {
+				p_gchandle_to_free = current_gchandle;
+			}
+			CSharpLanguage::release_binding_gchandle_thread_safe(p_gchandle_to_free, script_binding);
+		}
+	}
+
 	CSharpLanguage::get_singleton()->pre_unsafe_unreference(rc);
 	if (rc->unreference()) {
 		memdelete(rc);
-	} else {
-		void *data = CSharpLanguage::get_existing_instance_binding(rc);
-
-		if (data) {
-			CSharpScriptBinding &script_binding = ((RBMap<Object *, CSharpScriptBinding>::Element *)data)->get();
-			if (script_binding.inited) {
-				if (!script_binding.gchandle.is_released()) {
-					if (rc->get_reference_count() == 1 && script_binding.gchandle.is_weak()) {
-						// The GCHandle is just swapped, so get the swapped handle to release
-						// See: CSharpLanguage::_instance_binding_reference_callback(void *p_token, void *p_binding, GDExtensionBool p_reference)
-						p_gchandle_to_free = script_binding.gchandle.get_intptr();
-					}
-					CSharpLanguage::release_binding_gchandle_thread_safe(p_gchandle_to_free, script_binding);
-				}
-			}
-		}
 	}
 }
 
@@ -250,7 +246,9 @@ GCHandleIntPtr godotsharp_internal_unmanaged_get_instance_binding_managed(Object
 	void *data = CSharpLanguage::get_instance_binding_with_setup(p_unmanaged);
 	ERR_FAIL_NULL_V(data, { nullptr });
 	CSharpScriptBinding &script_binding = ((RBMap<Object *, CSharpScriptBinding>::Element *)data)->value();
-	ERR_FAIL_COND_V(!script_binding.inited, { nullptr });
+	if (!script_binding.inited.is_set()) {
+		return { nullptr };
+	}
 
 	return script_binding.gchandle.get_intptr();
 }
@@ -260,18 +258,26 @@ GCHandleIntPtr godotsharp_internal_unmanaged_instance_binding_create_managed(Obj
 	CRASH_COND(!p_unmanaged);
 #endif
 
+	MutexLock language_lock(CSharpLanguage::get_singleton()->get_language_bind_mutex());
+
 	void *data = CSharpLanguage::get_instance_binding_with_setup(p_unmanaged);
 	ERR_FAIL_NULL_V(data, { nullptr });
 	CSharpScriptBinding &script_binding = ((RBMap<Object *, CSharpScriptBinding>::Element *)data)->value();
-	ERR_FAIL_COND_V(!script_binding.inited, { nullptr });
+	ERR_FAIL_COND_V(!script_binding.inited.is_set(), { nullptr });
 
 	MonoGCHandleData &gchandle = script_binding.gchandle;
 
-	// TODO: Possible data race?
-	CRASH_COND(gchandle.get_intptr().value != p_old_gchandle.value);
-
-	CSharpLanguage::get_singleton()->release_script_gchandle(gchandle);
-	script_binding.inited = false;
+	{
+		MutexLock binding_lock(p_unmanaged->get_instance_binding_mutex());
+		GCHandleIntPtr current_gchandle = gchandle.get_intptr();
+		if (current_gchandle.value != nullptr && current_gchandle.value != p_old_gchandle.value) {
+			return current_gchandle;
+		}
+		if (current_gchandle.value != nullptr) {
+			CSharpLanguage::get_singleton()->release_script_gchandle(gchandle);
+		}
+		script_binding.inited.clear();
+	}
 
 	// Create a new one
 
@@ -289,9 +295,6 @@ GCHandleIntPtr godotsharp_internal_unmanaged_instance_binding_create_managed(Obj
 
 	ERR_FAIL_NULL_V(strong_gchandle.value, { nullptr });
 
-	gchandle = MonoGCHandleData(strong_gchandle, gdmono::GCHandleType::STRONG_HANDLE);
-	script_binding.inited = true;
-
 	// Tie managed to unmanaged
 	RefCounted *rc = Object::cast_to<RefCounted>(p_unmanaged);
 
@@ -303,6 +306,10 @@ GCHandleIntPtr godotsharp_internal_unmanaged_instance_binding_create_managed(Obj
 		rc->reference();
 		CSharpLanguage::get_singleton()->post_unsafe_reference(rc);
 	}
+
+	MutexLock binding_lock(p_unmanaged->get_instance_binding_mutex());
+	gchandle = MonoGCHandleData(strong_gchandle, gdmono::GCHandleType::STRONG_HANDLE);
+	script_binding.inited.set();
 
 	return gchandle.get_intptr();
 }

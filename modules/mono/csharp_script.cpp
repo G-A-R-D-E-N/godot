@@ -79,6 +79,93 @@
 // This must be a superset of `ignored_types` in bindings_generator.cpp.
 const Vector<String> ignored_types = {};
 
+#ifdef DEBUG_ENABLED
+struct CSharpBindingSetupRecord {
+	Object *object = nullptr;
+	Thread::ID thread_id = 0;
+	uint64_t start_usec = 0;
+};
+
+static constexpr uint32_t CSHARP_BINDING_SETUP_SLOTS = 64;
+static CSharpBindingSetupRecord csharp_binding_setups[CSHARP_BINDING_SETUP_SLOTS];
+static BinaryMutex csharp_binding_setups_mutex;
+static SafeNumeric<uint32_t> csharp_binding_setups_active;
+static SafeNumeric<uint64_t> csharp_binding_race_count;
+
+class CSharpBindingSetupScope {
+	int32_t slot = -1;
+
+public:
+	explicit CSharpBindingSetupScope(Object *p_object) {
+		if (!p_object) {
+			return;
+		}
+		MutexLock lock(csharp_binding_setups_mutex);
+		for (uint32_t i = 0; i < CSHARP_BINDING_SETUP_SLOTS; i++) {
+			CSharpBindingSetupRecord &record = csharp_binding_setups[i];
+			if (!record.object) {
+				record.object = p_object;
+				record.thread_id = Thread::get_caller_id();
+				record.start_usec = OS::get_singleton()->get_ticks_usec();
+				slot = (int32_t)i;
+				csharp_binding_setups_active.increment();
+				return;
+			}
+		}
+	}
+
+	~CSharpBindingSetupScope() {
+		if (slot < 0) {
+			return;
+		}
+		MutexLock lock(csharp_binding_setups_mutex);
+		csharp_binding_setups[slot] = CSharpBindingSetupRecord();
+		csharp_binding_setups_active.decrement();
+	}
+};
+
+static bool _find_binding_setup(Object *p_object, CSharpBindingSetupRecord &r_record) {
+	if (csharp_binding_setups_active.get() == 0) {
+		return false;
+	}
+	MutexLock lock(csharp_binding_setups_mutex);
+	for (const CSharpBindingSetupRecord &record : csharp_binding_setups) {
+		if (record.object == p_object) {
+			r_record = record;
+			return true;
+		}
+	}
+	return false;
+}
+
+static bool _binding_race_count_mode() {
+	static const bool count_mode = OS::get_singleton()->get_environment("GODOT_MONO_BINDING_RACE") == "count";
+	return count_mode;
+}
+
+static void _report_binding_race(const char *p_kind, Object *p_object, bool p_inited, const MonoGCHandleData &p_gchandle, GDExtensionBool p_reference, const CSharpBindingSetupRecord *p_setup, bool p_fatal) {
+	uint64_t count = csharp_binding_race_count.increment();
+	if (!p_fatal && count > 32 && (count & (count - 1)) != 0) {
+		return;
+	}
+
+	RefCounted *rc = Object::cast_to<RefCounted>(p_object);
+	Resource *res = Object::cast_to<Resource>(p_object);
+	String gchandle_state = p_gchandle.is_released() ? "none" : (p_gchandle.is_weak() ? "weak" : "strong");
+	String setup_state = "none";
+	if (p_setup) {
+		uint64_t now_usec = OS::get_singleton()->get_ticks_usec();
+		setup_state = vformat("thread %d (main: %s), started at %d usec, %d usec ago",
+				p_setup->thread_id, p_setup->thread_id == Thread::get_main_id(), p_setup->start_usec, now_usec - p_setup->start_usec);
+	}
+
+	ERR_PRINT(vformat("C# binding race #%d (%s): %s id=%d refcount=%d path=\"%s\"; caller thread %d (main: %s), p_reference=%s, inited=%s, gchandle=%s; setup in flight: %s; %s.",
+			count, p_kind, p_object->get_class(), (uint64_t)p_object->get_instance_id(), rc ? rc->get_reference_count() : -1, res ? res->get_path() : String(),
+			Thread::get_caller_id(), Thread::is_main_thread(), (bool)p_reference, p_inited, gchandle_state, setup_state,
+			p_fatal ? "crashing" : "continuing"));
+}
+#endif
+
 CSharpLanguage *CSharpLanguage::singleton = nullptr;
 
 GDExtensionInstanceBindingCallbacks CSharpLanguage::_instance_binding_callbacks = {
@@ -154,7 +241,7 @@ void CSharpLanguage::finalize() {
 
 		if (!script_binding.gchandle.is_released()) {
 			script_binding.gchandle.release();
-			script_binding.inited = false;
+			script_binding.inited.clear();
 		}
 
 		// Make sure we clear all the instance binding callbacks so they don't get called
@@ -180,6 +267,10 @@ void CSharpLanguage::finalize() {
 		} else {
 			ERR_PRINT("Leaked unsafe reference to deleted object: " + itos(id));
 		}
+	}
+
+	if (csharp_binding_race_count.get() > 0) {
+		print_line(vformat("C# binding race total: %d.", csharp_binding_race_count.get()));
 	}
 #endif // DEBUG_ENABLED
 
@@ -1113,7 +1204,7 @@ void CSharpLanguage::release_binding_gchandle_thread_safe(GCHandleIntPtr p_gchan
 		MutexLock lock(get_singleton()->script_gchandle_release_mutex);
 		if (!gchandle.is_released() && gchandle.get_intptr() == p_gchandle_to_free) {
 			gchandle.release();
-			r_script_binding.inited = false; // Here too, to be thread safe
+			r_script_binding.inited.clear();
 		}
 	}
 }
@@ -1166,11 +1257,6 @@ bool CSharpLanguage::setup_csharp_script_binding(CSharpScriptBinding &r_script_b
 
 	ERR_FAIL_NULL_V(strong_gchandle.value, false);
 
-	r_script_binding.inited = true;
-	r_script_binding.type_name = type_name;
-	r_script_binding.gchandle = MonoGCHandleData(strong_gchandle, gdmono::GCHandleType::STRONG_HANDLE);
-	r_script_binding.owner = p_object;
-
 	// Tie managed to unmanaged
 	RefCounted *rc = Object::cast_to<RefCounted>(p_object);
 
@@ -1182,6 +1268,14 @@ bool CSharpLanguage::setup_csharp_script_binding(CSharpScriptBinding &r_script_b
 
 		rc->reference();
 		CSharpLanguage::get_singleton()->post_unsafe_reference(rc);
+	}
+
+	{
+		MutexLock binding_lock(p_object->get_instance_binding_mutex());
+		r_script_binding.type_name = type_name;
+		r_script_binding.gchandle = MonoGCHandleData(strong_gchandle, gdmono::GCHandleType::STRONG_HANDLE);
+		r_script_binding.owner = p_object;
+		r_script_binding.inited.set();
 	}
 
 	return true;
@@ -1202,6 +1296,7 @@ void *CSharpLanguage::_instance_binding_create_callback(void *, void *p_instance
 	}
 
 	CSharpScriptBinding script_binding;
+	script_binding.owner = (Object *)p_instance;
 
 	return (void *)csharp_lang->insert_script_binding((Object *)p_instance, script_binding);
 }
@@ -1228,14 +1323,14 @@ void CSharpLanguage::_instance_binding_free_callback(void *, void *, void *p_bin
 
 		CSharpScriptBinding &script_binding = data->value();
 
-		if (script_binding.inited) {
+		if (script_binding.inited.is_set()) {
 			// Set the native instance field to IntPtr.Zero, if not yet garbage collected.
 			// This is done to avoid trying to dispose the native instance from Dispose(bool).
 			GDMonoCache::managed_callbacks.ScriptManagerBridge_SetGodotObjectPtr(
 					script_binding.gchandle.get_intptr(), nullptr);
 
 			script_binding.gchandle.release();
-			script_binding.inited = false;
+			script_binding.inited.clear();
 		}
 
 		csharp_lang->script_bindings.erase(data);
@@ -1250,25 +1345,44 @@ GDExtensionBool CSharpLanguage::_instance_binding_reference_callback(void *p_tok
 
 	CRASH_COND(!p_binding);
 
-	CSharpScriptBinding &script_binding = ((RBMap<Object *, CSharpScriptBinding>::Element *)p_binding)->get();
+	RBMap<Object *, CSharpScriptBinding>::Element *binding_element = (RBMap<Object *, CSharpScriptBinding>::Element *)p_binding;
+	CSharpScriptBinding &script_binding = binding_element->get();
 
 	RefCounted *rc_owner = Object::cast_to<RefCounted>(script_binding.owner);
+	bool inited = script_binding.inited.is_set();
 
 #ifdef DEBUG_ENABLED
-	CRASH_COND(!rc_owner);
+	if (unlikely(!rc_owner || !inited)) {
+		Object *object = binding_element->key();
+		CSharpBindingSetupRecord setup;
+		bool setup_in_flight = _find_binding_setup(object, setup);
+		if (!rc_owner) {
+			bool count_mode = _binding_race_count_mode();
+			_report_binding_race("no owner", object, inited, script_binding.gchandle, p_reference, setup_in_flight ? &setup : nullptr, !count_mode);
+			if (!count_mode) {
+				CRASH_COND(!rc_owner);
+			}
+			RefCounted *rc_object = Object::cast_to<RefCounted>(object);
+			CRASH_COND(!rc_object);
+			return rc_object->get_reference_count() == 0;
+		}
+		if (setup_in_flight && setup.thread_id != Thread::get_caller_id()) {
+			_report_binding_race("not set up yet", object, inited, script_binding.gchandle, p_reference, &setup, false);
+		}
+	}
 #endif // DEBUG_ENABLED
 
 	MonoGCHandleData &gchandle = script_binding.gchandle;
 
 	int refcount = rc_owner->get_reference_count();
 
-	if (!script_binding.inited) {
+	if (!inited) {
 		return refcount == 0;
 	}
 
 	if (p_reference) {
 		// Refcount incremented
-		if (refcount > 1 && gchandle.is_weak()) { // The managed side also holds a reference, hence 1 instead of 0
+		if (refcount > 1 && !gchandle.is_released() && gchandle.is_weak()) {
 			// The reference count was increased after the managed side was the only one referencing our owner.
 			// This means the owner is being referenced again by the unmanaged side,
 			// so the owner must hold the managed side alive again to avoid it from being GCed.
@@ -1325,6 +1439,12 @@ void *CSharpLanguage::get_instance_binding(Object *p_object) {
 }
 
 void *CSharpLanguage::get_instance_binding_with_setup(Object *p_object) {
+#ifdef DEBUG_ENABLED
+	void *existing_binding = p_object->get_instance_binding(get_singleton(), nullptr);
+	bool needs_setup = !existing_binding || !((RBMap<Object *, CSharpScriptBinding>::Element *)existing_binding)->value().inited.is_set();
+	CSharpBindingSetupScope setup_scope(needs_setup ? p_object : nullptr);
+#endif
+
 	void *binding = get_instance_binding(p_object);
 
 	// Initially this was in `_instance_binding_create_callback`. However, after the new instance
@@ -1334,10 +1454,10 @@ void *CSharpLanguage::get_instance_binding_with_setup(Object *p_object) {
 	if (binding) {
 		CSharpScriptBinding &script_binding = ((RBMap<Object *, CSharpScriptBinding>::Element *)binding)->value();
 
-		if (!script_binding.inited) {
+		if (!script_binding.inited.is_set()) {
 			MutexLock lock(CSharpLanguage::get_singleton()->get_language_bind_mutex());
 
-			if (!script_binding.inited) { // Another thread may have set it up
+			if (!script_binding.inited.is_set()) {
 				CSharpLanguage::get_singleton()->setup_csharp_script_binding(script_binding, p_object);
 			}
 		}
@@ -1392,13 +1512,17 @@ void CSharpLanguage::tie_native_managed_to_unmanaged(GCHandleIntPtr p_gchandle_i
 	// The object was just created, no script instance binding should have been attached
 	CRASH_COND(CSharpLanguage::has_instance_binding(p_unmanaged));
 
+#ifdef DEBUG_ENABLED
+	CSharpBindingSetupScope setup_scope(p_unmanaged);
+#endif
+
 	void *binding = CSharpLanguage::get_singleton()->get_instance_binding(p_unmanaged);
 
 	CSharpScriptBinding &script_binding = ((RBMap<Object *, CSharpScriptBinding>::Element *)binding)->value();
-	script_binding.inited = true;
 	script_binding.type_name = *p_native_name;
 	script_binding.gchandle = gchandle;
 	script_binding.owner = p_unmanaged;
+	script_binding.inited.set();
 }
 
 void CSharpLanguage::tie_user_managed_to_unmanaged(GCHandleIntPtr p_gchandle_intptr, Object *p_unmanaged, Ref<CSharpScript> *p_script, bool p_ref_counted) {
@@ -2024,7 +2148,7 @@ CSharpInstance::~CSharpInstance() {
 		void *data = CSharpLanguage::get_instance_binding_with_setup(owner);
 		CRASH_COND(data == nullptr);
 		CSharpScriptBinding &script_binding = ((RBMap<Object *, CSharpScriptBinding>::Element *)data)->get();
-		CRASH_COND(!script_binding.inited);
+		CRASH_COND(!script_binding.inited.is_set());
 
 #ifdef DEBUG_ENABLED
 		// The "instance binding" holds a reference so the refcount should be at least 2 before `scope_keep_owner_alive` goes out of scope
@@ -2376,12 +2500,12 @@ CSharpInstance *CSharpScript::_create_instance(const Variant **p_args, int p_arg
 		CRASH_COND(data == nullptr);
 
 		CSharpScriptBinding &script_binding = ((RBMap<Object *, CSharpScriptBinding>::Element *)data)->get();
-		if (script_binding.inited && !script_binding.gchandle.is_released()) {
+		if (script_binding.inited.is_set() && !script_binding.gchandle.is_released()) {
 			GDMonoCache::managed_callbacks.CSharpInstanceBridge_CallDispose(
 					script_binding.gchandle.get_intptr(), /* okIfNull */ true);
 
 			script_binding.gchandle.release(); // Just in case
-			script_binding.inited = false;
+			script_binding.inited.clear();
 		}
 	}
 

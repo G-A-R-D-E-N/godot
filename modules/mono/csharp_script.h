@@ -36,6 +36,7 @@
 #include "core/doc_data.h"
 #include "core/object/script_language.h"
 #include "core/templates/rb_map.h"
+#include "core/templates/safe_refcount.h"
 #include "core/templates/self_list.h"
 
 #ifdef TOOLS_ENABLED
@@ -384,12 +385,24 @@ public:
 };
 
 struct CSharpScriptBinding {
-	bool inited = false;
+	SafeFlag inited;
 	StringName type_name;
 	MonoGCHandleData gchandle;
 	Object *owner = nullptr;
 
 	CSharpScriptBinding() {}
+	CSharpScriptBinding(const CSharpScriptBinding &p_other) :
+			inited(p_other.inited.is_set()),
+			type_name(p_other.type_name),
+			gchandle(p_other.gchandle),
+			owner(p_other.owner) {}
+
+	void operator=(const CSharpScriptBinding &p_other) {
+		type_name = p_other.type_name;
+		gchandle = p_other.gchandle;
+		owner = p_other.owner;
+		inited.set_to(p_other.inited.is_set());
+	}
 };
 
 class ManagedCallableMiddleman : public Object {

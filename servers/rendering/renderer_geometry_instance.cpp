@@ -110,6 +110,19 @@ void RenderGeometryInstanceBase::set_transparency(float p_transparency) {
 	force_alpha = CLAMP(1.0 - p_transparency, 0, 1);
 }
 
+float RenderGeometryInstanceBase::get_fade_alpha(const Vector3 &p_origin, float p_distance_scale, bool p_range_fade) const {
+	float fade_alpha = 1.0f;
+	if (p_range_fade && (fade_near || fade_far)) {
+		const float fade_dist = transformed_aabb.get_center().distance_to(p_origin) * p_distance_scale;
+		if (fade_far && fade_dist > fade_far_begin) {
+			fade_alpha = Math::smoothstep(0.0f, 1.0f, 1.0f - (fade_dist - fade_far_begin) / (fade_far_end - fade_far_begin));
+		} else if (fade_near && fade_dist < fade_near_end) {
+			fade_alpha = Math::smoothstep(0.0f, 1.0f, (fade_dist - fade_near_begin) / (fade_near_end - fade_near_begin));
+		}
+	}
+	return fade_alpha * (force_alpha * (p_range_fade ? parent_fade_alpha : 1.0f));
+}
+
 void RenderGeometryInstanceBase::set_use_baked_light(bool p_enable) {
 	data->use_baked_light = p_enable;
 

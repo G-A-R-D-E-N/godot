@@ -835,7 +835,6 @@ FSR2Context *FSR2Effect::create_context(Size2i p_internal_size, Size2i p_target_
 }
 
 void FSR2Effect::upscale(const Parameters &p_params) {
-	// TODO: Transparency & Composition mask is not implemented.
 	FfxFsr2DispatchDescription dispatch_desc = {};
 	RID color = p_params.color;
 	RID depth = p_params.depth;

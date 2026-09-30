@@ -45,8 +45,13 @@ layout(local_size_x = GROUP_SIZE, local_size_y = GROUP_SIZE, local_size_z = 1) i
 
 layout(rgba16f, set = 0, binding = 0) uniform restrict readonly image2D color_buffer;
 layout(set = 0, binding = 1) uniform sampler2D depth_buffer;
+#ifdef TEMPORAL_METADATA
+layout(rgba16f, set = 0, binding = 2) uniform restrict readonly image2D velocity_buffer;
+layout(rgba16f, set = 0, binding = 3) uniform restrict readonly image2D last_velocity_buffer;
+#else
 layout(rg16f, set = 0, binding = 2) uniform restrict readonly image2D velocity_buffer;
 layout(rg16f, set = 0, binding = 3) uniform restrict readonly image2D last_velocity_buffer;
+#endif
 layout(set = 0, binding = 4) uniform sampler2D history_buffer;
 layout(rgba16f, set = 0, binding = 5) uniform restrict writeonly image2D output_buffer;
 
@@ -169,6 +174,22 @@ void get_closest_pixel_velocity_3x3(in uvec2 group_pos, uvec2 group_top_left, ou
 	// Velocity out
 	velocity = imageLoad(velocity_buffer, ivec2(group_top_left + min_pos)).xy;
 }
+
+#ifdef GARDEN_TAA
+vec4 get_front_pixel_velocity_3x3(uvec2 group_pos, uvec2 group_top_left) {
+	float max_depth = 0.0;
+	uvec2 max_pos = group_pos;
+	for (int i = 0; i < 9; i++) {
+		uvec2 pos = group_pos + kOffsets3x3[i];
+		float depth = load_depth(pos);
+		if (depth > max_depth) {
+			max_depth = depth;
+			max_pos = pos;
+		}
+	}
+	return imageLoad(velocity_buffer, ivec2(group_top_left + max_pos) + kBorderSize);
+}
+#endif
 
 /*------------------------------------------------------------------------------
 							  HISTORY SAMPLING
@@ -311,9 +332,26 @@ float get_factor_disocclusion(vec2 uv_reprojected, vec2 velocity) {
 	return clamp(disocclusion * DISOCCLUSION_SCALE, 0.0, 1.0);
 }
 
+#ifdef GARDEN_TAA
+float get_factor_garden_disocclusion(vec2 uv_reprojected, vec2 velocity, float mask, float id) {
+	float id_previous = imageLoad(last_velocity_buffer, ivec2(uv_reprojected * params.resolution)).w;
+	if (id > 0.5 && id_previous > 0.5 && abs(id - id_previous) > 0.5) {
+		return 1.0;
+	}
+	return get_factor_disocclusion(uv_reprojected, velocity) * (1.0 - mask);
+}
+#endif
+
 vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_screen, vec2 uv, sampler2D tex_history) {
 	// Get the velocity of the current pixel
+#ifdef GARDEN_TAA
+	vec4 velocity_mask_id = imageLoad(velocity_buffer, ivec2(pos_screen));
+	vec4 velocity_front = get_front_pixel_velocity_3x3(pos_group, pos_group_top_left);
+	float mask = max(velocity_mask_id.z, velocity_front.z);
+	vec2 velocity = mix(velocity_mask_id.xy, velocity_front.xy, mask);
+#else
 	vec2 velocity = imageLoad(velocity_buffer, ivec2(pos_screen)).xy;
+#endif
 
 	// Get reprojected uv
 	vec2 uv_reprojected = uv + velocity;
@@ -326,7 +364,11 @@ vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_
 
 	// Clip history to the neighbourhood of the current sample (fixes a lot of the ghosting).
 	vec2 velocity_closest = vec2(0.0); // This is best done by using the velocity with the closest depth.
+#ifdef GARDEN_TAA
+	velocity_closest = velocity_front.xy;
+#else
 	get_closest_pixel_velocity_3x3(pos_group, pos_group_top_left, velocity_closest);
+#endif
 	color_history = clip_history_3x3(pos_group, color_history, velocity_closest);
 
 	// Compute blend factor
@@ -336,7 +378,11 @@ vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_
 		float factor_screen = any(lessThan(uv_reprojected, vec2(0.0))) || any(greaterThan(uv_reprojected, vec2(1.0))) ? 1.0 : 0.0;
 
 		// Increase blend factor when there is disocclusion (fixes a lot of the remaining ghosting).
+#ifdef GARDEN_TAA
+		float factor_disocclusion = get_factor_garden_disocclusion(uv_reprojected, velocity, mask, velocity_mask_id.w);
+#else
 		float factor_disocclusion = get_factor_disocclusion(uv_reprojected, velocity);
+#endif
 
 		// Add to the blend factor
 		blend_factor = clamp(blend_factor + factor_screen + factor_disocclusion, 0.0, 1.0);
@@ -355,6 +401,9 @@ vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_
 		float diff = abs(lum_color - lum_history) / max(lum_color, max(lum_history, 1.001));
 		diff = 1.0 - diff;
 		diff = diff * diff;
+#ifdef GARDEN_TAA
+		diff = mix(diff, 1.0, mask);
+#endif
 		blend_factor = mix(0.0, blend_factor, diff);
 
 		// Lerp/blend
