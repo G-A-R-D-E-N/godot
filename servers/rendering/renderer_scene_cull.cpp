@@ -1000,7 +1000,7 @@ void RendererSceneCull::instance_geometry_set_transparency(RID p_instance, float
 	Instance *instance = instance_owner.get_or_null(p_instance);
 	ERR_FAIL_NULL(instance);
 
-	const bool changed = instance->transparency != p_transparency;
+	const bool changed = uint32_t(CLAMP(1.0f - instance->transparency, 0.0f, 1.0f) * 255.0) != uint32_t(CLAMP(1.0f - p_transparency, 0.0f, 1.0f) * 255.0);
 	instance->transparency = p_transparency;
 
 	if ((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK && instance->base_data) {
