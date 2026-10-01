@@ -309,9 +309,25 @@ public:
 	String child_path = "user://child.loader_lifetime";
 	bool parent_started = false;
 	bool changed = false;
+	CallQueue *statistics_queue = nullptr;
+	bool statistics_returned = false;
+	Error statistics_error = OK;
+	int queue_callbacks = 0;
 
 	void on_resource_changed() {
 		changed = true;
+	}
+
+	void on_queue_callback(Ref<Resource> p_resource, String p_text) {
+		queue_callbacks++;
+		changed = p_resource.is_valid() && p_text == "retained";
+	}
+
+	void on_queue_statistics() {
+		do {
+			statistics_error = statistics_queue->push_notification(get_instance_id(), 0);
+		} while (statistics_error == OK);
+		statistics_returned = true;
 	}
 
 	Ref<Resource> load(const String &p_path, const String &p_original_path, Error *r_error,
@@ -508,6 +524,110 @@ TEST_CASE("[ResourceLoader] Shutdown drains an active native load") {
 	ERR_PRINT_OFF;
 	CHECK_FALSE(WorkerThreadPool::get_singleton()->is_task_completed(loader->task_id));
 	ERR_PRINT_ON;
+	ResourceLoader::remove_resource_format_loader(loader);
+}
+
+TEST_CASE("[ResourceLoader] Queue statistics preserve callbacks and arguments") {
+	CallQueue queue(nullptr, 1);
+	Ref<NestedLoader> loader;
+	loader.instantiate();
+	Ref<Resource> resource;
+	resource.instantiate();
+	ObjectID id = resource->get_instance_id();
+	CHECK(queue.push_callable(callable_mp(loader.ptr(), &NestedLoader::on_queue_callback), resource, String("retained")) == OK);
+	resource.unref();
+	queue.statistics();
+	CHECK(ObjectDB::get_instance(id) != nullptr);
+	queue.statistics();
+	CHECK(queue.has_messages());
+	CHECK_FALSE(loader->changed);
+	loader->statistics_queue = &queue;
+	CHECK(queue.push_callable(callable_mp(loader.ptr(), &NestedLoader::on_queue_statistics)) == OK);
+	Error queued;
+	do {
+		queued = queue.push_notification(loader->get_instance_id(), 0);
+	} while (queued == OK);
+	CHECK(queued == ERR_OUT_OF_MEMORY);
+	CHECK(queue.push_notification(loader->get_instance_id(), 0) == ERR_OUT_OF_MEMORY);
+	CHECK(ObjectDB::get_instance(id) != nullptr);
+	CHECK(queue.flush() == OK);
+	CHECK(loader->changed);
+	CHECK(loader->statistics_returned);
+	CHECK(loader->statistics_error == ERR_OUT_OF_MEMORY);
+	CHECK(loader->queue_callbacks == 1);
+	CHECK_FALSE(queue.has_messages());
+	CHECK(ObjectDB::get_instance(id) == nullptr);
+}
+
+TEST_CASE("[ResourceLoader] Full deferred queue preserves native task ownership") {
+	bool shutdown = false;
+	SUBCASE("A later callback drains the completed task") {}
+	SUBCASE("Shutdown drains without the rejected callback") {
+		shutdown = true;
+	}
+	auto *queue = MessageQueue::get_main_singleton();
+	queue->flush();
+	Ref<GatedLoader> loader;
+	loader.instantiate();
+	ResourceLoader::add_resource_format_loader(loader, true);
+	Ref<ResourceLoader::LoadToken> token = ResourceLoader::_load_start("user://queue_full.loader_lifetime", "Resource",
+			ResourceLoader::LOAD_THREAD_SPAWN_SINGLE, ResourceLoader::CACHE_MODE_IGNORE);
+	CHECK(token.is_valid());
+	if (token.is_null()) {
+		ResourceLoader::remove_resource_format_loader(loader);
+		return;
+	}
+	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 10000;
+	bool entered = false;
+	while (!(entered = loader->entered.try_wait()) && OS::get_singleton()->get_ticks_msec() < deadline) {
+		OS::get_singleton()->delay_usec(100);
+	}
+	CHECK(entered);
+	if (!entered) {
+		loader->release.post();
+		Error error;
+		ResourceLoader::_load_complete(*token.ptr(), &error);
+		token.unref();
+		ResourceLoader::clear_thread_load_tasks();
+		ResourceLoader::remove_resource_format_loader(loader);
+		return;
+	}
+	Error queued;
+	do {
+		queued = queue->push_notification(loader->get_instance_id(), 0);
+	} while (queued == OK);
+	CHECK(queued == ERR_OUT_OF_MEMORY);
+	ObjectID id = token->get_instance_id();
+	WorkerThreadPool::TaskID rejected_task_id = loader->task_id;
+	token.unref();
+	loader->release.post();
+	auto *pool = WorkerThreadPool::get_singleton();
+	while (!pool->is_task_completed(loader->task_id)) {
+		OS::get_singleton()->delay_usec(100);
+	}
+	CHECK(ObjectDB::get_instance(id) != nullptr);
+	queue->clear();
+	if (shutdown) {
+		ResourceLoader::clear_thread_load_tasks();
+	} else {
+		loader->release.post();
+		Ref<ResourceLoader::LoadToken> recovery = ResourceLoader::_load_start("user://queue_callback.loader_lifetime", "Resource",
+				ResourceLoader::LOAD_THREAD_SPAWN_SINGLE, ResourceLoader::CACHE_MODE_IGNORE);
+		CHECK(recovery.is_valid());
+		if (recovery.is_valid()) {
+			loader->entered.wait();
+			while (!pool->is_task_completed(loader->task_id)) {
+				OS::get_singleton()->delay_usec(100);
+			}
+			recovery.unref();
+			queue->flush();
+		}
+	}
+	CHECK(ObjectDB::get_instance(id) == nullptr);
+	ERR_PRINT_OFF;
+	CHECK_FALSE(pool->is_task_completed(rejected_task_id));
+	ERR_PRINT_ON;
+	ResourceLoader::clear_thread_load_tasks();
 	ResourceLoader::remove_resource_format_loader(loader);
 }
 

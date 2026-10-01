@@ -346,6 +346,10 @@ void CallQueue::clear() {
 
 void CallQueue::statistics() {
 	LOCK_MUTEX;
+	if (flushing) {
+		UNLOCK_MUTEX;
+		return;
+	}
 	HashMap<StringName, int> set_count;
 	HashMap<int, int> notify_count;
 	HashMap<Callable, int> call_count;
@@ -409,15 +413,6 @@ void CallQueue::statistics() {
 			}
 
 			offset += advance;
-
-			if ((message->type & FLAG_MASK) != TYPE_NOTIFICATION) {
-				Variant *args = (Variant *)(message + 1);
-				for (int k = 0; k < message->args; k++) {
-					args[k].~Variant();
-				}
-			}
-
-			message->~Message();
 		}
 	}
 
