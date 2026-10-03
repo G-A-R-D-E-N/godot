@@ -37,6 +37,8 @@ TEST_FORCE_LINK(test_audio_stream_wav)
 #include "core/math/math_defs.h"
 #include "core/math/math_funcs.h"
 #include "scene/resources/audio/audio_stream_wav.h"
+#include "servers/audio/audio_driver_dummy.h"
+#include "servers/audio/audio_server.h"
 #include "tests/test_utils.h"
 
 namespace TestAudioStreamWAV {
@@ -216,6 +218,40 @@ TEST_CASE("[Audio][AudioStreamWAV] Saving IMA ADPCM is not supported") {
 	ERR_PRINT_OFF;
 	CHECK(stream->save_to_wav(save_path) == ERR_UNAVAILABLE);
 	ERR_PRINT_ON;
+}
+
+TEST_CASE("[Audio][AudioServer] Shutdown retires a playback stranded in FADE_OUT_TO_DELETION") {
+	AudioServer::get_singleton()->finish();
+	memdelete(AudioServer::get_singleton());
+	AudioDriverDummy::get_dummy_singleton()->set_use_threads(false);
+	AudioDriverManager::initialize(AudioDriverManager::get_driver_count() - 1);
+	AudioServer *server = memnew(AudioServer);
+	server->init();
+
+	ObjectID playback_id;
+	{
+		Ref<AudioStreamWAV> stream = memnew(AudioStreamWAV);
+		stream->set_format(AudioStreamWAV::FORMAT_16_BITS);
+		stream->set_data(gen_pcm16_test(WAV_RATE, WAV_COUNT, false));
+		Ref<AudioStreamPlayback> playback = stream->instantiate_playback();
+		REQUIRE(playback.is_valid());
+		playback_id = playback->get_instance_id();
+
+		Vector<AudioFrame> volumes;
+		volumes.resize(AuSC::MAX_CHANNELS_PER_BUS);
+		volumes.fill(AudioFrame(1, 1));
+		server->start_playback_stream(playback, SNAME("Master"), volumes);
+		CHECK(server->is_playback_active(playback));
+		server->stop_playback_stream(playback);
+		CHECK_FALSE(server->is_playback_active(playback));
+	}
+	CHECK(ObjectDB::get_instance(playback_id) != nullptr);
+
+	server->finish();
+	CHECK(ObjectDB::get_instance(playback_id) == nullptr);
+
+	memdelete(server);
+	AudioDriverDummy::get_dummy_singleton()->set_use_threads(true);
 }
 
 } // namespace TestAudioStreamWAV
