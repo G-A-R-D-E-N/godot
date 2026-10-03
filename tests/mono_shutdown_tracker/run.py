@@ -34,8 +34,16 @@ def main():
     project = Path(__file__).resolve().parent
     args.output.mkdir(parents=True, exist_ok=False)
     flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-    build = subprocess.run(['dotnet', 'build', str(project / 'ShutdownTrackerProbe.csproj'), '-c', 'Debug'],
-                           capture_output=True, text=True, timeout=90, creationflags=flags)
+    config = project / 'NuGet.config'
+    created_config = not config.exists()
+    if created_config:
+        config.write_bytes((project / 'NuGet.sources.xml').read_bytes())
+    try:
+        build = subprocess.run(['dotnet', 'build', str(project / 'ShutdownTrackerProbe.csproj'), '-c', 'Debug'],
+                               capture_output=True, text=True, timeout=90, creationflags=flags)
+    finally:
+        if created_config:
+            config.unlink()
     (args.output / 'build.log').write_text(build.stdout + build.stderr, encoding='utf-8')
     if build.returncode:
         raise RuntimeError('Probe build failed; see build.log.')
