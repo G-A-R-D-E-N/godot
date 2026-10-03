@@ -67,7 +67,7 @@ namespace Godot
 
         public static WeakReference<GodotObject> RegisterGodotObject(GodotObject godotObject)
         {
-            var weakReferenceToSelf = new WeakReference<GodotObject>(godotObject);
+            var weakReferenceToSelf = new WeakReference<GodotObject>(godotObject, trackResurrection: true);
             GodotObjectInstances.TryAdd(weakReferenceToSelf, 0);
             return weakReferenceToSelf;
         }
