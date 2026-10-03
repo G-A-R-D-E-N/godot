@@ -132,6 +132,7 @@ public:
 	}
 
 	bool emitted_while_loading = false;
+	bool release_child = false;
 
 	Ref<Resource> load(const String &p_path, const String &p_original_path, Error *r_error,
 			bool p_use_sub_threads, float *r_progress, CacheMode p_cache_mode) override {
@@ -158,6 +159,9 @@ public:
 					ResourceLoader::LOAD_THREAD_SPAWN_SINGLE, ResourceLoader::CACHE_MODE_IGNORE);
 			Error child_error;
 			child_resource = ResourceLoader::_load_complete(*child_token.ptr(), &child_error);
+			if (release_child) {
+				child_token.unref();
+			}
 			return memnew(Resource);
 		}
 		Ref<Resource> resource = memnew(Resource);
@@ -371,6 +375,31 @@ TEST_CASE("[ResourceLoader] Retired child connections follow a live parent") {
 	grandparent.unref();
 	loader->child_resource.unref();
 	loader->child_token.unref();
+	MessageQueue::get_main_singleton()->flush();
+	ResourceLoader::clear_thread_load_tasks();
+	ResourceLoader::remove_resource_format_loader(loader);
+}
+
+TEST_CASE("[ResourceLoader] Child dependencies are handed to the parent once") {
+	Ref<AwaitingLoader> loader;
+	loader.instantiate();
+	loader->release_child = true;
+	ResourceLoader::add_resource_format_loader(loader, true);
+	Ref<ResourceLoader::LoadToken> parent = ResourceLoader::_load_start("user://parent.loader_lifetime", "Resource",
+			ResourceLoader::LOAD_THREAD_SPAWN_SINGLE, ResourceLoader::CACHE_MODE_IGNORE);
+	CHECK(parent.is_valid());
+	auto *pool = WorkerThreadPool::get_singleton();
+	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 10000;
+	while ((loader->parent_task_id == WorkerThreadPool::INVALID_TASK_ID || !pool->is_task_completed(loader->parent_task_id)) && OS::get_singleton()->get_ticks_msec() < deadline) {
+		OS::get_singleton()->delay_usec(100);
+	}
+	CHECK(loader->child_resource.is_valid());
+	ResourceLoader::clear_thread_load_tasks();
+	if (loader->child_resource.is_valid()) {
+		CHECK_MESSAGE(loader->child_resource->get_reference_count() == 2, "Child source is referenced by the parent more than once");
+	}
+	parent.unref();
+	loader->child_resource.unref();
 	MessageQueue::get_main_singleton()->flush();
 	ResourceLoader::clear_thread_load_tasks();
 	ResourceLoader::remove_resource_format_loader(loader);

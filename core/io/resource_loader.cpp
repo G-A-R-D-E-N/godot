@@ -1133,6 +1133,7 @@ Ref<Resource> ResourceLoader::_load_complete_inner(LoadToken &p_load_token, Erro
 					load_task_ptr->parent_task->resource_dependencies.push_back(dependency);
 				}
 				load_task_ptr->resource_changed_connections.clear();
+				load_task_ptr->resource_dependencies.clear();
 				load_task_ptr->connections_propagated = true;
 			}
 		} else {
