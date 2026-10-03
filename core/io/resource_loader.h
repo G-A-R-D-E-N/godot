@@ -224,6 +224,7 @@ private:
 	};
 	static void _run_load_task(void *p_userdata);
 	static void _run_load_task_native(void *p_userdata);
+	static void _connect_changed(Ref<Resource> p_source, const Callable &p_callable, uint32_t p_flags);
 	static bool _clear_finished_load_tasks();
 
 	static thread_local bool import_thread;

@@ -239,6 +239,16 @@ void ResourceLoader::LoadToken::clear() {
 	for (ThreadLoadTask *child : load_task->child_tasks) {
 		child->parent_task = nullptr;
 	}
+	for (const ThreadLoadTask::ResourceChangedConnection &rcc : load_task->resource_changed_connections) {
+		if (!rcc.callable.is_valid()) {
+			continue;
+		}
+		if (Thread::is_main_thread()) {
+			rcc.source->connect_changed(rcc.callable, rcc.flags);
+		} else if (MessageQueue::get_main_singleton()) {
+			MessageQueue::get_main_singleton()->push_callable(callable_mp_static(&ResourceLoader::_connect_changed).bind(Ref<Resource>(rcc.source), rcc.callable, rcc.flags));
+		}
+	}
 	if (task_if_unregistered) {
 		memdelete(task_if_unregistered);
 		task_if_unregistered = nullptr;
@@ -641,6 +651,10 @@ void ResourceLoader::_run_load_task(void *p_userdata) {
 	curr_load_task = curr_load_task_backup;
 
 	print_verbose(vformat("Completed load for: '%s' remapped '%s' at thread %d", load_task.local_path, remapped_path, thread_index));
+}
+
+void ResourceLoader::_connect_changed(Ref<Resource> p_source, const Callable &p_callable, uint32_t p_flags) {
+	p_source->connect_changed(p_callable, p_flags);
 }
 
 void ResourceLoader::_run_load_task_native(void *p_userdata) {
@@ -1108,23 +1122,28 @@ Ref<Resource> ResourceLoader::_load_complete_inner(LoadToken &p_load_token, Erro
 				for (const ThreadLoadTask::ResourceChangedConnection &rcc : load_task_ptr->resource_changed_connections) {
 					load_task_ptr->parent_task->resource_changed_connections.push_back(rcc);
 				}
+				for (const Ref<Resource> &dependency : load_task_ptr->resource_dependencies) {
+					load_task_ptr->parent_task->resource_dependencies.push_back(dependency);
+				}
+				load_task_ptr->resource_changed_connections.clear();
 				load_task_ptr->connections_propagated = true;
 			}
 		} else {
+			LocalVector<ThreadLoadTask::ResourceChangedConnection> connections = std::move(load_task_ptr->resource_changed_connections);
 			p_thread_load_lock.temp_unlock();
 
 			// A leaf task being awaited => Propagate the resource changed connections.
 			if (Thread::is_main_thread()) {
 				// On the main thread it's safe to migrate the connections to the standard signal mechanism.
-				for (const ThreadLoadTask::ResourceChangedConnection &rcc : load_task_ptr->resource_changed_connections) {
+				for (const ThreadLoadTask::ResourceChangedConnection &rcc : connections) {
 					if (rcc.callable.is_valid()) {
 						rcc.source->connect_changed(rcc.callable, rcc.flags);
 					}
 				}
 			} else {
 				// On non-main threads, we have to queue and call it done when processed.
-				if (!load_task_ptr->resource_changed_connections.is_empty()) {
-					for (const ThreadLoadTask::ResourceChangedConnection &rcc : load_task_ptr->resource_changed_connections) {
+				if (!connections.is_empty()) {
+					for (const ThreadLoadTask::ResourceChangedConnection &rcc : connections) {
 						if (rcc.callable.is_valid()) {
 							MessageQueue::get_main_singleton()->push_callable(callable_mp(rcc.source, &Resource::connect_changed).bind(rcc.callable, rcc.flags));
 						}
