@@ -233,20 +233,27 @@ void ResourceLoader::LoadToken::clear() {
 	ThreadLoadTask *load_task = task_if_unregistered ? task_if_unregistered : thread_load_tasks.getptr(local_path);
 	DEV_ASSERT(load_task);
 	DEV_ASSERT(load_task->status == THREAD_LOAD_FAILED || load_task->status == THREAD_LOAD_LOADED);
-	if (load_task->parent_task) {
-		load_task->parent_task->child_tasks.erase(load_task);
+	ThreadLoadTask *parent_task = load_task->parent_task;
+	if (parent_task) {
+		parent_task->child_tasks.erase(load_task);
 	}
 	for (ThreadLoadTask *child : load_task->child_tasks) {
 		child->parent_task = nullptr;
 	}
 	for (const ThreadLoadTask::ResourceChangedConnection &rcc : load_task->resource_changed_connections) {
-		if (!rcc.callable.is_valid()) {
+		if (parent_task) {
+			parent_task->resource_changed_connections.push_back(rcc);
+		} else if (!rcc.callable.is_valid()) {
 			continue;
-		}
-		if (Thread::is_main_thread()) {
+		} else if (Thread::is_main_thread()) {
 			rcc.source->connect_changed(rcc.callable, rcc.flags);
 		} else if (MessageQueue::get_main_singleton()) {
 			MessageQueue::get_main_singleton()->push_callable(callable_mp_static(&ResourceLoader::_connect_changed).bind(Ref<Resource>(rcc.source), rcc.callable, rcc.flags));
+		}
+	}
+	if (parent_task) {
+		for (const Ref<Resource> &dependency : load_task->resource_dependencies) {
+			parent_task->resource_dependencies.push_back(dependency);
 		}
 	}
 	if (task_if_unregistered) {

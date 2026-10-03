@@ -120,7 +120,7 @@ public:
 	}
 };
 
-class AwaitingLoader : public ResourceFormatLoader {
+class AwaitingLoader : public GatedLoader {
 public:
 	Ref<ResourceLoader::LoadToken> child_token;
 	Ref<Resource> child_resource;
@@ -131,14 +131,26 @@ public:
 		changed = true;
 	}
 
-	bool recognize_path(const String &p_path, const String &p_type) const override {
-		return p_path.ends_with(".loader_lifetime");
-	}
+	bool emitted_while_loading = false;
 
 	Ref<Resource> load(const String &p_path, const String &p_original_path, Error *r_error,
 			bool p_use_sub_threads, float *r_progress, CacheMode p_cache_mode) override {
 		if (r_error) {
 			*r_error = OK;
+		}
+		if (p_path.contains("grand")) {
+			task_id = WorkerThreadPool::get_singleton()->get_caller_task_id();
+			Ref<ResourceLoader::LoadToken> middle = ResourceLoader::_load_start("user://parent.loader_lifetime", "Resource",
+					ResourceLoader::LOAD_THREAD_SPAWN_SINGLE, ResourceLoader::CACHE_MODE_IGNORE);
+			while (parent_task_id == WorkerThreadPool::INVALID_TASK_ID || !WorkerThreadPool::get_singleton()->is_task_completed(parent_task_id)) {
+				OS::get_singleton()->delay_usec(100);
+			}
+			entered.post();
+			release.wait();
+			middle.unref();
+			child_resource->emit_changed();
+			emitted_while_loading = true;
+			return memnew(Resource);
 		}
 		if (p_path.contains("parent")) {
 			parent_task_id = WorkerThreadPool::get_singleton()->get_caller_task_id();
@@ -326,6 +338,37 @@ TEST_CASE("[ResourceLoader] Propagated child connections survive parent retireme
 		CHECK_MESSAGE(false, "Parent load did not return the awaited child resource");
 	}
 	parent.unref();
+	loader->child_resource.unref();
+	loader->child_token.unref();
+	MessageQueue::get_main_singleton()->flush();
+	ResourceLoader::clear_thread_load_tasks();
+	ResourceLoader::remove_resource_format_loader(loader);
+}
+
+TEST_CASE("[ResourceLoader] Retired child connections follow a live parent") {
+	Ref<AwaitingLoader> loader;
+	loader.instantiate();
+	ResourceLoader::add_resource_format_loader(loader, true);
+	Ref<ResourceLoader::LoadToken> grandparent = ResourceLoader::_load_start("user://grand.loader_lifetime", "Resource",
+			ResourceLoader::LOAD_THREAD_SPAWN_SINGLE, ResourceLoader::CACHE_MODE_IGNORE);
+	CHECK(grandparent.is_valid());
+	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 10000;
+	bool entered = false;
+	while (!(entered = loader->entered.try_wait()) && OS::get_singleton()->get_ticks_msec() < deadline) {
+		OS::get_singleton()->delay_usec(100);
+	}
+	CHECK_MESSAGE(entered, "Grandparent did not reach its gate before the deadline");
+	MessageQueue::get_main_singleton()->flush();
+	loader->release.post();
+	auto *pool = WorkerThreadPool::get_singleton();
+	while (entered && !pool->is_task_completed(loader->task_id) && OS::get_singleton()->get_ticks_msec() < deadline) {
+		OS::get_singleton()->delay_usec(100);
+	}
+	CHECK(loader->emitted_while_loading);
+	CHECK_MESSAGE(loader->changed, "Child changed connection was lost when its parent retired during the grandparent load");
+	Error error;
+	CHECK(ResourceLoader::_load_complete(*grandparent.ptr(), &error).is_valid());
+	grandparent.unref();
 	loader->child_resource.unref();
 	loader->child_token.unref();
 	MessageQueue::get_main_singleton()->flush();
