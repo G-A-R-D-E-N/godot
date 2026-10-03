@@ -224,48 +224,45 @@ void ResourceFormatLoader::_bind_methods() {
 
 // This should be robust enough to be called redundantly without issues.
 void ResourceLoader::LoadToken::clear() {
-	WorkerThreadPool::TaskID task_to_await = 0;
+	MutexLock thread_load_lock(thread_load_mutex);
+	DEV_ASSERT(user_rc == 0 && user_path.is_empty());
 
-	{
-		MutexLock thread_load_lock(thread_load_mutex);
-		// User-facing tokens shouldn't be deleted until completely claimed.
-		DEV_ASSERT(user_rc == 0 && user_path.is_empty());
-
-		if (!local_path.is_empty()) {
-			if (task_if_unregistered) {
-				memdelete(task_if_unregistered);
-				task_if_unregistered = nullptr;
-			} else {
-				DEV_ASSERT(thread_load_tasks.has(local_path));
-				ThreadLoadTask &load_task = thread_load_tasks[local_path];
-				if (load_task.task_id && !load_task.awaited) {
-					task_to_await = load_task.task_id;
-				}
-				// Removing a task which is still in progress would be catastrophic.
-				// Tokens must be alive until the task thread function is done.
-				DEV_ASSERT(load_task.status == THREAD_LOAD_FAILED || load_task.status == THREAD_LOAD_LOADED);
-				thread_load_tasks.erase(local_path);
-			}
-			local_path.clear(); // Mark as already cleared.
-			if (task_to_await) {
-				for (KeyValue<String, ResourceLoader::ThreadLoadTask> &E : thread_load_tasks) {
-					if (E.value.task_id == task_to_await) {
-						task_to_await = 0;
-						break; // Same task is reused by nested loads, do not wait for completion here.
-					}
-				}
-			}
+	if (local_path.is_empty()) {
+		return;
+	}
+	ThreadLoadTask *load_task = task_if_unregistered ? task_if_unregistered : thread_load_tasks.getptr(local_path);
+	DEV_ASSERT(load_task);
+	DEV_ASSERT(load_task->status == THREAD_LOAD_FAILED || load_task->status == THREAD_LOAD_LOADED);
+	ThreadLoadTask *parent_task = load_task->parent_task;
+	if (parent_task) {
+		parent_task->child_tasks.erase(load_task);
+	}
+	for (ThreadLoadTask *child : load_task->child_tasks) {
+		child->parent_task = nullptr;
+	}
+	for (const ThreadLoadTask::ResourceChangedConnection &rcc : load_task->resource_changed_connections) {
+		if (parent_task) {
+			parent_task->resource_changed_connections.push_back(rcc);
+		} else if (!rcc.callable.is_valid()) {
+			continue;
+		} else if (Thread::is_main_thread()) {
+			rcc.source->connect_changed(rcc.callable, rcc.flags);
+		} else if (MessageQueue::get_main_singleton()) {
+			MessageQueue::get_main_singleton()->push_callable(callable_mp_static(&ResourceLoader::_connect_changed).bind(Ref<Resource>(rcc.source), rcc.callable, rcc.flags));
 		}
 	}
-
-	// If task is unused, await it here, locally, now the token data is consistent.
-	if (task_to_await) {
-		int load_nesting_backup = load_nesting;
-		load_nesting = 0;
-		WorkerThreadPool::get_singleton()->wait_for_task_completion(task_to_await);
-		DEV_ASSERT(load_nesting == 0);
-		load_nesting = load_nesting_backup;
+	if (parent_task) {
+		for (const Ref<Resource> &dependency : load_task->resource_dependencies) {
+			parent_task->resource_dependencies.push_back(dependency);
+		}
 	}
+	if (task_if_unregistered) {
+		memdelete(task_if_unregistered);
+		task_if_unregistered = nullptr;
+	} else {
+		thread_load_tasks.erase(local_path);
+	}
+	local_path.clear();
 }
 
 ResourceLoader::LoadToken::~LoadToken() {
@@ -333,9 +330,9 @@ Ref<Resource> ResourceLoader::_load(const String &p_path, const String &p_origin
 }
 
 // This implementation must allow re-entrancy for a task that started awaiting in a deeper stack frame.
-// The load task token must be manually re-referenced before this is called, which includes threaded runs.
 void ResourceLoader::_run_load_task(void *p_userdata) {
 	ThreadLoadTask &load_task = *(ThreadLoadTask *)p_userdata;
+	Ref<LoadToken> load_token(load_task.load_token);
 	int thread_index = WorkerThreadPool::get_singleton()->get_thread_index();
 	String thread_waiting_on_backup;
 
@@ -495,25 +492,15 @@ void ResourceLoader::_run_load_task(void *p_userdata) {
 
 		if (cleaning_tasks || status != THREAD_LOAD_IN_PROGRESS) {
 			curr_load_task = curr_load_task_backup;
-		}
-
-		if (cleaning_tasks) {
-			load_task.status = THREAD_LOAD_FAILED;
-			// Do not attempt to unreference the load token. Many things are
-			// tearing down concurrently and our task might be dead already. If it is
-			// the load token is already released.
-			return;
-		}
-
-		if (status != THREAD_LOAD_IN_PROGRESS) {
-			load_task.load_token->unreference();
-			thread_load_mutex.lock();
+			MutexLock thread_load_lock(thread_load_mutex);
+			if (cleaning_tasks) {
+				load_task.status = THREAD_LOAD_FAILED;
+			}
 			if (thread_waiting_on_backup.is_empty()) {
 				thread_waiting_on.erase(thread_index);
 			} else {
 				thread_waiting_on[thread_index] = thread_waiting_on_backup;
 			}
-			thread_load_mutex.unlock();
 			return;
 		}
 
@@ -638,16 +625,7 @@ void ResourceLoader::_run_load_task(void *p_userdata) {
 		thread_load_mutex.lock();
 	}
 
-	if (cleaning_tasks) {
-		// If we are cleaning don't wake up yielders here.
-		// And don't unreference the load token, it will get destroyed
-		// with the task later.
-		load_task.status = THREAD_LOAD_FAILED;
-		thread_load_mutex.unlock();
-		return;
-	}
-
-	if (load_task.error != OK) {
+	if (cleaning_tasks || load_task.error != OK) {
 		load_task.status = THREAD_LOAD_FAILED;
 	} else {
 		load_task.status = THREAD_LOAD_LOADED;
@@ -662,17 +640,13 @@ void ResourceLoader::_run_load_task(void *p_userdata) {
 		thread_waiting_on[thread_index] = thread_waiting_on_backup;
 	}
 
-	for (int tid : yielders) {
-		// Thundering herd, but not really an issue in practice. The
-		// number of threads in the WorkerThreadPool is bound and
-		// low.
-		WorkerThreadPool::get_singleton()->notify_yield_over(tid);
+	if (!cleaning_tasks) {
+		for (int tid : yielders) {
+			WorkerThreadPool::get_singleton()->notify_yield_over(tid);
+		}
 	}
 
 	thread_load_mutex.unlock();
-
-	// It's safe now to let the task go in case no one else was grabbing the token.
-	load_task.load_token->unreference();
 
 	if (load_nesting == 0) {
 		if (own_mq_override) {
@@ -684,6 +658,53 @@ void ResourceLoader::_run_load_task(void *p_userdata) {
 	curr_load_task = curr_load_task_backup;
 
 	print_verbose(vformat("Completed load for: '%s' remapped '%s' at thread %d", load_task.local_path, remapped_path, thread_index));
+}
+
+void ResourceLoader::_connect_changed(Ref<Resource> p_source, const Callable &p_callable, uint32_t p_flags) {
+	p_source->connect_changed(p_callable, p_flags);
+}
+
+void ResourceLoader::_run_load_task_native(void *p_userdata) {
+	Ref<LoadToken> load_token(((ThreadLoadTask *)p_userdata)->load_token);
+	_run_load_task(p_userdata);
+	{
+		MutexLock thread_load_lock(thread_load_mutex);
+		load_token->native_task_finished = true;
+	}
+	if (MessageQueue::get_main_singleton()) {
+		Error err = MessageQueue::get_main_singleton()->push_callable(callable_mp_static(&ResourceLoader::_clear_finished_load_tasks));
+		ERR_FAIL_COND(err != OK);
+	}
+}
+
+bool ResourceLoader::_clear_finished_load_tasks() {
+	ERR_FAIL_COND_V(!Thread::is_main_thread(), false);
+	while (true) {
+		WorkerThreadPool::TaskID task_id = WorkerThreadPool::INVALID_TASK_ID;
+		Ref<LoadToken> load_token;
+		{
+			MutexLock thread_load_lock(thread_load_mutex);
+			for (const KeyValue<WorkerThreadPool::TaskID, Ref<LoadToken>> &E : native_load_tasks) {
+				if (E.value->native_task_finished) {
+					task_id = E.key;
+					load_token = E.value;
+					break;
+				}
+			}
+			if (task_id == WorkerThreadPool::INVALID_TASK_ID) {
+				return true;
+			}
+			native_load_tasks.erase(task_id);
+		}
+		Error err = WorkerThreadPool::get_singleton()->wait_for_task_completion(task_id);
+		if (err != OK) {
+			{
+				MutexLock thread_load_lock(thread_load_mutex);
+				native_load_tasks.insert(task_id, load_token);
+			}
+			ERR_FAIL_V_MSG(false, "Could not reclaim a resource loading task.");
+		}
+	}
 }
 
 String ResourceLoader::_validate_local_path(const String &p_path) {
@@ -758,6 +779,9 @@ Ref<ResourceLoader::LoadToken> ResourceLoader::_load_start(const String &p_path,
 	ThreadLoadTask *load_task_ptr = nullptr;
 	{
 		MutexLock thread_load_lock(thread_load_mutex);
+		if (cleaning_tasks) {
+			return Ref<LoadToken>();
+		}
 
 		if (p_for_user) {
 			LoadToken *existing_token = _load_threaded_request_reuse_user_token(p_path);
@@ -810,12 +834,6 @@ Ref<ResourceLoader::LoadToken> ResourceLoader::_load_start(const String &p_path,
 				}
 			}
 
-			// Task hierarchy
-			if (curr_load_task) {
-				load_task.parent_task = curr_load_task;
-				curr_load_task->sub_tasks.insert(load_task.local_path);
-			}
-
 			// If we want to ignore cache, but there's another task loading it, we can't add this one to the map.
 			must_not_register = ignoring_cache && thread_load_tasks.has(local_path);
 			if (must_not_register) {
@@ -828,10 +846,11 @@ Ref<ResourceLoader::LoadToken> ResourceLoader::_load_start(const String &p_path,
 			}
 		}
 
-		// It's important to keep the token alive because until the load completes,
-		// which includes before the thread start, it may happen that no one is grabbing
-		// the token anymore so it's released.
-		load_task_ptr->load_token->reference();
+		if (curr_load_task) {
+			load_task_ptr->parent_task = curr_load_task;
+			curr_load_task->child_tasks.insert(load_task_ptr);
+			curr_load_task->sub_tasks.insert(load_task_ptr->local_path);
+		}
 
 		if (p_thread_mode == LOAD_THREAD_FROM_CURRENT) {
 			// The current thread may happen to be a thread from the pool.
@@ -842,7 +861,8 @@ Ref<ResourceLoader::LoadToken> ResourceLoader::_load_start(const String &p_path,
 				load_task_ptr->thread_id = Thread::get_caller_id();
 			}
 		} else {
-			load_task_ptr->task_id = WorkerThreadPool::get_singleton()->add_native_task(&ResourceLoader::_run_load_task, load_task_ptr);
+			load_task_ptr->task_id = WorkerThreadPool::get_singleton()->add_native_task(&ResourceLoader::_run_load_task_native, load_task_ptr);
+			native_load_tasks.insert(load_task_ptr->task_id, load_token);
 		}
 	} // MutexLock(thread_load_mutex).
 
@@ -1063,17 +1083,9 @@ Ref<Resource> ResourceLoader::_load_complete_inner(LoadToken &p_load_token, Erro
 
 				// The wtp won't let us wait on tasks that are older than us. But ResourceLoader has its own
 				// deadlock detection and prevention in _run_load_task(), rely on that instead.
-				load_task.load_token->reference();
 				_run_load_task(&load_task);
 
 				p_thread_load_lock.temp_relock();
-				load_task.awaited = true;
-				// Mark nested loads with the same task id as awaited.
-				for (KeyValue<String, ResourceLoader::ThreadLoadTask> &E : thread_load_tasks) {
-					if (E.value.task_id == load_task.task_id) {
-						E.value.awaited = true;
-					}
-				}
 
 				DEV_ASSERT(load_task.status == THREAD_LOAD_FAILED || load_task.status == THREAD_LOAD_LOADED);
 			} else if (load_task.need_wait) {
@@ -1117,23 +1129,29 @@ Ref<Resource> ResourceLoader::_load_complete_inner(LoadToken &p_load_token, Erro
 				for (const ThreadLoadTask::ResourceChangedConnection &rcc : load_task_ptr->resource_changed_connections) {
 					load_task_ptr->parent_task->resource_changed_connections.push_back(rcc);
 				}
+				for (const Ref<Resource> &dependency : load_task_ptr->resource_dependencies) {
+					load_task_ptr->parent_task->resource_dependencies.push_back(dependency);
+				}
+				load_task_ptr->resource_changed_connections.clear();
+				load_task_ptr->resource_dependencies.clear();
 				load_task_ptr->connections_propagated = true;
 			}
 		} else {
+			LocalVector<ThreadLoadTask::ResourceChangedConnection> connections = std::move(load_task_ptr->resource_changed_connections);
 			p_thread_load_lock.temp_unlock();
 
 			// A leaf task being awaited => Propagate the resource changed connections.
 			if (Thread::is_main_thread()) {
 				// On the main thread it's safe to migrate the connections to the standard signal mechanism.
-				for (const ThreadLoadTask::ResourceChangedConnection &rcc : load_task_ptr->resource_changed_connections) {
+				for (const ThreadLoadTask::ResourceChangedConnection &rcc : connections) {
 					if (rcc.callable.is_valid()) {
 						rcc.source->connect_changed(rcc.callable, rcc.flags);
 					}
 				}
 			} else {
 				// On non-main threads, we have to queue and call it done when processed.
-				if (!load_task_ptr->resource_changed_connections.is_empty()) {
-					for (const ThreadLoadTask::ResourceChangedConnection &rcc : load_task_ptr->resource_changed_connections) {
+				if (!connections.is_empty()) {
+					for (const ThreadLoadTask::ResourceChangedConnection &rcc : connections) {
 						if (rcc.callable.is_valid()) {
 							MessageQueue::get_main_singleton()->push_callable(callable_mp(rcc.source, &Resource::connect_changed).bind(rcc.callable, rcc.flags));
 						}
@@ -1583,7 +1601,7 @@ void ResourceLoader::clear_translation_remaps() {
 }
 
 void ResourceLoader::clear_thread_load_tasks() {
-	// Bring the thing down as quickly as possible without causing deadlocks or leaks.
+	ERR_FAIL_COND(!Thread::is_main_thread());
 
 	MutexLock thread_load_lock(thread_load_mutex);
 	cleaning_tasks = true;
@@ -1604,7 +1622,7 @@ void ResourceLoader::clear_thread_load_tasks() {
 				}
 			}
 		}
-		if (none_running) {
+		if (none_running && native_load_tasks.is_empty()) {
 			break;
 		}
 
@@ -1613,6 +1631,7 @@ void ResourceLoader::clear_thread_load_tasks() {
 		if (MessageQueue::get_singleton()) {
 			MessageQueue::get_singleton()->flush();
 		}
+		CRASH_COND_MSG(!_clear_finished_load_tasks(), "Resource loader shutdown cannot reclaim an exclusively owned native task.");
 
 		OS::get_singleton()->delay_usec(1000);
 
@@ -1625,10 +1644,13 @@ void ResourceLoader::clear_thread_load_tasks() {
 		DEV_ASSERT(user_token->user_rc > 0 && !user_token->user_path.is_empty());
 		user_token->user_path.clear();
 		user_token->user_rc = 0;
-		user_token->unreference();
+		thread_load_lock.temp_unlock();
+		if (user_token->unreference()) {
+			memdelete(user_token);
+		}
+		thread_load_lock.temp_relock();
 	}
 
-	thread_load_tasks.clear();
 	thread_waiting_on.clear();
 	// yielders is already guaranteed to be empty now
 
@@ -1792,6 +1814,7 @@ template <>
 thread_local SafeBinaryMutex<ResourceLoader::BINARY_MUTEX_TAG>::TLSData SafeBinaryMutex<ResourceLoader::BINARY_MUTEX_TAG>::tls_data(_get_res_loader_mutex());
 SafeBinaryMutex<ResourceLoader::BINARY_MUTEX_TAG> ResourceLoader::thread_load_mutex;
 HashMap<String, ResourceLoader::ThreadLoadTask> ResourceLoader::thread_load_tasks;
+HashMap<WorkerThreadPool::TaskID, Ref<ResourceLoader::LoadToken>> ResourceLoader::native_load_tasks;
 HashMap<int, String> ResourceLoader::thread_waiting_on;
 LocalVector<int> ResourceLoader::yielders;
 

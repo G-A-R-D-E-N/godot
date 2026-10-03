@@ -136,6 +136,7 @@ public:
 		String user_path;
 		uint32_t user_rc = 0; // Having user RC implies regular RC incremented in one, until the user RC reaches zero.
 		ThreadLoadTask *task_if_unregistered = nullptr;
+		bool native_task_finished = false;
 
 		void clear();
 
@@ -196,9 +197,9 @@ private:
 		Ref<Resource> resource;
 		LocalVector<Ref<Resource>> resource_dependencies; // We need to keep these alive for as long as the task is alive at least.
 		ThreadLoadTask *parent_task = nullptr;
+		HashSet<ThreadLoadTask *> child_tasks;
 		HashSet<String> sub_tasks;
 
-		bool awaited : 1; // If it's in the pool, this helps not awaiting from more than one dependent thread.
 		bool need_wait : 1;
 		bool in_progress_check : 1; // Measure against recursion cycles in progress reporting. Cycles are not expected, but can happen due to how it's currently implemented.
 		bool use_sub_threads : 1;
@@ -214,7 +215,6 @@ private:
 		LocalVector<ResourceChangedConnection> resource_changed_connections;
 
 		ThreadLoadTask() :
-				awaited(false),
 				need_wait(true),
 				in_progress_check(false),
 				use_sub_threads(false),
@@ -223,6 +223,9 @@ private:
 				connections_propagated(false) {}
 	};
 	static void _run_load_task(void *p_userdata);
+	static void _run_load_task_native(void *p_userdata);
+	static void _connect_changed(Ref<Resource> p_source, const Callable &p_callable, uint32_t p_flags);
+	static bool _clear_finished_load_tasks();
 
 	static thread_local bool import_thread;
 	static thread_local int load_nesting;
@@ -233,6 +236,7 @@ private:
 	friend SafeBinaryMutex<BINARY_MUTEX_TAG> &_get_res_loader_mutex();
 
 	static HashMap<String, ThreadLoadTask> thread_load_tasks;
+	static HashMap<WorkerThreadPool::TaskID, Ref<LoadToken>> native_load_tasks;
 	static HashMap<int, String> thread_waiting_on;
 	static LocalVector<int> yielders;
 	static bool cleaning_tasks;
