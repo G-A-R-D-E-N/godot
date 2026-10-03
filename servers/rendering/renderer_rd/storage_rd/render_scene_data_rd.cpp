@@ -310,6 +310,7 @@ void RenderSceneDataRD::update_ubo(RID p_uniform_buffer, RSE::ViewportDebugDraw 
 	}
 
 	uniform_buffer = p_uniform_buffer;
+	current_exposure_normalization = ubo.emissive_exposure_normalization;
 	RD::get_singleton()->buffer_update(uniform_buffer, 0, sizeof(UBODATA), &ubo);
 }
 

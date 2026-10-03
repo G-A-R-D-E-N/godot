@@ -1699,6 +1699,14 @@ void fragment_shader(in SceneData scene_data) {
 		}
 		fog = res;
 	}
+#ifdef USE_MULTIVIEW
+	float water_owns_fog = textureLod(sampler2DArray(water_fog_mask, SAMPLER_NEAREST_CLAMP), vec3(screen_uv, ViewIndex), 0.0).r;
+#else
+	float water_owns_fog = textureLod(sampler2DArray(water_fog_mask, SAMPLER_NEAREST_CLAMP), vec3(screen_uv, 0.0), 0.0).r;
+#endif
+	if (water_owns_fog > 0.5) {
+		fog = vec4(0.0, 0.0, 0.0, 1.0);
+	}
 #else
 	// Premultiply by opacity and convert opacity to transmittance to match volumetric fog.
 	fog.rgb *= fog.a;

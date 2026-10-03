@@ -217,7 +217,7 @@ static _FORCE_INLINE_ void store_transform_3x3(const Basis &p_basis, float *p_ar
 	p_array[11] = 0;
 }
 
-void SkyRD::_render_sky(RD::DrawListID p_list, float p_time, RID p_fb, PipelineCacheRD *p_pipeline, RID p_uniform_set, RID p_texture_set, const Projection &p_projection, const Basis &p_orientation, const Vector3 &p_position, float p_luminance_multiplier, float p_brightness_multiplier, float p_border_size) {
+void SkyRD::_render_sky(RD::DrawListID p_list, float p_time, RID p_fb, PipelineCacheRD *p_pipeline, RID p_uniform_set, RID p_texture_set, const Projection &p_projection, const Basis &p_orientation, const Vector3 &p_position, float p_luminance_multiplier, float p_brightness_multiplier, float p_border_size, RID p_fog_override) {
 	SkyPushConstant sky_push_constant;
 
 	memset(&sky_push_constant, 0, sizeof(SkyPushConstant));
@@ -252,7 +252,9 @@ void SkyRD::_render_sky(RD::DrawListID p_list, float p_time, RID p_fb, PipelineC
 		}
 		RD::get_singleton()->draw_list_bind_uniform_set(draw_list, p_texture_set, SKY_SET_TEXTURES);
 		// Fog uniform set can be invalidated before drawing, so validate at draw time
-		if (sky_scene_state.fog_uniform_set.is_valid() && RD::get_singleton()->uniform_set_is_valid(sky_scene_state.fog_uniform_set)) {
+		if (p_fog_override.is_valid()) {
+			RD::get_singleton()->draw_list_bind_uniform_set(draw_list, p_fog_override, SKY_SET_FOG);
+		} else if (sky_scene_state.fog_uniform_set.is_valid() && RD::get_singleton()->uniform_set_is_valid(sky_scene_state.fog_uniform_set)) {
 			RD::get_singleton()->draw_list_bind_uniform_set(draw_list, sky_scene_state.fog_uniform_set, SKY_SET_FOG);
 		} else {
 			RD::get_singleton()->draw_list_bind_uniform_set(draw_list, sky_scene_state.default_fog_uniform_set, SKY_SET_FOG);
@@ -903,6 +905,7 @@ void sky() {
 			uniforms.push_back(u);
 		}
 
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 1, texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_BLACK)));
 		sky_scene_state.default_fog_uniform_set = RD::get_singleton()->uniform_set_create(uniforms, sky_shader.default_shader_rd, SKY_SET_FOG);
 	}
 
@@ -1502,7 +1505,7 @@ void SkyRD::update_res_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, RID p
 	RD::get_singleton()->draw_command_end_label(); // Setup Sky resolution buffers
 }
 
-void SkyRD::draw_sky(RD::DrawListID p_draw_list, Ref<RenderSceneBuffersRD> p_render_buffers, RID p_env, RID p_fb, double p_time, float p_luminance_multiplier, float p_brightness_multiplier) {
+void SkyRD::draw_sky(RD::DrawListID p_draw_list, Ref<RenderSceneBuffersRD> p_render_buffers, RID p_env, RID p_fb, double p_time, float p_luminance_multiplier, float p_brightness_multiplier, RID p_water_fog_mask) {
 	ERR_FAIL_COND(p_render_buffers.is_null());
 	ERR_FAIL_COND(p_env.is_null());
 
@@ -1540,7 +1543,21 @@ void SkyRD::draw_sky(RD::DrawListID p_draw_list, Ref<RenderSceneBuffersRD> p_ren
 		texture_uniform_set = sky_scene_state.get_fog_only_texture_uniform_set(default_shader_rd, is_multiview);
 	}
 
-	_render_sky(p_draw_list, p_time, p_fb, pipeline, material_data->uniform_set, texture_uniform_set, projection, sky_transform, sky_scene_state.cam_transform.origin, p_luminance_multiplier, p_brightness_multiplier, border_size);
+	RID fog_override;
+	if (p_water_fog_mask.is_valid() && RD::get_singleton()->texture_is_valid(p_water_fog_mask)) {
+		RID volume = TextureStorage::get_singleton()->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_3D_WHITE);
+		if (p_render_buffers->has_custom_data(RB_SCOPE_FOG)) {
+			Ref<Fog::VolumetricFog> fog = p_render_buffers->get_custom_data(RB_SCOPE_FOG);
+			if (fog.is_valid()) {
+				volume = fog->fog_map;
+			}
+		}
+		RD::Uniform u_volume(RD::UNIFORM_TYPE_TEXTURE, 0, volume);
+		RD::Uniform u_mask(RD::UNIFORM_TYPE_TEXTURE, 1, p_water_fog_mask);
+		fog_override = UniformSetCacheRD::get_singleton()->get_cache(default_shader_rd, SKY_SET_FOG, u_volume, u_mask);
+	}
+
+	_render_sky(p_draw_list, p_time, p_fb, pipeline, material_data->uniform_set, texture_uniform_set, projection, sky_transform, sky_scene_state.cam_transform.origin, p_luminance_multiplier, p_brightness_multiplier, border_size, fog_override);
 }
 
 void SkyRD::invalidate_sky(Sky *p_sky) {

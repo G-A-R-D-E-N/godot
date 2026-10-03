@@ -38,7 +38,26 @@
 class RenderDataRD : public RenderData {
 	GDCLASS(RenderDataRD, RenderData);
 
+protected:
+	static void _bind_methods();
+
 public:
+	static bool supports_water_temporal_alpha() { return true; }
+	Dictionary get_water_lighting_data() const;
+	bool commit_water_color() const;
+	bool set_water_fog_mask(RID p_mask);
+	Dictionary get_water_fog_data() const;
+	Dictionary get_water_temporal_info() const;
+	RID water_fog_mask;
+	bool set_water_temporal_data(uint32_t p_view, RID p_reactivity, bool p_reset_history = false);
+	RID water_temporal_reactivity[RendererSceneRender::MAX_RENDER_VIEWS];
+	bool water_reset_history = false;
+
+	bool water_lighting_ready = false;
+	uint32_t water_omni_light_count = 0;
+	uint32_t water_spot_light_count = 0;
+	uint32_t water_area_light_count = 0;
+
 	// Access methods to expose data externally
 	virtual Ref<RenderSceneBuffers> get_render_scene_buffers() const override { return render_buffers; }
 	virtual RenderSceneData *get_render_scene_data() const override { return scene_data; }
