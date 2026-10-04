@@ -1092,7 +1092,7 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 
 	params.fog_frustum_end = fog_end;
 
-	Color ambient_color = RendererSceneRenderRD::get_singleton()->environment_get_ambient_light(p_settings.env).srgb_to_linear();
+	Color ambient_color = RendererSceneRenderRD::get_singleton()->environment_get_ambient_light(p_settings.env).srgb_to_linear() * p_settings.exposure_normalization;
 	params.ambient_color[0] = ambient_color.r;
 	params.ambient_color[1] = ambient_color.g;
 	params.ambient_color[2] = ambient_color.b;
@@ -1105,9 +1105,10 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 	params.directional_light_count = p_directional_light_count;
 
 	Color emission = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_emission(p_settings.env).srgb_to_linear();
-	params.base_emission[0] = emission.r * RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_emission_energy(p_settings.env);
-	params.base_emission[1] = emission.g * RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_emission_energy(p_settings.env);
-	params.base_emission[2] = emission.b * RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_emission_energy(p_settings.env);
+	float emission_energy = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_emission_energy(p_settings.env) * p_settings.exposure_normalization;
+	params.base_emission[0] = emission.r * emission_energy;
+	params.base_emission[1] = emission.g * emission_energy;
+	params.base_emission[2] = emission.b * emission_energy;
 	params.base_density = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_density(p_settings.env);
 
 	Color base_scattering = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_scattering(p_settings.env).srgb_to_linear();

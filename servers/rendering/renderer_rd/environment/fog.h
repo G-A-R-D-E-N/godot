@@ -362,6 +362,7 @@ public:
 		RID directional_shadow_depth;
 		RID directional_light_buffer;
 		bool reset_history;
+		float exposure_normalization;
 
 		// Objects related to our render buffer
 		Ref<VolumetricFog> vfog;
