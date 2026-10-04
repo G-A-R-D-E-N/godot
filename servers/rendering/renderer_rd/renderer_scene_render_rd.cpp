@@ -1164,6 +1164,10 @@ void RendererSceneRenderRD::_render_buffers_debug_draw(const RenderDataRD *p_ren
 
 		debug_effects->draw_motion_vectors(velocity, depth, dest_fb, p_render_data->scene_data->cam_projection, p_render_data->scene_data->cam_transform, p_render_data->scene_data->prev_cam_projection, p_render_data->scene_data->prev_cam_transform, resolution);
 	}
+
+	if (debug_draw == RSE::VIEWPORT_DEBUG_DRAW_LINEAR_DEPTH && rb->has_depth_texture()) {
+		debug_effects->draw_linear_depth(rb->get_depth_texture(0), texture_storage->render_target_get_rd_framebuffer(render_target), p_render_data->scene_data->view_projection[0], p_render_data->scene_data->z_near, p_render_data->scene_data->z_far);
+	}
 }
 
 RID RendererSceneRenderRD::render_buffers_get_default_voxel_gi_buffer() {

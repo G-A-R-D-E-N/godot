@@ -4673,7 +4673,9 @@ void Node3DEditorViewport::_menu_option(int p_option) {
 		case VIEW_DISPLAY_DEBUG_FALLBACK_SOURCE_SPECULAR:
 		case VIEW_DISPLAY_DEBUG_FALLBACK_SOURCE_DIFFUSE:
 		case VIEW_DISPLAY_DEBUG_REJECTED_HISTORY:
-		case VIEW_DISPLAY_DEBUG_FOG_HISTORY_CLAMP: {
+		case VIEW_DISPLAY_DEBUG_FOG_HISTORY_CLAMP:
+		case VIEW_DISPLAY_LINEAR_DEPTH:
+		case VIEW_DISPLAY_DEBUG_SSR_HIT_DISTANCE: {
 			static const int display_options[] = {
 				VIEW_DISPLAY_NORMAL,
 				VIEW_DISPLAY_WIREFRAME,
@@ -4721,6 +4723,8 @@ void Node3DEditorViewport::_menu_option(int p_option) {
 				VIEW_DISPLAY_DEBUG_FALLBACK_SOURCE_DIFFUSE,
 				VIEW_DISPLAY_DEBUG_REJECTED_HISTORY,
 				VIEW_DISPLAY_DEBUG_FOG_HISTORY_CLAMP,
+				VIEW_DISPLAY_LINEAR_DEPTH,
+				VIEW_DISPLAY_DEBUG_SSR_HIT_DISTANCE,
 				VIEW_MAX
 			};
 			static const Viewport::DebugDraw debug_draw_modes[] = {
@@ -4770,6 +4774,8 @@ void Node3DEditorViewport::_menu_option(int p_option) {
 				Viewport::DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE,
 				Viewport::DEBUG_DRAW_REJECTED_HISTORY,
 				Viewport::DEBUG_DRAW_FOG_HISTORY_CLAMP,
+				Viewport::DEBUG_DRAW_LINEAR_DEPTH,
+				Viewport::DEBUG_DRAW_SSR_HIT_DISTANCE,
 			};
 
 			for (int idx = 0; display_options[idx] != VIEW_MAX; idx++) {
@@ -7106,6 +7112,8 @@ Node3DEditorViewport::Node3DEditorViewport(Node3DEditor *p_spatial_editor, int p
 			TTRC("Displays the radiance SSIL gathers in the next frame: direct diffuse light plus emission weighted by EMISSION_BOUNCE_WEIGHT. Requires SSIL to be enabled in Environment."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Reflection Source"), VIEW_DISPLAY_DEBUG_REFLECTION_SOURCE, SupportedRenderingMethods::FORWARD_PLUS,
 			TTRC("Displays the radiance SSR samples in the next frame: the opaque image without the SSR term and without fog. Requires SSR to be enabled in Environment."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("SSR Hit Distance"), VIEW_DISPLAY_DEBUG_SSR_HIT_DISTANCE, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays the distance to the stochastic screen-space reflection hits as d / (d + 2) for d in meters (black = no hit). Requires SSR in Environment with the Stochastic backend in the project settings."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Persistent AO"), VIEW_DISPLAY_DEBUG_PERSISTENT_AO, SupportedRenderingMethods::FORWARD_PLUS,
 			TTRC("Displays the material ambient occlusion each surface writes (the AO built-in, including decals), before screen-space AO."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Fallback Source (Specular)"), VIEW_DISPLAY_DEBUG_FALLBACK_SOURCE_SPECULAR, SupportedRenderingMethods::FORWARD_PLUS,
@@ -7152,6 +7160,8 @@ Node3DEditorViewport::Node3DEditorViewport(Node3DEditor *p_spatial_editor, int p
 			TTRC("Represents occluders with black pixels. Requires occlusion culling to be enabled to have a visible effect."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Motion Vectors"), VIEW_DISPLAY_MOTION_VECTORS, SupportedRenderingMethods::FORWARD_PLUS,
 			TTRC("Represents motion vectors with colored lines in the direction of motion. Gray dots represent areas with no per-pixel motion."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Linear Depth"), VIEW_DISPLAY_LINEAR_DEPTH, SupportedRenderingMethods::FORWARD_PLUS_MOBILE,
+			TTRC("Displays the view-space depth of the depth buffer on a logarithmic scale: white at the camera's near plane, black at the far plane and for the sky."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Internal Buffer"), VIEW_DISPLAY_INTERNAL_BUFFER, SupportedRenderingMethods::FORWARD_PLUS_MOBILE,
 			TTRC("Shows the scene rendered in linear colorspace before any tonemapping or post-processing."));
 	view_display_menu->get_popup()->add_submenu_node_item(TTRC("Display Advanced..."), display_submenu, VIEW_DISPLAY_ADVANCED);

@@ -63,6 +63,15 @@ DebugEffects::DebugEffects() {
 
 		motion_vectors.pipeline.setup(motion_vectors.shader.version_get_shader(motion_vectors.shader_version, 0), RD::RENDER_PRIMITIVE_TRIANGLES, RD::PipelineRasterizationState(), RD::PipelineMultisampleState(), RD::PipelineDepthStencilState(), RD::PipelineColorBlendState::create_blend(), 0);
 	}
+
+	{
+		Vector<String> modes;
+		modes.push_back("");
+
+		linear_depth.shader.initialize(modes);
+		linear_depth.shader_version = linear_depth.shader.version_create();
+		linear_depth.pipeline.setup(linear_depth.shader.version_get_shader(linear_depth.shader_version, 0), RD::RENDER_PRIMITIVE_TRIANGLES, RD::PipelineRasterizationState(), RD::PipelineMultisampleState(), RD::PipelineDepthStencilState(), RD::PipelineColorBlendState::create_disabled(), 0);
+	}
 }
 
 void DebugEffects::_create_frustum_arrays() {
@@ -177,6 +186,7 @@ DebugEffects::~DebugEffects() {
 	}
 
 	motion_vectors.shader.version_free(motion_vectors.shader_version);
+	linear_depth.shader.version_free(linear_depth.shader_version);
 }
 
 void DebugEffects::draw_shadow_frustum(RID p_light, const Projection &p_cam_projection, const Transform3D &p_cam_transform, RID p_dest_fb, const Rect2 p_rect) {
@@ -376,5 +386,30 @@ void DebugEffects::draw_motion_vectors(RID p_velocity, RID p_depth, RID p_dest_f
 	RD::get_singleton()->draw_list_draw(draw_list, false, 1u, 3u);
 #endif
 
+	RD::get_singleton()->draw_list_end();
+}
+
+void DebugEffects::draw_linear_depth(RID p_depth, RID p_dest_fb, const Projection &p_projection, float p_z_near, float p_z_far) {
+	MaterialStorage *material_storage = MaterialStorage::get_singleton();
+	ERR_FAIL_NULL(material_storage);
+	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
+	ERR_FAIL_NULL(uniform_set_cache);
+
+	RID sampler = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
+	RD::Uniform u_depth(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ sampler, p_depth }));
+
+	Projection correction;
+	correction.set_depth_correction(true);
+	LinearDepthPushConstant push_constant = {};
+	RendererRD::MaterialStorage::store_camera((correction * p_projection).inverse(), push_constant.inv_projection);
+	push_constant.z_near = p_z_near;
+	push_constant.z_far = p_z_far;
+
+	RID shader = linear_depth.shader.version_get_shader(linear_depth.shader_version, 0);
+	RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(p_dest_fb);
+	RD::get_singleton()->draw_list_bind_render_pipeline(draw_list, linear_depth.pipeline.get_render_pipeline(RD::INVALID_ID, RD::get_singleton()->framebuffer_get_format(p_dest_fb), false, RD::get_singleton()->draw_list_get_current_pass()));
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 0, u_depth), 0);
+	RD::get_singleton()->draw_list_set_push_constant(draw_list, &push_constant, sizeof(LinearDepthPushConstant));
+	RD::get_singleton()->draw_list_draw(draw_list, false, 1u, 3u);
 	RD::get_singleton()->draw_list_end();
 }
