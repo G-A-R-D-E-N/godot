@@ -2506,7 +2506,9 @@ void fragment_shader(in SceneData scene_data) {
 
 			ssr_confidence = ssr.a;
 			// Apply fade when approaching 0.7 roughness to smoothen the harsh cutoff in the main SSR trace pass.
-			ssr *= smoothstep(0.0, 1.0, 1.0 - clamp((roughness - 0.6) / (0.7 - 0.6), 0.0, 1.0));
+			if (!bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_STOCHASTIC_SSR)) {
+				ssr *= smoothstep(0.0, 1.0, 1.0 - clamp((roughness - 0.6) / (0.7 - 0.6), 0.0, 1.0));
+			}
 
 			// Alpha is premultiplied.
 			indirect_specular_light = indirect_specular_light * (1.0 - ssr.a) + ssr.rgb;
@@ -3399,7 +3401,12 @@ void fragment_shader(in SceneData scene_data) {
 	bounce_source = vec4(diffuse_light + output_emission * emission_bounce_weight, 1.0);
 #endif
 #ifdef MODE_REFLECTION_SOURCE
-	reflection_source = vec4(output_emission + ambient_light + diffuse_light + direct_specular_light + source_specular_light, 1.0);
+#ifdef DEPTH_USED
+	float source_depth = gl_FragDepth;
+#else
+	float source_depth = gl_FragCoord.z;
+#endif
+	reflection_source = vec4(output_emission + ambient_light + diffuse_light + direct_specular_light + source_specular_light, (source_depth * projection_matrix[3][3] - projection_matrix[3][2]) / (source_depth * projection_matrix[2][3] - projection_matrix[2][2]));
 #endif
 
 #ifdef MODE_SEPARATE_SPECULAR

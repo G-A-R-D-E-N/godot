@@ -37,6 +37,12 @@ layout(push_constant, std430) uniform Params {
 }
 params;
 
+#ifdef VALIDATE_SOURCE
+layout(set = 0, binding = 7) uniform sampler2D source_depth_previous;
+
+#include "screen_space_source_validation_inc.glsl"
+#endif
+
 vec2 compute_cell_count(int level) {
 	int cell_count_x = max(1, params.screen_size.x >> level);
 	int cell_count_y = max(1, params.screen_size.y >> level);
@@ -284,6 +290,15 @@ void main() {
 		}
 
 		validity *= fade * margin_blend;
+
+#ifdef VALIDATE_SOURCE
+		if (validity > 0.0 && !params.orthogonal) {
+			vec4 hit_reprojected = scene_data.reprojection[params.view_index] * vec4(cur_screen_pos.xy * 2.0 - 1.0, hit_depth, 1.0);
+			if (!source_sample_valid(source_depth_previous, hit_reprojected, -hit_pos.z, vec2(params.screen_size))) {
+				validity = 0.0;
+			}
+		}
+#endif
 
 		if (validity > 0.0) {
 			color = vec4(textureLod(source_last_frame, reprojected_pos.xy, 0).xyz, 1.0) * validity;
