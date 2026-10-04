@@ -158,6 +158,10 @@ bool sc_dithered_instance_fade() {
 	return ((sc_packed_1() >> 8) & 1U) != 0;
 }
 
+uint sc_debug_lighting_component() {
+	return (sc_packed_1() >> 9) & 15U;
+}
+
 float sc_luminance_multiplier() {
 	// Not used in clustered renderer but we share some code with the mobile renderer that requires this.
 	return 1.0;

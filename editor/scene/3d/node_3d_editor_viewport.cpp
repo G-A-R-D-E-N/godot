@@ -4658,7 +4658,17 @@ void Node3DEditorViewport::_menu_option(int p_option) {
 		case VIEW_DISPLAY_MOTION_VECTORS:
 		case VIEW_DISPLAY_INTERNAL_BUFFER:
 		case VIEW_DISPLAY_DEBUG_CONTACT_SHADOWS:
-		case VIEW_DISPLAY_DEBUG_BENT_NORMALS: {
+		case VIEW_DISPLAY_DEBUG_BENT_NORMALS:
+		case VIEW_DISPLAY_DEBUG_DIRECT_DIFFUSE:
+		case VIEW_DISPLAY_DEBUG_DIRECT_SPECULAR:
+		case VIEW_DISPLAY_DEBUG_INDIRECT_DIFFUSE:
+		case VIEW_DISPLAY_DEBUG_INDIRECT_SPECULAR:
+		case VIEW_DISPLAY_DEBUG_EMISSION:
+		case VIEW_DISPLAY_DEBUG_FOG_TRANSMITTANCE:
+		case VIEW_DISPLAY_DEBUG_FOG_INSCATTER:
+		case VIEW_DISPLAY_DEBUG_SSR_CONFIDENCE:
+		case VIEW_DISPLAY_DEBUG_BOUNCE_SOURCE:
+		case VIEW_DISPLAY_DEBUG_REFLECTION_SOURCE: {
 			static const int display_options[] = {
 				VIEW_DISPLAY_NORMAL,
 				VIEW_DISPLAY_WIREFRAME,
@@ -4691,6 +4701,16 @@ void Node3DEditorViewport::_menu_option(int p_option) {
 				VIEW_DISPLAY_INTERNAL_BUFFER,
 				VIEW_DISPLAY_DEBUG_CONTACT_SHADOWS,
 				VIEW_DISPLAY_DEBUG_BENT_NORMALS,
+				VIEW_DISPLAY_DEBUG_DIRECT_DIFFUSE,
+				VIEW_DISPLAY_DEBUG_DIRECT_SPECULAR,
+				VIEW_DISPLAY_DEBUG_INDIRECT_DIFFUSE,
+				VIEW_DISPLAY_DEBUG_INDIRECT_SPECULAR,
+				VIEW_DISPLAY_DEBUG_EMISSION,
+				VIEW_DISPLAY_DEBUG_FOG_TRANSMITTANCE,
+				VIEW_DISPLAY_DEBUG_FOG_INSCATTER,
+				VIEW_DISPLAY_DEBUG_SSR_CONFIDENCE,
+				VIEW_DISPLAY_DEBUG_BOUNCE_SOURCE,
+				VIEW_DISPLAY_DEBUG_REFLECTION_SOURCE,
 				VIEW_MAX
 			};
 			static const Viewport::DebugDraw debug_draw_modes[] = {
@@ -4725,6 +4745,16 @@ void Node3DEditorViewport::_menu_option(int p_option) {
 				Viewport::DEBUG_DRAW_INTERNAL_BUFFER,
 				Viewport::DEBUG_DRAW_CONTACT_SHADOWS,
 				Viewport::DEBUG_DRAW_BENT_NORMALS,
+				Viewport::DEBUG_DRAW_DIRECT_DIFFUSE,
+				Viewport::DEBUG_DRAW_DIRECT_SPECULAR,
+				Viewport::DEBUG_DRAW_INDIRECT_DIFFUSE,
+				Viewport::DEBUG_DRAW_INDIRECT_SPECULAR,
+				Viewport::DEBUG_DRAW_EMISSION,
+				Viewport::DEBUG_DRAW_FOG_TRANSMITTANCE,
+				Viewport::DEBUG_DRAW_FOG_INSCATTER,
+				Viewport::DEBUG_DRAW_SSR_CONFIDENCE,
+				Viewport::DEBUG_DRAW_BOUNCE_SOURCE,
+				Viewport::DEBUG_DRAW_REFLECTION_SOURCE,
 			};
 
 			for (int idx = 0; display_options[idx] != VIEW_MAX; idx++) {
@@ -7044,6 +7074,27 @@ Node3DEditorViewport::Node3DEditorViewport(Node3DEditor *p_spatial_editor, int p
 			TTRC("Displays the GTAO bent normal buffer. Requires SSAO with the GTAO backend and bent normals enabled in the project settings."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Contact Shadows"), VIEW_DISPLAY_DEBUG_CONTACT_SHADOWS, SupportedRenderingMethods::FORWARD_PLUS,
 			TTRC("Displays the combined screen-space contact shadow visibility of all lights. Requires contact shadows to be enabled in the project settings."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("SSR Confidence"), VIEW_DISPLAY_DEBUG_SSR_CONFIDENCE, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays the confidence of the screen-space reflection hit at each pixel, the alpha of the SSR buffer (white = the hit replaces the probe or sky reflection). Requires SSR to be enabled in Environment to have a visible effect."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Bounce Source"), VIEW_DISPLAY_DEBUG_BOUNCE_SOURCE, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays the radiance SSIL gathers in the next frame: direct diffuse light plus emission weighted by EMISSION_BOUNCE_WEIGHT. Requires SSIL to be enabled in Environment."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Reflection Source"), VIEW_DISPLAY_DEBUG_REFLECTION_SOURCE, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays the radiance SSR samples in the next frame: the opaque image without the SSR term and without fog. Requires SSR to be enabled in Environment."));
+	display_submenu->add_separator();
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Direct Diffuse"), VIEW_DISPLAY_DEBUG_DIRECT_DIFFUSE, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays only the diffuse light from lights."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Direct Specular"), VIEW_DISPLAY_DEBUG_DIRECT_SPECULAR, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays only the specular light from lights."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Indirect Diffuse"), VIEW_DISPLAY_DEBUG_INDIRECT_DIFFUSE, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays only the ambient diffuse light, including SSIL and GI."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Indirect Specular"), VIEW_DISPLAY_DEBUG_INDIRECT_SPECULAR, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays only the reflected light from the sky, reflection probes, GI and SSR."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Emission"), VIEW_DISPLAY_DEBUG_EMISSION, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays only the emission of materials."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Fog Transmittance"), VIEW_DISPLAY_DEBUG_FOG_TRANSMITTANCE, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays the fraction of each surface's light that passes through fog (white = no fog)."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Fog Inscatter"), VIEW_DISPLAY_DEBUG_FOG_INSCATTER, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays the light that fog adds in front of each surface."));
 	display_submenu->add_separator();
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("VoxelGI/SDFGI Buffer"), VIEW_DISPLAY_DEBUG_GI_BUFFER, SupportedRenderingMethods::FORWARD_PLUS,
 			TTRC("Requires SDFGI or VoxelGI to be enabled to have a visible effect."));

@@ -1057,6 +1057,28 @@ float decal_coverage;
 #define DIRECT_DIFFUSE_WEIGHTED
 #endif
 
+#ifndef MODE_RENDER_DEPTH
+vec3 debug_lighting_component(uint p_component, vec3 p_direct_diffuse, vec3 p_direct_specular, vec3 p_indirect_diffuse, vec3 p_indirect_specular, vec3 p_emission, vec4 p_fog, float p_ssr_confidence) {
+	switch (p_component) {
+		case 1u:
+			return p_direct_diffuse;
+		case 2u:
+			return p_direct_specular;
+		case 3u:
+			return p_indirect_diffuse;
+		case 4u:
+			return p_indirect_specular;
+		case 5u:
+			return p_emission;
+		case 6u:
+			return vec3(p_fog.a);
+		case 7u:
+			return p_fog.rgb;
+	}
+	return vec3(p_ssr_confidence);
+}
+#endif
+
 #if !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED)
 
 // Default to SPECULAR_SCHLICK_GGX.
@@ -1254,6 +1276,7 @@ void fragment_shader(in SceneData scene_data) {
 	vec2 anisotropy_flow = vec2(1.0, 0.0);
 	vec3 energy_compensation = vec3(1.0);
 	vec4 fog = vec4(0.0, 0.0, 0.0, 1.0);
+	float ssr_confidence = 0.0;
 #if defined(CUSTOM_RADIANCE_USED)
 	vec4 custom_radiance = vec4(0.0);
 #endif
@@ -2449,6 +2472,7 @@ void fragment_shader(in SceneData scene_data) {
 				ssr.rgb /= implementation_data.ss_exposure / max(texelFetch(sampler2D(ss_exposure_texture, SAMPLER_NEAREST_CLAMP), ivec2(0, 0), 0).r, 1e-6);
 			}
 
+			ssr_confidence = ssr.a;
 			// Apply fade when approaching 0.7 roughness to smoothen the harsh cutoff in the main SSR trace pass.
 			ssr *= smoothstep(0.0, 1.0, 1.0 - clamp((roughness - 0.6) / (0.7 - 0.6), 0.0, 1.0));
 
@@ -3363,6 +3387,11 @@ void fragment_shader(in SceneData scene_data) {
 	specular_buffer.rgb = specular_buffer.rgb * fog.a;
 #endif //!FOG_DISABLED
 
+	if (sc_debug_lighting_component() != 0u) {
+		diffuse_buffer.rgb = debug_lighting_component(sc_debug_lighting_component(), diffuse_light, direct_specular_light, ambient_light, indirect_specular_light, output_emission, fog, ssr_confidence);
+		specular_buffer.rgb = vec3(0.0);
+	}
+
 #else //MODE_SEPARATE_SPECULAR
 
 	alpha *= scene_data.pass_alpha_multiplier;
@@ -3377,6 +3406,10 @@ void fragment_shader(in SceneData scene_data) {
 #ifndef FOG_DISABLED
 	frag_color.rgb = frag_color.rgb * fog.a + fog.rgb;
 #endif //!FOG_DISABLED
+
+	if (sc_debug_lighting_component() != 0u) {
+		frag_color.rgb = debug_lighting_component(sc_debug_lighting_component(), diffuse_light, direct_specular_light, ambient_light, indirect_specular_light, output_emission, fog, ssr_confidence);
+	}
 
 #if defined(PREMUL_ALPHA_USED) && !defined(MODE_RENDER_DEPTH)
 	frag_color.rgb *= premul_alpha;
