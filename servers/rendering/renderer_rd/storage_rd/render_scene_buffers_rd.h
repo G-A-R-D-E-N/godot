@@ -56,6 +56,8 @@
 #define RB_TEX_DEPTH_MSAA_SUBSAMPLED SNAME("depth_msaa_subsampled")
 #define RB_TEX_VELOCITY SNAME("velocity")
 #define RB_TEX_VELOCITY_MSAA SNAME("velocity_msaa")
+#define RB_TEX_REACTIVE SNAME("reactive")
+#define RB_TEX_REACTIVE_MSAA SNAME("reactive_msaa")
 
 #define RB_TEX_BLUR_0 SNAME("blur_0")
 #define RB_TEX_BLUR_1 SNAME("blur_1")
@@ -339,6 +341,7 @@ public:
 	RID get_velocity_buffer(bool p_get_msaa, uint32_t p_layer);
 
 	RID get_velocity_depth_buffer();
+	RID get_reactive_buffer(bool p_get_msaa, uint32_t p_layer = 0, uint32_t p_layers = 1);
 
 	// Samplers adjusted with the mipmap bias that is best fit for the configuration of these render buffers.
 
@@ -367,6 +370,7 @@ public:
 	static uint32_t get_depth_usage_bits(bool p_resolve, bool p_msaa, bool p_storage);
 	static bool get_temporal_metadata();
 	static RD::DataFormat get_velocity_format();
+	static uint32_t get_reactive_usage_bits(bool p_msaa);
 	static uint32_t get_velocity_usage_bits(bool p_resolve, bool p_msaa, bool p_storage);
 	static RD::DataFormat get_vrs_format();
 	static uint32_t get_vrs_usage_bits();

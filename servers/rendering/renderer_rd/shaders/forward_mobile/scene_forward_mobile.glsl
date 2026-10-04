@@ -1164,6 +1164,9 @@ void main() {
 #if defined(EMISSION_BOUNCE_WEIGHT_USED)
 	float emission_bounce_weight = 1.0;
 #endif
+#if defined(TEMPORAL_REACTIVE_USED)
+	float temporal_reactive = 0.0;
+#endif
 #ifdef TEMPORAL_METADATA_USED
 	float temporal_mask = 0.0;
 	float temporal_id = 0.0;

@@ -1056,6 +1056,10 @@ layout(location = 3) out vec4 bounce_source;
 layout(location = 4) out vec4 reflection_source;
 #endif
 
+#ifdef MOTION_VECTORS
+layout(location = 5) out float reactive_output;
+#endif
+
 #include "../scene_forward_aa_inc.glsl"
 
 #if !defined(MODE_RENDER_DEPTH) && (defined(INDIRECT_DIFFUSE_WEIGHT_USED) || defined(INDIRECT_SPECULAR_WEIGHT_USED) || defined(INDIRECT_COAT_USED) || defined(DECAL_COVERAGE_USED))
@@ -1316,6 +1320,7 @@ void fragment_shader(in SceneData scene_data) {
 	vec3 direct_diffuse_weight = vec3(1.0);
 #endif
 	float emission_bounce_weight = 1.0;
+	float temporal_reactive = 0.0;
 #if defined(TEMPORAL_METADATA) || defined(TEMPORAL_METADATA_USED)
 	float temporal_mask = sc_dithered_instance_fade() ? 1.0 : 0.0;
 	float temporal_id = 0.0;
@@ -3405,7 +3410,7 @@ void fragment_shader(in SceneData scene_data) {
 
 #ifdef MODE_UNSHADED
 	diffuse_buffer = vec4(albedo.rgb, 0.0);
-	specular_buffer = vec4(0.0);
+	specular_buffer = vec4(vec3(0.0), clamp(temporal_reactive, 0.0, 1.0) * (1.0 - scene_data.pass_alpha_multiplier));
 
 #else
 
@@ -3413,7 +3418,7 @@ void fragment_shader(in SceneData scene_data) {
 	sss_strength = -sss_strength;
 #endif
 	diffuse_buffer = vec4(emission + diffuse_light + ambient_light, sss_strength);
-	specular_buffer = vec4(direct_specular_light + indirect_specular_light, metallic);
+	specular_buffer = vec4(direct_specular_light + indirect_specular_light, clamp(temporal_reactive, 0.0, 1.0) * (1.0 - scene_data.pass_alpha_multiplier));
 #endif
 
 #ifndef FOG_DISABLED
@@ -3428,7 +3433,7 @@ void fragment_shader(in SceneData scene_data) {
 
 #else //MODE_SEPARATE_SPECULAR
 
-	alpha *= scene_data.pass_alpha_multiplier;
+	alpha = alpha * scene_data.pass_alpha_multiplier + clamp(temporal_reactive, 0.0, 1.0) * (1.0 - scene_data.pass_alpha_multiplier);
 
 #ifdef MODE_UNSHADED
 	frag_color = vec4(albedo, alpha);
@@ -3480,6 +3485,7 @@ void fragment_shader(in SceneData scene_data) {
 #else
 	motion_vector = prev_position_uv - position_uv;
 #endif
+	reactive_output = clamp(temporal_reactive, 0.0, 1.0);
 #endif
 #if defined(DEPTH_USED) && !defined(MODE_RENDER_DEPTH)
 	gl_FragDepth = min(gl_FragDepth * 1.00001, 1.0);

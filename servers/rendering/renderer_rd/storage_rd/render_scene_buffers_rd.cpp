@@ -739,6 +739,17 @@ void RenderSceneBuffersRD::ensure_velocity() {
 			create_texture(RB_SCOPE_BUFFERS, RB_TEX_VELOCITY_MSAA, get_velocity_format(), get_velocity_usage_bits(false, msaa, can_be_storage), texture_samples, Size2i(), 0, 1, true, true);
 		}
 	}
+	if (!has_texture(RB_SCOPE_BUFFERS, RB_TEX_REACTIVE)) {
+		const bool msaa = msaa_3d != RSE::VIEWPORT_MSAA_DISABLED;
+		create_texture(RB_SCOPE_BUFFERS, RB_TEX_REACTIVE, RD::DATA_FORMAT_R8_UNORM, get_reactive_usage_bits(false));
+		if (msaa) {
+			create_texture(RB_SCOPE_BUFFERS, RB_TEX_REACTIVE_MSAA, RD::DATA_FORMAT_R8_UNORM, get_reactive_usage_bits(true), texture_samples, Size2i(), 0, 1, true, true);
+		}
+	}
+}
+
+RID RenderSceneBuffersRD::get_reactive_buffer(bool p_get_msaa, uint32_t p_layer, uint32_t p_layers) {
+	return get_texture_slice(RB_SCOPE_BUFFERS, p_get_msaa ? RB_TEX_REACTIVE_MSAA : RB_TEX_REACTIVE, p_layer, 0, p_layers);
 }
 
 bool RenderSceneBuffersRD::has_velocity_buffer(bool p_has_msaa) {
@@ -856,6 +867,10 @@ RD::DataFormat RenderSceneBuffersRD::get_velocity_format() {
 
 uint32_t RenderSceneBuffersRD::get_velocity_usage_bits(bool p_resolve, bool p_msaa, bool p_storage) {
 	return get_color_usage_bits(p_resolve, p_msaa, p_storage);
+}
+
+uint32_t RenderSceneBuffersRD::get_reactive_usage_bits(bool p_msaa) {
+	return RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT | (p_msaa ? RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT : 0);
 }
 
 RD::DataFormat RenderSceneBuffersRD::get_vrs_format() {
