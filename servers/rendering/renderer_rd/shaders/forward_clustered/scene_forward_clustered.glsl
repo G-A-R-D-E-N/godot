@@ -2317,6 +2317,17 @@ void fragment_shader(in SceneData scene_data) {
 
 	//finalize ambient light here
 	{
+		float ambient_occlusion = ao;
+		vec4 ssil = vec4(0.0);
+		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSIL)) {
+#ifdef USE_MULTIVIEW
+			ssil = textureLod(sampler2DArray(ssil_buffer, SAMPLER_LINEAR_CLAMP), vec3(screen_uv, ViewIndex), 0.0);
+#else
+			ssil = textureLod(sampler2D(ssil_buffer, SAMPLER_LINEAR_CLAMP), screen_uv, 0.0);
+#endif
+			ambient_occlusion = min(ao, 1.0 - ssil.a);
+		}
+		vec3 policy_ambient_light = ambient_light;
 #ifdef MULTI_BOUNCE_OCCLUSION_ENABLED
 		// Apply multi-bounce ambient-occlusion approximation to ambient light:
 		// https://blog.selfshadow.com/publications/s2016-shading-course/activision/s2016_pbs_activision_occlusion.pdf#page=78
@@ -2327,9 +2338,12 @@ void fragment_shader(in SceneData scene_data) {
 			vec3 x = vec3(ao);
 			vec3 bounce_occlusion = max(x, ((x * a + b) * x + c) * x);
 			ambient_light *= bounce_occlusion;
+			x = vec3(ambient_occlusion);
+			policy_ambient_light *= max(x, ((x * a + b) * x + c) * x);
 		}
 #else // MULTI_BOUNCE_OCCLUSION_ENABLED
 		ambient_light *= ao;
+		policy_ambient_light *= ambient_occlusion;
 #endif // MULTI_BOUNCE_OCCLUSION_ENABLED
 #ifndef SPECULAR_OCCLUSION_DISABLED
 #ifdef BENT_NORMAL_MAP_USED
@@ -2370,15 +2384,10 @@ void fragment_shader(in SceneData scene_data) {
 #else
 		vec3 ambient_weight = albedo.rgb;
 #endif
+		ambient_light = policy_ambient_light;
 		ambient_light *= ambient_weight;
 
 		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSIL)) {
-#ifdef USE_MULTIVIEW
-			vec4 ssil = textureLod(sampler2DArray(ssil_buffer, SAMPLER_LINEAR_CLAMP), vec3(screen_uv, ViewIndex), 0.0);
-#else
-			vec4 ssil = textureLod(sampler2D(ssil_buffer, SAMPLER_LINEAR_CLAMP), screen_uv, 0.0);
-#endif // USE_MULTIVIEW
-			ambient_light *= 1.0 - ssil.a;
 			ambient_light += ssil.rgb * ambient_weight;
 		}
 
