@@ -801,7 +801,8 @@ uint32_t RenderForwardClustered::_setup_environment(const RenderDataRD *p_render
 				Ref<RenderBufferDataForwardClustered> rb_data;
 				if (rd->has_custom_data(RB_SCOPE_FORWARD_CLUSTERED)) {
 					rb_data = rd->get_custom_data(RB_SCOPE_FORWARD_CLUSTERED);
-					ss_flags |= (rb_data.is_valid() && !rb_data->ss_effects_data.ssr.half_size) ? SCREEN_SPACE_EFFECTS_FLAGS_RESOLVE_SSR : 0;
+					ss_flags |= (rb_data.is_valid() && !rb_data->ss_effects_data.ssr.half_size && !rb_data->ss_effects_data.ssr.stochastic) ? SCREEN_SPACE_EFFECTS_FLAGS_RESOLVE_SSR : 0;
+					ss_flags |= (rb_data.is_valid() && rb_data->ss_effects_data.ssr.stochastic) ? SCREEN_SPACE_EFFECTS_FLAGS_STOCHASTIC_SSR : 0;
 				}
 			}
 		}
@@ -1581,18 +1582,28 @@ void RenderForwardClustered::_process_ssil(Ref<RenderSceneBuffersRD> p_render_bu
 
 	Transform3D transform = p_transform;
 	transform.set_origin(Vector3(0.0, 0.0, 0.0));
+	const bool validate = p_render_buffers->has_texture(RB_SCOPE_BOUNCE_SOURCE, RB_SOURCE) && GLOBAL_GET_CACHED(bool, "rendering/environment/screen_space_lighting/temporal_validation");
 
 	for (uint32_t v = 0; v < p_render_buffers->get_view_count(); v++) {
 		Projection correction;
 		correction.set_depth_correction(true);
 		Projection projection = correction * p_projections[v];
 		Projection last_frame_projection = rb_data->ss_effects_data.ssil_last_frame_projections[v] * Projection(rb_data->ss_effects_data.ssil_last_frame_transform.affine_inverse()) * Projection(transform) * projection.inverse();
+		settings.depth_ndc = Vector2();
+		if (validate && !projection.is_orthogonal()) {
+			last_frame_projection = rb_data->ss_effects_data.ssil_last_frame_projections[v] * Projection(rb_data->ss_effects_data.ssil_last_frame_camera.affine_inverse()) * Projection(p_transform) * projection.inverse();
+			settings.depth_ndc = Vector2(-projection.columns[2][2], projection.columns[3][2]);
+		}
 
 		ss_effects->screen_space_indirect_lighting(p_render_buffers, rb_data->ss_effects_data.ssil, v, p_normal_buffers[v], p_projections[v], last_frame_projection, settings);
 
 		rb_data->ss_effects_data.ssil_last_frame_projections[v] = projection;
 	}
 	rb_data->ss_effects_data.ssil_last_frame_transform = transform;
+	rb_data->ss_effects_data.ssil_last_frame_camera = p_transform;
+	if (validate) {
+		ss_effects->ssil_store_previous_depth(p_render_buffers);
+	}
 }
 
 void RenderForwardClustered::_process_ssr(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_slices, const Projection *p_projections, const Vector3 *p_eye_offsets, const Transform3D &p_transform, float p_exposure, RID p_exposure_texture) {
@@ -1607,6 +1618,7 @@ void RenderForwardClustered::_process_ssr(Ref<RenderSceneBuffersRD> p_render_buf
 	ss_effects->ssr_allocate_buffers(p_render_buffers, rb_data->ss_effects_data.ssr, p_render_buffers->get_base_data_format());
 
 	Projection reprojections[RendererSceneRender::MAX_RENDER_VIEWS];
+	Projection last_projections[RendererSceneRender::MAX_RENDER_VIEWS];
 
 	for (uint32_t v = 0; v < p_render_buffers->get_view_count(); v++) {
 		Projection correction;
@@ -1615,12 +1627,21 @@ void RenderForwardClustered::_process_ssr(Ref<RenderSceneBuffersRD> p_render_buf
 		Projection projection = correction * p_projections[v];
 
 		reprojections[v] = rb_data->ss_effects_data.ssr_last_frame_projections[v] * Projection(rb_data->ss_effects_data.ssr_last_frame_transform.affine_inverse()) * Projection(p_transform) * projection.inverse();
+		last_projections[v] = rb_data->ss_effects_data.ssr_last_frame_projections[v];
 
 		rb_data->ss_effects_data.ssr_last_frame_projections[v] = projection;
 	}
+
+	RendererRD::SSEffects::SSRTemporalData temporal;
+	temporal.prev_projections = last_projections;
+	temporal.cur_to_prev = rb_data->ss_effects_data.ssr_last_frame_transform.affine_inverse() * p_transform;
+	temporal.frame = uint32_t(RSG::rasterizer->get_frame_number() & 1023);
+	temporal.validate_source = GLOBAL_GET_CACHED(bool, "rendering/environment/screen_space_lighting/temporal_validation");
+	temporal.history_valid = !p_render_buffers->get_history_reset();
+	temporal.write_hit_distance = get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SSR_HIT_DISTANCE;
 	rb_data->ss_effects_data.ssr_last_frame_transform = p_transform;
 
-	ss_effects->screen_space_reflection(p_render_buffers, rb_data->ss_effects_data.ssr, p_normal_slices, environment_get_ssr_max_steps(p_environment), environment_get_ssr_fade_in(p_environment), environment_get_ssr_fade_out(p_environment), environment_get_ssr_depth_tolerance(p_environment), p_projections, reprojections, p_eye_offsets, *copy_effects, p_exposure, p_exposure_texture);
+	ss_effects->screen_space_reflection(p_render_buffers, rb_data->ss_effects_data.ssr, p_normal_slices, environment_get_ssr_max_steps(p_environment), environment_get_ssr_fade_in(p_environment), environment_get_ssr_fade_out(p_environment), environment_get_ssr_depth_tolerance(p_environment), p_projections, reprojections, p_eye_offsets, *copy_effects, p_exposure, p_exposure_texture, temporal);
 }
 
 void RenderForwardClustered::_select_local_contact_shadows(RenderDataRD *p_render_data) {
@@ -2906,6 +2927,11 @@ void RenderForwardClustered::_render_buffers_debug_draw(const RenderDataRD *p_re
 		copy_effects->copy_to_fb_rect(rb->get_texture_slice(source_context, RB_SOURCE, 0, 0), texture_storage->render_target_get_rd_framebuffer(render_target), Rect2(Vector2(), rtsize), false, false, false, false, RID(), false, true);
 	}
 
+	if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SSR_HIT_DISTANCE && rb->has_texture(RB_SCOPE_SSR, RB_SSR_HIT_DISTANCE)) {
+		Size2i rtsize = texture_storage->render_target_get_size(render_target);
+		copy_effects->copy_to_fb_rect(rb->get_texture_slice(RB_SCOPE_SSR, RB_SSR_HIT_DISTANCE, 0, 0), texture_storage->render_target_get_rd_framebuffer(render_target), Rect2(Vector2(), rtsize), false, true);
+	}
+
 	if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_BENT_NORMALS && rb->has_texture(RB_SCOPE_GTAO, RB_GTAO_BENT_NORMAL)) {
 		RID bent_normal = rb->get_texture_slice(RB_SCOPE_GTAO, RB_GTAO_BENT_NORMAL, 0, 0);
 		Size2i rtsize = texture_storage->render_target_get_size(render_target);
@@ -4054,16 +4080,8 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
 
 		RID ssr;
-		if (rb_data.is_valid()) {
-			if (rb_data->ss_effects_data.ssr.half_size) {
-				if (rb->has_texture(RB_SCOPE_SSR, RB_FINAL)) {
-					ssr = rb->get_texture(RB_SCOPE_SSR, RB_FINAL);
-				}
-			} else {
-				if (rb->has_texture(RB_SCOPE_SSR, RB_SSR)) {
-					ssr = rb->get_texture(RB_SCOPE_SSR, RB_SSR);
-				}
-			}
+		if (rb_data.is_valid() && ss_effects) {
+			ssr = ss_effects->ssr_get_output(rb, rb_data->ss_effects_data.ssr);
 		}
 
 		RID texture = ssr.is_valid() ? ssr : texture_storage->texture_rd_get_default(is_multiview ? RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_BLACK : RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
@@ -4075,7 +4093,7 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		u.binding = 36;
 		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
 
-		RID ssr_mip_level = (rb_data.is_valid() && !rb_data->ss_effects_data.ssr.half_size && rb->has_texture(RB_SCOPE_SSR, RB_MIP_LEVEL)) ? rb->get_texture(RB_SCOPE_SSR, RB_MIP_LEVEL) : RID();
+		RID ssr_mip_level = (rb_data.is_valid() && !rb_data->ss_effects_data.ssr.half_size && !rb_data->ss_effects_data.ssr.stochastic && rb->has_texture(RB_SCOPE_SSR, RB_MIP_LEVEL)) ? rb->get_texture(RB_SCOPE_SSR, RB_MIP_LEVEL) : RID();
 		RID texture = ssr_mip_level.is_valid() ? ssr_mip_level : texture_storage->texture_rd_get_default(is_multiview ? RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_BLACK : RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
 		u.append_id(texture);
 		uniforms.push_back(u);

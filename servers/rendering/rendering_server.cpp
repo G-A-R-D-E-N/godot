@@ -3035,6 +3035,7 @@ void RenderingServer::_bind_methods() {
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SSR_CONFIDENCE);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_BOUNCE_SOURCE);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_REFLECTION_SOURCE);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SSR_HIT_DISTANCE);
 
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_VRS_DISABLED);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_VRS_TEXTURE);
@@ -3786,6 +3787,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssil/fadeout_to", PROPERTY_HINT_RANGE, "64,65536,0.1,or_greater"), 300.0);
 
 	GLOBAL_DEF("rendering/environment/screen_space_lighting/legacy_last_frame_source", false);
+	GLOBAL_DEF("rendering/environment/screen_space_lighting/temporal_validation", true);
 
 	// Move the project setting definitions here so they are available when we init the rendering internals.
 	GLOBAL_DEF_BASIC("rendering/viewport/hdr_2d", false);
@@ -3838,6 +3840,10 @@ void RenderingServer::init() {
 	GLOBAL_DEF("rendering/environment/glow/upscale_mode.mobile", 0);
 
 	GLOBAL_DEF("rendering/environment/screen_space_reflection/half_size", true);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/screen_space_reflection/backend", PROPERTY_HINT_ENUM, "Mirror,Stochastic"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/screen_space_reflection/stochastic/rays_per_pixel", PROPERTY_HINT_RANGE, "1,4,1"), 1);
+	GLOBAL_DEF("rendering/environment/screen_space_reflection/stochastic/temporal", true);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/screen_space_reflection/stochastic/roughness_cutoff", PROPERTY_HINT_RANGE, "0.1,1.0,0.01"), 0.8);
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/subsurface_scattering/subsurface_scattering_quality", PROPERTY_HINT_ENUM, "Disabled (Fastest),Low (Fast),Medium (Average),High (Slow)"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/subsurface_scattering/subsurface_scattering_scale", PROPERTY_HINT_RANGE, "0.001,1,0.001"), 0.05);

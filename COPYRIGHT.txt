@@ -190,6 +190,20 @@ Copyright: 2014-present Godot Engine contributors
  Sony Interactive Entertainment
 License: Apache-2.0 and Expat
 
+Files: servers/rendering/renderer_rd/shaders/effects/screen_space_reflection_stochastic.glsl
+Comment: Stochastic screen-space reflections. GGX visible-normal sampling after Heitz, "Sampling the
+ GGX Distribution of Visible Normals" (JCGT 7(4), 2018); neighbour hit reuse with the BRDF over
+ sampling probability ratio estimator and hit-point reprojection after Stachowiak, "Stochastic
+ Screen-Space Reflections" (SIGGRAPH 2015); hit confidence (border vignette, squared thickness
+ falloff, back-face rejection) and the temporal pass (radius-4 Gaussian neighbourhood moments,
+ history clipped toward the box centre) after AMD FidelityFX SSSR 1.x and the FidelityFX
+ reflection denoiser (GPUOpen-Effects/FidelityFX-SSSR, GPUOpen-Effects/FidelityFX-Denoiser,
+ MIT); the box clip is the Playdead TAA clip (MIT).
+Copyright: 2021, Advanced Micro Devices, Inc.
+ 2015, Playdead
+ 2014-present Godot Engine contributors
+License: Expat
+
 Files: servers/rendering/renderer_rd/shaders/effects/taa_resolve.glsl
 Comment: Temporal Anti-Aliasing resolve implementation
 Copyright: 2016, Panos Karabelas

@@ -106,6 +106,7 @@ public:
 		struct SSEffectsData {
 			Projection ssil_last_frame_projections[RendererSceneRender::MAX_RENDER_VIEWS];
 			Transform3D ssil_last_frame_transform;
+			Transform3D ssil_last_frame_camera;
 
 			Projection ssr_last_frame_projections[RendererSceneRender::MAX_RENDER_VIEWS];
 			Transform3D ssr_last_frame_transform;
@@ -311,6 +312,7 @@ private:
 		SCREEN_SPACE_EFFECTS_FLAGS_RESOLVE_SSR = (1 << 3),
 		SCREEN_SPACE_EFFECTS_FLAGS_USE_SSCS = (1 << 4),
 		SCREEN_SPACE_EFFECTS_FLAGS_USE_BENT_NORMALS = (1 << 5),
+		SCREEN_SPACE_EFFECTS_FLAGS_STOCHASTIC_SSR = (1 << 6),
 	};
 
 	struct SceneState {

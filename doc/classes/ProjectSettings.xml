@@ -2996,11 +2996,27 @@
 			Number of depth samples per slice side used by GTAO. Only used when [member rendering/environment/ssao/backend] is [code]GTAO[/code].
 		</member>
 		<member name="rendering/environment/screen_space_lighting/legacy_last_frame_source" type="bool" setter="" getter="" default="false">
-			If [code]false[/code], screen-space indirect lighting samples a bounce source written by the opaque pass (direct diffuse light plus emission weighted by [code]EMISSION_BOUNCE_WEIGHT[/code]) and screen-space reflections sample a reflection source (the opaque radiance without the screen-space reflection term and without fog). Both effects compress samples relative to the exposure the tonemapper uses, so their strength does not depend on the scale of the stored HDR values. If [code]true[/code], both effects sample a copy of the previous final frame and compress the stored values directly, as in earlier versions; the previous frame feeds their own output and fog back into the next frame.
+			If [code]false[/code], screen-space indirect lighting samples a bounce source written by the opaque pass (direct diffuse light plus emission weighted by [code]EMISSION_BOUNCE_WEIGHT[/code]) and screen-space reflections sample a reflection source (the opaque radiance without the screen-space reflection term and without fog). Both effects compress samples relative to the exposure the tonemapper uses, so their strength does not depend on the scale of the stored HDR values. Both reproject their samples with the camera and reject a sample when the previous frame held a different surface there (the reflection source stores the linear view depth in its alpha, SSIL keeps the previous frame's depth mipmaps), so moving objects and newly exposed surfaces leave no trail; a rejected sample counts as a miss. If [code]true[/code], both effects sample a copy of the previous final frame and compress the stored values directly, as in earlier versions; the previous frame feeds their own output and fog back into the next frame.
 			[b]Note:[/b] Only used by the Forward+ rendering method. Viewports with MSAA always sample the previous final frame, with the exposure-relative compression unless this setting is enabled.
+		</member>
+		<member name="rendering/environment/screen_space_lighting/temporal_validation" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], screen-space indirect lighting and screen-space reflections compare each sample of the previous frame's bounce or reflection source against the previous frame's depth and treat a mismatch (a moved object or a newly exposed surface) as a miss, so the probe, sky or ambient fallback keeps that share. Static scenes are unaffected. Only used when [member rendering/environment/screen_space_lighting/legacy_last_frame_source] is [code]false[/code].
+		</member>
+		<member name="rendering/environment/screen_space_reflection/backend" type="int" setter="" getter="" default="0">
+			The screen-space reflection backend. [code]Mirror[/code] traces one mirror ray per pixel and blurs the result by roughness; it fades out between roughness 0.6 and 0.7. [code]Stochastic[/code] traces rays sampled from the GGX distribution of visible normals, reuses the hits of neighboring pixels weighted by the BRDF over the sampling probability, and accumulates the result over frames with hit-point reprojection; it reflects up to [member rendering/environment/screen_space_reflection/stochastic/roughness_cutoff]. Both write radiance with a confidence that replaces the reflection probe or sky reflection where the confidence is high.
+			[b]Note:[/b] Only used by the Forward+ rendering method. The trace resolution follows [member rendering/environment/screen_space_reflection/half_size].
 		</member>
 		<member name="rendering/environment/screen_space_reflection/half_size" type="bool" setter="" getter="" default="true" keywords="resolution">
 			If [code]true[/code], screen-space reflections will be rendered at half size and then upscaled before being added to the scene. This is faster but may look pixelated or cause flickering. If [code]false[/code], screen-space reflections will be rendered at full size.
+		</member>
+		<member name="rendering/environment/screen_space_reflection/stochastic/rays_per_pixel" type="int" setter="" getter="" default="1">
+			Rays traced per traced pixel by the stochastic screen-space reflection backend. Pixels rougher than 0.35 trace on alternating pixels each frame.
+		</member>
+		<member name="rendering/environment/screen_space_reflection/stochastic/roughness_cutoff" type="float" setter="" getter="" default="0.8">
+			Roughness from which the stochastic screen-space reflection backend traces no rays and leaves the reflection to the probe or sky. The confidence fades out over the 0.1 below the cutoff.
+		</member>
+		<member name="rendering/environment/screen_space_reflection/stochastic/temporal" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], the stochastic screen-space reflection backend accumulates its result over frames. The history follows the reflected hit point, is clamped to the local variance of the current rays and is reset by [member rendering/anti_aliasing/quality/history_reset_serial] and exposure changes.
 		</member>
 		<member name="rendering/environment/ssao/adaptive_target" type="float" setter="" getter="" default="0.5">
 			Quality target to use when [member rendering/environment/ssao/quality] is set to [code]Ultra[/code]. A value of [code]0.0[/code] provides a quality and speed similar to [code]Medium[/code] while a value of [code]1.0[/code] provides much higher quality than any of the other settings at the cost of performance.
