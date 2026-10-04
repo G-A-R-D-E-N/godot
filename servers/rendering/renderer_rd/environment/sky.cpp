@@ -1386,7 +1386,7 @@ void SkyRD::update_radiance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, 
 			}
 			sky->processing_layer = 1;
 		}
-		sky->baked_exposure = p_luminance_multiplier;
+		sky->baked_exposure = p_brightness_multiplier;
 		sky->reflection.dirty = false;
 
 	} else {

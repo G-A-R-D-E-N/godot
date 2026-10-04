@@ -1699,21 +1699,19 @@ void RasterizerSceneGLES3::_setup_environment(const RenderDataGLES3 *p_render_da
 
 	if (p_render_data->camera_attributes.is_valid()) {
 		scene_state.data.emissive_exposure_normalization = RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes);
-		scene_state.data.IBL_exposure_normalization = 1.0;
-		if (is_environment(p_render_data->environment)) {
-			RID sky_rid = environment_get_sky(p_render_data->environment);
-			if (sky_rid.is_valid()) {
-				float current_exposure = RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes) * environment_get_bg_intensity(p_render_data->environment);
-				scene_state.data.IBL_exposure_normalization = current_exposure / MAX(0.001, sky_get_baked_exposure(sky_rid));
-			}
-		}
 	} else if (scene_state.data.emissive_exposure_normalization > 0.0) {
 		// This branch is triggered when using render_material().
 		// Emissive is set outside the function, so don't set it.
-		// IBL isn't used don't set it.
 	} else {
 		scene_state.data.emissive_exposure_normalization = 1.0;
-		scene_state.data.IBL_exposure_normalization = 1.0;
+	}
+
+	scene_state.data.IBL_exposure_normalization = 1.0;
+	RID sky_rid = is_environment(p_render_data->environment) ? environment_get_sky(p_render_data->environment) : RID();
+	if (sky_rid.is_valid()) {
+		float camera_exposure = p_render_data->camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes) : 1.0f;
+		float current_exposure = camera_exposure * environment_get_bg_intensity(p_render_data->environment);
+		scene_state.data.IBL_exposure_normalization = current_exposure / MAX(1e-6f, sky_get_baked_exposure(sky_rid));
 	}
 
 	_update_scene_ubo(scene_state.ubo_buffer, SCENE_DATA_UNIFORM_LOCATION, sizeof(SceneState::UBO), &scene_state.data, "Scene state UBO");

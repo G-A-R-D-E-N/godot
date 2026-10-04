@@ -251,22 +251,20 @@ void RenderSceneDataRD::update_ubo(RID p_uniform_buffer, RSE::ViewportDebugDraw 
 
 	if (p_camera_attributes.is_valid()) {
 		ubo.emissive_exposure_normalization = RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes);
-		ubo.IBL_exposure_normalization = 1.0;
-		if (p_env.is_valid()) {
-			RID sky_rid = render_scene_render->environment_get_sky(p_env);
-			if (sky_rid.is_valid()) {
-				float current_exposure = RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes) * render_scene_render->environment_get_bg_intensity(p_env) / p_luminance_multiplier;
-				ubo.IBL_exposure_normalization = current_exposure / MAX(0.001, render_scene_render->get_sky()->sky_get_baked_exposure(sky_rid));
-			}
-		}
 	} else if (emissive_exposure_normalization > 0.0) {
 		// This branch is triggered when using render_material().
 		// Emissive is set outside the function.
 		ubo.emissive_exposure_normalization = emissive_exposure_normalization;
-		// IBL isn't used don't set it.
 	} else {
 		ubo.emissive_exposure_normalization = 1.0;
-		ubo.IBL_exposure_normalization = 1.0;
+	}
+
+	ubo.IBL_exposure_normalization = 1.0;
+	RID sky_rid = p_env.is_valid() ? render_scene_render->environment_get_sky(p_env) : RID();
+	if (sky_rid.is_valid()) {
+		float camera_exposure = p_camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes) : 1.0f;
+		float current_exposure = camera_exposure * render_scene_render->environment_get_bg_intensity(p_env);
+		ubo.IBL_exposure_normalization = current_exposure / MAX(1e-6f, render_scene_render->get_sky()->sky_get_baked_exposure(sky_rid));
 	}
 
 	bool roughness_limiter_enabled = p_opaque_render_buffers && render_scene_render->screen_space_roughness_limiter_is_active();
