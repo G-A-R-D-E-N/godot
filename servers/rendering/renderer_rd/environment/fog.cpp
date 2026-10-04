@@ -1139,7 +1139,7 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 	RendererRD::MaterialStorage::store_transform(to_prev_cam_view, params.to_prev_view);
 
 	params.use_temporal_reprojection = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_temporal_reprojection(p_settings.env);
-	params.temporal_blend = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_temporal_reprojection_amount(p_settings.env);
+	params.temporal_blend = p_settings.reset_history ? 0.0f : RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_temporal_reprojection_amount(p_settings.env);
 
 	RID sky_rid = RendererSceneRenderRD::get_singleton()->environment_get_sky(p_settings.env);
 	if (sky_rid.is_valid()) {

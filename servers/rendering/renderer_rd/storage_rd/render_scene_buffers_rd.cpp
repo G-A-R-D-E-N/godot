@@ -181,6 +181,7 @@ void RenderSceneBuffersRD::configure(const RenderSceneBuffersConfiguration *p_co
 
 	// cleanout any old buffers we had.
 	cleanup();
+	history_valid = false;
 
 	// Create our color buffer.
 	const bool resolve_target = msaa_3d != RSE::VIEWPORT_MSAA_DISABLED;

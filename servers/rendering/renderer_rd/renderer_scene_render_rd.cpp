@@ -561,7 +561,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 		Ref<RendererRD::Luminance::LuminanceBuffers> luminance_buffers = luminance->get_luminance_buffers(rb);
 
 		uint64_t auto_exposure_version = RSG::camera_attributes->camera_attributes_get_auto_exposure_version(p_render_data->camera_attributes);
-		bool set_immediate = auto_exposure_version != rb->get_auto_exposure_version();
+		bool set_immediate = auto_exposure_version != rb->get_auto_exposure_version() || rb->get_history_reset();
 		rb->set_auto_exposure_version(auto_exposure_version);
 
 		double step = RSG::camera_attributes->camera_attributes_get_auto_exposure_adjust_speed(p_render_data->camera_attributes) * time_step;
@@ -1505,6 +1505,8 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 	Color clear_color;
 	if (p_render_buffers.is_valid() && p_reflection_probe.is_null()) {
 		clear_color = texture_storage->render_target_get_clear_request_color(rb->get_render_target());
+		float exposure_normalization = p_camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes) : 1.0f;
+		rb->update_history_reset(GLOBAL_GET_CACHED(int, "rendering/anti_aliasing/quality/history_reset_serial"), exposure_normalization);
 	} else {
 		clear_color = RSG::texture_storage->get_default_clear_color();
 	}

@@ -768,9 +768,10 @@ uint32_t RenderForwardClustered::_setup_environment(const RenderDataRD *p_render
 		scene_state.ubo.ssao_light_affect = environment_get_ssao_direct_light_affect(p_render_data->environment);
 		uint32_t ss_flags = 0;
 		if (p_opaque_render_buffers) {
+			bool last_frame_valid = rd.is_null() || !rd->get_history_reset();
 			ss_flags |= environment_get_ssao_enabled(p_render_data->environment) ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSAO : 0;
-			ss_flags |= environment_get_ssil_enabled(p_render_data->environment) ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSIL : 0;
-			ss_flags |= environment_get_ssr_enabled(p_render_data->environment) ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSR : 0;
+			ss_flags |= environment_get_ssil_enabled(p_render_data->environment) && last_frame_valid ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSIL : 0;
+			ss_flags |= environment_get_ssr_enabled(p_render_data->environment) && last_frame_valid ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSR : 0;
 			ss_flags |= bool(GLOBAL_GET_CACHED(bool, "rendering/lights_and_shadows/contact_shadow/enabled")) ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSCS : 0;
 
 			if (rd.is_valid()) {
@@ -1406,6 +1407,7 @@ void RenderForwardClustered::_update_volumetric_fog(Ref<RenderSceneBuffersRD> p_
 		settings.area_light_atlas = RendererRD::TextureStorage::get_singleton()->area_light_atlas_get_texture();
 		settings.directional_shadow_depth = RendererRD::LightStorage::get_singleton()->directional_shadow_get_texture();
 		settings.directional_light_buffer = RendererRD::LightStorage::get_singleton()->get_directional_light_buffer();
+		settings.reset_history = p_render_buffers->get_history_reset();
 
 		settings.vfog = fog;
 		settings.cluster_builder = rb_data->cluster_builder;
@@ -2553,9 +2555,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	}
 
 	if (rb_data.is_valid() && (using_upscaling || using_taa)) {
-		const int history_reset_serial = GLOBAL_GET_CACHED(int, "rendering/anti_aliasing/quality/history_reset_serial");
-		const bool reset_history = history_reset_serial != rb_data->history_reset_serial;
-		rb_data->history_reset_serial = history_reset_serial;
+		const bool reset_history = rb->get_history_reset();
 
 		if (scale_type == SCALE_FSR2) {
 			rb_data->ensure_fsr2(fsr2_effect);

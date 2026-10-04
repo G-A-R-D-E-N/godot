@@ -361,6 +361,7 @@ public:
 		RID area_light_atlas;
 		RID directional_shadow_depth;
 		RID directional_light_buffer;
+		bool reset_history;
 
 		// Objects related to our render buffer
 		Ref<VolumetricFog> vfog;
