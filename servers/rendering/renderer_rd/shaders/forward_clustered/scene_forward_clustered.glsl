@@ -2471,6 +2471,7 @@ void fragment_shader(in SceneData scene_data) {
 		// 10.0 is a magic number, it gives the intended effect in most scenarios.
 		// Low enough for occlusion, high enough for reaction to lights and shadows.
 		specular_occlusion = max(min(reflective_f * specular_occlusion * 10.0, 1.0), specular_occlusion);
+		specular_occlusion = bool(scene_data.flags & SCENE_DATA_FLAGS_USE_PHYSICAL_LIGHT_UNITS) ? 1.0 : specular_occlusion;
 #endif
 		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_BENT_NORMALS)) {
 #ifdef USE_MULTIVIEW
