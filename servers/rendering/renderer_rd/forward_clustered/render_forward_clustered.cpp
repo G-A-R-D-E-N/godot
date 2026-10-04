@@ -1438,6 +1438,7 @@ void RenderForwardClustered::_update_volumetric_fog(Ref<RenderSceneBuffersRD> p_
 		settings.directional_shadow_depth = RendererRD::LightStorage::get_singleton()->directional_shadow_get_texture();
 		settings.directional_light_buffer = RendererRD::LightStorage::get_singleton()->get_directional_light_buffer();
 		settings.reset_history = p_render_buffers->get_history_reset();
+		settings.debug_history_clamp = get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_FOG_HISTORY_CLAMP;
 		settings.exposure_normalization = is_using_physical_light_units() && p_camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes) : 1.0f;
 
 		settings.vfog = fog;
@@ -2387,6 +2388,13 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		clear_color = p_default_bg_color.srgb_to_linear();
 	}
 
+	const bool flat_debug_view = !is_reflection_probe && get_debug_draw_mode() >= RSE::VIEWPORT_DEBUG_DRAW_PERSISTENT_AO && get_debug_draw_mode() <= RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE;
+	if (flat_debug_view) {
+		draw_sky = false;
+		draw_sky_fog_only = false;
+		clear_color = Color(0, 0, 0, 1);
+	}
+
 	// After this point clear_color has linear encoding.
 
 	RSE::ViewportMSAA msaa = rb->get_msaa_3d();
@@ -2477,7 +2485,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	if (current_cluster_builder) {
 		base_specialization.cluster_has_area_light = current_cluster_builder->get_cluster_count_by_type(ClusterBuilderRD::ELEMENT_TYPE_AREA_LIGHT) != 0;
 	}
-	if (get_debug_draw_mode() >= RSE::VIEWPORT_DEBUG_DRAW_DIRECT_DIFFUSE && get_debug_draw_mode() <= RSE::VIEWPORT_DEBUG_DRAW_SSR_CONFIDENCE) {
+	if ((!is_reflection_probe && get_debug_draw_mode() >= RSE::VIEWPORT_DEBUG_DRAW_DIRECT_DIFFUSE && get_debug_draw_mode() <= RSE::VIEWPORT_DEBUG_DRAW_SSR_CONFIDENCE) || flat_debug_view) {
 		base_specialization.debug_lighting_component = get_debug_draw_mode() - RSE::VIEWPORT_DEBUG_DRAW_DIRECT_DIFFUSE + 1;
 	}
 
@@ -2823,6 +2831,9 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 				params.reprojection = (correction * prev_proj) * prev_transform.affine_inverse() * cur_transform * (correction * cur_proj).inverse();
 
 				fsr2_effect->upscale(params);
+				if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_REJECTED_HISTORY) {
+					fsr2_effect->rejected_history(params.context, RendererRD::TAA::rejected_history_texture(rb, v), params.internal_size);
+				}
 			}
 
 			RD::get_singleton()->draw_command_end_label();
@@ -2858,7 +2869,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		} else if (using_taa) {
 			RD::get_singleton()->draw_command_begin_label("TAA");
 			RENDER_TIMESTAMP("TAA");
-			taa->process(rb, rb->get_base_data_format(), p_render_data->scene_data->z_near, p_render_data->scene_data->z_far, GLOBAL_GET_CACHED(bool, "rendering/anti_aliasing/quality/garden_taa"), reset_history);
+			taa->process(rb, rb->get_base_data_format(), p_render_data->scene_data->z_near, p_render_data->scene_data->z_far, GLOBAL_GET_CACHED(bool, "rendering/anti_aliasing/quality/garden_taa"), reset_history, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_REJECTED_HISTORY);
 			RD::get_singleton()->draw_command_end_label();
 		}
 	}
@@ -2930,6 +2941,19 @@ void RenderForwardClustered::_render_buffers_debug_draw(const RenderDataRD *p_re
 	if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SSR_HIT_DISTANCE && rb->has_texture(RB_SCOPE_SSR, RB_SSR_HIT_DISTANCE)) {
 		Size2i rtsize = texture_storage->render_target_get_size(render_target);
 		copy_effects->copy_to_fb_rect(rb->get_texture_slice(RB_SCOPE_SSR, RB_SSR_HIT_DISTANCE, 0, 0), texture_storage->render_target_get_rd_framebuffer(render_target), Rect2(Vector2(), rtsize), false, true);
+	}
+
+	if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_REJECTED_HISTORY && rb->has_texture(RB_SCOPE_REJECTED_HISTORY, RB_REJECTED)) {
+		Size2i rtsize = texture_storage->render_target_get_size(render_target);
+		copy_effects->copy_to_fb_rect(rb->get_texture_slice(RB_SCOPE_REJECTED_HISTORY, RB_REJECTED, 0, 0), texture_storage->render_target_get_rd_framebuffer(render_target), Rect2(Vector2(), rtsize));
+	}
+
+	if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_FOG_HISTORY_CLAMP && rb->has_custom_data(RB_SCOPE_FOG)) {
+		Ref<RendererRD::Fog::VolumetricFog> fog = rb->get_custom_data(RB_SCOPE_FOG);
+		if (fog->history_clamp_view.is_valid()) {
+			Size2i rtsize = texture_storage->render_target_get_size(render_target);
+			copy_effects->copy_to_fb_rect(fog->history_clamp_view, texture_storage->render_target_get_rd_framebuffer(render_target), Rect2(Vector2(), rtsize), false, true);
+		}
 	}
 
 	if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_BENT_NORMALS && rb->has_texture(RB_SCOPE_GTAO, RB_GTAO_BENT_NORMAL)) {

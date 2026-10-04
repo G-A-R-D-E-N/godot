@@ -745,6 +745,11 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 			tonemap.exposure = environment_get_exposure(p_render_data->environment);
 			tonemap.max_value = max_value;
 		}
+		if (debug_draw >= RSE::VIEWPORT_DEBUG_DRAW_PERSISTENT_AO && debug_draw <= RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE) {
+			tonemap.tonemap_mode = RSE::ENV_TONE_MAPPER_LINEAR;
+			tonemap.exposure = 1.0;
+			tonemap.white = 1.0;
+		}
 
 		tonemap.use_color_correction = false;
 		tonemap.use_1d_color_correction = false;
@@ -1018,6 +1023,9 @@ bool RendererSceneRenderRD::_debug_draw_can_use_effects(RSE::ViewportDebugDraw p
 		case RSE::VIEWPORT_DEBUG_DRAW_CLUSTER_DECALS:
 		case RSE::VIEWPORT_DEBUG_DRAW_CLUSTER_REFLECTION_PROBES:
 		case RSE::VIEWPORT_DEBUG_DRAW_INTERNAL_BUFFER:
+		case RSE::VIEWPORT_DEBUG_DRAW_PERSISTENT_AO:
+		case RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_SPECULAR:
+		case RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE:
 			can_use_effects = false;
 			break;
 		// Modes that draws information over part of the viewport needs camera effects because we see partially the normal draw mode.

@@ -1072,7 +1072,16 @@ float decal_coverage;
 #endif
 
 #ifndef MODE_RENDER_DEPTH
-vec3 debug_lighting_component(uint p_component, vec3 p_direct_diffuse, vec3 p_direct_specular, vec3 p_indirect_diffuse, vec3 p_indirect_specular, vec3 p_emission, vec4 p_fog, float p_ssr_confidence) {
+vec3 debug_lighting_source(vec4 p_weights) {
+#ifdef USE_LIGHTMAP
+	const vec3 gi_color = vec3(0.0, 1.0, 1.0);
+#else
+	const vec3 gi_color = vec3(1.0, 0.5, 0.0);
+#endif
+	return min(p_weights.x * vec3(0.1, 0.3, 1.0) + p_weights.y * gi_color + p_weights.z * vec3(0.0, 1.0, 0.0) + p_weights.w * vec3(1.0, 0.0, 1.0), vec3(1.0));
+}
+
+vec3 debug_lighting_component(uint p_component, vec3 p_direct_diffuse, vec3 p_direct_specular, vec3 p_indirect_diffuse, vec3 p_indirect_specular, vec3 p_emission, vec4 p_fog, float p_ssr_confidence, float p_persistent_ao, vec4 p_specular_source, vec4 p_ambient_source) {
 	switch (p_component) {
 		case 1u:
 			return p_direct_diffuse;
@@ -1088,8 +1097,14 @@ vec3 debug_lighting_component(uint p_component, vec3 p_direct_diffuse, vec3 p_di
 			return vec3(p_fog.a);
 		case 7u:
 			return p_fog.rgb;
+		case 8u:
+			return vec3(p_ssr_confidence);
+		case 11u:
+			return vec3(p_persistent_ao);
+		case 12u:
+			return debug_lighting_source(p_specular_source);
 	}
-	return vec3(p_ssr_confidence);
+	return debug_lighting_source(p_ambient_source);
 }
 #endif
 
@@ -1300,6 +1315,9 @@ void fragment_shader(in SceneData scene_data) {
 	vec3 energy_compensation = vec3(1.0);
 	vec4 fog = vec4(0.0, 0.0, 0.0, 1.0);
 	float ssr_confidence = 0.0;
+	float persistent_ao = 1.0;
+	vec4 specular_source = vec4(0.0);
+	vec4 ambient_source = vec4(0.0);
 #if defined(CUSTOM_RADIANCE_USED)
 	vec4 custom_radiance = vec4(0.0);
 #endif
@@ -1807,6 +1825,7 @@ void fragment_shader(in SceneData scene_data) {
 	//pack albedo until needed again, saves 2 VGPRs in the meantime
 
 #endif //not render depth
+	persistent_ao = ao;
 	/////////////////////// LIGHTING //////////////////////////////
 
 #ifdef NORMAL_USED
@@ -1892,15 +1911,18 @@ void fragment_shader(in SceneData scene_data) {
 	} else if (bool(scene_data.flags & SCENE_DATA_FLAGS_USE_REFLECTION_COLOR)) {
 		indirect_specular_light = scene_data.reflection_color.rgb;
 	}
+	specular_source.x = float(bool(scene_data.flags & (SCENE_DATA_FLAGS_USE_REFLECTION_CUBEMAP | SCENE_DATA_FLAGS_USE_REFLECTION_COLOR)));
 
 #if defined(CUSTOM_RADIANCE_USED)
 	indirect_specular_light = mix(indirect_specular_light, custom_radiance.rgb, custom_radiance.a);
+	specular_source = mix(specular_source, vec4(1.0, 0.0, 0.0, 0.0), custom_radiance.a);
 #endif
 
 #ifndef USE_LIGHTMAP
 	//lightmap overrides everything
 	if (bool(scene_data.flags & SCENE_DATA_FLAGS_USE_AMBIENT_LIGHT)) {
 		ambient_light = scene_data.ambient_light_color_energy.rgb;
+		ambient_source.x = 1.0;
 
 		if (bool(scene_data.flags & SCENE_DATA_FLAGS_USE_AMBIENT_CUBEMAP)) {
 			vec3 ambient_dir = scene_data.radiance_inverse_xform * indirect_normal;
@@ -1920,6 +1942,7 @@ void fragment_shader(in SceneData scene_data) {
 #endif // USE_LIGHTMAP
 #if defined(CUSTOM_IRRADIANCE_USED)
 	ambient_light = mix(ambient_light, custom_irradiance.rgb, custom_irradiance.a);
+	ambient_source = mix(ambient_source, vec4(1.0, 0.0, 0.0, 0.0), custom_irradiance.a);
 #endif
 
 #ifdef LIGHT_CLEARCOAT_USED
@@ -2103,6 +2126,7 @@ void fragment_shader(in SceneData scene_data) {
 			}
 		}
 	}
+	ambient_source.y = float(bool(instances.data[instance_index].flags & (INSTANCE_FLAGS_USE_LIGHTMAP_CAPTURE | INSTANCE_FLAGS_USE_LIGHTMAP)));
 #else
 
 	if (sc_use_forward_gi() && bool(instances.data[instance_index].flags & INSTANCE_FLAGS_USE_SDFGI)) { //has lightmap capture
@@ -2171,8 +2195,10 @@ void fragment_shader(in SceneData scene_data) {
 			}
 
 			ambient_light = diffuse;
+			ambient_source = vec4(0.0, 1.0, 0.0, 0.0);
 			if (use_specular) {
 				indirect_specular_light = specular;
+				specular_source = vec4(0.0, 1.0, 0.0, 0.0);
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
 				cc_specular_light = specular;
 #endif
@@ -2228,6 +2254,8 @@ void fragment_shader(in SceneData scene_data) {
 
 		indirect_specular_light = spec_accum.rgb;
 		ambient_light = amb_accum.rgb;
+		specular_source = vec4(0.0, 1.0, 0.0, 0.0);
+		ambient_source = specular_source;
 	}
 
 	if (!sc_use_forward_gi() && bool(instances.data[instance_index].flags & INSTANCE_FLAGS_USE_GI_BUFFERS)) { //use GI buffers
@@ -2273,6 +2301,8 @@ void fragment_shader(in SceneData scene_data) {
 
 		ambient_light = mix(ambient_light, buffer_ambient.rgb, buffer_ambient.a);
 		indirect_specular_light = mix(indirect_specular_light, buffer_reflection.rgb, buffer_reflection.a);
+		ambient_source = mix(ambient_source, vec4(0.0, 1.0, 0.0, 0.0), buffer_ambient.a);
+		specular_source = mix(specular_source, vec4(0.0, 1.0, 0.0, 0.0), buffer_reflection.a);
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
 		cc_specular_light = mix(cc_specular_light, buffer_reflection.rgb, buffer_reflection.a);
 #endif
@@ -2376,6 +2406,7 @@ void fragment_shader(in SceneData scene_data) {
 		if (reflection_accum.a > 0.0) {
 			indirect_specular_light = reflection_accum.rgb;
 		}
+		specular_source = specular_source * (1.0 - float(reflection_accum.a)) + vec4(0.0, 0.0, reflection_accum.a, 0.0);
 
 #ifdef LIGHT_CLEARCOAT_USED
 		if (cc_reflection_accum.a > 0.0) {
@@ -2387,6 +2418,7 @@ void fragment_shader(in SceneData scene_data) {
 		if (ambient_accum.a > 0.0) {
 			ambient_light = ambient_accum.rgb;
 		}
+		ambient_source = ambient_source * (1.0 - float(ambient_accum.a)) + vec4(0.0, 0.0, ambient_accum.a, 0.0);
 #endif
 	}
 
@@ -2472,6 +2504,8 @@ void fragment_shader(in SceneData scene_data) {
 
 		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSIL)) {
 			ambient_light += ssil.rgb * ambient_weight;
+			float ssil_share = dot(ssil.rgb * ambient_weight, vec3(0.2126, 0.7152, 0.0722)) / max(dot(ambient_light, vec3(0.2126, 0.7152, 0.0722)), 1e-6);
+			ambient_source = ambient_source * (1.0 - ssil_share) + vec4(0.0, 0.0, 0.0, ssil_share);
 		}
 
 #ifdef MODE_REFLECTION_SOURCE
@@ -2516,6 +2550,7 @@ void fragment_shader(in SceneData scene_data) {
 
 			// Alpha is premultiplied.
 			indirect_specular_light = indirect_specular_light * (1.0 - ssr.a) + ssr.rgb;
+			specular_source = specular_source * (1.0 - ssr.a) + vec4(0.0, 0.0, 0.0, ssr.a);
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
 			cc_specular_light = cc_specular_light * (1.0 - ssr.a) + ssr.rgb;
 #endif
@@ -3434,7 +3469,7 @@ void fragment_shader(in SceneData scene_data) {
 #endif //!FOG_DISABLED
 
 	if (sc_debug_lighting_component() != 0u) {
-		diffuse_buffer.rgb = debug_lighting_component(sc_debug_lighting_component(), diffuse_light, direct_specular_light, ambient_light, indirect_specular_light, output_emission, fog, ssr_confidence);
+		diffuse_buffer.rgb = debug_lighting_component(sc_debug_lighting_component(), diffuse_light, direct_specular_light, ambient_light, indirect_specular_light, output_emission, fog, ssr_confidence, persistent_ao, specular_source, ambient_source);
 		specular_buffer.rgb = vec3(0.0);
 	}
 
@@ -3454,7 +3489,7 @@ void fragment_shader(in SceneData scene_data) {
 #endif //!FOG_DISABLED
 
 	if (sc_debug_lighting_component() != 0u) {
-		frag_color.rgb = debug_lighting_component(sc_debug_lighting_component(), diffuse_light, direct_specular_light, ambient_light, indirect_specular_light, output_emission, fog, ssr_confidence);
+		frag_color.rgb = debug_lighting_component(sc_debug_lighting_component(), diffuse_light, direct_specular_light, ambient_light, indirect_specular_light, output_emission, fog, ssr_confidence, persistent_ao, specular_source, ambient_source);
 	}
 
 #if defined(PREMUL_ALPHA_USED) && !defined(MODE_RENDER_DEPTH)

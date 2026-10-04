@@ -33,6 +33,9 @@
 #include "servers/rendering/renderer_rd/shaders/effects/taa_resolve.glsl.gen.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_scene_buffers_rd.h"
 
+#define RB_SCOPE_REJECTED_HISTORY SNAME("rb_rejected_history")
+#define RB_REJECTED SNAME("rejected")
+
 namespace RendererRD {
 
 class TAA {
@@ -40,7 +43,8 @@ public:
 	TAA();
 	~TAA();
 
-	void process(Ref<RenderSceneBuffersRD> p_render_buffers, RD::DataFormat p_format, float p_z_near, float p_z_far, bool p_garden, bool p_reset);
+	void process(Ref<RenderSceneBuffersRD> p_render_buffers, RD::DataFormat p_format, float p_z_near, float p_z_far, bool p_garden, bool p_reset, bool p_rejected_history);
+	static RID rejected_history_texture(Ref<RenderSceneBuffersRD> p_render_buffers, uint32_t p_view);
 
 private:
 	struct TAAResolvePushConstant {
@@ -54,8 +58,11 @@ private:
 	RID shader_version;
 	RID pipeline;
 	RID garden_pipeline;
+	RID rejected_pipeline;
+	RID garden_rejected_pipeline;
+	int rejected_variant = 1;
 
-	void resolve(RID p_frame, RID p_temp, RID p_depth, RID p_velocity, RID p_prev_velocity, RID p_history, RID p_reactive, Size2 p_resolution, float p_z_near, float p_z_far, bool p_garden);
+	void resolve(RID p_frame, RID p_temp, RID p_depth, RID p_velocity, RID p_prev_velocity, RID p_history, RID p_reactive, Size2 p_resolution, float p_z_near, float p_z_far, bool p_garden, RID p_rejected);
 };
 
 } // namespace RendererRD

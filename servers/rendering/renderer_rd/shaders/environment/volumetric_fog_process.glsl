@@ -186,7 +186,7 @@ layout(set = 0, binding = 15, std140) uniform Params {
 
 	vec2 sky_border_size;
 	bool temporal_clamp;
-	uint pad;
+	bool debug_history_clamp;
 
 	mat3x4 cam_rotation;
 	mat4 to_prev_view;
@@ -211,6 +211,7 @@ layout(set = 0, binding = 19) buffer emissive_only_map_buffer {
 layout(r32ui, set = 0, binding = 17) uniform uimage3D density_only_map;
 layout(r32ui, set = 0, binding = 18) uniform uimage3D light_only_map;
 layout(r32ui, set = 0, binding = 19) uniform uimage3D emissive_only_map;
+layout(r32ui, set = 0, binding = 22) uniform restrict uimage2D history_clamp_map;
 #endif
 
 #ifdef USE_RADIANCE_OCTMAP_ARRAY
@@ -925,6 +926,15 @@ void main() {
 		vec4 history = textureLod(sampler3D(prev_density_texture, linear_sampler), prev_view, 0.0);
 		if (!any(isnan(history)) && !any(isinf(history))) {
 			result = mix(current, clamp(history, neighborhood_min, neighborhood_max), params.temporal_blend);
+#ifndef NO_IMAGE_ATOMICS
+			if (params.debug_history_clamp) {
+				vec4 moved = abs(history - clamp(history, neighborhood_min, neighborhood_max));
+				vec4 reference = max(history, current);
+				const vec3 luminance = vec3(0.2126, 0.7152, 0.0722);
+				float amount = max(dot(moved.rgb, luminance) / max(dot(reference.rgb, luminance), 1e-4), moved.a / max(reference.a, 1e-4));
+				imageAtomicMax(history_clamp_map, pos.xy, floatBitsToUint(clamp(amount, 0.0, 1.0)));
+			}
+#endif
 		}
 	}
 

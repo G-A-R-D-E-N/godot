@@ -33,6 +33,8 @@
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
 
+#include <thirdparty/amd-fsr2/ffx_fsr2_private.h>
+
 using namespace RendererRD;
 
 #ifndef _MSC_VER
@@ -789,11 +791,16 @@ FSR2Effect::FSR2Effect() {
 	state.min_filter = RD::SAMPLER_FILTER_LINEAR;
 	device.linear_clamp_sampler = RD::get_singleton()->sampler_create(state);
 	ERR_FAIL_COND(device.linear_clamp_sampler.is_null());
+
+	rejected_history_shader.initialize(modes_single);
+	rejected_history_version = rejected_history_shader.version_create();
+	rejected_history_pipeline = RD::get_singleton()->compute_pipeline_create(rejected_history_shader.version_get_shader(rejected_history_version, 0));
 }
 
 FSR2Effect::~FSR2Effect() {
 	RD::get_singleton()->free_rid(device.point_clamp_sampler);
 	RD::get_singleton()->free_rid(device.linear_clamp_sampler);
+	rejected_history_shader.version_free(rejected_history_version);
 
 	for (uint32_t i = 0; i < FFX_FSR2_PASS_COUNT; i++) {
 		device.passes[i].shader->version_free(device.passes[i].shader_version);
@@ -876,4 +883,24 @@ void FSR2Effect::upscale(const Parameters &p_params) {
 
 	FfxErrorCode result = ffxFsr2ContextDispatch(&p_params.context->fsr_context, &dispatch_desc);
 	ERR_FAIL_COND(result != FFX_OK);
+}
+
+void FSR2Effect::rejected_history(FSR2Context *p_context, RID p_output, Size2i p_size) {
+	const FfxFsr2Context_Private *context = reinterpret_cast<const FfxFsr2Context_Private *>(&p_context->fsr_context);
+	const LocalVector<RID> &rids = p_context->scratch.resources.rids;
+	RID shader = rejected_history_shader.version_get_shader(rejected_history_version, 0);
+	ERR_FAIL_COND(shader.is_null());
+
+	RD::Uniform u_prepared(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, { device.point_clamp_sampler, rids[uint32_t(context->srvResources[FFX_FSR2_RESOURCE_IDENTIFIER_PREPARED_INPUT_COLOR].internalIndex)] });
+	RD::Uniform u_motion(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, { device.point_clamp_sampler, rids[uint32_t(context->srvResources[FFX_FSR2_RESOURCE_IDENTIFIER_DILATED_MOTION_VECTORS].internalIndex)] });
+	RD::Uniform u_reactive(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, { device.point_clamp_sampler, rids[uint32_t(context->srvResources[FFX_FSR2_RESOURCE_IDENTIFIER_DILATED_REACTIVE_MASKS].internalIndex)] });
+	RD::Uniform u_output(RD::UNIFORM_TYPE_IMAGE, 3, { p_output });
+	uint32_t push_constant[4] = { uint32_t(p_size.x), uint32_t(p_size.y), context->constants.frameIndex == 0 ? 1u : 0u, 0u };
+
+	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
+	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, rejected_history_pipeline);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, UniformSetCacheRD::get_singleton()->get_cache(shader, 0, u_prepared, u_motion, u_reactive, u_output), 0);
+	RD::get_singleton()->compute_list_set_push_constant(compute_list, push_constant, sizeof(push_constant));
+	RD::get_singleton()->compute_list_dispatch_threads(compute_list, p_size.x, p_size.y, 1);
+	RD::get_singleton()->compute_list_end();
 }
