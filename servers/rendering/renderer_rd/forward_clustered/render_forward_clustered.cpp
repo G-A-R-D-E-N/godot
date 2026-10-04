@@ -2444,6 +2444,9 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	if (current_cluster_builder) {
 		base_specialization.cluster_has_area_light = current_cluster_builder->get_cluster_count_by_type(ClusterBuilderRD::ELEMENT_TYPE_AREA_LIGHT) != 0;
 	}
+	if (get_debug_draw_mode() >= RSE::VIEWPORT_DEBUG_DRAW_DIRECT_DIFFUSE && get_debug_draw_mode() <= RSE::VIEWPORT_DEBUG_DRAW_SSR_CONFIDENCE) {
+		base_specialization.debug_lighting_component = get_debug_draw_mode() - RSE::VIEWPORT_DEBUG_DRAW_DIRECT_DIFFUSE + 1;
+	}
 
 	RENDER_TIMESTAMP("Render Opaque Pass");
 
@@ -2873,6 +2876,12 @@ void RenderForwardClustered::_render_buffers_debug_draw(const RenderDataRD *p_re
 		RID combined = ss_effects->sscs_combine_for_debug(rb, rb_data->ss_effects_data.sscs);
 		Size2i rtsize = texture_storage->render_target_get_size(render_target);
 		copy_effects->copy_to_fb_rect(combined, texture_storage->render_target_get_rd_framebuffer(render_target), Rect2(Vector2(), rtsize), false, true);
+	}
+
+	const StringName source_context = get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_BOUNCE_SOURCE ? RB_SCOPE_BOUNCE_SOURCE : RB_SCOPE_REFLECTION_SOURCE;
+	if ((get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_BOUNCE_SOURCE || get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_REFLECTION_SOURCE) && rb->has_texture(source_context, RB_SOURCE)) {
+		Size2i rtsize = texture_storage->render_target_get_size(render_target);
+		copy_effects->copy_to_fb_rect(rb->get_texture_slice(source_context, RB_SOURCE, 0, 0), texture_storage->render_target_get_rd_framebuffer(render_target), Rect2(Vector2(), rtsize), false, false, false, false, RID(), false, true);
 	}
 
 	if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_BENT_NORMALS && rb->has_texture(RB_SCOPE_GTAO, RB_GTAO_BENT_NORMAL)) {

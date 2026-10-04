@@ -775,6 +775,46 @@
 			Draws the view-space bent normals computed by the GTAO backend of screen-space ambient occlusion.
 			[b]Note:[/b] Only supported when using the Forward+ rendering method, with [member ProjectSettings.rendering/environment/ssao/backend] set to GTAO and [member ProjectSettings.rendering/environment/gtao/bent_normals] enabled.
 		</constant>
+		<constant name="DEBUG_DRAW_DIRECT_DIFFUSE" value="31" enum="DebugDraw">
+			Draws only the diffuse light from lights, after the material weight and direct-light ambient occlusion.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_DIRECT_SPECULAR" value="32" enum="DebugDraw">
+			Draws only the specular light from lights.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_INDIRECT_DIFFUSE" value="33" enum="DebugDraw">
+			Draws only the ambient diffuse light, including screen-space indirect lighting and GI, after the material weight.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_INDIRECT_SPECULAR" value="34" enum="DebugDraw">
+			Draws only the reflected light from the sky, reflection probes, GI and screen-space reflections, after the material weight.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_EMISSION" value="35" enum="DebugDraw">
+			Draws only the emission of materials. The direct diffuse, direct specular, indirect diffuse, indirect specular and emission views add up to the image before fog.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_FOG_TRANSMITTANCE" value="36" enum="DebugDraw">
+			Draws the fraction of each opaque surface's light that passes through depth and volumetric fog (white = no fog).
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_FOG_INSCATTER" value="37" enum="DebugDraw">
+			Draws the light that depth and volumetric fog add in front of each opaque surface. The image equals the image before fog times the transmittance plus the inscatter.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_SSR_CONFIDENCE" value="38" enum="DebugDraw">
+			Draws the confidence of the screen-space reflection hit at each pixel (the alpha of the screen-space reflection buffer).
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_BOUNCE_SOURCE" value="39" enum="DebugDraw">
+			Draws the bounce source that screen-space indirect lighting samples in the next frame: direct diffuse light plus emission weighted by [code]EMISSION_BOUNCE_WEIGHT[/code], before fog.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method, without MSAA, with [member ProjectSettings.rendering/environment/screen_space_lighting/legacy_last_frame_source] disabled.
+		</constant>
+		<constant name="DEBUG_DRAW_REFLECTION_SOURCE" value="40" enum="DebugDraw">
+			Draws the reflection source that screen-space reflections sample in the next frame: the opaque image without the screen-space reflection term and without fog.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method, without MSAA, with [member ProjectSettings.rendering/environment/screen_space_lighting/legacy_last_frame_source] disabled.
+		</constant>
 		<constant name="DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_NEAREST" value="0" enum="DefaultCanvasItemTextureFilter">
 			The texture filter reads from the nearest pixel only. This makes the texture look pixelated from up close, and grainy from a distance (due to mipmaps not being sampled).
 		</constant>
