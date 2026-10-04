@@ -1266,6 +1266,7 @@ void fragment_shader(in SceneData scene_data) {
 #if defined(DIRECT_DIFFUSE_WEIGHT_USED)
 	vec3 direct_diffuse_weight = vec3(1.0);
 #endif
+	float emission_bounce_weight = 1.0;
 #if defined(TEMPORAL_METADATA) || defined(TEMPORAL_METADATA_USED)
 	float temporal_mask = sc_dithered_instance_fade() ? 1.0 : 0.0;
 	float temporal_id = 0.0;
