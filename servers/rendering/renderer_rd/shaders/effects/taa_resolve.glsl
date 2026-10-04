@@ -347,7 +347,7 @@ float get_factor_garden_disocclusion(vec2 uv_reprojected, vec2 velocity, float m
 #endif
 
 #ifdef MODE_REJECTED_HISTORY
-void store_rejected_history(uvec2 pos_screen, vec2 uv_reprojected, float factor_screen, float factor_disocclusion, vec3 color_input, vec3 history, vec3 history_clipped) {
+void store_rejected_history(uvec2 pos_screen, vec2 uv_reprojected, float factor_screen, float factor_disocclusion, float reactive, vec3 color_input, vec3 history, vec3 history_clipped) {
 #ifdef GARDEN_TAA
 	float id = imageLoad(velocity_buffer, ivec2(pos_screen)).w;
 	float id_previous = imageLoad(last_velocity_buffer, ivec2(uv_reprojected * params.resolution)).w;
@@ -355,7 +355,7 @@ void store_rejected_history(uvec2 pos_screen, vec2 uv_reprojected, float factor_
 #else
 	bool id_mismatch = false;
 #endif
-	float clamped = smoothstep(0.02, 0.2, length(reinhard(history) - reinhard(history_clipped)));
+	float clamped = max(smoothstep(0.02, 0.2, length(reinhard(history) - reinhard(history_clipped))), reactive);
 	vec3 color = vec3(0.25 * luminance(reinhard(color_input))) + vec3(factor_disocclusion, clamped * (1.0 - factor_disocclusion), 0.0);
 	color = factor_screen > 0.0 ? vec3(0.0, 0.0, 1.0) : id_mismatch ? vec3(1.0, 0.0, 1.0) : color;
 	imageStore(rejected_buffer, ivec2(pos_screen), vec4(min(color, vec3(1.0)), 1.0));
@@ -394,6 +394,8 @@ vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_
 #endif
 	color_history = clip_history_3x3(pos_group, color_history, velocity_closest);
 
+	float reactive = texelFetch(reactive_buffer, ivec2(pos_screen), 0).r;
+
 	// Compute blend factor
 	float blend_factor = RPC_16; // We want to be able to accumulate as many jitter samples as we generated, that is, 16.
 	{
@@ -410,10 +412,9 @@ vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_
 		// Add to the blend factor
 		blend_factor = clamp(blend_factor + factor_screen + factor_disocclusion, 0.0, 1.0);
 #ifdef MODE_REJECTED_HISTORY
-		store_rejected_history(pos_screen, uv_reprojected, factor_screen, factor_disocclusion, color_input, history_unclipped, color_history);
+		store_rejected_history(pos_screen, uv_reprojected, factor_screen, factor_disocclusion, reactive, color_input, history_unclipped, color_history);
 #endif
 	}
-	float reactive = texelFetch(reactive_buffer, ivec2(pos_screen), 0).r;
 	blend_factor = max(blend_factor, reactive);
 
 	// Resolve
