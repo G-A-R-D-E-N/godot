@@ -264,6 +264,50 @@ void SkyRD::_render_sky(RD::DrawListID p_list, float p_time, RID p_fb, PipelineC
 	RD::get_singleton()->draw_list_draw(draw_list, false, 1u, 3u);
 }
 
+void SkyRD::_update_scene_uniform_set() {
+	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
+	LocalVector<RD::Uniform> uniforms;
+
+	{
+		RD::Uniform u;
+		u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+		u.binding = 1;
+		u.append_id(RendererRD::MaterialStorage::get_singleton()->global_shader_uniforms_get_storage_buffer());
+		uniforms.push_back(u);
+	}
+
+	{
+		RD::Uniform u;
+		u.binding = 2;
+		u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER;
+		u.append_id(sky_scene_state.uniform_buffer);
+		uniforms.push_back(u);
+	}
+
+	{
+		RD::Uniform u;
+		u.binding = 3;
+		u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER;
+		u.append_id(sky_scene_state.directional_light_buffer);
+		uniforms.push_back(u);
+	}
+
+	{
+		RD::Uniform u;
+		u.binding = 16;
+		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		for (uint32_t i = 0; i < sky_scene_state.max_directional_lights; i++) {
+			RID texture = sky_scene_state.cloud_shadow_textures[i];
+			u.append_id(texture.is_valid() ? texture : texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_WHITE));
+		}
+		uniforms.push_back(u);
+	}
+
+	RendererRD::MaterialStorage::get_singleton()->samplers_rd_get_default().append_uniforms(uniforms, SAMPLERS_BINDING_FIRST_INDEX);
+
+	sky_scene_state.uniform_set = UniformSetCacheRD::get_singleton()->get_cache_vec(sky_shader.default_shader_rd, SKY_SET_UNIFORMS, uniforms);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // ReflectionData
 
@@ -845,35 +889,7 @@ void sky() {
 
 		sky_scene_state.uniform_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(SkySceneState::UBO));
 
-		Vector<RD::Uniform> uniforms;
-
-		{
-			RD::Uniform u;
-			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
-			u.binding = 1;
-			u.append_id(RendererRD::MaterialStorage::get_singleton()->global_shader_uniforms_get_storage_buffer());
-			uniforms.push_back(u);
-		}
-
-		{
-			RD::Uniform u;
-			u.binding = 2;
-			u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER;
-			u.append_id(sky_scene_state.uniform_buffer);
-			uniforms.push_back(u);
-		}
-
-		{
-			RD::Uniform u;
-			u.binding = 3;
-			u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER;
-			u.append_id(sky_scene_state.directional_light_buffer);
-			uniforms.push_back(u);
-		}
-
-		material_storage->samplers_rd_get_default().append_uniforms(uniforms, SAMPLERS_BINDING_FIRST_INDEX);
-
-		sky_scene_state.uniform_set = RD::get_singleton()->uniform_set_create(uniforms, sky_shader.default_shader_rd, SKY_SET_UNIFORMS);
+		_update_scene_uniform_set();
 	}
 
 	{
@@ -966,10 +982,6 @@ SkyRD::~SkyRD() {
 	material_storage->material_free(sky_shader.default_material);
 	material_storage->shader_free(sky_scene_state.fog_shader);
 	material_storage->material_free(sky_scene_state.fog_material);
-
-	if (RD::get_singleton()->uniform_set_is_valid(sky_scene_state.uniform_set)) {
-		RD::get_singleton()->free_rid(sky_scene_state.uniform_set);
-	}
 
 	if (RD::get_singleton()->uniform_set_is_valid(sky_scene_state.default_fog_uniform_set)) {
 		RD::get_singleton()->free_rid(sky_scene_state.default_fog_uniform_set);
@@ -1103,6 +1115,9 @@ void SkyRD::setup_sky(const RenderDataRD *p_render_data, const Size2i p_screen_s
 
 	bool sun_scatter_enabled = RendererSceneRenderRD::get_singleton()->environment_get_fog_enabled(p_render_data->environment) && RendererSceneRenderRD::get_singleton()->environment_get_fog_sun_scatter(p_render_data->environment) > 0.001;
 	sky_scene_state.ubo.directional_light_count = 0;
+	for (RID &cloud_shadow_texture : sky_scene_state.cloud_shadow_textures) {
+		cloud_shadow_texture = RID();
+	}
 	if (shader_data->uses_light || sun_scatter_enabled) {
 		const PagedArray<RID> &lights = *p_render_data->lights;
 		// Run through the list of lights in the scene and pick out the Directional Lights.
@@ -1146,6 +1161,13 @@ void SkyRD::setup_sky(const RenderDataRD *p_render_data, const Size2i p_screen_s
 
 				float angular_diameter = light_storage->light_get_param(base, RSE::LIGHT_PARAM_SIZE);
 				sky_light_data.size = Math::deg_to_rad(angular_diameter);
+
+				float cloud_shadow_u[4];
+				float cloud_shadow_v[4];
+				sky_scene_state.cloud_shadow_textures[sky_scene_state.ubo.directional_light_count] = light_storage->light_directional_get_cloud_shadow_texture(base);
+				sky_light_data.cloud_shadow[2] = light_storage->light_instance_get_cloud_shadow(lights[i], p_render_data->scene_data->cam_transform, cloud_shadow_u, cloud_shadow_v, &sky_light_data.cloud_shadow[3]);
+				sky_light_data.cloud_shadow[0] = cloud_shadow_u[3];
+				sky_light_data.cloud_shadow[1] = cloud_shadow_v[3];
 				sky_scene_state.ubo.directional_light_count++;
 				if (sky_scene_state.ubo.directional_light_count >= sky_scene_state.max_directional_lights) {
 					break;
@@ -1154,6 +1176,7 @@ void SkyRD::setup_sky(const RenderDataRD *p_render_data, const Size2i p_screen_s
 		}
 		// Check whether the directional_light_buffer changes.
 		bool light_data_dirty = false;
+		bool cloud_shadow_dirty = false;
 
 		// Light buffer is dirty if we have fewer or more lights.
 		// If we have fewer lights, make sure that old lights are disabled.
@@ -1181,21 +1204,23 @@ void SkyRD::setup_sky(const RenderDataRD *p_render_data, const Size2i p_screen_s
 					light_data_dirty = true;
 					break;
 				}
+				cloud_shadow_dirty = cloud_shadow_dirty || memcmp(sky_scene_state.directional_lights[i].cloud_shadow, sky_scene_state.last_frame_directional_lights[i].cloud_shadow, sizeof(SkyDirectionalLightData::cloud_shadow)) != 0;
 			}
 		}
 
-		if (light_data_dirty) {
+		if (light_data_dirty || cloud_shadow_dirty) {
 			RD::get_singleton()->buffer_update(sky_scene_state.directional_light_buffer, 0, sizeof(SkyDirectionalLightData) * sky_scene_state.max_directional_lights, sky_scene_state.directional_lights);
 
 			SkyDirectionalLightData *temp = sky_scene_state.last_frame_directional_lights;
 			sky_scene_state.last_frame_directional_lights = sky_scene_state.directional_lights;
 			sky_scene_state.directional_lights = temp;
 			sky_scene_state.last_frame_directional_light_count = sky_scene_state.ubo.directional_light_count;
-			if (sky) {
+			if (sky && light_data_dirty) {
 				sky->reflection.dirty = true;
 			}
 		}
 	}
+	_update_scene_uniform_set();
 
 	// Setup fog variables.
 	sky_scene_state.ubo.volumetric_fog_enabled = false;

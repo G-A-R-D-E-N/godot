@@ -65,6 +65,7 @@ public:
 		float size;
 		uint32_t enabled;
 		uint32_t pad[3];
+		float cloud_shadow[4];
 	};
 
 private:
@@ -135,6 +136,7 @@ private:
 	};
 
 	void _render_sky(RD::DrawListID p_list, float p_time, RID p_fb, PipelineCacheRD *p_pipeline, RID p_uniform_set, RID p_texture_set, const Projection &p_projection, const Basis &p_orientation, const Vector3 &p_position, float p_luminance_multiplier, float p_brightness_modifier, float p_border_size = 0.0);
+	void _update_scene_uniform_set();
 
 public:
 	struct SkySceneState {
@@ -173,6 +175,7 @@ public:
 		uint32_t max_directional_lights;
 		uint32_t last_frame_directional_light_count;
 		RID directional_light_buffer;
+		RID cloud_shadow_textures[RendererSceneRender::MAX_DIRECTIONAL_LIGHTS];
 		RID uniform_set;
 		RID uniform_buffer;
 		RID fog_uniform_set;

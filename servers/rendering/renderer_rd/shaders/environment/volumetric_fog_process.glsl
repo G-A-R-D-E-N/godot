@@ -221,6 +221,11 @@ layout(set = 0, binding = 20) uniform texture2D sky_texture;
 
 layout(set = 0, binding = 21) uniform texture2D area_light_atlas;
 
+#ifdef MODE_DENSITY
+layout(set = 2, binding = 0) uniform texture2D cloud_shadow_textures[MAX_DIRECTIONAL_LIGHT_DATA_STRUCTS];
+layout(set = 2, binding = 1) uniform sampler cloud_shadow_sampler;
+#endif
+
 float get_depth_at_pos(float cell_depth_size, int z) {
 	float d = float(z) * cell_depth_size + cell_depth_size * 0.5; //center of voxels
 	d = pow(d, params.detail_spread);
@@ -434,6 +439,11 @@ void main() {
 					shadow = mix(shadow, 1.0, smoothstep(directional_lights.data[i].fade_from, directional_lights.data[i].fade_to, view_pos.z)); //done with negative values for performance
 
 					shadow_attenuation = mix(vec3(1.0 - directional_lights.data[i].shadow_opacity), vec3(1.0), shadow);
+				}
+
+				if (directional_lights.data[i].cloud_shadow_strength > 0.0) {
+					vec2 cloud_uv = vec2(dot(directional_lights.data[i].cloud_shadow_u.xyz, view_pos), dot(directional_lights.data[i].cloud_shadow_v.xyz, view_pos)) + vec2(directional_lights.data[i].cloud_shadow_u.w, directional_lights.data[i].cloud_shadow_v.w);
+					shadow_attenuation *= mix(1.0, pow(textureLod(sampler2D(cloud_shadow_textures[i], cloud_shadow_sampler), cloud_uv, 0.0).r, directional_lights.data[i].cloud_shadow_exponent), directional_lights.data[i].cloud_shadow_strength);
 				}
 
 				total_light += shadow_attenuation * directional_lights.data[i].color * directional_lights.data[i].energy * henyey_greenstein(dot(safe_normalize(view_pos), safe_normalize(directional_lights.data[i].direction)), params.phase_g) * directional_lights.data[i].volumetric_fog_energy;

@@ -2146,6 +2146,18 @@
 				If [code]true[/code], this directional light will blend between shadow map splits resulting in a smoother transition between them. Equivalent to [member DirectionalLight3D.directional_shadow_blend_splits].
 			</description>
 		</method>
+		<method name="light_directional_set_cloud_shadow">
+			<return type="void" />
+			<param index="0" name="light" type="RID" />
+			<param index="1" name="texture" type="RID" />
+			<param index="2" name="scale" type="float" />
+			<param index="3" name="offset" type="Vector2" />
+			<param index="4" name="altitude" type="float" />
+			<param index="5" name="strength" type="float" />
+			<description>
+				Sets the cloud shadow of this directional light. Equivalent to [member DirectionalLight3D.cloud_shadow_texture], [member DirectionalLight3D.cloud_shadow_scale], [member DirectionalLight3D.cloud_shadow_offset], [member DirectionalLight3D.cloud_shadow_altitude] and [member DirectionalLight3D.cloud_shadow_strength].
+			</description>
+		</method>
 		<method name="light_directional_set_shadow_mode">
 			<return type="void" />
 			<param index="0" name="light" type="RID" />

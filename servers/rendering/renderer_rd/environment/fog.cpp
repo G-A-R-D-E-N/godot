@@ -34,6 +34,7 @@
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
+#include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
 #include "servers/rendering/rendering_server_default.h"
 
 using namespace RendererRD;
@@ -1174,12 +1175,26 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 
 	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 
-	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, volumetric_fog.process_pipelines[using_sdfgi ? VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_DENSITY_WITH_SDFGI : VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_DENSITY].get_rid());
+	int density_variant = using_sdfgi ? VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_DENSITY_WITH_SDFGI : VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_DENSITY;
+	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, volumetric_fog.process_pipelines[density_variant].get_rid());
 
 	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, fog->gi_dependent_sets.process_uniform_set_density, 0);
 
 	if (using_sdfgi) {
 		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, fog->sdfgi_uniform_set, 1);
+	}
+
+	{
+		RD::Uniform u_cloud_shadow_textures;
+		u_cloud_shadow_textures.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		u_cloud_shadow_textures.binding = 0;
+		const RID *cloud_shadow_textures = RendererRD::LightStorage::get_singleton()->get_directional_cloud_shadow_textures();
+		for (uint32_t i = 0; i < RendererSceneRender::MAX_DIRECTIONAL_LIGHTS; i++) {
+			u_cloud_shadow_textures.append_id(cloud_shadow_textures[i].is_valid() ? cloud_shadow_textures[i] : texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_WHITE));
+		}
+		RD::Uniform u_cloud_shadow_sampler(RD::UNIFORM_TYPE_SAMPLER, 1, material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS, RSE::CANVAS_ITEM_TEXTURE_REPEAT_ENABLED));
+		RID density_shader = volumetric_fog.process_shader.version_get_shader(volumetric_fog.process_shader_version, _get_fog_process_variant(density_variant));
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, UniformSetCacheRD::get_singleton()->get_cache(density_shader, 2, u_cloud_shadow_textures, u_cloud_shadow_sampler), 2);
 	}
 	RD::get_singleton()->compute_list_dispatch_threads(compute_list, fog->width, fog->height, fog->depth);
 	RD::get_singleton()->compute_list_add_barrier(compute_list);
