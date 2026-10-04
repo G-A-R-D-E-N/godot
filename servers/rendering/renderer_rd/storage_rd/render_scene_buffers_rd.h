@@ -73,6 +73,10 @@ private:
 	RD::DataFormat preferred_data_format = RD::DATA_FORMAT_MAX;
 	RendererRD::VRS *vrs = nullptr;
 	uint64_t auto_exposure_version = 1;
+	int history_reset_serial = 0;
+	float history_exposure_normalization = 1.0;
+	bool history_valid = false;
+	bool history_reset = false;
 	RSE::ViewportVRSMode vrs_mode = RSE::VIEWPORT_VRS_DISABLED;
 
 	// Our render target represents our final destination that we display on screen.
@@ -251,6 +255,14 @@ public:
 
 	uint64_t get_auto_exposure_version() const { return auto_exposure_version; }
 	void set_auto_exposure_version(const uint64_t p_auto_exposure_version) { auto_exposure_version = p_auto_exposure_version; }
+
+	void update_history_reset(int p_serial, float p_exposure_normalization) {
+		history_reset = !history_valid || p_serial != history_reset_serial || p_exposure_normalization != history_exposure_normalization;
+		history_valid = true;
+		history_reset_serial = p_serial;
+		history_exposure_normalization = p_exposure_normalization;
+	}
+	bool get_history_reset() const { return history_reset; }
 
 	// For our internal textures we provide some easy access methods.
 

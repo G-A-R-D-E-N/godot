@@ -102,7 +102,6 @@ public:
 
 	public:
 		ClusterBuilderRD *cluster_builder = nullptr;
-		int history_reset_serial = 0;
 
 		struct SSEffectsData {
 			Projection ssil_last_frame_projections[RendererSceneRender::MAX_RENDER_VIEWS];
