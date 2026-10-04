@@ -436,6 +436,63 @@ RSE::LightDirectionalSkyMode LightStorage::light_directional_get_sky_mode(RID p_
 	return light->directional_sky_mode;
 }
 
+void LightStorage::light_directional_set_cloud_shadow(RID p_light, RID p_texture, float p_scale, const Vector2 &p_offset, float p_altitude, float p_strength) {
+	Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL(light);
+
+	light->cloud_shadow_texture = p_texture;
+	light->cloud_shadow_scale = MAX(p_scale, 0.001f);
+	light->cloud_shadow_offset = p_offset;
+	light->cloud_shadow_altitude = p_altitude;
+	light->cloud_shadow_strength = CLAMP(p_strength, 0.0f, 1.0f);
+}
+
+RID LightStorage::light_directional_get_cloud_shadow_texture(RID p_light) const {
+	const Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL_V(light, RID());
+
+	if (light->cloud_shadow_texture.is_null() || light->cloud_shadow_strength <= 0.0f) {
+		return RID();
+	}
+	return TextureStorage::get_singleton()->texture_get_rd_texture(light->cloud_shadow_texture);
+}
+
+float LightStorage::_get_cloud_shadow(const Light *p_light, const Transform3D &p_light_transform, const Transform3D &p_camera_transform, float *r_u, float *r_v, float *r_exponent) const {
+	Vector3 to_light = p_light_transform.basis.xform(Vector3(0, 0, 1)).normalized();
+	real_t height = MAX(to_light.y, (real_t)0.05);
+	real_t slope_x = to_light.x / height;
+	real_t slope_z = to_light.z / height;
+	real_t inv_scale = 1.0 / p_light->cloud_shadow_scale;
+	const Basis &basis = p_camera_transform.basis;
+	const Vector3 &origin = p_camera_transform.origin;
+
+	Vector3 u = (basis.rows[0] - basis.rows[1] * slope_x) * inv_scale;
+	Vector3 v = (basis.rows[2] - basis.rows[1] * slope_z) * inv_scale;
+	real_t u_origin = (origin.x + (p_light->cloud_shadow_altitude - origin.y) * slope_x) * inv_scale + p_light->cloud_shadow_offset.x;
+	real_t v_origin = (origin.z + (p_light->cloud_shadow_altitude - origin.y) * slope_z) * inv_scale + p_light->cloud_shadow_offset.y;
+
+	r_u[0] = u.x;
+	r_u[1] = u.y;
+	r_u[2] = u.z;
+	r_u[3] = u_origin - Math::floor(u_origin);
+	r_v[0] = v.x;
+	r_v[1] = v.y;
+	r_v[2] = v.z;
+	r_v[3] = v_origin - Math::floor(v_origin);
+	*r_exponent = 1.0 / height;
+
+	return p_light->cloud_shadow_texture.is_valid() && to_light.y > 0.0 ? p_light->cloud_shadow_strength : 0.0f;
+}
+
+float LightStorage::light_instance_get_cloud_shadow(RID p_light_instance, const Transform3D &p_camera_transform, float *r_u, float *r_v, float *r_exponent) const {
+	const LightInstance *light_instance = light_instance_owner.get_or_null(p_light_instance);
+	ERR_FAIL_NULL_V(light_instance, 0.0f);
+	const Light *light = light_owner.get_or_null(light_instance->light);
+	ERR_FAIL_NULL_V(light, 0.0f);
+
+	return _get_cloud_shadow(light, light_instance->transform, p_camera_transform, r_u, r_v, r_exponent);
+}
+
 RSE::LightDirectionalShadowMode LightStorage::light_directional_get_shadow_mode(RID p_light) {
 	const Light *light = light_owner.get_or_null(p_light);
 	ERR_FAIL_NULL_V(light, RSE::LIGHT_DIRECTIONAL_SHADOW_ORTHOGONAL);
@@ -741,6 +798,10 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 
 	r_directional_light_soft_shadows = false;
 
+	for (RID &cloud_shadow_texture : directional_cloud_shadow_textures) {
+		cloud_shadow_texture = RID();
+	}
+
 	for (int i = 0; i < (int)p_lights.size(); i++) {
 		LightInstance *light_instance = light_instance_owner.get_or_null(p_lights[i]);
 		if (!light_instance) {
@@ -803,6 +864,9 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 						break;
 					}
 				}
+
+				directional_cloud_shadow_textures[r_directional_light_count] = light_directional_get_cloud_shadow_texture(light_instance->light);
+				light_data.cloud_shadow_strength = _get_cloud_shadow(light, light_transform, p_camera_transform, light_data.cloud_shadow_u, light_data.cloud_shadow_v, &light_data.cloud_shadow_exponent);
 
 				float angular_diameter = light->param[RSE::LIGHT_PARAM_SIZE];
 				if (angular_diameter > 0.0) {

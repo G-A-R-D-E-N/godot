@@ -4092,6 +4092,16 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		u.append_id(exposure_texture);
 		uniforms.push_back(u);
 	}
+	{
+		RD::Uniform u;
+		u.binding = 41;
+		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		const RID *cloud_shadow_textures = light_storage->get_directional_cloud_shadow_textures();
+		for (uint32_t i = 0; i < MAX_DIRECTIONAL_LIGHTS; i++) {
+			u.append_id(p_render_data && cloud_shadow_textures[i].is_valid() ? cloud_shadow_textures[i] : texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_WHITE));
+		}
+		uniforms.push_back(u);
+	}
 #ifdef MODULE_TEXTURE_STREAMING_ENABLED
 	{
 		RD::Uniform u;

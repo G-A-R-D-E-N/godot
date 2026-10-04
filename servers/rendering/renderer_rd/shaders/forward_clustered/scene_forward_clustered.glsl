@@ -1106,6 +1106,12 @@ vec4 volumetric_fog_process(vec2 screen_uv, float z) {
 	return texture(sampler3D(volumetric_fog_texture, SAMPLER_LINEAR_CLAMP), fog_pos);
 }
 
+float directional_cloud_shadow(uint p_index, vec3 p_vertex) {
+	vec2 uv = vec2(dot(directional_lights.data[p_index].cloud_shadow_u.xyz, p_vertex), dot(directional_lights.data[p_index].cloud_shadow_v.xyz, p_vertex)) + vec2(directional_lights.data[p_index].cloud_shadow_u.w, directional_lights.data[p_index].cloud_shadow_v.w);
+	float transmittance = pow(texture(sampler2D(cloud_shadow_textures[p_index], SAMPLER_LINEAR_WITH_MIPMAPS_REPEAT), uv).r, directional_lights.data[p_index].cloud_shadow_exponent);
+	return mix(1.0, transmittance, directional_lights.data[p_index].cloud_shadow_strength);
+}
+
 vec4 fog_process(vec3 vertex) {
 	vec3 fog_color = scene_data_block.data.fog_light_color;
 
@@ -1137,6 +1143,9 @@ vec4 fog_process(vec3 vertex) {
 
 		for (uint i = 0; i < scene_data_block.data.directional_light_count; i++) {
 			vec3 light_color = directional_lights.data[i].color * directional_lights.data[i].energy;
+			if (directional_lights.data[i].cloud_shadow_strength > 0.0) {
+				light_color *= directional_cloud_shadow(i, vec3(0.0));
+			}
 			float light_amount = pow(max(dot(view, directional_lights.data[i].direction), 0.0), 8.0);
 			fog_color += light_color * light_amount * scene_data_block.data.fog_sun_scatter;
 		}
@@ -2924,6 +2933,9 @@ void fragment_shader(in SceneData scene_data) {
 
 			shadow = mix(1.0, shadow, directional_lights.data[i].shadow_opacity);
 #endif
+			if (directional_lights.data[i].cloud_shadow_strength > 0.0) {
+				shadow *= directional_cloud_shadow(i, vertex);
+			}
 
 			blur_shadow(shadow);
 

@@ -504,6 +504,8 @@ layout(set = 1, binding = 39) uniform texture2D gtao_bent_normal_buffer;
 #endif // USE_MULTIVIEW
 layout(set = 1, binding = 40) uniform texture2D ss_exposure_texture;
 
+layout(set = 1, binding = 41) uniform texture2D cloud_shadow_textures[MAX_DIRECTIONAL_LIGHT_DATA_STRUCTS];
+
 #endif
 
 vec4 normal_roughness_compatibility(vec4 p_normal_roughness) {

@@ -576,6 +576,55 @@ DirectionalLight3D::SkyMode DirectionalLight3D::get_sky_mode() const {
 	return sky_mode;
 }
 
+void DirectionalLight3D::_update_cloud_shadow() {
+	RS::get_singleton()->light_directional_set_cloud_shadow(light, cloud_shadow_texture.is_valid() ? cloud_shadow_texture->get_rid() : RID(), cloud_shadow_scale, cloud_shadow_offset, cloud_shadow_altitude, cloud_shadow_strength);
+}
+
+void DirectionalLight3D::set_cloud_shadow_texture(const Ref<Texture2D> &p_texture) {
+	cloud_shadow_texture = p_texture;
+	_update_cloud_shadow();
+}
+
+Ref<Texture2D> DirectionalLight3D::get_cloud_shadow_texture() const {
+	return cloud_shadow_texture;
+}
+
+void DirectionalLight3D::set_cloud_shadow_scale(real_t p_scale) {
+	cloud_shadow_scale = p_scale;
+	_update_cloud_shadow();
+}
+
+real_t DirectionalLight3D::get_cloud_shadow_scale() const {
+	return cloud_shadow_scale;
+}
+
+void DirectionalLight3D::set_cloud_shadow_offset(const Vector2 &p_offset) {
+	cloud_shadow_offset = p_offset;
+	_update_cloud_shadow();
+}
+
+Vector2 DirectionalLight3D::get_cloud_shadow_offset() const {
+	return cloud_shadow_offset;
+}
+
+void DirectionalLight3D::set_cloud_shadow_altitude(real_t p_altitude) {
+	cloud_shadow_altitude = p_altitude;
+	_update_cloud_shadow();
+}
+
+real_t DirectionalLight3D::get_cloud_shadow_altitude() const {
+	return cloud_shadow_altitude;
+}
+
+void DirectionalLight3D::set_cloud_shadow_strength(real_t p_strength) {
+	cloud_shadow_strength = p_strength;
+	_update_cloud_shadow();
+}
+
+real_t DirectionalLight3D::get_cloud_shadow_strength() const {
+	return cloud_shadow_strength;
+}
+
 void DirectionalLight3D::_validate_property(PropertyInfo &p_property) const {
 	if (Engine::get_singleton()->is_editor_hint()) {
 		if (shadow_mode == SHADOW_ORTHOGONAL && (p_property.name == "directional_shadow_split_1" || p_property.name == "directional_shadow_blend_splits")) {
@@ -608,7 +657,25 @@ void DirectionalLight3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_sky_mode", "mode"), &DirectionalLight3D::set_sky_mode);
 	ClassDB::bind_method(D_METHOD("get_sky_mode"), &DirectionalLight3D::get_sky_mode);
 
+	ClassDB::bind_method(D_METHOD("set_cloud_shadow_texture", "texture"), &DirectionalLight3D::set_cloud_shadow_texture);
+	ClassDB::bind_method(D_METHOD("get_cloud_shadow_texture"), &DirectionalLight3D::get_cloud_shadow_texture);
+	ClassDB::bind_method(D_METHOD("set_cloud_shadow_scale", "scale"), &DirectionalLight3D::set_cloud_shadow_scale);
+	ClassDB::bind_method(D_METHOD("get_cloud_shadow_scale"), &DirectionalLight3D::get_cloud_shadow_scale);
+	ClassDB::bind_method(D_METHOD("set_cloud_shadow_offset", "offset"), &DirectionalLight3D::set_cloud_shadow_offset);
+	ClassDB::bind_method(D_METHOD("get_cloud_shadow_offset"), &DirectionalLight3D::get_cloud_shadow_offset);
+	ClassDB::bind_method(D_METHOD("set_cloud_shadow_altitude", "altitude"), &DirectionalLight3D::set_cloud_shadow_altitude);
+	ClassDB::bind_method(D_METHOD("get_cloud_shadow_altitude"), &DirectionalLight3D::get_cloud_shadow_altitude);
+	ClassDB::bind_method(D_METHOD("set_cloud_shadow_strength", "strength"), &DirectionalLight3D::set_cloud_shadow_strength);
+	ClassDB::bind_method(D_METHOD("get_cloud_shadow_strength"), &DirectionalLight3D::get_cloud_shadow_strength);
+
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "sky_mode", PROPERTY_HINT_ENUM, "Light and Sky,Light Only,Sky Only"), "set_sky_mode", "get_sky_mode");
+
+	ADD_GROUP("Cloud Shadow", "cloud_shadow_");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "cloud_shadow_texture", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"), "set_cloud_shadow_texture", "get_cloud_shadow_texture");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cloud_shadow_scale", PROPERTY_HINT_RANGE, "1,100000,1,or_greater,exp,suffix:m"), "set_cloud_shadow_scale", "get_cloud_shadow_scale");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "cloud_shadow_offset"), "set_cloud_shadow_offset", "get_cloud_shadow_offset");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cloud_shadow_altitude", PROPERTY_HINT_RANGE, "0,20000,1,or_greater,or_less,suffix:m"), "set_cloud_shadow_altitude", "get_cloud_shadow_altitude");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cloud_shadow_strength", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_cloud_shadow_strength", "get_cloud_shadow_strength");
 
 	ADD_GROUP("Directional Shadow", "directional_shadow_");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "directional_shadow_mode", PROPERTY_HINT_ENUM, "Orthogonal (Fast),PSSM 2 Splits (Average),PSSM 4 Splits (Slow)"), "set_shadow_mode", "get_shadow_mode");

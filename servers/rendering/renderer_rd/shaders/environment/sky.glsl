@@ -87,12 +87,15 @@ struct DirectionalLightData {
 	vec4 direction_energy;
 	vec4 color_size;
 	bool enabled;
+	vec4 cloud_shadow;
 };
 
 layout(set = 0, binding = 3, std140) uniform DirectionalLights {
 	DirectionalLightData data[MAX_DIRECTIONAL_LIGHT_DATA_STRUCTS];
 }
 directional_lights;
+
+layout(set = 0, binding = 16) uniform texture2D cloud_shadow_textures[MAX_DIRECTIONAL_LIGHT_DATA_STRUCTS];
 
 #ifdef MATERIAL_UNIFORMS_USED
 /* clang-format off */
@@ -166,6 +169,9 @@ vec4 fog_process(vec3 view, vec3 sky_color) {
 		float sun_total = 0.0;
 		for (uint i = 0; i < sky_scene_data.directional_light_count; i++) {
 			vec3 light_color = directional_lights.data[i].color_size.xyz * directional_lights.data[i].direction_energy.w;
+			if (directional_lights.data[i].cloud_shadow.z > 0.0) {
+				light_color *= mix(1.0, pow(textureLod(sampler2D(cloud_shadow_textures[i], SAMPLER_LINEAR_WITH_MIPMAPS_REPEAT), directional_lights.data[i].cloud_shadow.xy, 0.0).r, directional_lights.data[i].cloud_shadow.w), directional_lights.data[i].cloud_shadow.z);
+			}
 			float light_amount = pow(max(dot(view, directional_lights.data[i].direction_energy.xyz), 0.0), 8.0) * M_PI;
 			fog_color += light_color * light_amount * sky_scene_data.fog_sun_scatter;
 		}
