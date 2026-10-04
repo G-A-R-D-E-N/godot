@@ -3056,6 +3056,9 @@
 		<member name="rendering/environment/volumetric_fog/use_filter" type="int" setter="" getter="" default="1">
 			Enables filtering of the volumetric fog effect prior to integration. This substantially blurs the fog which reduces fine details but also smooths out harsh edges and aliasing artifacts. Disable when more detail is required.
 		</member>
+		<member name="rendering/environment/volumetric_fog/use_temporal_clamp" type="bool" setter="" getter="" default="true">
+			If [code]true[/code] and [member Environment.volumetric_fog_temporal_reprojection_enabled] is [code]true[/code], the reprojected fog from previous frames is clamped to the range of the current frame's neighboring froxels before blending. This removes the trails that moving lights leave in the fog, while fog lit by static lights keeps its temporal smoothing. If [code]false[/code], the previous frames are blended in unclamped.
+		</member>
 		<member name="rendering/environment/volumetric_fog/volume_depth" type="int" setter="" getter="" default="64">
 			Number of slices to use along the depth of the froxel buffer for volumetric fog. A lower number will be more efficient but may result in artifacts appearing during camera movement. See also [member Environment.volumetric_fog_length].
 		</member>

@@ -68,7 +68,7 @@ layout(rgba16f, set = 0, binding = 9) uniform restrict readonly image3D source_m
 layout(rgba16f, set = 0, binding = 10) uniform restrict writeonly image3D dest_map;
 #endif
 
-#ifdef MODE_FILTER
+#if defined(MODE_FILTER) || defined(MODE_TEMPORAL)
 layout(rgba16f, set = 0, binding = 9) uniform restrict readonly image3D source_map;
 layout(rgba16f, set = 0, binding = 10) uniform restrict writeonly image3D dest_map;
 #endif
@@ -185,7 +185,8 @@ layout(set = 0, binding = 15, std140) uniform Params {
 	float temporal_blend;
 
 	vec2 sky_border_size;
-	vec2 pad;
+	bool temporal_clamp;
+	uint pad;
 
 	mat3x4 cam_rotation;
 	mat4 to_prev_view;
@@ -816,7 +817,7 @@ void main() {
 	if (is_final_density_invalid) {
 		final_density = is_reprojected_density_invalid ? vec4(0.0) : reprojected_density;
 	} else if (!is_reprojected_density_invalid) {
-		final_density = mix(final_density, reprojected_density, reproject_amount);
+		final_density = mix(final_density, reprojected_density, params.temporal_clamp ? 0.0 : reproject_amount);
 	}
 	final_density = clamp(final_density, vec4(0.0), vec4(65504.0));
 
@@ -887,6 +888,49 @@ void main() {
 	imageStore(dest_map, pos, accum);
 
 #endif
+
+#ifdef MODE_TEMPORAL
+	ivec3 pos = ivec3(gl_GlobalInvocationID.xyz);
+	if (any(greaterThanEqual(pos, params.fog_volume_size))) {
+		return;
+	}
+
+	vec4 current = imageLoad(source_map, pos);
+	vec4 neighborhood_min = current;
+	vec4 neighborhood_max = current;
+	for (int z = -1; z <= 1; z++) {
+		for (int y = -1; y <= 1; y++) {
+			for (int x = -1; x <= 1; x++) {
+				vec4 neighbor = imageLoad(source_map, clamp(pos + ivec3(x, y, z), ivec3(0), params.fog_volume_size - ivec3(1)));
+				neighborhood_min = min(neighborhood_min, neighbor);
+				neighborhood_max = max(neighborhood_max, neighbor);
+			}
+		}
+	}
+
+	vec3 fog_unit_pos = vec3(pos) * fog_cell_size + fog_cell_size * 0.5;
+	fog_unit_pos.z = pow(fog_unit_pos.z, params.detail_spread);
+	vec3 view_pos = vec3((fog_unit_pos.xy * 2.0 - 1.0) * mix(params.fog_frustum_size_begin, params.fog_frustum_size_end, vec2(fog_unit_pos.z)), -params.fog_frustum_end * fog_unit_pos.z);
+	view_pos.y = -view_pos.y;
+
+	vec3 prev_view = (params.to_prev_view * vec4(view_pos, 1.0)).xyz;
+	prev_view.y = -prev_view.y;
+	prev_view.z /= -params.fog_frustum_end;
+	prev_view.xy /= mix(params.fog_frustum_size_begin, params.fog_frustum_size_end, vec2(prev_view.z));
+	prev_view.xy = prev_view.xy * 0.5 + 0.5;
+	prev_view.z = pow(prev_view.z, 1.0 / params.detail_spread);
+
+	vec4 result = current;
+	if (all(greaterThan(prev_view, vec3(0.0))) && all(lessThan(prev_view, vec3(1.0)))) {
+		vec4 history = textureLod(sampler3D(prev_density_texture, linear_sampler), prev_view, 0.0);
+		if (!any(isnan(history)) && !any(isinf(history))) {
+			result = mix(current, clamp(history, neighborhood_min, neighborhood_max), params.temporal_blend);
+		}
+	}
+
+	imageStore(dest_map, pos, result);
+#endif
+
 #ifdef MODE_COPY
 	ivec3 pos = ivec3(gl_GlobalInvocationID.xyz);
 	if (any(greaterThanEqual(pos, params.fog_volume_size))) {

@@ -30,6 +30,7 @@
 
 #include "fog.h"
 
+#include "core/config/project_settings.h"
 #include "servers/rendering/renderer_rd/cluster_builder_rd.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
@@ -318,6 +319,7 @@ ALBEDO = vec3(1.0);
 				volumetric_fog_modes.push_back(ShaderRD::VariantDefine(shader_group, base_define + "\n#define MODE_FILTER\n", false));
 				volumetric_fog_modes.push_back(ShaderRD::VariantDefine(shader_group, base_define + "\n#define MODE_FOG\n", false));
 				volumetric_fog_modes.push_back(ShaderRD::VariantDefine(shader_group, base_define + "\n#define MODE_COPY\n", false));
+				volumetric_fog_modes.push_back(ShaderRD::VariantDefine(shader_group, base_define + "\n#define MODE_TEMPORAL\n", false));
 				shader_group++;
 			}
 		}
@@ -447,6 +449,7 @@ bool Fog::VolumetricFog::sync_gi_dependent_sets_validity(bool p_ensure_freed) {
 	if (valid) {
 		if (p_ensure_freed) {
 			RD::get_singleton()->free_rid(gi_dependent_sets.process_uniform_set_density);
+			RD::get_singleton()->free_rid(gi_dependent_sets.process_uniform_set_density2);
 			RD::get_singleton()->free_rid(gi_dependent_sets.process_uniform_set);
 			RD::get_singleton()->free_rid(gi_dependent_sets.process_uniform_set2);
 			valid = false;
@@ -1026,6 +1029,9 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 			uniforms.remove_at(9);
 			uniforms.write[8].set_id(0, aux8);
 			fog->gi_dependent_sets.process_uniform_set_density = RD::get_singleton()->uniform_set_create(uniforms, volumetric_fog.process_shader.version_get_shader(volumetric_fog.process_shader_version, _get_fog_process_variant(VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_DENSITY)), 0);
+
+			uniforms.write[8].set_id(0, aux9);
+			fog->gi_dependent_sets.process_uniform_set_density2 = RD::get_singleton()->uniform_set_create(uniforms, volumetric_fog.process_shader.version_get_shader(volumetric_fog.process_shader_version, _get_fog_process_variant(VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_DENSITY)), 0);
 		}
 	}
 
@@ -1142,6 +1148,7 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 
 	params.use_temporal_reprojection = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_temporal_reprojection(p_settings.env);
 	params.temporal_blend = p_settings.reset_history ? 0.0f : RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_temporal_reprojection_amount(p_settings.env);
+	params.temporal_clamp = params.use_temporal_reprojection && GLOBAL_GET_CACHED(bool, "rendering/environment/volumetric_fog/use_temporal_clamp");
 
 	RID sky_rid = RendererSceneRenderRD::get_singleton()->environment_get_sky(p_settings.env);
 	if (sky_rid.is_valid()) {
@@ -1178,7 +1185,7 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 	int density_variant = using_sdfgi ? VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_DENSITY_WITH_SDFGI : VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_DENSITY;
 	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, volumetric_fog.process_pipelines[density_variant].get_rid());
 
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, fog->gi_dependent_sets.process_uniform_set_density, 0);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, params.temporal_clamp ? fog->gi_dependent_sets.process_uniform_set_density2 : fog->gi_dependent_sets.process_uniform_set_density, 0);
 
 	if (using_sdfgi) {
 		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, fog->sdfgi_uniform_set, 1);
@@ -1198,6 +1205,13 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 	}
 	RD::get_singleton()->compute_list_dispatch_threads(compute_list, fog->width, fog->height, fog->depth);
 	RD::get_singleton()->compute_list_add_barrier(compute_list);
+
+	if (params.temporal_clamp) {
+		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, volumetric_fog.process_pipelines[VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_TEMPORAL].get_rid());
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, fog->gi_dependent_sets.process_uniform_set2, 0);
+		RD::get_singleton()->compute_list_dispatch_threads(compute_list, fog->width, fog->height, fog->depth);
+		RD::get_singleton()->compute_list_add_barrier(compute_list);
+	}
 
 	// Copy fog to history buffer
 	if (RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_temporal_reprojection(p_settings.env)) {

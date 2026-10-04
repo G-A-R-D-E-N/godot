@@ -144,6 +144,7 @@ private:
 			VOLUMETRIC_FOG_PROCESS_SHADER_FILTER,
 			VOLUMETRIC_FOG_PROCESS_SHADER_FOG,
 			VOLUMETRIC_FOG_PROCESS_SHADER_COPY,
+			VOLUMETRIC_FOG_PROCESS_SHADER_TEMPORAL,
 			VOLUMETRIC_FOG_PROCESS_SHADER_MAX,
 		};
 
@@ -183,7 +184,8 @@ private:
 			float temporal_blend;
 
 			float sky_border_size[2];
-			float pad[2];
+			uint32_t temporal_clamp;
+			uint32_t pad;
 
 			float cam_rotation[12];
 			float to_prev_view[16];
@@ -322,6 +324,7 @@ public:
 
 		struct {
 			RID process_uniform_set_density;
+			RID process_uniform_set_density2;
 			RID process_uniform_set;
 			RID process_uniform_set2;
 		} gi_dependent_sets;
