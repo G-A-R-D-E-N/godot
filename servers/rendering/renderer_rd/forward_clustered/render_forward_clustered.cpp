@@ -2807,6 +2807,18 @@ void RenderForwardClustered::_render_buffers_debug_draw(const RenderDataRD *p_re
 		copy_effects->copy_to_fb_rect(final, texture_storage->render_target_get_rd_framebuffer(render_target), Rect2(Vector2(), rtsize), false, false);
 	}
 
+	if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_CONTACT_SHADOWS && ss_effects && rb->has_texture(RB_SCOPE_SSCS, RB_SSCS)) {
+		RID combined = ss_effects->sscs_combine_for_debug(rb, rb_data->ss_effects_data.sscs);
+		Size2i rtsize = texture_storage->render_target_get_size(render_target);
+		copy_effects->copy_to_fb_rect(combined, texture_storage->render_target_get_rd_framebuffer(render_target), Rect2(Vector2(), rtsize), false, true);
+	}
+
+	if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_BENT_NORMALS && rb->has_texture(RB_SCOPE_GTAO, RB_GTAO_BENT_NORMAL)) {
+		RID bent_normal = rb->get_texture_slice(RB_SCOPE_GTAO, RB_GTAO_BENT_NORMAL, 0, 0);
+		Size2i rtsize = texture_storage->render_target_get_size(render_target);
+		copy_effects->copy_to_fb_rect(bent_normal, texture_storage->render_target_get_rd_framebuffer(render_target), Rect2(Vector2(), rtsize), false, false, false, false, RID(), false, true);
+	}
+
 	if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_GI_BUFFER && rb->has_texture(RB_SCOPE_GI, RB_TEX_AMBIENT)) {
 		Size2i rtsize = texture_storage->render_target_get_size(render_target);
 		RID ambient_texture = rb->get_texture(RB_SCOPE_GI, RB_TEX_AMBIENT);

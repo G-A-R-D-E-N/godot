@@ -33,6 +33,7 @@
 #include "servers/rendering/renderer_rd/pipeline_deferred_rd.h"
 #include "servers/rendering/renderer_rd/shaders/effects/gtao.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/screen_space_contact_shadows.glsl.gen.h"
+#include "servers/rendering/renderer_rd/shaders/effects/screen_space_contact_shadows_combine.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/screen_space_reflection.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/screen_space_reflection_downsample.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/screen_space_reflection_filter.glsl.gen.h"
@@ -72,6 +73,7 @@
 #define RB_MIP_LEVEL SNAME("mip_level")
 
 #define RB_SSCS SNAME("sscs")
+#define RB_SSCS_COMBINED SNAME("sscs_combined")
 
 #define RB_GTAO_DEPTH SNAME("working_depth")
 #define RB_GTAO_NORMAL SNAME("working_normal")
@@ -209,6 +211,7 @@ public:
 
 	void sscs_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, SSCSRenderBuffers &p_sscs_buffers, uint32_t p_contact_shadow_count);
 	void screen_space_contact_shadows(Ref<RenderSceneBuffersRD> p_render_buffers, SSCSRenderBuffers &p_sscs_buffers, const SSCSSettings &p_settings, const Projection *p_projections, const Vector4 &p_light_vector, uint32_t p_light_index, float p_blur, float p_taa_frame_count);
+	RID sscs_combine_for_debug(Ref<RenderSceneBuffersRD> p_render_buffers, const SSCSRenderBuffers &p_sscs_buffers);
 
 private:
 	/* Settings */
@@ -617,6 +620,9 @@ private:
 		PipelineDeferredRD sscs_pipelines[SCREEN_SPACE_CONTACT_SHADOWS_MAX];
 		RID border_sampler;
 
+		ScreenSpaceContactShadowsCombineShaderRD combine_shader;
+		RID combine_shader_version;
+		PipelineDeferredRD combine_pipeline;
 	} sscs;
 
 	struct ScreenSpaceContactShadowsPushConstant {
@@ -629,6 +635,12 @@ private:
 		uint32_t ray_confidence;
 		uint32_t plane_rejection;
 		uint32_t pad[3];
+	};
+
+	struct ScreenSpaceContactShadowsCombinePushConstant {
+		int32_t screen_size[2];
+		uint32_t layer_count;
+		uint32_t layer_stride;
 	};
 
 	/* Subsurface scattering */
