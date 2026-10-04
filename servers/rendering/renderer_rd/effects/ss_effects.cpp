@@ -396,6 +396,14 @@ SSEffects::SSEffects() {
 
 			sscs.border_sampler = border_sampler;
 		}
+
+		{
+			Vector<String> combine_modes;
+			combine_modes.push_back("\n");
+			sscs.combine_shader.initialize(combine_modes);
+			sscs.combine_shader_version = sscs.combine_shader.version_create();
+			sscs.combine_pipeline.create_compute_pipeline(sscs.combine_shader.version_get_shader(sscs.combine_shader_version, 0));
+		}
 	}
 
 	// Subsurface scattering
@@ -505,6 +513,8 @@ SSEffects::~SSEffects() {
 			sscs.sscs_pipelines[i].free();
 		}
 		sscs.sscs_shader.version_free(sscs.sscs_shader_version);
+		sscs.combine_pipeline.free();
+		sscs.combine_shader.version_free(sscs.combine_shader_version);
 
 		RD::get_singleton()->free_rid(sscs.border_sampler);
 	}
@@ -2109,6 +2119,33 @@ void SSEffects::screen_space_contact_shadows(Ref<RenderSceneBuffersRD> p_render_
 	}
 
 	RD::get_singleton()->draw_command_end_label();
+}
+
+RID SSEffects::sscs_combine_for_debug(Ref<RenderSceneBuffersRD> p_render_buffers, const SSCSRenderBuffers &p_sscs_buffers) {
+	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
+	ERR_FAIL_NULL_V(uniform_set_cache, RID());
+	ERR_FAIL_COND_V(!p_render_buffers->has_texture(RB_SCOPE_SSCS, RB_SSCS), RID());
+
+	RID combined = p_render_buffers->create_texture(RB_SCOPE_SSCS, RB_SSCS_COMBINED, RD::DATA_FORMAT_R8_UNORM, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, p_sscs_buffers.size, 1);
+
+	ScreenSpaceContactShadowsCombinePushConstant push_constant;
+	push_constant.screen_size[0] = p_sscs_buffers.size.width;
+	push_constant.screen_size[1] = p_sscs_buffers.size.height;
+	push_constant.layer_count = p_sscs_buffers.light_count;
+	push_constant.layer_stride = p_render_buffers->get_view_count();
+
+	RID shader = sscs.combine_shader.version_get_shader(sscs.combine_shader_version, 0);
+	RD::Uniform u_shadows(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ sscs.border_sampler, p_render_buffers->get_texture(RB_SCOPE_SSCS, RB_SSCS) }));
+	RD::Uniform u_combined(RD::UNIFORM_TYPE_IMAGE, 1, combined);
+
+	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
+	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, sscs.combine_pipeline.get_rid());
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_shadows, u_combined), 0);
+	RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(push_constant));
+	RD::get_singleton()->compute_list_dispatch_threads(compute_list, p_sscs_buffers.size.width, p_sscs_buffers.size.height, 1);
+	RD::get_singleton()->compute_list_end();
+
+	return combined;
 }
 
 /* Subsurface scattering */
