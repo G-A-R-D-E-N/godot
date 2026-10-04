@@ -1337,6 +1337,7 @@ MaterialStorage::MaterialStorage() {
 		actions.renames["INDIRECT_COAT_ROUGHNESS"] = "indirect_coat_roughness";
 		actions.renames["DIRECT_DIFFUSE_WEIGHT"] = "direct_diffuse_weight";
 		actions.renames["EMISSION_BOUNCE_WEIGHT"] = "emission_bounce_weight";
+		actions.renames["TEMPORAL_REACTIVE"] = "temporal_reactive";
 		actions.renames["DECAL_COVERAGE"] = "decal_coverage";
 		actions.renames["TEMPORAL_MASK"] = "temporal_mask";
 		actions.renames["TEMPORAL_ID"] = "temporal_id";
@@ -1425,6 +1426,7 @@ MaterialStorage::MaterialStorage() {
 		actions.usage_defines["INDIRECT_COAT_ROUGHNESS"] = "@INDIRECT_COAT_WEIGHT";
 		actions.usage_defines["DIRECT_DIFFUSE_WEIGHT"] = "#define DIRECT_DIFFUSE_WEIGHT_USED\n";
 		actions.usage_defines["EMISSION_BOUNCE_WEIGHT"] = "#define EMISSION_BOUNCE_WEIGHT_USED\n";
+		actions.usage_defines["TEMPORAL_REACTIVE"] = "#define TEMPORAL_REACTIVE_USED\n";
 		actions.usage_defines["DECAL_COVERAGE"] = "#define DECAL_COVERAGE_USED\n";
 		actions.usage_defines["TEMPORAL_MASK"] = "#define TEMPORAL_METADATA_USED\n";
 		actions.usage_defines["TEMPORAL_ID"] = "@TEMPORAL_MASK";

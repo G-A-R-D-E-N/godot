@@ -54,6 +54,7 @@ layout(rg16f, set = 0, binding = 3) uniform restrict readonly image2D last_veloc
 #endif
 layout(set = 0, binding = 4) uniform sampler2D history_buffer;
 layout(rgba16f, set = 0, binding = 5) uniform restrict writeonly image2D output_buffer;
+layout(set = 0, binding = 6) uniform sampler2D reactive_buffer;
 
 layout(push_constant, std430) uniform Params {
 	vec2 resolution;
@@ -387,6 +388,8 @@ vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_
 		// Add to the blend factor
 		blend_factor = clamp(blend_factor + factor_screen + factor_disocclusion, 0.0, 1.0);
 	}
+	float reactive = texelFetch(reactive_buffer, ivec2(pos_screen), 0).r;
+	blend_factor = max(blend_factor, reactive);
 
 	// Resolve
 	vec3 color_resolved = vec3(0.0);
@@ -404,6 +407,7 @@ vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_
 #ifdef GARDEN_TAA
 		diff = mix(diff, 1.0, mask);
 #endif
+		diff = mix(diff, 1.0, reactive);
 		blend_factor = mix(0.0, blend_factor, diff);
 
 		// Lerp/blend

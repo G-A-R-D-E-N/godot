@@ -198,20 +198,22 @@ RID RenderForwardClustered::RenderBufferDataForwardClustered::get_color_pass_fb(
 	}
 
 	RID velocity_buffer;
+	RID reactive;
 	if (p_color_pass_flags & COLOR_PASS_FLAG_MOTION_VECTORS) {
 		render_buffers->ensure_velocity();
 		velocity_buffer = render_buffers->get_velocity_buffer(use_msaa);
+		reactive = render_buffers->get_reactive_buffer(use_msaa, 0, v_count);
 	}
 
 	RID depth = use_msaa ? render_buffers->get_texture(RB_SCOPE_BUFFERS, RB_TEX_DEPTH_MSAA) : render_buffers->get_depth_texture();
 
-	if (p_color_pass_flags & (COLOR_PASS_FLAG_BOUNCE_SOURCE | COLOR_PASS_FLAG_REFLECTION_SOURCE)) {
+	if (p_color_pass_flags & (COLOR_PASS_FLAG_BOUNCE_SOURCE | COLOR_PASS_FLAG_REFLECTION_SOURCE | COLOR_PASS_FLAG_MOTION_VECTORS)) {
 		RID bounce = (p_color_pass_flags & COLOR_PASS_FLAG_BOUNCE_SOURCE) ? render_buffers->get_texture_slice(RB_SCOPE_BOUNCE_SOURCE, RB_SOURCE, 0, 0, v_count) : RID();
 		RID reflection = (p_color_pass_flags & COLOR_PASS_FLAG_REFLECTION_SOURCE) ? render_buffers->get_texture_slice(RB_SCOPE_REFLECTION_SOURCE, RB_SOURCE, 0, 0, v_count) : RID();
 		if (render_buffers->has_texture(RB_SCOPE_VRS, RB_TEXTURE)) {
-			return FramebufferCacheRD::get_singleton()->get_cache_multiview(v_count, color, specular, velocity_buffer, bounce, reflection, depth, render_buffers->get_texture(RB_SCOPE_VRS, RB_TEXTURE));
+			return FramebufferCacheRD::get_singleton()->get_cache_multiview(v_count, color, specular, velocity_buffer, bounce, reflection, reactive, depth, render_buffers->get_texture(RB_SCOPE_VRS, RB_TEXTURE));
 		}
-		return FramebufferCacheRD::get_singleton()->get_cache_multiview(v_count, color, specular, velocity_buffer, bounce, reflection, depth);
+		return FramebufferCacheRD::get_singleton()->get_cache_multiview(v_count, color, specular, velocity_buffer, bounce, reflection, reactive, depth);
 	}
 
 	if (render_buffers->has_texture(RB_SCOPE_VRS, RB_TEXTURE)) {
@@ -2487,9 +2489,16 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 					c.push_back(Color(0, 0, 0, 0)); // Motion vector. Pushed to the clear color vector even if the framebuffer isn't bound.
 					c.push_back(Color(0, 0, 0, 0));
 					c.push_back(Color(0, 0, 0, 0));
+					c.push_back(Color(0, 0, 0, 0));
 				}
-			} else if (using_bounce_source || using_reflection_source) {
-				ss_effects->clear_lighting_sources(rb);
+			} else {
+				if (using_bounce_source || using_reflection_source) {
+					ss_effects->clear_lighting_sources(rb);
+				}
+				if (color_pass_flags & COLOR_PASS_FLAG_MOTION_VECTORS) {
+					rb->ensure_velocity();
+					RD::get_singleton()->texture_clear(rb->get_texture(RB_SCOPE_BUFFERS, use_msaa ? RB_TEX_REACTIVE_MSAA : RB_TEX_REACTIVE), Color(0, 0, 0, 0), 0, 1, 0, rb->get_view_count());
+				}
 			}
 
 			uint32_t opaque_color_pass_flags = using_motion_pass ? (color_pass_flags & ~uint32_t(COLOR_PASS_FLAG_MOTION_VECTORS)) : color_pass_flags;
@@ -2720,6 +2729,9 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 			if (resolve_velocity_buffer) {
 				RD::get_singleton()->texture_resolve_multisample(rb->get_velocity_buffer(true, v), rb->get_velocity_buffer(false, v));
+				if (rb->has_texture(RB_SCOPE_BUFFERS, RB_TEX_REACTIVE_MSAA)) {
+					RD::get_singleton()->texture_resolve_multisample(rb->get_reactive_buffer(true, v), rb->get_reactive_buffer(false, v));
+				}
 			}
 		}
 	}
@@ -4923,11 +4935,17 @@ static RD::FramebufferFormatID _get_color_framebuffer_format_for_pipeline(RD::Da
 		attachments.push_back(unused_attachment);
 	}
 
-	if (p_bounce_source || p_reflection_source) {
+	if (p_bounce_source || p_reflection_source || p_velocity) {
 		attachment.format = RendererRD::SSEffects::LIGHTING_SOURCE_FORMAT;
 		attachment.usage_flags = RendererRD::SSEffects::LIGHTING_SOURCE_USAGE_BITS;
 		attachments.push_back(p_bounce_source ? attachment : unused_attachment);
 		attachments.push_back(p_reflection_source ? attachment : unused_attachment);
+	}
+
+	if (p_velocity) {
+		attachment.format = RD::DATA_FORMAT_R8_UNORM;
+		attachment.usage_flags = RenderSceneBuffersRD::get_reactive_usage_bits(multisampling);
+		attachments.push_back(attachment);
 	}
 
 	// Depth attachment.
