@@ -57,8 +57,11 @@
 #define RB_SCOPE_SSR SNAME("rb_ssr")
 #define RB_SCOPE_SSCS SNAME("rb_sscs")
 #define RB_SCOPE_GTAO SNAME("rb_gtao")
+#define RB_SCOPE_BOUNCE_SOURCE SNAME("rb_bounce_source")
+#define RB_SCOPE_REFLECTION_SOURCE SNAME("rb_reflection_source")
 
 #define RB_LINEAR_DEPTH SNAME("linear_depth")
+#define RB_SOURCE SNAME("source")
 #define RB_FINAL SNAME("final")
 #define RB_LAST_FRAME SNAME("last_frame")
 #define RB_DEINTERLEAVED SNAME("deinterleaved")
@@ -102,6 +105,12 @@ public:
 	void allocate_last_frame_buffer(Ref<RenderSceneBuffersRD> p_render_buffers, bool p_use_ssil, bool p_use_ssr);
 	void copy_internal_texture_to_last_frame(Ref<RenderSceneBuffersRD> p_render_buffers, CopyEffects &p_copy_effects);
 
+	static constexpr RD::DataFormat LIGHTING_SOURCE_FORMAT = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
+	static constexpr uint32_t LIGHTING_SOURCE_USAGE_BITS = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
+	void allocate_lighting_sources(Ref<RenderSceneBuffersRD> p_render_buffers, bool p_bounce, bool p_reflection);
+	void clear_lighting_sources(Ref<RenderSceneBuffersRD> p_render_buffers);
+	void build_lighting_source_mipmaps(Ref<RenderSceneBuffersRD> p_render_buffers, CopyEffects &p_copy_effects);
+
 	/* SS Downsampler */
 
 	void downsample_depth(Ref<RenderSceneBuffersRD> p_render_buffers, uint32_t p_view, const Projection &p_projection);
@@ -122,6 +131,8 @@ public:
 		float intensity = 2.0;
 		float sharpness = 0.98;
 		float normal_rejection = 1.0;
+		float exposure = 1.0;
+		RID exposure_texture;
 
 		Size2i full_screen_size;
 	};
@@ -187,7 +198,7 @@ public:
 	};
 
 	void ssr_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, SSRRenderBuffers &p_ssr_buffers, const RD::DataFormat p_color_format);
-	void screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffers, SSRRenderBuffers &p_ssr_buffers, const RID *p_normal_roughness_slices, int p_max_steps, float p_fade_in, float p_fade_out, float p_tolerance, const Projection *p_projections, const Projection *p_reprojections, const Vector3 *p_eye_offsets, RendererRD::CopyEffects &p_copy_effects);
+	void screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffers, SSRRenderBuffers &p_ssr_buffers, const RID *p_normal_roughness_slices, int p_max_steps, float p_fade_in, float p_fade_out, float p_tolerance, const Projection *p_projections, const Projection *p_reprojections, const Vector3 *p_eye_offsets, RendererRD::CopyEffects &p_copy_effects, float p_exposure, RID p_exposure_texture);
 
 	/* subsurface scattering */
 	void sss_set_quality(RSE::SubSurfaceScatteringQuality p_quality);
@@ -313,7 +324,7 @@ private:
 		float radius;
 		float intensity;
 		int size_multiplier;
-		int pad;
+		float exposure;
 
 		float fade_out_mul;
 		float fade_out_add;
@@ -568,7 +579,8 @@ private:
 		float depth_tolerance;
 		int32_t orthogonal;
 		uint32_t view_index;
-		int32_t pad[3];
+		float exposure;
+		int32_t pad[2];
 	};
 
 	struct ScreenSpaceReflectionFilterPushConstant {
@@ -579,7 +591,8 @@ private:
 
 	struct ScreenSpaceReflectionResolvePushConstant {
 		int32_t screen_size[2];
-		int32_t pad[2];
+		float exposure;
+		int32_t pad;
 	};
 
 	struct ScreenSpaceReflection {

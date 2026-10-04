@@ -1041,6 +1041,13 @@ layout(location = 2) out vec2 motion_vector;
 #endif
 #endif
 
+#ifdef MODE_BOUNCE_SOURCE
+layout(location = 3) out vec4 bounce_source;
+#endif
+#ifdef MODE_REFLECTION_SOURCE
+layout(location = 4) out vec4 reflection_source;
+#endif
+
 #include "../scene_forward_aa_inc.glsl"
 
 #if !defined(MODE_RENDER_DEPTH) && (defined(INDIRECT_DIFFUSE_WEIGHT_USED) || defined(INDIRECT_SPECULAR_WEIGHT_USED) || defined(INDIRECT_COAT_USED) || defined(DECAL_COVERAGE_USED))
@@ -1762,6 +1769,10 @@ void fragment_shader(in SceneData scene_data) {
 	vec3 indirect_specular_light = vec3(0.0, 0.0, 0.0);
 	vec3 diffuse_light = vec3(0.0, 0.0, 0.0);
 	vec3 ambient_light = vec3(0.0, 0.0, 0.0);
+#ifdef MODE_REFLECTION_SOURCE
+	vec3 source_specular_light = vec3(0.0);
+	vec3 source_cc_specular_light = vec3(0.0);
+#endif
 #ifndef MODE_UNSHADED
 	// Used in regular draw pass and when drawing SDFs for SDFGI and materials for VoxelGI.
 	emission *= scene_data.emissive_exposure_normalization;
@@ -2400,6 +2411,13 @@ void fragment_shader(in SceneData scene_data) {
 			ambient_light += ssil.rgb * ambient_weight;
 		}
 
+#ifdef MODE_REFLECTION_SOURCE
+		source_specular_light = indirect_specular_light;
+#if defined(INDIRECT_COAT_USED)
+		source_cc_specular_light = cc_specular_light;
+#endif
+#endif
+
 		//process ssr
 		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSR)) {
 			bool resolve_ssr = bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_RESOLVE_SSR);
@@ -2424,6 +2442,7 @@ void fragment_shader(in SceneData scene_data) {
 			if (resolve_ssr) {
 				const vec3 rec709_luminance_weights = vec3(0.2126, 0.7152, 0.0722);
 				ssr.rgb /= 1.0 - dot(ssr.rgb, rec709_luminance_weights);
+				ssr.rgb /= implementation_data.ss_exposure / max(texelFetch(sampler2D(ss_exposure_texture, SAMPLER_NEAREST_CLAMP), ivec2(0, 0), 0).r, 1e-6);
 			}
 
 			// Apply fade when approaching 0.7 roughness to smoothen the harsh cutoff in the main SSR trace pass.
@@ -2457,6 +2476,9 @@ void fragment_shader(in SceneData scene_data) {
 #if defined(DIFFUSE_TOON)
 		//simplify for toon, as
 		indirect_specular_light *= specular * metallic * albedo * 2.0;
+#ifdef MODE_REFLECTION_SOURCE
+		source_specular_light *= specular * metallic * albedo * 2.0;
+#endif
 #else
 		// Base Layer
 		float NdotV = clamp(dot(normal, view), 0.0001, 1.0);
@@ -2471,9 +2493,15 @@ void fragment_shader(in SceneData scene_data) {
 		specular_weight = mix(indirect_specular_weight, specular_weight, decal_coverage);
 #endif
 		indirect_specular_light *= specular_weight;
+#ifdef MODE_REFLECTION_SOURCE
+		source_specular_light *= specular_weight;
+#endif
 
 #if defined(INDIRECT_COAT_USED)
 		indirect_specular_light += cc_specular_light * indirect_coat_weight * (1.0 - decal_coverage);
+#ifdef MODE_REFLECTION_SOURCE
+		source_specular_light += source_cc_specular_light * indirect_coat_weight * (1.0 - decal_coverage);
+#endif
 #elif defined(LIGHT_CLEARCOAT_USED)
 		float geo_NdotV = max(dot(geo_normal, view), 0.0001); // We want to use geometric normal, not normal_map
 		// The clearcoat layer assumes an IOR of 1.5 (4% reflectance).
@@ -2488,6 +2516,9 @@ void fragment_shader(in SceneData scene_data) {
 		// Clearcoat Layer
 		// We don't need DFG for clearcoat, so we can use the fresnel directly.
 		indirect_specular_light += cc_specular_light * F;
+#ifdef MODE_REFLECTION_SOURCE
+		source_specular_light = source_specular_light * cc_attenuation + cc_specular_light * F;
+#endif
 #endif
 
 #endif // DIFFUSE_TOON
@@ -3294,6 +3325,19 @@ void fragment_shader(in SceneData scene_data) {
 	//restore fog
 	fog = vec4(unpackHalf2x16(fog_rg), unpackHalf2x16(fog_ba));
 #endif //!FOG_DISABLED
+
+#ifdef MODE_UNSHADED
+	vec3 output_emission = albedo;
+#else
+	vec3 output_emission = emission;
+#endif
+
+#ifdef MODE_BOUNCE_SOURCE
+	bounce_source = vec4(diffuse_light + output_emission * emission_bounce_weight, 1.0);
+#endif
+#ifdef MODE_REFLECTION_SOURCE
+	reflection_source = vec4(output_emission + ambient_light + diffuse_light + direct_specular_light + source_specular_light, 1.0);
+#endif
 
 #ifdef MODE_SEPARATE_SPECULAR
 

@@ -87,6 +87,7 @@ layout(set = 3, binding = 1) uniform ProjectionConstants {
 	mat4 reprojection;
 }
 projection_constants;
+layout(set = 3, binding = 2) uniform sampler2D source_exposure;
 
 layout(push_constant, std430) uniform Params {
 	ivec2 screen_size;
@@ -106,7 +107,7 @@ layout(push_constant, std430) uniform Params {
 	float radius;
 	float intensity;
 	int size_multiplier;
-	int pad;
+	float exposure;
 
 	float fade_out_mul;
 	float fade_out_add;
@@ -172,6 +173,8 @@ vec3 load_normal(ivec2 p_pos, ivec2 p_offset) {
 	return encoded_normal;
 }
 
+float sample_exposure;
+
 // all vectors in viewspace
 float calculate_pixel_obscurance(vec3 p_pixel_normal, vec3 p_hit_delta, float p_fallof_sq) {
 	float length_sq = dot(p_hit_delta, p_hit_delta);
@@ -208,7 +211,7 @@ void SSIL_tap_inner(const int p_quality_level, inout vec3 r_color_sum, inout flo
 
 	r_obscurance_sum += obscurance * weight;
 
-	vec3 sample_color = textureLod(last_frame, reprojected_sampling_uv, 5.0).rgb;
+	vec3 sample_color = textureLod(last_frame, reprojected_sampling_uv, 5.0).rgb * sample_exposure;
 	// Reduce impact of fireflies by tonemapping before averaging: http://graphicrants.blogspot.com/2013/12/tone-mapping.html
 	sample_color /= (1.0 + dot(sample_color, vec3(0.299, 0.587, 0.114)));
 	r_color_sum += sample_color * obscurance * weight * mix(1.0, smoothstep(0.0, 0.1, -dot(sample_normal, normalize(hit_delta))), params.normal_rejection_amount);
@@ -256,6 +259,7 @@ void SSILTap(const int p_quality_level, inout vec3 r_color_sum, inout float r_ob
 }
 
 void generate_SSIL(out vec3 r_color, out vec4 r_edges, out float r_obscurance, out float r_weight, const vec2 p_pos, int p_quality_level, bool p_adaptive_base) {
+	sample_exposure = params.exposure / max(texelFetch(source_exposure, ivec2(0, 0), 0).r, 1e-6);
 	vec2 pos_rounded = trunc(p_pos);
 	uvec2 upos = uvec2(pos_rounded);
 
@@ -392,6 +396,7 @@ void generate_SSIL(out vec3 r_color, out vec4 r_edges, out float r_obscurance, o
 	// Calculate weighted average
 	vec3 color = color_sum / weight_sum;
 	color /= 1.0 - dot(color, vec3(0.299, 0.587, 0.114));
+	color /= sample_exposure;
 
 	// Calculate fadeout (1 close, gradient, 0 far)
 	float fade_out = clamp(pix_center_pos.z * params.fade_out_mul + params.fade_out_add, 0.0, 1.0);

@@ -319,6 +319,14 @@ uint16_t SceneShaderForwardClustered::ShaderData::_get_shader_version(PipelineVe
 				shader_flags |= SHADER_COLOR_PASS_FLAG_MULTIVIEW;
 			}
 
+			if (p_color_pass_flags & PIPELINE_COLOR_PASS_FLAG_BOUNCE_SOURCE) {
+				shader_flags |= SHADER_COLOR_PASS_FLAG_BOUNCE_SOURCE;
+			}
+
+			if (p_color_pass_flags & PIPELINE_COLOR_PASS_FLAG_REFLECTION_SOURCE) {
+				shader_flags |= SHADER_COLOR_PASS_FLAG_REFLECTION_SOURCE;
+			}
+
 			return ShaderVersion::SHADER_VERSION_COLOR_PASS * 2 + shader_flags;
 		} break;
 		default: {
@@ -347,7 +355,7 @@ void SceneShaderForwardClustered::ShaderData::_create_pipeline(PipelineKey p_pip
 	RD::PipelineColorBlendState::Attachment blend_attachment = blend_mode_to_blend_attachment(BlendMode(blend_mode));
 	RD::PipelineColorBlendState blend_state_color_blend;
 	blend_state_color_blend.attachments = { blend_attachment, RD::PipelineColorBlendState::Attachment(), RD::PipelineColorBlendState::Attachment() };
-	RD::PipelineColorBlendState blend_state_color_opaque = RD::PipelineColorBlendState::create_disabled(3);
+	RD::PipelineColorBlendState blend_state_color_opaque = RD::PipelineColorBlendState::create_disabled(5);
 	RD::PipelineColorBlendState blend_state_depth_normal_roughness = RD::PipelineColorBlendState::create_disabled(1);
 	RD::PipelineColorBlendState blend_state_depth_normal_roughness_giprobe = RD::PipelineColorBlendState::create_disabled(2);
 
@@ -665,6 +673,8 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 			"\n#define USE_LIGHTMAP\n", // SHADER_COLOR_PASS_FLAG_LIGHTMAP
 			"\n#define USE_MULTIVIEW\n", // SHADER_COLOR_PASS_FLAG_MULTIVIEW
 			"\n#define MOTION_VECTORS\n", // SHADER_COLOR_PASS_FLAG_MOTION_VECTORS
+			"\n#define MODE_BOUNCE_SOURCE\n",
+			"\n#define MODE_REFLECTION_SOURCE\n",
 		};
 
 		for (int i = 0; i < SHADER_COLOR_PASS_FLAG_COUNT; i++) {
@@ -685,6 +695,10 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 				group = SHADER_GROUP_ADVANCED;
 			} else if (multiview_group) {
 				group = SHADER_GROUP_MULTIVIEW;
+			}
+			const int sources = ((i & SHADER_COLOR_PASS_FLAG_BOUNCE_SOURCE) ? 1 : 0) | ((i & SHADER_COLOR_PASS_FLAG_REFLECTION_SOURCE) ? 2 : 0);
+			if (sources) {
+				group = ShaderGroup(SHADER_GROUP_BOUNCE_SOURCE + sources - 1 + (multiview_group ? 3 : 0));
 			}
 
 			shader_versions.push_back(ShaderRD::VariantDefine(group, version, false));
@@ -1064,6 +1078,14 @@ void SceneShaderForwardClustered::enable_advanced_shader_group(bool p_needs_mult
 		shader.enable_group(SHADER_GROUP_ADVANCED_MULTIVIEW);
 	}
 	shader.enable_group(SHADER_GROUP_ADVANCED);
+}
+
+void SceneShaderForwardClustered::enable_lighting_sources_shader_group(bool p_bounce, bool p_reflection, bool p_needs_multiview) {
+	const int group = SHADER_GROUP_BOUNCE_SOURCE + (int(p_bounce) | (int(p_reflection) << 1)) - 1;
+	if (p_needs_multiview || RendererCompositorRD::get_singleton()->is_xr_enabled()) {
+		shader.enable_group(group + 3);
+	}
+	shader.enable_group(group);
 }
 
 bool SceneShaderForwardClustered::is_multiview_shader_group_enabled() const {
