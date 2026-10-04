@@ -357,7 +357,12 @@ struct ImplementationData {
 	bool volumetric_fog_enabled;
 	float volumetric_fog_inv_length;
 	float volumetric_fog_detail_spread;
-	uint volumetric_fog_pad;
+	bool aerial_perspective_enabled;
+
+	float aerial_perspective_inv_distance;
+	float aerial_perspective_exposure;
+	uint aerial_perspective_pad0;
+	uint aerial_perspective_pad1;
 };
 
 layout(set = 1, binding = 1, std140) uniform ImplementationDataBlock {
@@ -505,6 +510,7 @@ layout(set = 1, binding = 39) uniform texture2D gtao_bent_normal_buffer;
 layout(set = 1, binding = 40) uniform texture2D ss_exposure_texture;
 
 layout(set = 1, binding = 41) uniform texture2D cloud_shadow_textures[MAX_DIRECTIONAL_LIGHT_DATA_STRUCTS];
+layout(set = 1, binding = 42) uniform texture3D aerial_perspective_texture;
 
 #endif
 

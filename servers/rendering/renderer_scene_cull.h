@@ -1277,6 +1277,8 @@ public:
 	PASS1RC(float, environment_get_fog_depth_begin, RID)
 	PASS1RC(float, environment_get_fog_depth_end, RID)
 
+	PASS4(environment_set_aerial_perspective, RID, bool, RID, float)
+
 	// Volumentric Fog
 	PASS14(environment_set_volumetric_fog, RID, bool, float, const Color &, const Color &, float, float, float, float, float, bool, float, float, float)
 

@@ -436,6 +436,26 @@ float RendererEnvironmentStorage::environment_get_fog_depth_curve(RID p_env) con
 	return env->fog_depth_curve;
 }
 
+void RendererEnvironmentStorage::environment_set_aerial_perspective(RID p_env, bool p_enable, RID p_texture, float p_max_distance) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->aerial_perspective_enabled = p_enable;
+	env->aerial_perspective_texture = p_texture;
+	env->aerial_perspective_max_distance = MAX(p_max_distance, 0.001f);
+}
+
+RID RendererEnvironmentStorage::environment_get_aerial_perspective_texture(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, RID());
+	return env->aerial_perspective_enabled ? env->aerial_perspective_texture : RID();
+}
+
+float RendererEnvironmentStorage::environment_get_aerial_perspective_max_distance(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, 1.0);
+	return env->aerial_perspective_max_distance;
+}
+
 float RendererEnvironmentStorage::environment_get_fog_depth_begin(RID p_env) const {
 	Environment *env = environment_owner.get_or_null(p_env);
 	ERR_FAIL_NULL_V(env, 0.0);

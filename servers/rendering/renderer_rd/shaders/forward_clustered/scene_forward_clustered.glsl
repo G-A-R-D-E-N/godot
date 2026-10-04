@@ -1113,7 +1113,7 @@ float directional_cloud_shadow(uint p_index, vec3 p_vertex) {
 vec4 fog_process(vec3 vertex) {
 	vec3 fog_color = scene_data_block.data.fog_light_color;
 
-	if (scene_data_block.data.fog_aerial_perspective > 0.0) {
+	if (scene_data_block.data.fog_aerial_perspective > 0.0 && !implementation_data.aerial_perspective_enabled) {
 		vec3 sky_fog_color = vec3(0.0);
 		vec3 cube_view = scene_data_block.data.radiance_inverse_xform * vertex;
 		// mip_level always reads from the second mipmap and higher so the fog is always slightly blurred
@@ -1616,6 +1616,16 @@ void fragment_shader(in SceneData scene_data) {
 		fog.a = 1.0 - fog.a;
 	}
 
+	if (implementation_data.aerial_perspective_enabled) {
+#ifdef USE_MULTIVIEW
+		vec3 aerial_perspective_uvw = vec3(combined_uv, length(vertex) * implementation_data.aerial_perspective_inv_distance);
+#else
+		vec3 aerial_perspective_uvw = vec3(screen_uv, length(vertex) * implementation_data.aerial_perspective_inv_distance);
+#endif
+		vec4 aerial_perspective = textureLod(sampler3D(aerial_perspective_texture, SAMPLER_LINEAR_CLAMP), aerial_perspective_uvw, 0.0);
+		fog = vec4(aerial_perspective.rgb * implementation_data.aerial_perspective_exposure * fog.a + fog.rgb, aerial_perspective.a * fog.a);
+	}
+
 	if (implementation_data.volumetric_fog_enabled) {
 #ifdef USE_MULTIVIEW
 		vec4 volumetric_fog = volumetric_fog_process(combined_uv, -vertex.z);
@@ -1623,7 +1633,7 @@ void fragment_shader(in SceneData scene_data) {
 		vec4 volumetric_fog = volumetric_fog_process(screen_uv, -vertex.z);
 #endif
 		vec4 res = vec4(0.0);
-		if (bool(scene_data.flags & SCENE_DATA_FLAGS_USE_FOG)) {
+		if (bool(scene_data.flags & SCENE_DATA_FLAGS_USE_FOG) || implementation_data.aerial_perspective_enabled) {
 			//must use the full blending equation here to blend fogs
 			if (sc_fog_use_legacy_blending()) {
 				res.a = mix(0.0, fog.a, volumetric_fog.a);

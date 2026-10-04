@@ -199,6 +199,12 @@ private:
 
 	void _update_fog_depth();
 
+	bool aerial_perspective_enabled = false;
+	Ref<Texture3D> aerial_perspective_texture;
+	float aerial_perspective_max_distance = 32000.0;
+
+	void _update_aerial_perspective();
+
 	// Volumetric Fog
 	bool volumetric_fog_enabled = false;
 	float volumetric_fog_density = 0.05;
@@ -408,6 +414,13 @@ public:
 	float get_fog_depth_begin() const;
 	void set_fog_depth_end(float p_end);
 	float get_fog_depth_end() const;
+
+	void set_aerial_perspective_enabled(bool p_enabled);
+	bool is_aerial_perspective_enabled() const;
+	void set_aerial_perspective_texture(const Ref<Texture3D> &p_texture);
+	Ref<Texture3D> get_aerial_perspective_texture() const;
+	void set_aerial_perspective_max_distance(float p_distance);
+	float get_aerial_perspective_max_distance() const;
 
 	// Volumetric Fog
 	void set_volumetric_fog_enabled(bool p_enable);
