@@ -971,6 +971,16 @@ layout(location = 13) in vec4 specular_light_interp;
 layout(location = 14) in vec2 point_coord_interp;
 #endif
 
+#if defined(MOTION_VECTORS) && defined(DEPTH_USED)
+mat4 motion_prev_projection_matrix() {
+#ifdef USE_MULTIVIEW
+	return scene_data_block.prev_data.projection_matrix_view[ViewIndex];
+#else
+	return scene_data_block.prev_data.projection_matrix;
+#endif
+}
+#endif
+
 //defines to keep compatibility with vertex
 
 #ifdef USE_MULTIVIEW
@@ -3443,8 +3453,24 @@ void fragment_shader(in SceneData scene_data) {
 
 #endif //MODE_RENDER_DEPTH
 #ifdef MOTION_VECTORS
-	vec2 position_clip = (screen_position.xy / screen_position.w) - scene_data.taa_jitter;
-	vec2 prev_position_clip = (prev_screen_position.xy / prev_screen_position.w) - scene_data_block.prev_data.taa_jitter;
+	vec4 motion_position = screen_position;
+	vec4 motion_prev_position = prev_screen_position;
+#ifdef DEPTH_USED
+	{
+		mat4 motion_projection = projection_matrix;
+		mat4 motion_prev_projection = motion_prev_projection_matrix();
+		float motion_z = (motion_projection[3][2] - gl_FragDepth * motion_projection[3][3]) / (gl_FragDepth * motion_projection[2][3] - motion_projection[2][2]);
+		vec3 motion_ray = vertex_interp - eye_offset;
+		vec3 motion_offset = motion_projection[2][3] != 0.0 ? motion_ray * ((motion_z - eye_offset.z) / motion_ray.z - 1.0) : vec3(0.0, 0.0, motion_z - vertex_interp.z);
+		mat3 motion_prev_view = transpose(mat3(scene_data_block.prev_data.view_matrix[0].xyz, scene_data_block.prev_data.view_matrix[1].xyz, scene_data_block.prev_data.view_matrix[2].xyz));
+		mat3 motion_prev_model = transpose(mat3(instances.data[instance_index].prev_transform[0].xyz, instances.data[instance_index].prev_transform[1].xyz, instances.data[instance_index].prev_transform[2].xyz));
+		vec3 motion_prev_offset = motion_prev_view * (motion_prev_model * (inverse(mat3(read_model_matrix)) * (mat3(inv_view_matrix) * motion_offset)));
+		motion_position += motion_projection * vec4(motion_offset, 0.0);
+		motion_prev_position += motion_prev_projection * vec4(motion_prev_offset, 0.0);
+	}
+#endif
+	vec2 position_clip = (motion_position.xy / motion_position.w) - scene_data.taa_jitter;
+	vec2 prev_position_clip = (motion_prev_position.xy / motion_prev_position.w) - scene_data_block.prev_data.taa_jitter;
 
 	vec2 position_uv = position_clip * vec2(0.5, 0.5);
 	vec2 prev_position_uv = prev_position_clip * vec2(0.5, 0.5);
@@ -3454,6 +3480,9 @@ void fragment_shader(in SceneData scene_data) {
 #else
 	motion_vector = prev_position_uv - position_uv;
 #endif
+#endif
+#if defined(DEPTH_USED) && !defined(MODE_RENDER_DEPTH)
+	gl_FragDepth = min(gl_FragDepth * 1.00001, 1.0);
 #endif
 }
 
