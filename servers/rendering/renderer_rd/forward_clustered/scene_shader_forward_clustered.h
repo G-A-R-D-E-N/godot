@@ -48,6 +48,12 @@ public:
 		SHADER_GROUP_ADVANCED,
 		SHADER_GROUP_MULTIVIEW,
 		SHADER_GROUP_ADVANCED_MULTIVIEW,
+		SHADER_GROUP_BOUNCE_SOURCE,
+		SHADER_GROUP_REFLECTION_SOURCE,
+		SHADER_GROUP_BOUNCE_AND_REFLECTION_SOURCES,
+		SHADER_GROUP_BOUNCE_SOURCE_MULTIVIEW,
+		SHADER_GROUP_REFLECTION_SOURCE_MULTIVIEW,
+		SHADER_GROUP_BOUNCE_AND_REFLECTION_SOURCES_MULTIVIEW,
 	};
 
 	// Not an enum because these values are constants that are processed as numbers
@@ -71,7 +77,9 @@ public:
 		SHADER_COLOR_PASS_FLAG_LIGHTMAP = 1 << 2,
 		SHADER_COLOR_PASS_FLAG_MULTIVIEW = 1 << 3,
 		SHADER_COLOR_PASS_FLAG_MOTION_VECTORS = 1 << 4,
-		SHADER_COLOR_PASS_FLAG_COUNT = 1 << 5
+		SHADER_COLOR_PASS_FLAG_BOUNCE_SOURCE = 1 << 5,
+		SHADER_COLOR_PASS_FLAG_REFLECTION_SOURCE = 1 << 6,
+		SHADER_COLOR_PASS_FLAG_COUNT = 1 << 7
 	};
 
 	enum PipelineVersion {
@@ -94,7 +102,9 @@ public:
 		PIPELINE_COLOR_PASS_FLAG_LIGHTMAP = 1 << 2,
 		PIPELINE_COLOR_PASS_FLAG_MULTIVIEW = 1 << 3,
 		PIPELINE_COLOR_PASS_FLAG_MOTION_VECTORS = 1 << 4,
-		PIPELINE_COLOR_PASS_FLAG_OPTIONS = 5,
+		PIPELINE_COLOR_PASS_FLAG_BOUNCE_SOURCE = 1 << 5,
+		PIPELINE_COLOR_PASS_FLAG_REFLECTION_SOURCE = 1 << 6,
+		PIPELINE_COLOR_PASS_FLAG_OPTIONS = 7,
 		PIPELINE_COLOR_PASS_FLAG_COMBINATIONS = 1 << PIPELINE_COLOR_PASS_FLAG_OPTIONS,
 	};
 
@@ -388,6 +398,7 @@ public:
 	void set_default_specialization(const ShaderSpecialization &p_specialization);
 	void enable_multiview_shader_group();
 	void enable_advanced_shader_group(bool p_needs_multiview = false);
+	void enable_lighting_sources_shader_group(bool p_bounce, bool p_reflection, bool p_needs_multiview);
 	bool is_multiview_shader_group_enabled() const;
 	bool is_advanced_shader_group_enabled(bool p_multiview) const;
 	uint32_t get_pipeline_compilations(RSE::PipelineSource p_source);

@@ -340,7 +340,7 @@ struct ImplementationData {
 	uint ss_effects_flags;
 	float ssao_light_affect;
 	float ssao_ao_affect;
-	uint pad1;
+	float ss_exposure;
 
 	mat4 sdf_to_bounds;
 
@@ -498,6 +498,7 @@ layout(set = 1, binding = 36) uniform texture2D ssr_mip_level_buffer;
 layout(set = 1, binding = 37) uniform texture2DArray sscs_buffer;
 layout(set = 1, binding = 39) uniform texture2D gtao_bent_normal_buffer;
 #endif // USE_MULTIVIEW
+layout(set = 1, binding = 40) uniform texture2D ss_exposure_texture;
 
 #endif
 

@@ -20,6 +20,8 @@ layout(set = 0, binding = 5, std140) uniform SceneData {
 }
 scene_data;
 
+layout(set = 0, binding = 6) uniform sampler2D source_exposure;
+
 layout(push_constant, std430) uniform Params {
 	ivec2 screen_size;
 	int mipmaps;
@@ -29,7 +31,7 @@ layout(push_constant, std430) uniform Params {
 	float depth_tolerance;
 	bool orthogonal;
 	int view_index;
-	int pad1;
+	float exposure;
 	int pad2;
 	int pad3;
 }
@@ -285,6 +287,7 @@ void main() {
 
 		if (validity > 0.0) {
 			color = vec4(textureLod(source_last_frame, reprojected_pos.xy, 0).xyz, 1.0) * validity;
+			color.rgb *= params.exposure / max(texelFetch(source_exposure, ivec2(0, 0), 0).r, 1e-6);
 
 			// Tone map the SSR color to have smoother roughness filtering across samples with varying luminance.
 			const vec3 rec709_luminance_weights = vec3(0.2126, 0.7152, 0.0722);

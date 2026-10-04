@@ -2995,6 +2995,10 @@
 		<member name="rendering/environment/gtao/steps" type="int" setter="" getter="" default="3">
 			Number of depth samples per slice side used by GTAO. Only used when [member rendering/environment/ssao/backend] is [code]GTAO[/code].
 		</member>
+		<member name="rendering/environment/screen_space_lighting/legacy_last_frame_source" type="bool" setter="" getter="" default="false">
+			If [code]false[/code], screen-space indirect lighting samples a bounce source written by the opaque pass (direct diffuse light plus emission weighted by [code]EMISSION_BOUNCE_WEIGHT[/code]) and screen-space reflections sample a reflection source (the opaque radiance without the screen-space reflection term and without fog). Both effects compress samples relative to the exposure the tonemapper uses, so their strength does not depend on the scale of the stored HDR values. If [code]true[/code], both effects sample a copy of the previous final frame and compress the stored values directly, as in earlier versions; the previous frame feeds their own output and fog back into the next frame.
+			[b]Note:[/b] Only used by the Forward+ rendering method. Viewports with MSAA always sample the previous final frame, with the exposure-relative compression unless this setting is enabled.
+		</member>
 		<member name="rendering/environment/screen_space_reflection/half_size" type="bool" setter="" getter="" default="true" keywords="resolution">
 			If [code]true[/code], screen-space reflections will be rendered at half size and then upscaled before being added to the scene. This is faster but may look pixelated or cause flickering. If [code]false[/code], screen-space reflections will be rendered at full size.
 		</member>

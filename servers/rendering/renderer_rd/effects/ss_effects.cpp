@@ -484,6 +484,50 @@ void SSEffects::copy_internal_texture_to_last_frame(Ref<RenderSceneBuffersRD> p_
 	}
 }
 
+static void _allocate_lighting_source(Ref<RenderSceneBuffersRD> p_render_buffers, const StringName &p_context, bool p_needed, uint32_t p_mipmaps) {
+	if (p_render_buffers->has_texture(p_context, RB_SOURCE) && (!p_needed || p_render_buffers->get_texture_format(p_context, RB_SOURCE).mipmaps != p_mipmaps)) {
+		p_render_buffers->clear_context(p_context);
+	}
+	if (p_needed && !p_render_buffers->has_texture(p_context, RB_SOURCE)) {
+		RID source = p_render_buffers->create_texture(p_context, RB_SOURCE, SSEffects::LIGHTING_SOURCE_FORMAT, SSEffects::LIGHTING_SOURCE_USAGE_BITS, RD::TEXTURE_SAMPLES_1, Size2i(), 0, p_mipmaps);
+		RD::get_singleton()->texture_clear(source, Color(0, 0, 0, 0), 0, p_mipmaps, 0, p_render_buffers->get_view_count());
+	}
+}
+
+void SSEffects::allocate_lighting_sources(Ref<RenderSceneBuffersRD> p_render_buffers, bool p_bounce, bool p_reflection) {
+	_allocate_lighting_source(p_render_buffers, RB_SCOPE_BOUNCE_SOURCE, p_bounce, 6);
+	_allocate_lighting_source(p_render_buffers, RB_SCOPE_REFLECTION_SOURCE, p_reflection, ssr_half_size ? 2 : 1);
+	if ((p_bounce || p_reflection) && p_render_buffers->has_texture(RB_SCOPE_SSLF, RB_LAST_FRAME)) {
+		p_render_buffers->clear_context(RB_SCOPE_SSLF);
+	}
+}
+
+void SSEffects::clear_lighting_sources(Ref<RenderSceneBuffersRD> p_render_buffers) {
+	const StringName contexts[2] = { RB_SCOPE_BOUNCE_SOURCE, RB_SCOPE_REFLECTION_SOURCE };
+	for (const StringName &context : contexts) {
+		if (p_render_buffers->has_texture(context, RB_SOURCE)) {
+			RD::get_singleton()->texture_clear(p_render_buffers->get_texture(context, RB_SOURCE), Color(0, 0, 0, 0), 0, 1, 0, p_render_buffers->get_view_count());
+		}
+	}
+}
+
+void SSEffects::build_lighting_source_mipmaps(Ref<RenderSceneBuffersRD> p_render_buffers, CopyEffects &p_copy_effects) {
+	const StringName contexts[2] = { RB_SCOPE_BOUNCE_SOURCE, RB_SCOPE_REFLECTION_SOURCE };
+	for (const StringName &context : contexts) {
+		if (!p_render_buffers->has_texture(context, RB_SOURCE)) {
+			continue;
+		}
+		uint32_t mipmaps = p_render_buffers->get_texture_format(context, RB_SOURCE).mipmaps;
+		for (uint32_t v = 0; v < p_render_buffers->get_view_count(); v++) {
+			for (uint32_t m = 1; m < mipmaps; m++) {
+				RID source = p_render_buffers->get_texture_slice(context, RB_SOURCE, v, m - 1);
+				RID dest = p_render_buffers->get_texture_slice(context, RB_SOURCE, v, m);
+				p_copy_effects.make_mipmap(source, dest, RD::get_singleton()->texture_size(dest));
+			}
+		}
+	}
+}
+
 SSEffects::~SSEffects() {
 	{
 		// Cleanup SS Reflections
@@ -810,7 +854,8 @@ void SSEffects::screen_space_indirect_lighting(Ref<RenderSceneBuffersRD> p_rende
 	RD::get_singleton()->draw_command_begin_label("Process Screen-Space Indirect Lighting");
 
 	// Obtain our (cached) buffer slices for the view we are rendering.
-	RID last_frame = p_render_buffers->get_texture_slice(RB_SCOPE_SSLF, RB_LAST_FRAME, p_view, 0, 1, 6);
+	const bool bounce_source = p_render_buffers->has_texture(RB_SCOPE_BOUNCE_SOURCE, RB_SOURCE);
+	RID last_frame = p_render_buffers->get_texture_slice(bounce_source ? RB_SCOPE_BOUNCE_SOURCE : RB_SCOPE_SSLF, bounce_source ? RB_SOURCE : RB_LAST_FRAME, p_view, 0, 1, 6);
 	RID deinterleaved = p_render_buffers->get_texture_slice(RB_SCOPE_SSIL, RB_DEINTERLEAVED, p_view * 4, 0, 4, 1);
 	RID deinterleaved_pong = p_render_buffers->get_texture_slice(RB_SCOPE_SSIL, RB_DEINTERLEAVED_PONG, 4 * p_view, 0, 4, 1);
 	RID edges = p_render_buffers->get_texture_slice(RB_SCOPE_SSIL, RB_EDGES, 4 * p_view, 0, 4, 1);
@@ -884,6 +929,7 @@ void SSEffects::screen_space_indirect_lighting(Ref<RenderSceneBuffersRD> p_rende
 
 		ssil.gather_push_constant.quality = MAX(0, ssil_quality - 1);
 		ssil.gather_push_constant.size_multiplier = ssil_half_size ? 2 : 1;
+		ssil.gather_push_constant.exposure = p_settings.exposure;
 
 		// We are using our uniform cache so our uniform sets are automatically freed when our textures are freed.
 		// It also ensures that we're reusing the right cached entry in a multiview situation without us having to
@@ -902,7 +948,9 @@ void SSEffects::screen_space_indirect_lighting(Ref<RenderSceneBuffersRD> p_rende
 			u_projection.binding = 1;
 			u_projection.append_id(ssil.projection_uniform_buffer);
 
-			projection_uniform_set = uniform_set_cache->get_cache(shader, 3, u_last_frame, u_projection);
+			RD::Uniform u_exposure(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, Vector<RID>{ default_sampler, p_settings.exposure_texture });
+
+			projection_uniform_set = uniform_set_cache->get_cache(shader, 3, u_last_frame, u_projection, u_exposure);
 		}
 
 		RID gather_uniform_set;
@@ -1738,7 +1786,7 @@ void SSEffects::ssr_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers,
 	}
 }
 
-void SSEffects::screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffers, SSRRenderBuffers &p_ssr_buffers, const RID *p_normal_roughness_slices, int p_max_steps, float p_fade_in, float p_fade_out, float p_tolerance, const Projection *p_projections, const Projection *p_reprojections, const Vector3 *p_eye_offsets, RendererRD::CopyEffects &p_copy_effects) {
+void SSEffects::screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffers, SSRRenderBuffers &p_ssr_buffers, const RID *p_normal_roughness_slices, int p_max_steps, float p_fade_in, float p_fade_out, float p_tolerance, const Projection *p_projections, const Projection *p_reprojections, const Vector3 *p_eye_offsets, RendererRD::CopyEffects &p_copy_effects, float p_exposure, RID p_exposure_texture) {
 	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
 	ERR_FAIL_NULL(uniform_set_cache);
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
@@ -1901,11 +1949,17 @@ void SSEffects::screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffe
 		push_constant.depth_tolerance = p_tolerance;
 		push_constant.orthogonal = p_projections[v].is_orthogonal();
 		push_constant.view_index = v;
+		push_constant.exposure = p_exposure;
 
-		RID last_frame_texture = p_render_buffers->get_texture_slice(RB_SCOPE_SSLF, RB_LAST_FRAME, v, 0);
-		if (ssr_half_size && RD::get_singleton()->texture_size(last_frame_texture) != p_ssr_buffers.size) {
-			// SSIL is likely also enabled. The texture we need is in the second mipmap in this case.
-			last_frame_texture = p_render_buffers->get_texture_slice(RB_SCOPE_SSLF, RB_LAST_FRAME, v, 1);
+		RID last_frame_texture;
+		if (p_render_buffers->has_texture(RB_SCOPE_REFLECTION_SOURCE, RB_SOURCE)) {
+			last_frame_texture = p_render_buffers->get_texture_slice(RB_SCOPE_REFLECTION_SOURCE, RB_SOURCE, v, ssr_half_size ? 1 : 0);
+		} else {
+			last_frame_texture = p_render_buffers->get_texture_slice(RB_SCOPE_SSLF, RB_LAST_FRAME, v, 0);
+			if (ssr_half_size && RD::get_singleton()->texture_size(last_frame_texture) != p_ssr_buffers.size) {
+				// SSIL is likely also enabled. The texture we need is in the second mipmap in this case.
+				last_frame_texture = p_render_buffers->get_texture_slice(RB_SCOPE_SSLF, RB_LAST_FRAME, v, 1);
+			}
 		}
 
 		RID hiz_texture = p_render_buffers->get_texture_slice(RB_SCOPE_SSR, RB_HIZ, v, 0, 1, p_ssr_buffers.mipmaps);
@@ -1919,7 +1973,8 @@ void SSEffects::screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffe
 		RD::Uniform u_ssr(RD::UNIFORM_TYPE_IMAGE, 3, ssr_texture);
 		RD::Uniform u_mip_level(RD::UNIFORM_TYPE_IMAGE, 4, mip_level_texture);
 		RD::Uniform u_scene_data(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 5, ssr.ubo);
-		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(ssr_shader, 0, u_last_frame, u_hiz, u_normal_roughness, u_ssr, u_mip_level, u_scene_data), 0);
+		RD::Uniform u_exposure(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, Vector<RID>{ nearest_sampler, p_exposure_texture });
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(ssr_shader, 0, u_last_frame, u_hiz, u_normal_roughness, u_ssr, u_mip_level, u_scene_data, u_exposure), 0);
 
 		RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(push_constant));
 		RD::get_singleton()->compute_list_dispatch_threads(compute_list, p_ssr_buffers.size.width, p_ssr_buffers.size.height, 1);
@@ -1974,6 +2029,7 @@ void SSEffects::screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffe
 			ScreenSpaceReflectionResolvePushConstant push_constant;
 			push_constant.screen_size[0] = internal_size.x;
 			push_constant.screen_size[1] = internal_size.y;
+			push_constant.exposure = p_exposure;
 
 			RID depth_texture = p_render_buffers->get_depth_texture(v);
 			RID depth_half_texture = p_render_buffers->get_texture_slice(RB_SCOPE_SSR, RB_HIZ, v, 0);
@@ -1989,7 +2045,8 @@ void SSEffects::screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffe
 			RD::Uniform u_ssr(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, Vector<RID>{ linear_sampler, ssr_texture });
 			RD::Uniform u_mip_level(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, Vector<RID>{ nearest_sampler, mip_level_texture });
 			RD::Uniform u_output(RD::UNIFORM_TYPE_IMAGE, 6, output_texture);
-			RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(resolve_shader, 0, u_depth, u_normal_roughness, u_depth_half, u_normal_roughness_half, u_ssr, u_mip_level, u_output), 0);
+			RD::Uniform u_exposure(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 7, Vector<RID>{ nearest_sampler, p_exposure_texture });
+			RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(resolve_shader, 0, u_depth, u_normal_roughness, u_depth_half, u_normal_roughness_half, u_ssr, u_mip_level, u_output, u_exposure), 0);
 
 			RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(push_constant));
 			RD::get_singleton()->compute_list_dispatch_threads(compute_list, internal_size.width, internal_size.height, 1);

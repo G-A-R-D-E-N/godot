@@ -205,6 +205,15 @@ RID RenderForwardClustered::RenderBufferDataForwardClustered::get_color_pass_fb(
 
 	RID depth = use_msaa ? render_buffers->get_texture(RB_SCOPE_BUFFERS, RB_TEX_DEPTH_MSAA) : render_buffers->get_depth_texture();
 
+	if (p_color_pass_flags & (COLOR_PASS_FLAG_BOUNCE_SOURCE | COLOR_PASS_FLAG_REFLECTION_SOURCE)) {
+		RID bounce = (p_color_pass_flags & COLOR_PASS_FLAG_BOUNCE_SOURCE) ? render_buffers->get_texture_slice(RB_SCOPE_BOUNCE_SOURCE, RB_SOURCE, 0, 0, v_count) : RID();
+		RID reflection = (p_color_pass_flags & COLOR_PASS_FLAG_REFLECTION_SOURCE) ? render_buffers->get_texture_slice(RB_SCOPE_REFLECTION_SOURCE, RB_SOURCE, 0, 0, v_count) : RID();
+		if (render_buffers->has_texture(RB_SCOPE_VRS, RB_TEXTURE)) {
+			return FramebufferCacheRD::get_singleton()->get_cache_multiview(v_count, color, specular, velocity_buffer, bounce, reflection, depth, render_buffers->get_texture(RB_SCOPE_VRS, RB_TEXTURE));
+		}
+		return FramebufferCacheRD::get_singleton()->get_cache_multiview(v_count, color, specular, velocity_buffer, bounce, reflection, depth);
+	}
+
 	if (render_buffers->has_texture(RB_SCOPE_VRS, RB_TEXTURE)) {
 		RID vrs_texture = render_buffers->get_texture(RB_SCOPE_VRS, RB_TEXTURE);
 		return FramebufferCacheRD::get_singleton()->get_cache_multiview(v_count, color, specular, velocity_buffer, depth, vrs_texture);
@@ -468,6 +477,14 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 					pipeline_key.color_pass_flags |= SceneShaderForwardClustered::PIPELINE_COLOR_PASS_FLAG_MULTIVIEW;
 				}
 
+				if (p_params->color_pass_flags & COLOR_PASS_FLAG_BOUNCE_SOURCE) {
+					pipeline_key.color_pass_flags |= SceneShaderForwardClustered::PIPELINE_COLOR_PASS_FLAG_BOUNCE_SOURCE;
+				}
+
+				if (p_params->color_pass_flags & COLOR_PASS_FLAG_REFLECTION_SOURCE) {
+					pipeline_key.color_pass_flags |= SceneShaderForwardClustered::PIPELINE_COLOR_PASS_FLAG_REFLECTION_SOURCE;
+				}
+
 				pipeline_key.version = SceneShaderForwardClustered::PIPELINE_VERSION_COLOR_PASS;
 			} break;
 			case PASS_MODE_SHADOW:
@@ -645,7 +662,7 @@ void RenderForwardClustered::_render_list(RenderingDevice::DrawListID p_draw_lis
 	} break;
 
 		case PASS_MODE_COLOR: {
-			switch (p_params->color_pass_flags) {
+			switch (p_params->color_pass_flags & ~uint32_t(COLOR_PASS_FLAG_BOUNCE_SOURCE | COLOR_PASS_FLAG_REFLECTION_SOURCE)) {
 				VALID_FLAG_COMBINATION(0);
 				VALID_FLAG_COMBINATION(COLOR_PASS_FLAG_TRANSPARENT);
 				VALID_FLAG_COMBINATION(COLOR_PASS_FLAG_TRANSPARENT | COLOR_PASS_FLAG_MULTIVIEW);
@@ -787,6 +804,8 @@ uint32_t RenderForwardClustered::_setup_environment(const RenderDataRD *p_render
 	} else {
 		scene_state.ubo.ss_effects_flags = 0;
 	}
+	RID ss_exposure_texture;
+	scene_state.ubo.ss_exposure = _get_screen_space_exposure(p_render_data, ss_exposure_texture);
 
 	if ((scene_state.ubo.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSAO) && rd.is_valid() && rd->has_texture(RB_SCOPE_GTAO, RB_GTAO_BENT_NORMAL)) {
 		scene_state.ubo.ss_effects_flags |= SCREEN_SPACE_EFFECTS_FLAGS_USE_BENT_NORMALS;
@@ -1514,7 +1533,22 @@ void RenderForwardClustered::_process_ssao(Ref<RenderSceneBuffersRD> p_render_bu
 	}
 }
 
-void RenderForwardClustered::_process_ssil(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_buffers, const Projection *p_projections, const Transform3D &p_transform) {
+float RenderForwardClustered::_get_screen_space_exposure(const RenderDataRD *p_render_data, RID &r_exposure_texture) {
+	r_exposure_texture = RendererRD::TextureStorage::get_singleton()->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_WHITE);
+	if (p_render_data == nullptr || p_render_data->render_buffers.is_null() || !is_environment(p_render_data->environment) || GLOBAL_GET_CACHED(bool, "rendering/environment/screen_space_lighting/legacy_last_frame_source")) {
+		return 1.0f;
+	}
+	Ref<RenderSceneBuffersRD> rb = p_render_data->render_buffers;
+	float exposure = environment_get_exposure(p_render_data->environment);
+	RID luminance_texture = RSG::camera_attributes->camera_attributes_uses_auto_exposure(p_render_data->camera_attributes) ? luminance->get_current_luminance_buffer(rb) : RID();
+	if (luminance_texture.is_valid()) {
+		r_exposure_texture = luminance_texture;
+		return exposure * RSG::camera_attributes->camera_attributes_get_auto_exposure_scale(p_render_data->camera_attributes);
+	}
+	return exposure * rb->get_luminance_multiplier();
+}
+
+void RenderForwardClustered::_process_ssil(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_buffers, const Projection *p_projections, const Transform3D &p_transform, float p_exposure, RID p_exposure_texture) {
 	ERR_FAIL_NULL(ss_effects);
 	ERR_FAIL_COND(p_render_buffers.is_null());
 	ERR_FAIL_COND(p_environment.is_null());
@@ -1529,6 +1563,8 @@ void RenderForwardClustered::_process_ssil(Ref<RenderSceneBuffersRD> p_render_bu
 	settings.intensity = environment_get_ssil_intensity(p_environment);
 	settings.sharpness = environment_get_ssil_sharpness(p_environment);
 	settings.normal_rejection = environment_get_ssil_normal_rejection(p_environment);
+	settings.exposure = p_exposure;
+	settings.exposure_texture = p_exposure_texture;
 	settings.full_screen_size = p_render_buffers->get_internal_size();
 
 	ss_effects->ssil_allocate_buffers(p_render_buffers, rb_data->ss_effects_data.ssil, settings);
@@ -1549,7 +1585,7 @@ void RenderForwardClustered::_process_ssil(Ref<RenderSceneBuffersRD> p_render_bu
 	rb_data->ss_effects_data.ssil_last_frame_transform = transform;
 }
 
-void RenderForwardClustered::_process_ssr(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_slices, const Projection *p_projections, const Vector3 *p_eye_offsets, const Transform3D &p_transform) {
+void RenderForwardClustered::_process_ssr(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_slices, const Projection *p_projections, const Vector3 *p_eye_offsets, const Transform3D &p_transform, float p_exposure, RID p_exposure_texture) {
 	ERR_FAIL_NULL(ss_effects);
 	ERR_FAIL_COND(p_render_buffers.is_null());
 
@@ -1574,7 +1610,7 @@ void RenderForwardClustered::_process_ssr(Ref<RenderSceneBuffersRD> p_render_buf
 	}
 	rb_data->ss_effects_data.ssr_last_frame_transform = p_transform;
 
-	ss_effects->screen_space_reflection(p_render_buffers, rb_data->ss_effects_data.ssr, p_normal_slices, environment_get_ssr_max_steps(p_environment), environment_get_ssr_fade_in(p_environment), environment_get_ssr_fade_out(p_environment), environment_get_ssr_depth_tolerance(p_environment), p_projections, reprojections, p_eye_offsets, *copy_effects);
+	ss_effects->screen_space_reflection(p_render_buffers, rb_data->ss_effects_data.ssr, p_normal_slices, environment_get_ssr_max_steps(p_environment), environment_get_ssr_fade_in(p_environment), environment_get_ssr_fade_out(p_environment), environment_get_ssr_depth_tolerance(p_environment), p_projections, reprojections, p_eye_offsets, *copy_effects, p_exposure, p_exposure_texture);
 }
 
 void RenderForwardClustered::_select_local_contact_shadows(RenderDataRD *p_render_data) {
@@ -1811,9 +1847,11 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 		// This should allow most of the processing to happen in parallel even if we're doing
 		// drawcalls per eye/view. It will all sync up at the barrier.
 
-		if (p_use_ssil || p_use_ssr) {
+		if ((p_use_ssil || p_use_ssr) && !rb->has_texture(RB_SCOPE_BOUNCE_SOURCE, RB_SOURCE) && !rb->has_texture(RB_SCOPE_REFLECTION_SOURCE, RB_SOURCE)) {
 			ss_effects->allocate_last_frame_buffer(rb, p_use_ssil, p_use_ssr);
 		}
+		RID ss_exposure_texture;
+		const float ss_exposure = _get_screen_space_exposure(p_render_data, ss_exposure_texture);
 
 		if (p_use_ssao || p_use_ssil) {
 			RENDER_TIMESTAMP("Prepare Depth for SSAO/SSIL");
@@ -1829,7 +1867,7 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 			}
 
 			if (p_use_ssil) {
-				_process_ssil(rb, p_render_data->environment, p_normal_roughness_slices, p_render_data->scene_data->view_projection, p_render_data->scene_data->cam_transform);
+				_process_ssil(rb, p_render_data->environment, p_normal_roughness_slices, p_render_data->scene_data->view_projection, p_render_data->scene_data->cam_transform, ss_exposure, ss_exposure_texture);
 			}
 		}
 
@@ -1838,7 +1876,7 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 		}
 
 		if (p_use_ssr) {
-			_process_ssr(rb, p_render_data->environment, p_normal_roughness_slices, p_render_data->scene_data->view_projection, p_render_data->scene_data->view_eye_offset, p_render_data->scene_data->cam_transform);
+			_process_ssr(rb, p_render_data->environment, p_normal_roughness_slices, p_render_data->scene_data->view_projection, p_render_data->scene_data->view_eye_offset, p_render_data->scene_data->cam_transform, ss_exposure, ss_exposure_texture);
 		}
 	}
 
@@ -2040,6 +2078,8 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	bool using_voxelgi = false;
 	bool reverse_cull = p_render_data->scene_data->cam_transform.basis.determinant() < 0;
 	bool using_ssil = !is_reflection_probe && p_render_data->environment.is_valid() && environment_get_ssil_enabled(p_render_data->environment);
+	bool using_bounce_source = false;
+	bool using_reflection_source = false;
 	bool using_motion_pass = rb_data.is_valid() && using_upscaling;
 
 	if (is_reflection_probe) {
@@ -2099,6 +2139,20 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 			// Indicate pipelines for multiview are required.
 			global_pipeline_data_required.use_multiview = true;
+		}
+
+		const bool use_lighting_sources = ss_effects && !GLOBAL_GET_CACHED(bool, "rendering/environment/screen_space_lighting/legacy_last_frame_source") && rb->get_msaa_3d() == RSE::VIEWPORT_MSAA_DISABLED;
+		using_bounce_source = use_lighting_sources && using_ssil;
+		using_reflection_source = use_lighting_sources && using_ssr;
+		if (ss_effects) {
+			ss_effects->allocate_lighting_sources(rb, using_bounce_source, using_reflection_source);
+		}
+		if (using_bounce_source || using_reflection_source) {
+			color_pass_flags |= (using_bounce_source ? COLOR_PASS_FLAG_BOUNCE_SOURCE : 0) | (using_reflection_source ? COLOR_PASS_FLAG_REFLECTION_SOURCE : 0);
+			scene_shader.enable_lighting_sources_shader_group(using_bounce_source, using_reflection_source, p_render_data->scene_data->view_count > 1);
+			global_pipeline_data_required.use_bounce_source = global_pipeline_data_required.use_bounce_source || using_bounce_source;
+			global_pipeline_data_required.use_reflection_source = global_pipeline_data_required.use_reflection_source || using_reflection_source;
+			scene_shader.enable_lighting_sources_shader_group(global_pipeline_data_required.use_bounce_source, global_pipeline_data_required.use_reflection_source, global_pipeline_data_required.use_multiview);
 		}
 
 		color_framebuffer = rb_data->get_color_pass_fb(color_pass_flags);
@@ -2422,7 +2476,11 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 				if (rb_data.is_valid()) {
 					c.push_back(Color(0, 0, 0, 0)); // Separate specular.
 					c.push_back(Color(0, 0, 0, 0)); // Motion vector. Pushed to the clear color vector even if the framebuffer isn't bound.
+					c.push_back(Color(0, 0, 0, 0));
+					c.push_back(Color(0, 0, 0, 0));
 				}
+			} else if (using_bounce_source || using_reflection_source) {
+				ss_effects->clear_lighting_sources(rb);
 			}
 
 			uint32_t opaque_color_pass_flags = using_motion_pass ? (color_pass_flags & ~uint32_t(COLOR_PASS_FLAG_MOTION_VECTORS)) : color_pass_flags;
@@ -2630,7 +2688,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_ALPHA, p_render_data, is_multiview, radiance_texture, samplers, transparent_pass_uniform_buffer_index, true);
 
 	{
-		uint32_t transparent_color_pass_flags = (color_pass_flags | uint32_t(COLOR_PASS_FLAG_TRANSPARENT)) & ~uint32_t(COLOR_PASS_FLAG_SEPARATE_SPECULAR);
+		uint32_t transparent_color_pass_flags = (color_pass_flags | uint32_t(COLOR_PASS_FLAG_TRANSPARENT)) & ~uint32_t(COLOR_PASS_FLAG_SEPARATE_SPECULAR | COLOR_PASS_FLAG_BOUNCE_SOURCE | COLOR_PASS_FLAG_REFLECTION_SOURCE);
 		// Motion vectors should not be overwritten by transparent objects.
 		transparent_color_pass_flags &= ~uint32_t(COLOR_PASS_FLAG_MOTION_VECTORS);
 
@@ -2660,9 +2718,13 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	RD::get_singleton()->draw_command_end_label();
 
 	RD::get_singleton()->draw_command_begin_label("Copy Framebuffer for SSIL/SSR");
-	if (using_ssil || using_ssr) {
+	if ((using_ssil && !using_bounce_source) || (using_ssr && !using_reflection_source)) {
 		RENDER_TIMESTAMP("Copy Final Framebuffer (SSIL/SSR)");
 		_copy_framebuffer_to_ss_effects(rb, using_ssil, using_ssr);
+	}
+	if (using_bounce_source || using_reflection_source) {
+		RENDER_TIMESTAMP("Lighting Source Mipmaps (SSIL/SSR)");
+		ss_effects->build_lighting_source_mipmaps(rb, *copy_effects);
 	}
 	RD::get_singleton()->draw_command_end_label();
 
@@ -4014,6 +4076,15 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		u.append_id(texture);
 		uniforms.push_back(u);
 	}
+	{
+		RD::Uniform u;
+		u.binding = 40;
+		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		RID exposure_texture;
+		_get_screen_space_exposure(p_render_data, exposure_texture);
+		u.append_id(exposure_texture);
+		uniforms.push_back(u);
+	}
 #ifdef MODULE_TEXTURE_STREAMING_ENABLED
 	{
 		RD::Uniform u;
@@ -4787,7 +4858,7 @@ void RenderForwardClustered::_geometry_instance_update(RenderGeometryInstance *p
 	ginstance->dirty_list_element.remove_from_list();
 }
 
-static RD::FramebufferFormatID _get_color_framebuffer_format_for_pipeline(RD::DataFormat p_color_format, bool p_can_be_storage, RD::TextureSamples p_samples, bool p_specular, bool p_velocity, uint32_t p_view_count) {
+static RD::FramebufferFormatID _get_color_framebuffer_format_for_pipeline(RD::DataFormat p_color_format, bool p_can_be_storage, RD::TextureSamples p_samples, bool p_specular, bool p_velocity, uint32_t p_view_count, bool p_bounce_source = false, bool p_reflection_source = false) {
 	const bool multisampling = p_samples > RD::TEXTURE_SAMPLES_1;
 	RD::AttachmentFormat attachment;
 	attachment.samples = p_samples;
@@ -4817,6 +4888,13 @@ static RD::FramebufferFormatID _get_color_framebuffer_format_for_pipeline(RD::Da
 		attachments.push_back(attachment);
 	} else {
 		attachments.push_back(unused_attachment);
+	}
+
+	if (p_bounce_source || p_reflection_source) {
+		attachment.format = RendererRD::SSEffects::LIGHTING_SOURCE_FORMAT;
+		attachment.usage_flags = RendererRD::SSEffects::LIGHTING_SOURCE_USAGE_BITS;
+		attachments.push_back(p_bounce_source ? attachment : unused_attachment);
+		attachments.push_back(p_reflection_source ? attachment : unused_attachment);
 	}
 
 	// Depth attachment.
@@ -4993,10 +5071,11 @@ void RenderForwardClustered::_mesh_compile_pipelines_for_surface(const SurfacePi
 				// Generate all the possible variants used during the advanced color passes.
 				const uint32_t separate_specular_iterations = p_global.use_separate_specular ? 2 : 1;
 				const uint32_t motion_vectors_iterations = p_global.use_motion_vectors ? 2 : 1;
+				const uint32_t source_flags = alpha ? 0 : ((p_global.use_bounce_source ? SceneShaderForwardClustered::PIPELINE_COLOR_PASS_FLAG_BOUNCE_SOURCE : 0) | (p_global.use_reflection_source ? SceneShaderForwardClustered::PIPELINE_COLOR_PASS_FLAG_REFLECTION_SOURCE : 0));
 				uint32_t base_color_pass_flags = pipeline_key.color_pass_flags;
 				for (uint32_t separate_specular = 0; separate_specular < separate_specular_iterations; separate_specular++) {
 					for (uint32_t motion_vectors = 0; motion_vectors < motion_vectors_iterations; motion_vectors++) {
-						if (!separate_specular && !motion_vectors) {
+						if (!separate_specular && !motion_vectors && !source_flags) {
 							// This case was already generated.
 							continue;
 						}
@@ -5013,6 +5092,12 @@ void RenderForwardClustered::_mesh_compile_pipelines_for_surface(const SurfacePi
 
 						pipeline_key.framebuffer_format_id = _get_color_framebuffer_format_for_pipeline(buffers_color_format, buffers_can_be_storage, RD::TextureSamples(p_global.texture_samples), separate_specular, motion_vectors, view_count);
 						_mesh_compile_pipeline_for_surface(p_surface.shader, p_surface.mesh_surface, true, p_surface.instanced, p_source, pipeline_key, r_pipeline_pairs);
+
+						if (source_flags) {
+							pipeline_key.color_pass_flags |= source_flags;
+							pipeline_key.framebuffer_format_id = _get_color_framebuffer_format_for_pipeline(buffers_color_format, buffers_can_be_storage, RD::TextureSamples(p_global.texture_samples), separate_specular, motion_vectors, view_count, p_global.use_bounce_source, p_global.use_reflection_source);
+							_mesh_compile_pipeline_for_surface(p_surface.shader, p_surface.mesh_surface, true, p_surface.instanced, p_source, pipeline_key, r_pipeline_pairs);
+						}
 					}
 				}
 			}
