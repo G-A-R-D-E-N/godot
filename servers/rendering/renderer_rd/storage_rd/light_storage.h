@@ -276,6 +276,7 @@ private:
 		int reflection_texture_size = 0;
 		float uv_border_size = 0.0;
 		bool update_always = false;
+		int staging_index = -1; // Invariant: no probe samples this layer.
 
 		RID reflection;
 		RID color_buffer;
@@ -299,12 +300,14 @@ private:
 	mutable RID_Owner<ReflectionAtlas> reflection_atlas_owner;
 
 	void _reflection_atlas_clear(ReflectionAtlas *p_reflection_atlas);
+	int _reflection_atlas_find_slot(ReflectionAtlas *p_reflection_atlas);
 
 	/* REFLECTION PROBE INSTANCE */
 
 	struct ReflectionProbeInstance {
 		RID probe;
-		int atlas_index = -1;
+		int atlas_index = -1; // Invariant: -1 or a layer holding one complete capture of this probe.
+		int render_index = -1;
 		RID atlas;
 
 		bool dirty = true;

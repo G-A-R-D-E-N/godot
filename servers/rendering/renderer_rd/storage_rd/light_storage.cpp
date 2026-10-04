@@ -1741,7 +1741,7 @@ bool LightStorage::reflection_probe_has_atlas_index(RID p_instance) {
 		return false;
 	}
 
-	return rpi->atlas_index >= 0;
+	return rpi->render_index >= 0;
 }
 
 void LightStorage::reflection_probe_release_atlas_index(RID p_instance) {
@@ -1753,8 +1753,12 @@ void LightStorage::reflection_probe_release_atlas_index(RID p_instance) {
 	}
 	ReflectionAtlas *atlas = reflection_atlas_owner.get_or_null(rpi->atlas);
 	ERR_FAIL_NULL(atlas);
-	ERR_FAIL_INDEX(rpi->atlas_index, atlas->reflections.size());
-	atlas->reflections.write[rpi->atlas_index].owner = RID();
+	const int indices[2] = { rpi->atlas_index, rpi->render_index };
+	for (const int index : indices) {
+		if (index >= 0 && index < atlas->reflections.size() && atlas->reflections[index].owner == p_instance) {
+			atlas->reflections.write[index].owner = RID();
+		}
+	}
 
 	// TODO investigate if this is enough? shouldn't we be freeing our textures and framebuffers?
 
@@ -1766,6 +1770,7 @@ void LightStorage::reflection_probe_release_atlas_index(RID p_instance) {
 	}
 
 	rpi->atlas_index = -1;
+	rpi->render_index = -1;
 	rpi->atlas = RID();
 }
 
@@ -1792,7 +1797,31 @@ bool LightStorage::reflection_probe_instance_has_reflection(RID p_instance) {
 	ReflectionProbeInstance *rpi = reflection_probe_instance_owner.get_or_null(p_instance);
 	ERR_FAIL_NULL_V(rpi, false);
 
-	return rpi->atlas.is_valid();
+	return rpi->atlas.is_valid() && rpi->atlas_index >= 0;
+}
+
+int LightStorage::_reflection_atlas_find_slot(ReflectionAtlas *p_reflection_atlas) {
+	const uint64_t frame = RSG::rasterizer->get_frame_number();
+	int lru = -1;
+	uint64_t lru_pass = 0;
+	for (int i = 0; i < p_reflection_atlas->reflections.size(); i++) {
+		if (i == p_reflection_atlas->staging_index) {
+			continue;
+		}
+		const ReflectionProbeInstance *owner = reflection_probe_instance_owner.get_or_null(p_reflection_atlas->reflections[i].owner);
+		if (!owner) {
+			return i;
+		}
+		// Must not evict a capture in flight or one that a view sampled last frame.
+		if (!owner->rendering && owner->last_pass + 1 < frame && (lru < 0 || owner->last_pass < lru_pass)) {
+			lru = i;
+			lru_pass = owner->last_pass;
+		}
+	}
+	if (lru >= 0) {
+		reflection_probe_release_atlas_index(p_reflection_atlas->reflections[lru].owner);
+	}
+	return lru;
 }
 
 bool LightStorage::reflection_probe_instance_begin_render(RID p_instance, RID p_reflection_atlas) {
@@ -1844,7 +1873,7 @@ bool LightStorage::reflection_probe_instance_begin_render(RID p_instance, RID p_
 		bool use_storage = !copy_effects->get_raster_effects().has_flag(CopyEffects::RASTER_EFFECT_OCTMAP);
 		{
 			RD::TextureFormat tf;
-			tf.array_layers = atlas->count;
+			tf.array_layers = atlas->count + 1;
 			tf.format = get_reflection_probe_color_format();
 			tf.texture_type = RD::TEXTURE_TYPE_2D_ARRAY;
 			tf.mipmaps = mipmaps;
@@ -1871,8 +1900,9 @@ bool LightStorage::reflection_probe_instance_begin_render(RID p_instance, RID p_
 			tf.usage_bits = get_reflection_probe_depth_usage_bits();
 			atlas->depth_buffer = RD::get_singleton()->texture_create(tf, RD::TextureView());
 		}
-		atlas->reflections.resize(atlas->count);
-		for (int i = 0; i < atlas->count; i++) {
+		atlas->reflections.resize(atlas->count + 1);
+		atlas->staging_index = atlas->count;
+		for (int i = 0; i < atlas->reflections.size(); i++) {
 			atlas->reflections.write[i].data.update_reflection_data(atlas->reflection_texture_size, mipmaps, false, atlas->reflection, i, update_always, RendererSceneRenderRD::get_singleton()->get_sky()->roughness_layers, RendererSceneRenderRD::get_singleton()->_render_buffers_get_preferred_color_format(), atlas->uv_border_size);
 		}
 
@@ -1889,36 +1919,30 @@ bool LightStorage::reflection_probe_instance_begin_render(RID p_instance, RID p_
 		atlas->update_always = update_always;
 	}
 
-	if (rpi->atlas_index == -1) {
-		for (int i = 0; i < atlas->reflections.size(); i++) {
-			if (atlas->reflections[i].owner.is_null()) {
-				rpi->atlas_index = i;
-				break;
-			}
-		}
-		//find the one used last
-		if (rpi->atlas_index == -1) {
-			//everything is in use, find the one least used via LRU
-			uint64_t pass_min = 0;
+	if (rpi->render_index >= 0 && rpi->render_index != rpi->atlas_index && rpi->render_index < atlas->reflections.size() && atlas->reflections[rpi->render_index].owner == p_instance) {
+		atlas->reflections.write[rpi->render_index].owner = RID();
+	}
+	rpi->render_index = -1;
 
-			for (int i = 0; i < atlas->reflections.size(); i++) {
-				ReflectionProbeInstance *rpi2 = reflection_probe_instance_owner.get_or_null(atlas->reflections[i].owner);
-				if (rpi2->last_pass < pass_min) {
-					pass_min = rpi2->last_pass;
-					rpi->atlas_index = i;
-				}
-			}
-		}
+	int render_index = rpi->atlas_index;
+	if (render_index < 0) {
+		render_index = _reflection_atlas_find_slot(atlas);
+	} else if (!update_always) {
+		render_index = atlas->staging_index;
+	}
+	const RID slot_owner = render_index >= 0 ? atlas->reflections[render_index].owner : RID();
+	if (render_index < 0 || (slot_owner.is_valid() && slot_owner != p_instance)) {
+		RD::get_singleton()->draw_command_end_label();
+		return false;
 	}
 
-	if (rpi->atlas_index != -1) { // should we fail if this is still -1 ?
-		atlas->reflections.write[rpi->atlas_index].owner = p_instance;
-	}
-
+	atlas->reflections.write[render_index].owner = p_instance;
+	rpi->render_index = render_index;
 	rpi->atlas = p_reflection_atlas;
 	rpi->rendering = true;
 	rpi->dirty = false;
 	rpi->processing_layer = 1;
+	rpi->last_pass = RSG::rasterizer->get_frame_number();
 
 	RD::get_singleton()->draw_command_end_label();
 
@@ -1934,9 +1958,10 @@ bool LightStorage::reflection_probe_instance_end_render(RID p_instance, RID p_re
 
 	ReflectionProbeInstance *rpi = reflection_probe_instance_owner.get_or_null(p_instance);
 	ERR_FAIL_NULL_V(rpi, false);
+	ERR_FAIL_INDEX_V(rpi->render_index, atlas->reflections.size(), false);
 
 	RD::get_singleton()->draw_command_begin_label("Convert reflection probe to octahedral");
-	copy_effects->copy_cubemap_to_octmap(atlas->color_buffer, atlas->reflections.write[rpi->atlas_index].data.layers[0].mipmaps[0].framebuffer, atlas->uv_border_size);
+	copy_effects->copy_cubemap_to_octmap(atlas->color_buffer, atlas->reflections.write[rpi->render_index].data.layers[0].mipmaps[0].framebuffer, atlas->uv_border_size);
 	RD::get_singleton()->draw_command_end_label();
 
 	return true;
@@ -1955,30 +1980,37 @@ bool LightStorage::reflection_probe_instance_postprocess_step(RID p_instance) {
 	ERR_FAIL_COND_V(!rpi->rendering, false);
 
 	ReflectionAtlas *atlas = reflection_atlas_owner.get_or_null(rpi->atlas);
-	if (!atlas || rpi->atlas_index == -1) {
+	if (!atlas || rpi->render_index == -1) {
 		// Does not belong to an atlas anymore, cancel (was removed from atlas or atlas changed while rendering).
 		rpi->rendering = false;
 		return false;
 	}
 
+	SkyRD::ReflectionData &data = atlas->reflections.write[rpi->render_index].data;
 	if (LightStorage::get_singleton()->reflection_probe_get_update_mode(rpi->probe) == RSE::REFLECTION_PROBE_UPDATE_ALWAYS) {
 		// Using real time reflections, all roughness is done in one step
-		atlas->reflections.write[rpi->atlas_index].data.create_reflection_fast_filter(false);
-		rpi->rendering = false;
-		rpi->processing_layer = 1;
-		return true;
+		data.create_reflection_fast_filter(false);
+	} else {
+		const int mip_count = (int)data.layers[0].mipmaps.size();
+		const int last = rpi->atlas_index < 0 ? mip_count : MIN(rpi->processing_layer + 1, mip_count);
+		for (; rpi->processing_layer < last; rpi->processing_layer++) {
+			data.create_reflection_importance_sample(false, rpi->processing_layer, RendererSceneRenderRD::get_singleton()->get_sky()->sky_ggx_samples_quality);
+		}
+		if (rpi->processing_layer < mip_count) {
+			return false;
+		}
 	}
 
-	atlas->reflections.write[rpi->atlas_index].data.create_reflection_importance_sample(false, rpi->processing_layer, RendererSceneRenderRD::get_singleton()->get_sky()->sky_ggx_samples_quality);
-
-	rpi->processing_layer++;
-	if (rpi->processing_layer == (int)atlas->reflections[rpi->atlas_index].data.layers[0].mipmaps.size()) {
-		rpi->rendering = false;
-		rpi->processing_layer = 1;
-		return true;
+	if (rpi->atlas_index >= 0 && rpi->atlas_index != rpi->render_index) {
+		atlas->reflections.write[rpi->atlas_index].owner = RID();
+		atlas->staging_index = rpi->atlas_index;
 	}
-
-	return false;
+	rpi->atlas_index = rpi->render_index;
+	rpi->render_index = -1;
+	rpi->rendering = false;
+	rpi->processing_layer = 1;
+	rpi->last_pass = RSG::rasterizer->get_frame_number();
+	return true;
 }
 
 uint32_t LightStorage::reflection_probe_instance_get_resolution(RID p_instance) {
@@ -1997,7 +2029,7 @@ RID LightStorage::reflection_probe_instance_get_framebuffer(RID p_instance, int 
 
 	ReflectionAtlas *atlas = reflection_atlas_owner.get_or_null(rpi->atlas);
 	ERR_FAIL_NULL_V(atlas, RID());
-	ERR_FAIL_COND_V_MSG(rpi->atlas_index < 0, RID(), "Reflection probe atlas index invalid. Maximum amount of reflection probes in use (" + itos(atlas->count) + ") may have been exceeded, reflections will not display properly. Consider increasing Rendering > Reflections > Reflection Atlas > Reflection Count in the Project Settings.");
+	ERR_FAIL_COND_V_MSG(rpi->render_index < 0, RID(), "Reflection probe atlas index invalid. Maximum amount of reflection probes in use (" + itos(atlas->count) + ") may have been exceeded, reflections will not display properly. Consider increasing Rendering > Reflections > Reflection Atlas > Reflection Count in the Project Settings.");
 
 	return atlas->color_fbs[p_index];
 }
