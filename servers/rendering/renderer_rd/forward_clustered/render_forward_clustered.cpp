@@ -122,6 +122,7 @@ void RenderForwardClustered::RenderBufferDataForwardClustered::free_data() {
 		render_buffers->clear_context(RB_SCOPE_SSDS);
 		render_buffers->clear_context(RB_SCOPE_SSIL);
 		render_buffers->clear_context(RB_SCOPE_SSAO);
+		render_buffers->clear_context(RB_SCOPE_GTAO);
 		render_buffers->clear_context(RB_SCOPE_SSR);
 		render_buffers->clear_context(RB_SCOPE_SSCS);
 	}
@@ -785,6 +786,10 @@ uint32_t RenderForwardClustered::_setup_environment(const RenderDataRD *p_render
 		scene_state.ubo.ss_effects_flags = ss_flags;
 	} else {
 		scene_state.ubo.ss_effects_flags = 0;
+	}
+
+	if ((scene_state.ubo.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSAO) && rd.is_valid() && rd->has_texture(RB_SCOPE_GTAO, RB_GTAO_BENT_NORMAL)) {
+		scene_state.ubo.ss_effects_flags |= SCREEN_SPACE_EFFECTS_FLAGS_USE_BENT_NORMALS;
 	}
 
 	if (uniform_buffer_index >= scene_state.implementation_uniform_buffers.size()) {
@@ -1453,7 +1458,11 @@ void RenderForwardClustered::setup_added_decal(const Transform3D &p_transform, c
 
 /* Render scene */
 
-void RenderForwardClustered::_process_ssao(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_buffers, const Projection *p_projections) {
+bool RenderForwardClustered::_ssao_uses_gtao(const Projection &p_projection) const {
+	return GLOBAL_GET_CACHED(int, "rendering/environment/ssao/backend") == 1 && !p_projection.is_orthogonal();
+}
+
+void RenderForwardClustered::_process_ssao(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_buffers, const Projection *p_projections, float p_taa_frame_count) {
 	ERR_FAIL_NULL(ss_effects);
 	ERR_FAIL_COND(p_render_buffers.is_null());
 	ERR_FAIL_COND(p_environment.is_null());
@@ -1462,6 +1471,32 @@ void RenderForwardClustered::_process_ssao(Ref<RenderSceneBuffersRD> p_render_bu
 	ERR_FAIL_COND(rb_data.is_null());
 
 	RENDER_TIMESTAMP("Process SSAO");
+
+	if (_ssao_uses_gtao(p_projections[0])) {
+		RendererRD::SSEffects::GTAOSettings gtao_settings;
+		gtao_settings.radius = environment_get_ssao_radius(p_environment);
+		gtao_settings.intensity = environment_get_ssao_intensity(p_environment);
+		gtao_settings.power = environment_get_ssao_power(p_environment);
+		gtao_settings.slices = MAX(1, GLOBAL_GET_CACHED(int, "rendering/environment/gtao/slices"));
+		gtao_settings.steps = MAX(1, GLOBAL_GET_CACHED(int, "rendering/environment/gtao/steps"));
+		gtao_settings.denoise_passes = MAX(0, GLOBAL_GET_CACHED(int, "rendering/environment/gtao/denoise_passes"));
+		gtao_settings.half_size = GLOBAL_GET_CACHED(bool, "rendering/environment/gtao/half_size");
+		gtao_settings.bent_normals = GLOBAL_GET_CACHED(bool, "rendering/environment/gtao/bent_normals");
+		gtao_settings.noise_index = uint32_t(p_taa_frame_count);
+		gtao_settings.full_screen_size = p_render_buffers->get_internal_size();
+
+		ss_effects->gtao_allocate_buffers(p_render_buffers, rb_data->ss_effects_data.gtao, gtao_settings);
+
+		for (uint32_t v = 0; v < p_render_buffers->get_view_count(); v++) {
+			ss_effects->generate_gtao(p_render_buffers, rb_data->ss_effects_data.gtao, v, p_normal_buffers[v], p_projections[v], gtao_settings);
+		}
+		return;
+	}
+
+	if (p_render_buffers->has_texture(RB_SCOPE_GTAO, RB_GTAO_DEPTH)) {
+		p_render_buffers->clear_context(RB_SCOPE_GTAO);
+		rb_data->ss_effects_data.gtao = RendererRD::SSEffects::GTAORenderBuffers();
+	}
 
 	RendererRD::SSEffects::SSAOSettings settings;
 	settings.radius = environment_get_ssao_radius(p_environment);
@@ -1704,12 +1739,14 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 		if (p_use_ssao || p_use_ssil) {
 			RENDER_TIMESTAMP("Prepare Depth for SSAO/SSIL");
 			// Convert our depth buffer data to linear data in
-			for (uint32_t v = 0; v < rb->get_view_count(); v++) {
-				ss_effects->downsample_depth(rb, v, p_render_data->scene_data->view_projection[v]);
+			if (p_use_ssil || !_ssao_uses_gtao(p_render_data->scene_data->view_projection[0])) {
+				for (uint32_t v = 0; v < rb->get_view_count(); v++) {
+					ss_effects->downsample_depth(rb, v, p_render_data->scene_data->view_projection[v]);
+				}
 			}
 
 			if (p_use_ssao) {
-				_process_ssao(rb, p_render_data->environment, p_normal_roughness_slices, p_render_data->scene_data->view_projection);
+				_process_ssao(rb, p_render_data->environment, p_normal_roughness_slices, p_render_data->scene_data->view_projection, p_render_data->scene_data->taa_frame_count);
 			}
 
 			if (p_use_ssil) {
@@ -3874,6 +3911,15 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		}
 
 		RID texture = sscs.is_valid() ? sscs : texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_BLACK);
+		u.append_id(texture);
+		uniforms.push_back(u);
+	}
+	{
+		RD::Uniform u;
+		u.binding = 39;
+		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		RID bent_normal = rb.is_valid() && rb->has_texture(RB_SCOPE_GTAO, RB_GTAO_BENT_NORMAL) ? rb->get_texture(RB_SCOPE_GTAO, RB_GTAO_BENT_NORMAL) : RID();
+		RID texture = bent_normal.is_valid() ? bent_normal : texture_storage->texture_rd_get_default(is_multiview ? RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_NORMAL : RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_NORMAL);
 		u.append_id(texture);
 		uniforms.push_back(u);
 	}

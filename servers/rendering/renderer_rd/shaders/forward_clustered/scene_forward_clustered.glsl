@@ -1154,6 +1154,31 @@ uint cluster_get_range_clip_mask(uint i, uint z_min, uint z_max) {
 	return bitfieldInsert(uint(0), uint(0xFFFFFFFF), local_min, mask_width);
 }
 
+float specular_occlusion_cone(float p_ao, float p_roughness, vec3 p_bent_normal, vec3 p_reflection) {
+	float cos_a_v = sqrt(1.0 - p_ao);
+	float limited_roughness = max(p_roughness, 0.01);
+	float cos_a_s = exp2((-log(10.0) / log(2.0)) * limited_roughness * limited_roughness);
+	float cos_b = dot(p_bent_normal, p_reflection);
+
+	float r1 = acos(cos_a_v);
+	float r2 = acos(cos_a_s);
+	float d = acos(cos_b);
+	float area = 0.0;
+
+	if (d <= max(r1, r2) - min(r1, r2)) {
+		area = M_TAU - M_TAU * max(cos_a_v, cos_a_s);
+	} else if (d >= r1 + r2) {
+		area = 0.0;
+	} else {
+		float delta = abs(r1 - r2);
+		float x = 1.0 - clamp((d - delta) / (r1 + r2 - delta), 0.0, 1.0);
+		area = smoothstep(0.0, 1.0, x);
+		area *= M_TAU - M_TAU * max(cos_a_v, cos_a_s);
+	}
+
+	return area / (M_TAU * (1.0 - cos_a_s));
+}
+
 #endif //!MODE_RENDER DEPTH
 
 #if defined(MODE_RENDER_NORMAL_ROUGHNESS) || defined(MODE_RENDER_MATERIAL)
@@ -2310,33 +2335,10 @@ void fragment_shader(in SceneData scene_data) {
 #ifdef BENT_NORMAL_MAP_USED
 		// Apply cone to cone intersection with cosine weighted assumption:
 		// https://blog.selfshadow.com/publications/s2016-shading-course/activision/s2016_pbs_activision_occlusion.pdf
-		float cos_a_v = sqrt(1.0 - ao);
-		float limited_roughness = max(roughness, 0.01); // Avoid artifacts at really low roughness.
-		float cos_a_s = exp2((-log(10.0) / log(2.0)) * limited_roughness * limited_roughness);
-		float cos_b = dot(bent_normal_vector, reflect(-view, normal));
-
 		// Intersection between the spherical caps of the visibility and specular cone.
 		// Based on Christopher Oat and Pedro V. Sander's "Ambient aperture lighting":
 		// https://advances.realtimerendering.com/s2006/Chapter8-Ambient_Aperture_Lighting.pdf
-		float r1 = acos(cos_a_v);
-		float r2 = acos(cos_a_s);
-		float d = acos(cos_b);
-		float area = 0.0;
-
-		if (d <= max(r1, r2) - min(r1, r2)) {
-			// One cap is enclosed in the other.
-			area = M_TAU - M_TAU * max(cos_a_v, cos_a_s);
-		} else if (d >= r1 + r2) {
-			// No intersection.
-			area = 0.0;
-		} else {
-			float delta = abs(r1 - r2);
-			float x = 1.0 - clamp((d - delta) / (r1 + r2 - delta), 0.0, 1.0);
-			area = smoothstep(0.0, 1.0, x);
-			area *= M_TAU - M_TAU * max(cos_a_v, cos_a_s);
-		}
-
-		float specular_occlusion = area / (M_TAU * (1.0 - cos_a_s));
+		float specular_occlusion = specular_occlusion_cone(ao, roughness, bent_normal_vector, reflect(-view, normal));
 		indirect_specular_light *= specular_occlusion;
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
 		cc_specular_light *= specular_occlusion;
@@ -2349,6 +2351,14 @@ void fragment_shader(in SceneData scene_data) {
 		// 10.0 is a magic number, it gives the intended effect in most scenarios.
 		// Low enough for occlusion, high enough for reaction to lights and shadows.
 		specular_occlusion = max(min(reflective_f * specular_occlusion * 10.0, 1.0), specular_occlusion);
+		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_BENT_NORMALS)) {
+#ifdef USE_MULTIVIEW
+			vec3 occlusion_bent_normal = normalize(textureLod(sampler2DArray(gtao_bent_normal_buffer, SAMPLER_LINEAR_CLAMP), vec3(screen_uv, ViewIndex), 0.0).xyz * 2.0 - 1.0);
+#else
+			vec3 occlusion_bent_normal = normalize(textureLod(sampler2D(gtao_bent_normal_buffer, SAMPLER_LINEAR_CLAMP), screen_uv, 0.0).xyz * 2.0 - 1.0);
+#endif
+			specular_occlusion = specular_occlusion_cone(ao, roughness, occlusion_bent_normal, reflect(-view, normal));
+		}
 		indirect_specular_light *= specular_occlusion;
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
 		cc_specular_light *= specular_occlusion;
