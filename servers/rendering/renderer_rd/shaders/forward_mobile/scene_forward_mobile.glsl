@@ -1164,6 +1164,9 @@ void main() {
 #if defined(DIRECT_DIFFUSE_WEIGHT_USED)
 	vec3 direct_diffuse_weight_highp = vec3(1.0);
 #endif
+#if defined(EMISSION_BOUNCE_WEIGHT_USED)
+	float emission_bounce_weight = 1.0;
+#endif
 #ifdef TEMPORAL_METADATA_USED
 	float temporal_mask = 0.0;
 	float temporal_id = 0.0;

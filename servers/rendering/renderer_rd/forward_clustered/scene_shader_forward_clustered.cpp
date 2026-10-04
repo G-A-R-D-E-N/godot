@@ -785,6 +785,7 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 		actions.renames["INDIRECT_COAT_WEIGHT"] = "indirect_coat_weight";
 		actions.renames["INDIRECT_COAT_ROUGHNESS"] = "indirect_coat_roughness";
 		actions.renames["DIRECT_DIFFUSE_WEIGHT"] = "direct_diffuse_weight";
+		actions.renames["EMISSION_BOUNCE_WEIGHT"] = "emission_bounce_weight";
 		actions.renames["DECAL_COVERAGE"] = "decal_coverage";
 		actions.renames["TEMPORAL_MASK"] = "temporal_mask";
 		actions.renames["TEMPORAL_ID"] = "temporal_id";

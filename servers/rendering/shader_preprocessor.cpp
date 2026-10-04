@@ -1366,6 +1366,7 @@ void ShaderPreprocessor::_prepare_state(ShaderPreprocessor::State &rp_state, con
 		insert_builtin_define("INDIRECT_WEIGHTS_AVAILABLE", _MKSTR(1), rp_state);
 		insert_builtin_define("DECAL_COVERAGE_AVAILABLE", _MKSTR(1), rp_state);
 		insert_builtin_define("DIRECT_DIFFUSE_WEIGHT_AVAILABLE", _MKSTR(1), rp_state);
+		insert_builtin_define("EMISSION_BOUNCE_WEIGHT_AVAILABLE", _MKSTR(1), rp_state);
 		insert_builtin_define("TEMPORAL_FRAME_AVAILABLE", _MKSTR(1), rp_state);
 		insert_builtin_define("TEMPORAL_METADATA_AVAILABLE", _MKSTR(1), rp_state);
 	}
