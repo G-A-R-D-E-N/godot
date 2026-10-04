@@ -167,6 +167,7 @@ void RenderSceneDataRD::update_ubo(RID p_uniform_buffer, RSE::ViewportDebugDraw 
 		RSE::EnvironmentAmbientSource ambient_src = render_scene_render->environment_get_ambient_source(p_env);
 
 		float bg_energy_multiplier = render_scene_render->environment_get_bg_energy_multiplier(p_env);
+		float exposure_normalization = render_scene_render->is_using_physical_light_units() && p_camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes) : 1.0f;
 
 		ubo.ambient_light_color_energy[3] = bg_energy_multiplier;
 
@@ -182,7 +183,7 @@ void RenderSceneDataRD::update_ubo(RID p_uniform_buffer, RSE::ViewportDebugDraw 
 			ubo.ambient_light_color_energy[2] = color.b * bg_energy_multiplier;
 			ubo.flags |= SCENE_DATA_FLAGS_USE_AMBIENT_LIGHT;
 		} else {
-			float energy = render_scene_render->environment_get_ambient_light_energy(p_env);
+			float energy = render_scene_render->environment_get_ambient_light_energy(p_env) * exposure_normalization;
 			Color color = render_scene_render->environment_get_ambient_light(p_env);
 			color = color.srgb_to_linear();
 			ubo.ambient_light_color_energy[0] = color.r * energy;
@@ -229,7 +230,7 @@ void RenderSceneDataRD::update_ubo(RID p_uniform_buffer, RSE::ViewportDebugDraw 
 		ubo.fog_depth_begin = MIN(render_scene_render->environment_get_fog_depth_begin(p_env), ubo.fog_depth_end - 0.001);
 
 		Color fog_color = render_scene_render->environment_get_fog_light_color(p_env).srgb_to_linear();
-		float fog_energy = render_scene_render->environment_get_fog_light_energy(p_env);
+		float fog_energy = render_scene_render->environment_get_fog_light_energy(p_env) * exposure_normalization;
 
 		ubo.fog_light_color[0] = fog_color.r * fog_energy;
 		ubo.fog_light_color[1] = fog_color.g * fog_energy;

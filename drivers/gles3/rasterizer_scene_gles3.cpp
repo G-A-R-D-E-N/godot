@@ -1632,6 +1632,7 @@ void RasterizerSceneGLES3::_setup_environment(const RenderDataGLES3 *p_render_da
 		RSE::EnvironmentAmbientSource ambient_src = environment_get_ambient_source(p_render_data->environment);
 
 		float bg_energy_multiplier = environment_get_bg_energy_multiplier(p_render_data->environment);
+		float exposure_normalization = use_physical_light_units && p_render_data->camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes) : 1.0f;
 
 		scene_state.data.ambient_light_color_energy[3] = bg_energy_multiplier;
 
@@ -1648,7 +1649,7 @@ void RasterizerSceneGLES3::_setup_environment(const RenderDataGLES3 *p_render_da
 			scene_state.data.use_ambient_light = true;
 			scene_state.data.use_ambient_cubemap = false;
 		} else {
-			float energy = environment_get_ambient_light_energy(p_render_data->environment);
+			float energy = environment_get_ambient_light_energy(p_render_data->environment) * exposure_normalization;
 			Color color = environment_get_ambient_light(p_render_data->environment);
 			color = color.srgb_to_linear();
 			scene_state.data.ambient_light_color_energy[0] = color.r * energy;
@@ -1684,7 +1685,7 @@ void RasterizerSceneGLES3::_setup_environment(const RenderDataGLES3 *p_render_da
 		scene_state.data.fog_aerial_perspective = environment_get_fog_aerial_perspective(p_render_data->environment);
 
 		Color fog_color = environment_get_fog_light_color(p_render_data->environment).srgb_to_linear();
-		float fog_energy = environment_get_fog_light_energy(p_render_data->environment);
+		float fog_energy = environment_get_fog_light_energy(p_render_data->environment) * exposure_normalization;
 
 		scene_state.data.fog_light_color[0] = fog_color.r * fog_energy;
 		scene_state.data.fog_light_color[1] = fog_color.g * fog_energy;
