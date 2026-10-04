@@ -835,6 +835,10 @@
 			Draws, for each froxel column of the volumetric fog, the largest change the temporal clamp made to the reprojected history this frame, relative to the history (white = the history was replaced entirely).
 			[b]Note:[/b] Only supported when using the Forward+ rendering method, with volumetric fog temporal reprojection and [member ProjectSettings.rendering/environment/volumetric_fog/use_temporal_clamp] enabled.
 		</constant>
+		<constant name="DEBUG_DRAW_LINEAR_DEPTH" value="46" enum="DebugDraw">
+			Draws the view-space depth stored in the depth buffer on a logarithmic scale between the camera's near and far planes: [code]1 - log(depth / near) / log(far / near)[/code], so the near plane is white and the far plane, including the sky, is black. Works with perspective, orthogonal and frustum cameras; with multiple views, the first view is drawn.
+			[b]Note:[/b] Only supported when using the Forward+ or Mobile rendering methods.
+		</constant>
 		<constant name="DEBUG_DRAW_SSR_HIT_DISTANCE" value="47" enum="DebugDraw">
 			Draws the distance from each surface to its stochastic screen-space reflection hits, mapped as [code]d / (d + 2)[/code] for [code]d[/code] in meters (black = no hit, grey = 2 m).
 			[b]Note:[/b] Only supported when using the Forward+ rendering method, with [member ProjectSettings.rendering/environment/screen_space_reflection/backend] set to Stochastic.
