@@ -1576,6 +1576,10 @@ layout(location = 0) out vec4 motion_vectors;
 float decal_coverage;
 #endif
 
+#if defined(DIRECT_DIFFUSE_WEIGHT_USED) && !(defined(USE_VERTEX_LIGHTING) && defined(LIGHT_CODE_USED))
+#define DIRECT_DIFFUSE_WEIGHTED
+#endif
+
 #ifndef RENDER_MOTION_VECTORS
 vec3 F0(float metallic, float specular, vec3 albedo) {
 	float dielectric = 0.16 * specular * specular;
@@ -2299,6 +2303,9 @@ void main() {
 #if defined(INDIRECT_COAT_USED)
 	vec3 indirect_coat_weight = vec3(0.0);
 	float indirect_coat_roughness = 0.0;
+#endif
+#if defined(DIRECT_DIFFUSE_WEIGHT_USED)
+	vec3 direct_diffuse_weight = vec3(1.0);
 #endif
 #ifdef TEMPORAL_METADATA_USED
 	float temporal_mask = 0.0;
@@ -3062,12 +3069,18 @@ void main() {
 	frag_color = vec4(albedo, alpha);
 #else
 
+#ifdef DIRECT_DIFFUSE_WEIGHTED
+	diffuse_light *= direct_diffuse_weight;
+#else
 	diffuse_light *= albedo;
+#endif
 
 	diffuse_light *= ao;
 	specular_light *= ao;
 
+#ifndef DIRECT_DIFFUSE_WEIGHTED
 	diffuse_light *= 1.0 - metallic;
+#endif
 #ifndef INDIRECT_DIFFUSE_WEIGHT_USED
 	ambient_light *= 1.0 - metallic;
 #endif
@@ -3344,10 +3357,16 @@ void main() {
 
 #endif // ADDITIVE_SPOT
 
+#ifdef DIRECT_DIFFUSE_WEIGHTED
+	diffuse_light *= direct_diffuse_weight;
+#else
 	diffuse_light *= albedo;
+#endif
 	diffuse_light *= ao;
 	specular_light *= ao;
+#ifndef DIRECT_DIFFUSE_WEIGHTED
 	diffuse_light *= 1.0 - metallic;
+#endif
 	vec3 additive_light_color = diffuse_light + specular_light;
 
 #ifndef FOG_DISABLED
