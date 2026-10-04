@@ -247,7 +247,7 @@ public:
 	struct SkyMaterialData : public RendererRD::MaterialStorage::MaterialData {
 		SkyShaderData *shader_data = nullptr;
 		RID uniform_set;
-		bool uniform_set_updated;
+		uint64_t uniform_set_version = 0;
 
 		virtual void set_render_priority(int p_priority) {}
 		virtual void set_next_pass(RID p_pass) {}
@@ -289,6 +289,8 @@ public:
 
 		// State to track when radiance octmap needs updating.
 		SkyMaterialData *prev_material_data = nullptr;
+		uint64_t prev_material_version = 0;
+		LocalVector<SkyDirectionalLightData> prev_lights;
 		Vector3 prev_position;
 		float prev_time;
 		float prev_fog_aerial_perspective = 0.0;
