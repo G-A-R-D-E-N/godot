@@ -4668,7 +4668,12 @@ void Node3DEditorViewport::_menu_option(int p_option) {
 		case VIEW_DISPLAY_DEBUG_FOG_INSCATTER:
 		case VIEW_DISPLAY_DEBUG_SSR_CONFIDENCE:
 		case VIEW_DISPLAY_DEBUG_BOUNCE_SOURCE:
-		case VIEW_DISPLAY_DEBUG_REFLECTION_SOURCE: {
+		case VIEW_DISPLAY_DEBUG_REFLECTION_SOURCE:
+		case VIEW_DISPLAY_DEBUG_PERSISTENT_AO:
+		case VIEW_DISPLAY_DEBUG_FALLBACK_SOURCE_SPECULAR:
+		case VIEW_DISPLAY_DEBUG_FALLBACK_SOURCE_DIFFUSE:
+		case VIEW_DISPLAY_DEBUG_REJECTED_HISTORY:
+		case VIEW_DISPLAY_DEBUG_FOG_HISTORY_CLAMP: {
 			static const int display_options[] = {
 				VIEW_DISPLAY_NORMAL,
 				VIEW_DISPLAY_WIREFRAME,
@@ -4711,6 +4716,11 @@ void Node3DEditorViewport::_menu_option(int p_option) {
 				VIEW_DISPLAY_DEBUG_SSR_CONFIDENCE,
 				VIEW_DISPLAY_DEBUG_BOUNCE_SOURCE,
 				VIEW_DISPLAY_DEBUG_REFLECTION_SOURCE,
+				VIEW_DISPLAY_DEBUG_PERSISTENT_AO,
+				VIEW_DISPLAY_DEBUG_FALLBACK_SOURCE_SPECULAR,
+				VIEW_DISPLAY_DEBUG_FALLBACK_SOURCE_DIFFUSE,
+				VIEW_DISPLAY_DEBUG_REJECTED_HISTORY,
+				VIEW_DISPLAY_DEBUG_FOG_HISTORY_CLAMP,
 				VIEW_MAX
 			};
 			static const Viewport::DebugDraw debug_draw_modes[] = {
@@ -4755,6 +4765,11 @@ void Node3DEditorViewport::_menu_option(int p_option) {
 				Viewport::DEBUG_DRAW_SSR_CONFIDENCE,
 				Viewport::DEBUG_DRAW_BOUNCE_SOURCE,
 				Viewport::DEBUG_DRAW_REFLECTION_SOURCE,
+				Viewport::DEBUG_DRAW_PERSISTENT_AO,
+				Viewport::DEBUG_DRAW_FALLBACK_SOURCE_SPECULAR,
+				Viewport::DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE,
+				Viewport::DEBUG_DRAW_REJECTED_HISTORY,
+				Viewport::DEBUG_DRAW_FOG_HISTORY_CLAMP,
 			};
 
 			for (int idx = 0; display_options[idx] != VIEW_MAX; idx++) {
@@ -7091,6 +7106,16 @@ Node3DEditorViewport::Node3DEditorViewport(Node3DEditor *p_spatial_editor, int p
 			TTRC("Displays the radiance SSIL gathers in the next frame: direct diffuse light plus emission weighted by EMISSION_BOUNCE_WEIGHT. Requires SSIL to be enabled in Environment."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Reflection Source"), VIEW_DISPLAY_DEBUG_REFLECTION_SOURCE, SupportedRenderingMethods::FORWARD_PLUS,
 			TTRC("Displays the radiance SSR samples in the next frame: the opaque image without the SSR term and without fog. Requires SSR to be enabled in Environment."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Persistent AO"), VIEW_DISPLAY_DEBUG_PERSISTENT_AO, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays the material ambient occlusion each surface writes (the AO built-in, including decals), before screen-space AO."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Fallback Source (Specular)"), VIEW_DISPLAY_DEBUG_FALLBACK_SOURCE_SPECULAR, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Colors each pixel by the provider of its reflected light: blue = sky or environment, orange = VoxelGI/SDFGI, green = reflection probe, magenta = SSR, black = none. Blends show the replacement weights, so the SSR handover to the fallback is a gradient."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Fallback Source (Diffuse)"), VIEW_DISPLAY_DEBUG_FALLBACK_SOURCE_DIFFUSE, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Colors each pixel by the provider of its ambient light: blue = sky or environment, orange = VoxelGI/SDFGI, cyan = lightmap, green = reflection probe, magenta = SSIL share, black = none."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Rejected History"), VIEW_DISPLAY_DEBUG_REJECTED_HISTORY, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays where TAA or FSR2 discarded or clamped history this frame: white = reset frame, blue = reprojected off screen, magenta = temporal ID mismatch, red = disocclusion, green = clamped (TAA) or reactive (FSR2). Requires TAA or FSR2."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Fog History Clamp"), VIEW_DISPLAY_DEBUG_FOG_HISTORY_CLAMP, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays, for each froxel column, how strongly the volumetric fog temporal clamp moved the reprojected history this frame (white = fully replaced). Requires volumetric fog with temporal reprojection."));
 	display_submenu->add_separator();
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Direct Diffuse"), VIEW_DISPLAY_DEBUG_DIRECT_DIFFUSE, SupportedRenderingMethods::FORWARD_PLUS,
 			TTRC("Displays only the diffuse light from lights."));

@@ -513,6 +513,18 @@ void Fog::VolumetricFog::init(const Vector3i &fog_size, RID p_sky_shader) {
 		emissive_map = RD::get_singleton()->texture_create(tf, RD::TextureView());
 		RD::get_singleton()->set_resource_name(emissive_map, "Fog emissive map");
 		RD::get_singleton()->texture_clear(emissive_map, Color(0, 0, 0, 0), 0, 1, 0, 1);
+
+		tf.texture_type = RD::TEXTURE_TYPE_2D;
+		tf.depth = 1;
+		tf.usage_bits |= RD::TEXTURE_USAGE_SAMPLING_BIT;
+		tf.shareable_formats.push_back(RD::DATA_FORMAT_R32_UINT);
+		tf.shareable_formats.push_back(RD::DATA_FORMAT_R32_SFLOAT);
+		history_clamp_map = RD::get_singleton()->texture_create(tf, RD::TextureView());
+		RD::get_singleton()->set_resource_name(history_clamp_map, "Fog history clamp map");
+		RD::get_singleton()->texture_clear(history_clamp_map, Color(0, 0, 0, 0), 0, 1, 0, 1);
+		RD::TextureView float_view;
+		float_view.format_override = RD::DATA_FORMAT_R32_SFLOAT;
+		history_clamp_view = RD::get_singleton()->texture_create_shared(float_view, history_clamp_map);
 	}
 
 	Vector<RD::Uniform> uniforms;
@@ -534,6 +546,10 @@ Fog::VolumetricFog::~VolumetricFog() {
 	RD::get_singleton()->free_rid(density_map);
 	RD::get_singleton()->free_rid(light_map);
 	RD::get_singleton()->free_rid(emissive_map);
+	if (history_clamp_map.is_valid()) {
+		RD::get_singleton()->free_rid(history_clamp_view);
+		RD::get_singleton()->free_rid(history_clamp_map);
+	}
 
 	if (fog_uniform_set.is_valid() && RD::get_singleton()->uniform_set_is_valid(fog_uniform_set)) {
 		RD::get_singleton()->free_rid(fog_uniform_set);
@@ -1010,6 +1026,10 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 			copy_uniforms.push_back(u);
 		}
 
+		if (fog->history_clamp_map.is_valid()) {
+			uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 22, fog->history_clamp_map));
+		}
+
 		if (fog->copy_uniform_set.is_valid() && RD::get_singleton()->uniform_set_is_valid(fog->copy_uniform_set)) {
 			RD::get_singleton()->free_rid(fog->copy_uniform_set);
 		}
@@ -1149,6 +1169,7 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 	params.use_temporal_reprojection = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_temporal_reprojection(p_settings.env);
 	params.temporal_blend = p_settings.reset_history ? 0.0f : RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_temporal_reprojection_amount(p_settings.env);
 	params.temporal_clamp = params.use_temporal_reprojection && GLOBAL_GET_CACHED(bool, "rendering/environment/volumetric_fog/use_temporal_clamp");
+	params.debug_history_clamp = p_settings.debug_history_clamp && fog->history_clamp_map.is_valid();
 
 	RID sky_rid = RendererSceneRenderRD::get_singleton()->environment_get_sky(p_settings.env);
 	if (sky_rid.is_valid()) {
@@ -1179,6 +1200,9 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 
 	RENDER_TIMESTAMP("Render Fog");
 	RD::get_singleton()->buffer_update(volumetric_fog.params_ubo, 0, sizeof(VolumetricFogShader::ParamsUBO), &params);
+	if (params.debug_history_clamp) {
+		RD::get_singleton()->texture_clear(fog->history_clamp_map, Color(0, 0, 0, 0), 0, 1, 0, 1);
+	}
 
 	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 

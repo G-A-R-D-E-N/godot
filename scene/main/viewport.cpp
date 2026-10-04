@@ -5414,7 +5414,7 @@ void Viewport::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_debanding"), "set_use_debanding", "is_using_debanding");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_occlusion_culling"), "set_use_occlusion_culling", "is_using_occlusion_culling");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "mesh_lod_threshold", PROPERTY_HINT_RANGE, "0,1024,0.1"), "set_mesh_lod_threshold", "get_mesh_lod_threshold");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "debug_draw", PROPERTY_HINT_ENUM, "Disabled,Unshaded,Lighting,Overdraw,Wireframe,Normal Buffer,VoxelGI Albedo,VoxelGI Lighting,VoxelGI Emission,Shadow Atlas,Directional Shadow Map,Scene Luminance,SSAO,SSIL,Directional Shadow Splits,Decal Atlas,SDFGI Cascades,SDFGI Probes,VoxelGI/SDFGI Buffer,Disable Mesh LOD,OmniLight3D Cluster,SpotLight3D Cluster,Decal Cluster,ReflectionProbe Cluster,Occlusion Culling Buffer,Motion Vectors,Internal Buffer,AreaLight3D Cluster,AreaLight3D Atlas,Contact Shadows,Bent Normals,Direct Diffuse,Direct Specular,Indirect Diffuse,Indirect Specular,Emission,Fog Transmittance,Fog Inscatter,SSR Confidence,Bounce Source,Reflection Source,SSR Hit Distance:47"), "set_debug_draw", "get_debug_draw");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "debug_draw", PROPERTY_HINT_ENUM, "Disabled,Unshaded,Lighting,Overdraw,Wireframe,Normal Buffer,VoxelGI Albedo,VoxelGI Lighting,VoxelGI Emission,Shadow Atlas,Directional Shadow Map,Scene Luminance,SSAO,SSIL,Directional Shadow Splits,Decal Atlas,SDFGI Cascades,SDFGI Probes,VoxelGI/SDFGI Buffer,Disable Mesh LOD,OmniLight3D Cluster,SpotLight3D Cluster,Decal Cluster,ReflectionProbe Cluster,Occlusion Culling Buffer,Motion Vectors,Internal Buffer,AreaLight3D Cluster,AreaLight3D Atlas,Contact Shadows,Bent Normals,Direct Diffuse,Direct Specular,Indirect Diffuse,Indirect Specular,Emission,Fog Transmittance,Fog Inscatter,SSR Confidence,Bounce Source,Reflection Source,Persistent AO,Fallback Source Specular,Fallback Source Diffuse,Rejected History,Fog History Clamp,SSR Hit Distance:47"), "set_debug_draw", "get_debug_draw");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_hdr_2d"), "set_use_hdr_2d", "is_using_hdr_2d");
 
 #ifndef _3D_DISABLED
@@ -5556,6 +5556,11 @@ void Viewport::_bind_methods() {
 	BIND_ENUM_CONSTANT(DEBUG_DRAW_SSR_CONFIDENCE);
 	BIND_ENUM_CONSTANT(DEBUG_DRAW_BOUNCE_SOURCE);
 	BIND_ENUM_CONSTANT(DEBUG_DRAW_REFLECTION_SOURCE);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_PERSISTENT_AO);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_FALLBACK_SOURCE_SPECULAR);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_REJECTED_HISTORY);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_FOG_HISTORY_CLAMP);
 	BIND_ENUM_CONSTANT(DEBUG_DRAW_SSR_HIT_DISTANCE);
 
 	BIND_ENUM_CONSTANT(DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_NEAREST);

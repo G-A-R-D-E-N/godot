@@ -185,7 +185,7 @@ private:
 
 			float sky_border_size[2];
 			uint32_t temporal_clamp;
-			uint32_t pad;
+			uint32_t debug_history_clamp;
 
 			float cam_rotation[12];
 			float to_prev_view[16];
@@ -318,6 +318,8 @@ public:
 		RID density_map;
 		RID light_map;
 		RID emissive_map;
+		RID history_clamp_map;
+		RID history_clamp_view;
 
 		RID fog_uniform_set;
 		RID copy_uniform_set;
@@ -365,6 +367,7 @@ public:
 		RID directional_shadow_depth;
 		RID directional_light_buffer;
 		bool reset_history;
+		bool debug_history_clamp = false;
 		float exposure_normalization;
 
 		// Objects related to our render buffer

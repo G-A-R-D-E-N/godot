@@ -5756,6 +5756,26 @@
 			Draws the reflection source that screen-space reflections sample in the next frame: the opaque image without the screen-space reflection term and without fog.
 			[b]Note:[/b] Only supported when using the Forward+ rendering method, without MSAA, with [member ProjectSettings.rendering/environment/screen_space_lighting/legacy_last_frame_source] disabled.
 		</constant>
+		<constant name="VIEWPORT_DEBUG_DRAW_PERSISTENT_AO" value="41" enum="ViewportDebugDraw">
+			Draws the ambient occlusion each surface writes itself (the [code]AO[/code] built-in, after decals), before screen-space ambient occlusion is applied. Drawn without tonemapping or exposure, on a black background.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_SPECULAR" value="42" enum="ViewportDebugDraw">
+			Colors each surface by the providers of its indirect specular light, weighted by how much each one replaced the previous ones: blue for the sky or environment reflection, orange for VoxelGI or SDFGI, green for reflection probes, magenta for screen-space reflections and black for none. The handover from screen-space reflections to the fallback shows as a gradient. Drawn without tonemapping or exposure, on a black background.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE" value="43" enum="ViewportDebugDraw">
+			Colors each surface by the providers of its indirect diffuse light: blue for the ambient light or sky, orange for VoxelGI or SDFGI, cyan for lightmaps, green for reflection probe ambient and black for none. Magenta is the share of screen-space indirect lighting in the final indirect diffuse light. Drawn without tonemapping or exposure, on a black background.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="VIEWPORT_DEBUG_DRAW_REJECTED_HISTORY" value="44" enum="ViewportDebugDraw">
+			Draws where the temporal resolver discarded or limited its history this frame, over the dimmed scene luminance. With TAA: white on a frame that resets the history, blue where the reprojection leaves the screen, magenta where [code]TEMPORAL_ID[/code] changed (Garden TAA), red for velocity disocclusion and green where neighborhood clipping moved the history strongly. With FSR2: white on a reset frame, blue off screen, red for its depth-based disocclusion and green for its dilated reactive mask.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method with TAA or FSR2.
+		</constant>
+		<constant name="VIEWPORT_DEBUG_DRAW_FOG_HISTORY_CLAMP" value="45" enum="ViewportDebugDraw">
+			Draws, for each froxel column of the volumetric fog, the largest change the temporal clamp made to the reprojected history this frame, relative to the history (white = the history was replaced entirely).
+			[b]Note:[/b] Only supported when using the Forward+ rendering method, with volumetric fog temporal reprojection and [member ProjectSettings.rendering/environment/volumetric_fog/use_temporal_clamp] enabled.
+		</constant>
 		<constant name="VIEWPORT_DEBUG_DRAW_SSR_HIT_DISTANCE" value="47" enum="ViewportDebugDraw">
 			Draws the distance from each surface to its stochastic screen-space reflection hits, mapped as [code]d / (d + 2)[/code] for [code]d[/code] in meters (black = no hit, grey = 2 m).
 			[b]Note:[/b] Only supported when using the Forward+ rendering method, with [member ProjectSettings.rendering/environment/screen_space_reflection/backend] set to Stochastic.
