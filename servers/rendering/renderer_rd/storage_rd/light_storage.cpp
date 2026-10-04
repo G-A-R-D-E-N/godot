@@ -946,6 +946,12 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 					float fade_start = light->param[RSE::LIGHT_PARAM_SHADOW_FADE_START];
 					light_data.fade_from = -light_data.shadow_split_offsets[limit] * MIN(fade_start, 0.999); //using 1.0 would break smoothstep
 					light_data.fade_to = -light_data.shadow_split_offsets[limit];
+					if (p_render_data->reflection_probe.is_valid()) {
+						float shadow_max = light->param[RSE::LIGHT_PARAM_SHADOW_MAX_DISTANCE];
+						float fade_end = shadow_max > 0.0 ? MAX(light_data.shadow_split_offsets[limit], shadow_max) : light_data.shadow_split_offsets[limit] * 2.0;
+						light_data.fade_from = -fade_end * MIN(fade_start, 0.999);
+						light_data.fade_to = -fade_end;
+					}
 				}
 
 				r_directional_light_count++;
