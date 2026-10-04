@@ -1623,6 +1623,8 @@ void fragment_shader(in SceneData scene_data) {
 		vec3 aerial_perspective_uvw = vec3(screen_uv, length(vertex) * implementation_data.aerial_perspective_inv_distance);
 #endif
 		vec4 aerial_perspective = textureLod(sampler3D(aerial_perspective_texture, SAMPLER_LINEAR_CLAMP), aerial_perspective_uvw, 0.0);
+		float aerial_perspective_slices = float(textureSize(sampler3D(aerial_perspective_texture, SAMPLER_LINEAR_CLAMP), 0).z);
+		aerial_perspective = mix(vec4(0.0, 0.0, 0.0, 1.0), aerial_perspective, clamp(aerial_perspective_uvw.z * aerial_perspective_slices * 2.0, 0.0, 1.0));
 		fog = vec4(aerial_perspective.rgb * implementation_data.aerial_perspective_exposure * fog.a + fog.rgb, aerial_perspective.a * fog.a);
 	}
 
