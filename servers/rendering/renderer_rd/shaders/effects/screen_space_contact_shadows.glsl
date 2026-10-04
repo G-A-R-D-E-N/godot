@@ -16,6 +16,11 @@ layout(push_constant, std430) uniform Params {
 	float surface_thickness;
 	float blur;
 	float taa_frame_count;
+	bool ray_confidence;
+	bool plane_rejection;
+	uint pad0;
+	uint pad1;
+	uint pad2;
 }
 params;
 
@@ -33,8 +38,39 @@ params;
 #define Z_SIGN -1.0
 
 #define BILINEAR_THRESHOLD 0.02
+#define PLANE_BIAS_RAMP_SAMPLES 32.0
+#define PLANE_BIAS_RAMP_FLOOR 0.08
 
 shared float DepthData[READ_COUNT * WAVE_SIZE];
+shared float RawDepthData[READ_COUNT * WAVE_SIZE];
+shared vec2 SampleCenterData[READ_COUNT * WAVE_SIZE];
+shared int ScreenIndexFirst;
+shared int ScreenIndexLast;
+shared int RayIndexFirst;
+shared int RayIndexLast;
+
+bool plane_valid = false;
+vec2 plane_center;
+vec2 plane_gradient;
+float plane_depth;
+float plane_bias;
+
+float occluder_delta(int p_index, int p_offset, float p_start_depth, float p_depth_scale) {
+	float depth_delta = abs(p_start_depth - DepthData[p_index] * p_depth_scale);
+	if (plane_valid) {
+		float raw_depth = RawDepthData[p_index];
+		float depth_on_plane = plane_depth + dot(plane_gradient, SampleCenterData[p_index] - plane_center);
+		float bias = plane_bias * depth_on_plane * clamp(float(p_offset) / PLANE_BIAS_RAMP_SAMPLES, PLANE_BIAS_RAMP_FLOOR, 1.0);
+		if (raw_depth <= DEPTH_FAR || (depth_on_plane > DEPTH_FAR && raw_depth < depth_on_plane + bias)) {
+			depth_delta = 1e10;
+		}
+	}
+	return depth_delta;
+}
+
+float smaller_slope(float p_backward, float p_forward) {
+	return abs(p_forward) <= abs(p_backward) ? p_forward : p_backward;
+}
 
 // https://www.iryoku.com/next-generation-post-processing-in-call-of-duty-advanced-warfare
 float interleaved_gradient_noise(vec2 screen_pos) {
@@ -123,6 +159,15 @@ void main() {
 		return;
 	}
 
+	if (thread_id == 0) {
+		ScreenIndexFirst = READ_COUNT * WAVE_SIZE;
+		ScreenIndexLast = -1;
+		RayIndexFirst = READ_COUNT * WAVE_SIZE;
+		RayIndexLast = -1;
+	}
+	memoryBarrierShared();
+	barrier();
+
 	float sampling_depth[READ_COUNT];
 	float shadowing_depth[READ_COUNT];
 	float sample_distance[READ_COUNT];
@@ -177,6 +222,16 @@ void main() {
 
 		int idx = (i * WAVE_SIZE) + thread_id;
 		DepthData[idx] = stored_depth;
+		RawDepthData[idx] = depths.x;
+		SampleCenterData[idx] = read_xy + 0.5;
+		if (all(greaterThanEqual(read_xy, vec2(0.0))) && all(lessThan(read_xy, vec2(params.screen_size)))) {
+			atomicMin(ScreenIndexFirst, idx);
+			atomicMax(ScreenIndexLast, idx);
+		}
+		if (sample_distance[i] > 0.0) {
+			atomicMin(RayIndexFirst, idx);
+			atomicMax(RayIndexLast, idx);
+		}
 		pixel_pos += group_delta;
 	}
 
@@ -203,24 +258,38 @@ void main() {
 
 	start_depth += params.blur * interleaved_gradient_noise(vec2(write_xy) + vec2(params.taa_frame_count * 5.588238));
 
+	if (params.plane_rejection) {
+		vec2 texel = 1.0 / vec2(params.screen_size);
+		vec2 uv = (vec2(write_xy) + 0.5) * texel;
+		float left = textureLod(depth_buffer, uv - vec2(texel.x, 0.0), 0.0).x;
+		float right = textureLod(depth_buffer, uv + vec2(texel.x, 0.0), 0.0).x;
+		float top = textureLod(depth_buffer, uv - vec2(0.0, texel.y), 0.0).x;
+		float bottom = textureLod(depth_buffer, uv + vec2(0.0, texel.y), 0.0).x;
+		plane_gradient = vec2(smaller_slope(sampling_depth[0] - left, right - sampling_depth[0]), smaller_slope(sampling_depth[0] - top, bottom - sampling_depth[0]));
+		plane_center = vec2(write_xy) + 0.5;
+		plane_depth = sampling_depth[0];
+		plane_bias = 0.25 * params.surface_thickness;
+		plane_valid = true;
+	}
+
 	int sample_index = thread_id + 1;
 	vec4 shadow_value = vec4(1.0);
 	float hard_shadow = 1.0;
 
 	for (int i = 0; i < HARD_SHADOW_SAMPLES; i++) {
-		float depth_delta = abs(start_depth - DepthData[sample_index + i] * depth_scale);
+		float depth_delta = occluder_delta(sample_index + i, i + 1, start_depth, depth_scale);
 		hard_shadow = min(hard_shadow, depth_delta);
 	}
 
 	// Main averaged samples — accumulated into 4 buckets to soften aliasing
 	for (int i = HARD_SHADOW_SAMPLES; i < SAMPLE_COUNT - FADE_OUT_SAMPLES; i++) {
-		float depth_delta = abs(start_depth - DepthData[sample_index + i] * depth_scale);
+		float depth_delta = occluder_delta(sample_index + i, i + 1, start_depth, depth_scale);
 		shadow_value[i & 3] = min(shadow_value[i & 3], depth_delta);
 	}
 
 	// Fade out samples — push distant shadow edge toward lit
 	for (int i = SAMPLE_COUNT - FADE_OUT_SAMPLES; i < SAMPLE_COUNT; i++) {
-		float depth_delta = abs(start_depth - DepthData[sample_index + i] * depth_scale);
+		float depth_delta = occluder_delta(sample_index + i, i + 1, start_depth, depth_scale);
 		float fade_out = float(i + 1 - (SAMPLE_COUNT - FADE_OUT_SAMPLES)) / float(FADE_OUT_SAMPLES + 1) * 0.75;
 		shadow_value[i & 3] = min(shadow_value[i & 3], depth_delta + fade_out);
 	}
@@ -231,5 +300,16 @@ void main() {
 
 	// Average the 4 buckets, then take the harder of hard_shadow and averaged result
 	float shadow = min(hard_shadow, dot(shadow_value, vec4(0.25)));
+	float ray_weight = 1.0;
+	if (params.ray_confidence) {
+		int intended_first = max(sample_index, RayIndexFirst);
+		int intended_last = min(sample_index + SAMPLE_COUNT - 1, RayIndexLast);
+		int intended = intended_last - intended_first + 1;
+		int tested = min(intended_last, ScreenIndexLast) - max(intended_first, ScreenIndexFirst) + 1;
+		if (intended > 0) {
+			ray_weight = smoothstep(0.2, 0.9, float(max(tested, 0)) / float(intended));
+		}
+	}
+	shadow = mix(1.0, shadow, ray_weight);
 	imageStore(output_shadow, write_xy, vec4(shadow, 0.0, 0.0, 0.0));
 }

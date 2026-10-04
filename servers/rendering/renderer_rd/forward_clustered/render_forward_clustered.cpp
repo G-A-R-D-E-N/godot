@@ -1577,7 +1577,68 @@ void RenderForwardClustered::_process_ssr(Ref<RenderSceneBuffersRD> p_render_buf
 	ss_effects->screen_space_reflection(p_render_buffers, rb_data->ss_effects_data.ssr, p_normal_slices, environment_get_ssr_max_steps(p_environment), environment_get_ssr_fade_in(p_environment), environment_get_ssr_fade_out(p_environment), environment_get_ssr_depth_tolerance(p_environment), p_projections, reprojections, p_eye_offsets, *copy_effects);
 }
 
-void RenderForwardClustered::_process_sscs(Ref<RenderSceneBuffersRD> p_render_buffers, const Projection *p_projections, const Transform3D &p_transform, const LocalVector<int> &p_contact_shadows, const RenderShadowData *p_render_shadows, const float p_taa_frame_count) {
+void RenderForwardClustered::_select_local_contact_shadows(RenderDataRD *p_render_data) {
+	const uint32_t max_lights = MAX(0, GLOBAL_GET_CACHED(int, "rendering/lights_and_shadows/contact_shadow/max_local_lights"));
+	if (max_lights == 0 || p_render_data->lights == nullptr) {
+		return;
+	}
+
+	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
+	const bool physical_units = is_using_physical_light_units();
+	const Vector3 camera_position = p_render_data->scene_data->cam_transform.origin;
+
+	struct Candidate {
+		RID instance;
+		float score = 0.0;
+		float distance = 0.0;
+
+		bool operator<(const Candidate &p_other) const {
+			if (score != p_other.score) {
+				return score > p_other.score;
+			}
+			if (distance != p_other.distance) {
+				return distance < p_other.distance;
+			}
+			return instance.get_id() < p_other.instance.get_id();
+		}
+	};
+
+	LocalVector<Candidate> candidates;
+	for (uint32_t i = 0; i < p_render_data->lights->size(); i++) {
+		RID instance = (*p_render_data->lights)[i];
+		RID base = light_storage->light_instance_get_base_light(instance);
+		const RSE::LightType type = light_storage->light_get_type(base);
+		if ((type != RSE::LIGHT_OMNI && type != RSE::LIGHT_SPOT) || !light_storage->light_get_allow_contact_shadows(base)) {
+			continue;
+		}
+
+		const float distance = camera_position.distance_to(light_storage->light_instance_get_base_transform(instance).origin);
+		if (light_storage->light_is_distance_fade_enabled(base) && distance > light_storage->light_get_distance_fade_begin(base) + light_storage->light_get_distance_fade_length(base)) {
+			continue;
+		}
+
+		float energy = Math::abs(light_storage->light_get_param(base, RSE::LIGHT_PARAM_ENERGY));
+		if (physical_units) {
+			energy *= light_storage->light_get_param(base, RSE::LIGHT_PARAM_INTENSITY) / (type == RSE::LIGHT_OMNI ? 4.0f * Math::PI : Math::PI);
+		}
+		if (energy <= 0.0f) {
+			continue;
+		}
+
+		Candidate candidate;
+		candidate.instance = instance;
+		candidate.score = energy / MAX(distance * distance, 0.01f);
+		candidate.distance = distance;
+		candidates.push_back(candidate);
+	}
+
+	candidates.sort();
+	for (uint32_t i = 0; i < MIN(max_lights, candidates.size()); i++) {
+		p_render_data->local_contact_shadows.push_back(candidates[i].instance);
+	}
+}
+
+void RenderForwardClustered::_process_sscs(Ref<RenderSceneBuffersRD> p_render_buffers, const Projection *p_projections, const Transform3D &p_transform, const LocalVector<int> &p_contact_shadows, const LocalVector<RID> &p_local_contact_shadows, const RenderShadowData *p_render_shadows, const float p_taa_frame_count) {
 	ERR_FAIL_NULL(ss_effects);
 	ERR_FAIL_COND(p_render_buffers.is_null());
 
@@ -1591,10 +1652,12 @@ void RenderForwardClustered::_process_sscs(Ref<RenderSceneBuffersRD> p_render_bu
 	RendererRD::SSEffects::SSCSSettings settings;
 	settings.quality = RSE::ScreenSpaceContactShadowsLength(GLOBAL_GET_CACHED(int, "rendering/lights_and_shadows/contact_shadow/shadow_length"));
 	settings.surface_thickness = GLOBAL_GET_CACHED(float, "rendering/lights_and_shadows/contact_shadow/surface_thickness");
+	settings.ray_confidence = GLOBAL_GET_CACHED(bool, "rendering/lights_and_shadows/contact_shadow/ray_completion_confidence");
+	settings.plane_rejection = GLOBAL_GET_CACHED(bool, "rendering/lights_and_shadows/contact_shadow/receiver_plane_rejection");
 
 	Transform3D inverse_transform = p_transform.affine_inverse();
 
-	ss_effects->sscs_allocate_buffers(p_render_buffers, rb_data->ss_effects_data.sscs, p_contact_shadows.size());
+	ss_effects->sscs_allocate_buffers(p_render_buffers, rb_data->ss_effects_data.sscs, p_contact_shadows.size() + p_local_contact_shadows.size());
 
 	for (uint32_t i = 0; i < p_contact_shadows.size(); i++) {
 		RID light_instance = p_render_shadows[p_contact_shadows[i]].light;
@@ -1608,7 +1671,17 @@ void RenderForwardClustered::_process_sscs(Ref<RenderSceneBuffersRD> p_render_bu
 
 		float blur = light_storage->light_get_param(base, RSE::LIGHT_PARAM_CONTACT_SHADOW_BLUR);
 
-		ss_effects->screen_space_contact_shadows(p_render_buffers, rb_data->ss_effects_data.sscs, settings, p_projections, light_direction, i, blur, p_taa_frame_count);
+		ss_effects->screen_space_contact_shadows(p_render_buffers, rb_data->ss_effects_data.sscs, settings, p_projections, Vector4(light_direction.x, light_direction.y, light_direction.z, 0.0), i, blur, p_taa_frame_count);
+	}
+
+	for (uint32_t i = 0; i < p_local_contact_shadows.size(); i++) {
+		RID light_instance = p_local_contact_shadows[i];
+		RID base = light_storage->light_instance_get_base_light(light_instance);
+		Vector3 light_position = inverse_transform.xform(light_storage->light_instance_get_base_transform(light_instance).origin);
+
+		float blur = light_storage->light_get_param(base, RSE::LIGHT_PARAM_CONTACT_SHADOW_BLUR);
+
+		ss_effects->screen_space_contact_shadows(p_render_buffers, rb_data->ss_effects_data.sscs, settings, p_projections, Vector4(light_position.x, light_position.y, light_position.z, 1.0), p_contact_shadows.size() + i, blur, p_taa_frame_count);
 	}
 }
 
@@ -1648,6 +1721,7 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 	p_render_data->shadows.clear();
 	p_render_data->directional_shadows.clear();
 	p_render_data->contact_shadows.clear();
+	p_render_data->local_contact_shadows.clear();
 
 	float lod_distance_multiplier = p_render_data->scene_data->cam_projection.get_lod_multiplier();
 	{
@@ -1671,6 +1745,10 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 			} else {
 				p_render_data->shadows.push_back(i);
 			}
+		}
+
+		if (p_use_sscs && rb_data.is_valid() && ss_effects) {
+			_select_local_contact_shadows(p_render_data);
 		}
 
 		if (p_render_data->cube_shadows.size()) {
@@ -1754,7 +1832,7 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 		}
 
 		if (p_use_sscs) {
-			_process_sscs(rb, p_render_data->scene_data->view_projection, p_render_data->scene_data->cam_transform, p_render_data->contact_shadows, p_render_data->render_shadows, p_render_data->scene_data->taa_frame_count);
+			_process_sscs(rb, p_render_data->scene_data->view_projection, p_render_data->scene_data->cam_transform, p_render_data->contact_shadows, p_render_data->local_contact_shadows, p_render_data->render_shadows, p_render_data->scene_data->taa_frame_count);
 		}
 
 		if (p_use_ssr) {

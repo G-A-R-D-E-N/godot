@@ -183,6 +183,13 @@ Comment: Intel XeGTAO 1.30 (main pass, edge-aware denoiser, depth MIP filter), p
 Copyright: 2016-2021, Intel Corporation
 License: Expat
 
+Files: servers/rendering/renderer_rd/shaders/effects/screen_space_contact_shadows.glsl
+Comment: Wave layout after Bend Studio screen-space shadows (Sony Interactive Entertainment,
+ Apache-2.0).
+Copyright: 2014-present Godot Engine contributors
+ Sony Interactive Entertainment
+License: Apache-2.0 and Expat
+
 Files: servers/rendering/renderer_rd/shaders/effects/taa_resolve.glsl
 Comment: Temporal Anti-Aliasing resolve implementation
 Copyright: 2016, Panos Karabelas

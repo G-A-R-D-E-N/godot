@@ -454,6 +454,17 @@ half sample_directional_soft_shadow(texture2D shadow, vec3 pssm_coord, vec2 tex_
 
 #endif // SHADOWS_DISABLED
 
+#if !defined(SHADOWS_DISABLED) && !defined(USING_MOBILE_RENDERER)
+half light_contact_shadow(uint p_sscs_index, vec2 p_screen_uv) {
+#ifdef USE_MULTIVIEW
+	float sscs_layer = float(p_sscs_index * 2u + uint(ViewIndex));
+#else
+	float sscs_layer = float(p_sscs_index);
+#endif
+	return half(textureLod(sampler2DArray(sscs_buffer, SAMPLER_LINEAR_CLAMP), vec3(p_screen_uv, sscs_layer), 0.0).r);
+}
+#endif
+
 half get_omni_attenuation(float distance, float inv_range, float decay) {
 	float nd = distance * inv_range;
 	nd *= nd;
@@ -626,6 +637,11 @@ void light_process_omni(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 			shadow = mix(half(1.0), sample_omni_pcf_shadow(shadow_atlas, omni_lights.data[idx].soft_shadow_scale / shadow_sample.z, pos, uv_rect, flip_offset, depth, taa_frame_count), half(omni_lights.data[idx].shadow_opacity));
 		}
 	}
+#ifndef USING_MOBILE_RENDERER
+	if (omni_attenuation > HALF_FLT_MIN && bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSCS) && omni_lights.data[idx].sscs_index != 0xFFFFFFFFu) {
+		shadow = min(shadow, light_contact_shadow(omni_lights.data[idx].sscs_index, screen_uv));
+	}
+#endif
 #endif
 
 	vec3 color = omni_lights.data[idx].color;
@@ -880,6 +896,11 @@ void light_process_spot(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 			shadow = mix(half(1.0), sample_pcf_shadow(shadow_atlas, spot_lights.data[idx].soft_shadow_scale * scene_data_block.data.shadow_atlas_pixel_size, shadow_uv, taa_frame_count), half(spot_lights.data[idx].shadow_opacity));
 		}
 	}
+#ifndef USING_MOBILE_RENDERER
+	if (spot_attenuation > HALF_FLT_MIN && bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSCS) && spot_lights.data[idx].sscs_index != 0xFFFFFFFFu) {
+		shadow = min(shadow, light_contact_shadow(spot_lights.data[idx].sscs_index, screen_uv));
+	}
+#endif
 #endif // SHADOWS_DISABLED
 
 	vec3 color = spot_lights.data[idx].color;

@@ -3691,6 +3691,9 @@ void RenderingServer::init() {
 	GLOBAL_DEF("rendering/lights_and_shadows/contact_shadow/enabled", false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/contact_shadow/shadow_length", PROPERTY_HINT_ENUM, "Short (Fast),Medium (Average),Long (Slow)"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/lights_and_shadows/contact_shadow/surface_thickness", PROPERTY_HINT_RANGE, "0.001,0.1,0.001"), 0.01);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/contact_shadow/max_local_lights", PROPERTY_HINT_RANGE, "0,16,1"), 4);
+	GLOBAL_DEF("rendering/lights_and_shadows/contact_shadow/ray_completion_confidence", true);
+	GLOBAL_DEF("rendering/lights_and_shadows/contact_shadow/receiver_plane_rejection", true);
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/directional_shadow/size", PROPERTY_HINT_RANGE, "256,16384"), 4096);
 	GLOBAL_DEF("rendering/lights_and_shadows/directional_shadow/size.mobile", 2048);
