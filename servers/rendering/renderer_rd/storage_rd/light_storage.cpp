@@ -739,7 +739,6 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 	omni_light_count = 0;
 	spot_light_count = 0;
 	area_light_count = 0;
-	uint32_t directional_contact_shadows_count = 0;
 
 	r_directional_light_soft_shadows = false;
 
@@ -798,7 +797,13 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 				light_data.shadow_opacity = (p_using_shadows && light->shadow)
 						? light->param[RSE::LIGHT_PARAM_SHADOW_OPACITY]
 						: 0.0;
-				light_data.sscs_index = (p_using_shadows && light->shadow && light->allow_contact_shadows) ? directional_contact_shadows_count++ : 0xffffffff;
+				light_data.sscs_index = 0xffffffff;
+				for (uint32_t j = 0; j < p_render_data->contact_shadows.size(); j++) {
+					if (p_render_data->render_shadows[p_render_data->contact_shadows[j]].light == p_lights[i]) {
+						light_data.sscs_index = j;
+						break;
+					}
+				}
 
 				float angular_diameter = light->param[RSE::LIGHT_PARAM_SIZE];
 				if (angular_diameter > 0.0) {
@@ -1118,6 +1123,14 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 			}
 		}
 		light_data.mask = light->cull_mask;
+
+		light_data.sscs_index = 0xffffffff;
+		for (uint32_t j = 0; j < p_render_data->local_contact_shadows.size(); j++) {
+			if (p_render_data->local_contact_shadows[j] == light_instance->self) {
+				light_data.sscs_index = p_render_data->contact_shadows.size() + j;
+				break;
+			}
+		}
 
 		light_data.atlas_rect[0] = 0;
 		light_data.atlas_rect[1] = 0;

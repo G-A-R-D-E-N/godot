@@ -3212,6 +3212,15 @@
 			[b]Note:[/b] Screen-space contact shadows are only supported in the Forward+ renderer, not Mobile or Compatibility.
 			[b]Note:[/b] Screen-space contact shadows only affect [DirectionalLight3D] nodes that have shadows enabled. The [DirectionalLight3D] node must also have [member Light3D.shadow_contact_shadows_allow] set to [code]true[/code].
 		</member>
+		<member name="rendering/lights_and_shadows/contact_shadow/max_local_lights" type="int" setter="" getter="" default="4">
+			Maximum number of [OmniLight3D] and [SpotLight3D] nodes that receive screen-space contact shadows per viewport. Lights with [member Light3D.shadow_contact_shadows_allow] enabled are ranked by their energy divided by their squared distance to the camera, closest and brightest first. A light without a shadow map uses the contact shadow as its only visibility. Set to [code]0[/code] to restrict contact shadows to [DirectionalLight3D].
+		</member>
+		<member name="rendering/lights_and_shadows/contact_shadow/ray_completion_confidence" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], each contact shadow ray is weighted by the fraction of its length that could be tested on screen, so rays that leave the screen fade out and hand the pixel back to the shadow map instead of ending abruptly at the screen edge.
+		</member>
+		<member name="rendering/lights_and_shadows/contact_shadow/receiver_plane_rejection" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], contact shadow samples that lie on or behind the receiver's own surface plane (reconstructed from the depth buffer and extrapolated along the ray) cannot occlude it. This removes the self-shadowing streaks flat ground shows at grazing light angles, while objects standing on the surface keep their contact shadows.
+		</member>
 		<member name="rendering/lights_and_shadows/contact_shadow/shadow_length" type="int" setter="" getter="" default="1">
 			Controls the maximum distance contact shadows can be cast from their caster. Higher settings sample further along the shadow ray, at a moderate performance cost. Note that the effective maximum distance depends on the distance between the camera and object, as well as the 3D rendering resolution (determined by the viewport resolution multiplied by [member rendering/scaling_3d/scale]).
 		</member>
