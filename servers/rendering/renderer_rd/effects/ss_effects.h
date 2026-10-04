@@ -31,6 +31,7 @@
 #pragma once
 
 #include "servers/rendering/renderer_rd/pipeline_deferred_rd.h"
+#include "servers/rendering/renderer_rd/shaders/effects/gtao.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/screen_space_contact_shadows.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/screen_space_reflection.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/screen_space_reflection_downsample.glsl.gen.h"
@@ -54,6 +55,7 @@
 #define RB_SCOPE_SSAO SNAME("rb_ssao")
 #define RB_SCOPE_SSR SNAME("rb_ssr")
 #define RB_SCOPE_SSCS SNAME("rb_sscs")
+#define RB_SCOPE_GTAO SNAME("rb_gtao")
 
 #define RB_LINEAR_DEPTH SNAME("linear_depth")
 #define RB_FINAL SNAME("final")
@@ -70,6 +72,12 @@
 #define RB_MIP_LEVEL SNAME("mip_level")
 
 #define RB_SSCS SNAME("sscs")
+
+#define RB_GTAO_DEPTH SNAME("working_depth")
+#define RB_GTAO_NORMAL SNAME("working_normal")
+#define RB_GTAO_TERM SNAME("ao_term")
+#define RB_GTAO_TERM_PONG SNAME("ao_term_pong")
+#define RB_GTAO_BENT_NORMAL SNAME("bent_normal")
 
 class RenderSceneBuffersRD;
 
@@ -143,6 +151,29 @@ public:
 
 	void ssao_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, SSAORenderBuffers &p_ssao_buffers, const SSAOSettings &p_settings);
 	void generate_ssao(Ref<RenderSceneBuffersRD> p_render_buffers, SSAORenderBuffers &p_ssao_buffers, uint32_t p_view, RID p_normal_buffer, const Projection &p_projection, const SSAOSettings &p_settings);
+
+	struct GTAORenderBuffers {
+		bool half_size = false;
+		bool bent_normals = false;
+		Size2i work_size;
+	};
+
+	struct GTAOSettings {
+		float radius = 1.0;
+		float intensity = 2.0;
+		float power = 1.5;
+		int slices = 3;
+		int steps = 3;
+		int denoise_passes = 2;
+		bool half_size = true;
+		bool bent_normals = false;
+		uint32_t noise_index = 0;
+
+		Size2i full_screen_size;
+	};
+
+	void gtao_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, GTAORenderBuffers &p_gtao_buffers, const GTAOSettings &p_settings);
+	void generate_gtao(Ref<RenderSceneBuffersRD> p_render_buffers, GTAORenderBuffers &p_gtao_buffers, uint32_t p_view, RID p_normal_buffer, const Projection &p_projection, const GTAOSettings &p_settings);
 
 	/* Screen Space Reflection */
 	void ssr_set_half_size(bool p_half_size);
@@ -433,6 +464,60 @@ private:
 	} ssao;
 
 	void gather_ssao(RD::ComputeListID p_compute_list, const RID *p_ao_slices, const SSAOSettings &p_settings, bool p_adaptive_base_pass, RID p_gather_uniform_set, RID p_importance_map_uniform_set);
+
+	enum GTAOMode {
+		GTAO_PREFILTER,
+		GTAO_PREFILTER_HALF,
+		GTAO_MAIN,
+		GTAO_MAIN_BENT,
+		GTAO_DENOISE,
+		GTAO_DENOISE_BENT,
+		GTAO_RESOLVE,
+		GTAO_RESOLVE_HALF,
+		GTAO_RESOLVE_BENT,
+		GTAO_RESOLVE_HALF_BENT,
+		GTAO_MAX
+	};
+
+	struct GTAOPushConstant {
+		int32_t viewport_size[2];
+		float viewport_pixel_size[2];
+
+		float depth_unpack_consts[2];
+		float camera_tan_half_fov[2];
+
+		float ndc_to_view_mul[2];
+		float ndc_to_view_add[2];
+
+		float ndc_to_view_mul_x_pixel_size[2];
+		float effect_radius;
+		float effect_falloff_range;
+
+		float radius_multiplier;
+		float pad0;
+		float final_value_power;
+		float denoise_blur_beta;
+
+		float sample_distribution_power;
+		float thin_occluder_compensation;
+		float depth_mip_sampling_offset;
+		int32_t noise_index;
+
+		float slice_count;
+		float steps_per_slice;
+		int32_t full_size[2];
+
+		float full_pixel_size[2];
+		uint32_t final_apply;
+		uint32_t pad1;
+	};
+
+	struct GTAO {
+		GtaoShaderRD shader;
+		RID shader_version;
+		PipelineDeferredRD pipelines[GTAO_MAX];
+		RID point_sampler;
+	} gtao;
 
 	/* Screen Space Reflection */
 

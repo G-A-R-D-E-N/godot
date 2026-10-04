@@ -3752,6 +3752,13 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssao/blur_passes", PROPERTY_HINT_RANGE, "0,6"), 2);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssao/fadeout_from", PROPERTY_HINT_RANGE, "0.0,512,0.1,or_greater"), 50.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssao/fadeout_to", PROPERTY_HINT_RANGE, "64,65536,0.1,or_greater"), 300.0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssao/backend", PROPERTY_HINT_ENUM, "ASSAO,GTAO"), 0);
+
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/gtao/slices", PROPERTY_HINT_RANGE, "1,16,1"), 3);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/gtao/steps", PROPERTY_HINT_RANGE, "1,16,1"), 3);
+	GLOBAL_DEF("rendering/environment/gtao/half_size", true);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/gtao/denoise_passes", PROPERTY_HINT_RANGE, "0,4,1"), 2);
+	GLOBAL_DEF("rendering/environment/gtao/bent_normals", false);
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/quality", PROPERTY_HINT_ENUM, "Very Low (Fast),Low (Fast),Medium (Average),High (Slow),Ultra (Custom)"), 2);
 	GLOBAL_DEF("rendering/environment/ssil/half_size", true);

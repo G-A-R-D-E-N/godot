@@ -175,6 +175,14 @@ Comment: Intel ASSAO and related files
 Copyright: 2016, Intel Corporation
 License: Expat
 
+Files: servers/rendering/renderer_rd/shaders/effects/gtao.glsl
+ servers/rendering/renderer_rd/shaders/effects/xegtao_inc.glsl
+Comment: Intel XeGTAO 1.30 (main pass, edge-aware denoiser, depth MIP filter), ported to GLSL.
+ The half-resolution depth prefilter uses the XeGTAO depth MIP filter; the half-resolution upsample
+ depth weight is a range weight written for this file.
+Copyright: 2016-2021, Intel Corporation
+License: Expat
+
 Files: servers/rendering/renderer_rd/shaders/effects/taa_resolve.glsl
 Comment: Temporal Anti-Aliasing resolve implementation
 Copyright: 2016, Panos Karabelas
