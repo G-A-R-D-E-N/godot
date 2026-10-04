@@ -753,6 +753,9 @@ uint32_t RenderForwardClustered::_setup_environment(const RenderDataRD *p_render
 
 	scene_state.ubo.gi_upscale_for_msaa = false;
 	scene_state.ubo.volumetric_fog_enabled = false;
+	scene_state.ubo.aerial_perspective_enabled = env.is_valid() && p_render_data->reflection_probe.is_null() && _get_aerial_perspective_texture(env).is_valid();
+	scene_state.ubo.aerial_perspective_inv_distance = scene_state.ubo.aerial_perspective_enabled ? 1.0f / environment_get_aerial_perspective_max_distance(env) : 0.0f;
+	scene_state.ubo.aerial_perspective_exposure = is_using_physical_light_units() && p_render_data->camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes) : 1.0f;
 
 	if (rd.is_valid()) {
 		if (rd->get_msaa_3d() != RSE::VIEWPORT_MSAA_DISABLED) {
@@ -1479,6 +1482,11 @@ void RenderForwardClustered::setup_added_decal(const Transform3D &p_transform, c
 
 bool RenderForwardClustered::_ssao_uses_gtao(const Projection &p_projection) const {
 	return GLOBAL_GET_CACHED(int, "rendering/environment/ssao/backend") == 1 && !p_projection.is_orthogonal();
+}
+
+RID RenderForwardClustered::_get_aerial_perspective_texture(RID p_environment) const {
+	RID texture = environment_get_aerial_perspective_texture(p_environment);
+	return texture.is_valid() ? RendererRD::TextureStorage::get_singleton()->texture_get_rd_texture(texture) : RID();
 }
 
 void RenderForwardClustered::_process_ssao(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_buffers, const Projection *p_projections, float p_taa_frame_count) {
@@ -4100,6 +4108,14 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		for (uint32_t i = 0; i < MAX_DIRECTIONAL_LIGHTS; i++) {
 			u.append_id(p_render_data && cloud_shadow_textures[i].is_valid() ? cloud_shadow_textures[i] : texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_WHITE));
 		}
+		uniforms.push_back(u);
+	}
+	{
+		RD::Uniform u;
+		u.binding = 42;
+		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		RID aerial_perspective = p_render_data && is_environment(p_render_data->environment) ? _get_aerial_perspective_texture(p_render_data->environment) : RID();
+		u.append_id(aerial_perspective.is_valid() ? aerial_perspective : texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_3D_WHITE));
 		uniforms.push_back(u);
 	}
 #ifdef MODULE_TEXTURE_STREAMING_ENABLED

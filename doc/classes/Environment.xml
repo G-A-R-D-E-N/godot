@@ -51,6 +51,16 @@
 		<member name="adjustment_saturation" type="float" setter="set_adjustment_saturation" getter="get_adjustment_saturation" default="1.0">
 			Applies a simple saturation adjustment to the rendered image after tonemaping. When [member adjustment_saturation] is set to [code]0.0[/code], the rendered image will be fully converted to a grayscale image. Effective only if [member adjustment_enabled] is [code]true[/code].
 		</member>
+		<member name="aerial_perspective_enabled" type="bool" setter="set_aerial_perspective_enabled" getter="is_aerial_perspective_enabled" default="false">
+			If [code]true[/code] and [member aerial_perspective_texture] is set, the aerial perspective volume is applied to opaque and transparent surfaces, before depth fog, height fog and volumetric fog: [code]color = color * a + rgb[/code]. While it is applied, [member fog_aerial_perspective] is ignored, also for the fog on the sky. It is not applied to the sky itself or to reflection probes. Only supported in the Forward+ renderer.
+		</member>
+		<member name="aerial_perspective_max_distance" type="float" setter="set_aerial_perspective_max_distance" getter="get_aerial_perspective_max_distance" default="32000.0">
+			The distance from the camera, in meters, at the far end of [member aerial_perspective_texture].
+		</member>
+		<member name="aerial_perspective_texture" type="Texture3D" setter="set_aerial_perspective_texture" getter="get_aerial_perspective_texture">
+			A camera-aligned volume of atmospheric scattering between the camera and each point, sampled with trilinear filtering. X and Y follow [code]SCREEN_UV[/code] of the camera ([code]0, 0[/code] is the top-left corner). Z is [code]distance / aerial_perspective_max_distance[/code], with distance measured from the camera to the point, so the slice centers are at [code](slice + 0.5) / depth * aerial_perspective_max_distance[/code]. RGB is the in-scattered radiance in nits, multiplied by the camera's exposure normalization like the fog colors when physical light units are used, and A is the transmittance.
+			[b]Note:[/b] The volume belongs to one camera. An [Environment] shared by cameras with different views applies the same volume to all of them.
+		</member>
 		<member name="ambient_light_color" type="Color" setter="set_ambient_light_color" getter="get_ambient_light_color" default="Color(0, 0, 0, 1)">
 			The ambient light's [Color]. Only effective if [member ambient_light_sky_contribution] is lower than [code]1.0[/code] (exclusive).
 		</member>

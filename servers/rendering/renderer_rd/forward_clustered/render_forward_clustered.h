@@ -337,7 +337,11 @@ private:
 			uint32_t volumetric_fog_enabled;
 			float volumetric_fog_inv_length;
 			float volumetric_fog_detail_spread;
-			uint32_t volumetric_fog_pad;
+			uint32_t aerial_perspective_enabled;
+
+			float aerial_perspective_inv_distance;
+			float aerial_perspective_exposure;
+			uint32_t aerial_perspective_pad[2];
 		};
 
 		struct PushConstantUbershader {
@@ -809,6 +813,7 @@ private:
 
 	/* Render Scene */
 	bool _ssao_uses_gtao(const Projection &p_projection) const;
+	RID _get_aerial_perspective_texture(RID p_environment) const;
 	void _process_ssao(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_buffers, const Projection *p_projections, float p_taa_frame_count);
 	float _get_screen_space_exposure(const RenderDataRD *p_render_data, RID &r_exposure_texture);
 	void _process_ssil(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_buffers, const Projection *p_projections, const Transform3D &p_transform, float p_exposure, RID p_exposure_texture);

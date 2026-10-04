@@ -913,6 +913,37 @@ void Environment::_update_fog_depth() {
 			fog_depth_end);
 }
 
+void Environment::set_aerial_perspective_enabled(bool p_enabled) {
+	aerial_perspective_enabled = p_enabled;
+	_update_aerial_perspective();
+}
+
+bool Environment::is_aerial_perspective_enabled() const {
+	return aerial_perspective_enabled;
+}
+
+void Environment::set_aerial_perspective_texture(const Ref<Texture3D> &p_texture) {
+	aerial_perspective_texture = p_texture;
+	_update_aerial_perspective();
+}
+
+Ref<Texture3D> Environment::get_aerial_perspective_texture() const {
+	return aerial_perspective_texture;
+}
+
+void Environment::set_aerial_perspective_max_distance(float p_distance) {
+	aerial_perspective_max_distance = p_distance;
+	_update_aerial_perspective();
+}
+
+float Environment::get_aerial_perspective_max_distance() const {
+	return aerial_perspective_max_distance;
+}
+
+void Environment::_update_aerial_perspective() {
+	RS::get_singleton()->environment_set_aerial_perspective(environment, aerial_perspective_enabled, aerial_perspective_texture.is_valid() ? aerial_perspective_texture->get_rid() : RID(), aerial_perspective_max_distance);
+}
+
 // Volumetric Fog
 
 void Environment::_update_volumetric_fog() {
@@ -1531,6 +1562,18 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "fog_depth_curve", PROPERTY_HINT_EXP_EASING), "set_fog_depth_curve", "get_fog_depth_curve");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "fog_depth_begin", PROPERTY_HINT_RANGE, "0,4000,0.1,or_greater,or_less,suffix:m"), "set_fog_depth_begin", "get_fog_depth_begin");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "fog_depth_end", PROPERTY_HINT_RANGE, "0,4000,0.1,or_greater,or_less,suffix:m"), "set_fog_depth_end", "get_fog_depth_end");
+
+	ClassDB::bind_method(D_METHOD("set_aerial_perspective_enabled", "enabled"), &Environment::set_aerial_perspective_enabled);
+	ClassDB::bind_method(D_METHOD("is_aerial_perspective_enabled"), &Environment::is_aerial_perspective_enabled);
+	ClassDB::bind_method(D_METHOD("set_aerial_perspective_texture", "texture"), &Environment::set_aerial_perspective_texture);
+	ClassDB::bind_method(D_METHOD("get_aerial_perspective_texture"), &Environment::get_aerial_perspective_texture);
+	ClassDB::bind_method(D_METHOD("set_aerial_perspective_max_distance", "distance"), &Environment::set_aerial_perspective_max_distance);
+	ClassDB::bind_method(D_METHOD("get_aerial_perspective_max_distance"), &Environment::get_aerial_perspective_max_distance);
+
+	ADD_GROUP("Aerial Perspective", "aerial_perspective_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "aerial_perspective_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_aerial_perspective_enabled", "is_aerial_perspective_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "aerial_perspective_texture", PROPERTY_HINT_RESOURCE_TYPE, "Texture3D"), "set_aerial_perspective_texture", "get_aerial_perspective_texture");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "aerial_perspective_max_distance", PROPERTY_HINT_RANGE, "1,100000,1,or_greater,exp,suffix:m"), "set_aerial_perspective_max_distance", "get_aerial_perspective_max_distance");
 
 	ClassDB::bind_method(D_METHOD("set_volumetric_fog_enabled", "enabled"), &Environment::set_volumetric_fog_enabled);
 	ClassDB::bind_method(D_METHOD("is_volumetric_fog_enabled"), &Environment::is_volumetric_fog_enabled);

@@ -889,6 +889,7 @@ public:
 	FUNC11(environment_set_fog, RID, bool, const Color &, float, float, float, float, float, float, float, RSE::EnvironmentFogMode)
 
 	FUNC4(environment_set_fog_depth, RID, float, float, float)
+	FUNC4(environment_set_aerial_perspective, RID, bool, RID, float)
 	FUNC14(environment_set_volumetric_fog, RID, bool, float, const Color &, const Color &, float, float, float, float, float, bool, float, float, float)
 
 	FUNC2(environment_set_volumetric_fog_volume_size, int, int)
