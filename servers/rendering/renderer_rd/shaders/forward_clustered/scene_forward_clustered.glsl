@@ -1179,6 +1179,10 @@ float specular_occlusion_cone(float p_ao, float p_roughness, vec3 p_bent_normal,
 	return area / (M_TAU * (1.0 - cos_a_s));
 }
 
+float specular_occlusion_lagarde(float p_n_dot_v, float p_ao, float p_alpha) {
+	return clamp(pow(p_n_dot_v + p_ao, exp2(-16.0 * p_alpha - 1.0)) - 1.0 + p_ao, 0.0, 1.0);
+}
+
 #endif //!MODE_RENDER DEPTH
 
 #if defined(MODE_RENDER_NORMAL_ROUGHNESS) || defined(MODE_RENDER_MATERIAL)
@@ -2345,7 +2349,7 @@ void fragment_shader(in SceneData scene_data) {
 		ambient_light *= ao;
 		policy_ambient_light *= ambient_occlusion;
 #endif // MULTI_BOUNCE_OCCLUSION_ENABLED
-#ifndef SPECULAR_OCCLUSION_DISABLED
+#if !defined(SPECULAR_OCCLUSION_DISABLED) || defined(SPECULAR_OCCLUSION_COMBINED)
 #ifdef BENT_NORMAL_MAP_USED
 		// Apply cone to cone intersection with cosine weighted assumption:
 		// https://blog.selfshadow.com/publications/s2016-shading-course/activision/s2016_pbs_activision_occlusion.pdf
@@ -2358,6 +2362,9 @@ void fragment_shader(in SceneData scene_data) {
 		cc_specular_light *= specular_occlusion;
 #endif
 #else // BENT_NORMAL_MAP_USED
+#ifdef SPECULAR_OCCLUSION_COMBINED
+		float specular_occlusion = specular_occlusion_lagarde(clamp(dot(normal, view), 0.0, 1.0), ao, roughness * roughness);
+#else
 		float specular_occlusion = (ambient_light.r * 0.3 + ambient_light.g * 0.59 + ambient_light.b * 0.11) * 2.0; // Luminance of ambient light.
 		specular_occlusion = min(specular_occlusion * 4.0, 1.0); // This multiplication preserves speculars on bright areas.
 
@@ -2365,6 +2372,7 @@ void fragment_shader(in SceneData scene_data) {
 		// 10.0 is a magic number, it gives the intended effect in most scenarios.
 		// Low enough for occlusion, high enough for reaction to lights and shadows.
 		specular_occlusion = max(min(reflective_f * specular_occlusion * 10.0, 1.0), specular_occlusion);
+#endif
 		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_BENT_NORMALS)) {
 #ifdef USE_MULTIVIEW
 			vec3 occlusion_bent_normal = normalize(textureLod(sampler2DArray(gtao_bent_normal_buffer, SAMPLER_LINEAR_CLAMP), vec3(screen_uv, ViewIndex), 0.0).xyz * 2.0 - 1.0);
@@ -2375,7 +2383,11 @@ void fragment_shader(in SceneData scene_data) {
 		}
 		indirect_specular_light *= specular_occlusion;
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+#ifdef SPECULAR_OCCLUSION_COMBINED
+		cc_specular_light *= specular_occlusion_lagarde(clamp(dot(geo_normal, view), 0.0, 1.0), ao, indirect_coat_roughness * indirect_coat_roughness);
+#else
 		cc_specular_light *= specular_occlusion;
+#endif
 #endif
 #endif // BENT_NORMAL_MAP_USED
 #endif // SPECULAR_OCCLUSION_DISABLED
