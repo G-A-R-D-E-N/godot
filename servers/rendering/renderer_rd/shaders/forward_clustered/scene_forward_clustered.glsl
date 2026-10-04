@@ -1046,6 +1046,10 @@ layout(location = 2) out vec2 motion_vector;
 float decal_coverage;
 #endif
 
+#if defined(DIRECT_DIFFUSE_WEIGHT_USED) && !(defined(USE_VERTEX_LIGHTING) && defined(LIGHT_CODE_USED))
+#define DIRECT_DIFFUSE_WEIGHTED
+#endif
+
 #if !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED)
 
 // Default to SPECULAR_SCHLICK_GGX.
@@ -1229,6 +1233,9 @@ void fragment_shader(in SceneData scene_data) {
 #if defined(INDIRECT_COAT_USED)
 	vec3 indirect_coat_weight = vec3(0.0);
 	float indirect_coat_roughness = 0.0;
+#endif
+#if defined(DIRECT_DIFFUSE_WEIGHT_USED)
+	vec3 direct_diffuse_weight = vec3(1.0);
 #endif
 #if defined(TEMPORAL_METADATA) || defined(TEMPORAL_METADATA_USED)
 	float temporal_mask = sc_dithered_instance_fade() ? 1.0 : 0.0;
@@ -3237,14 +3244,20 @@ void fragment_shader(in SceneData scene_data) {
 #else
 
 	// multiply by albedo
+#ifdef DIRECT_DIFFUSE_WEIGHTED
+	diffuse_light *= direct_diffuse_weight;
+#else
 	diffuse_light *= albedo; // ambient must be multiplied by albedo at the end
+#endif
 
 	// apply direct light AO
 	diffuse_light *= ao;
 	direct_specular_light *= ao;
 
 	// apply metallic
+#ifndef DIRECT_DIFFUSE_WEIGHTED
 	diffuse_light *= 1.0 - metallic;
+#endif
 #ifndef INDIRECT_DIFFUSE_WEIGHT_USED
 	ambient_light *= 1.0 - metallic;
 #endif

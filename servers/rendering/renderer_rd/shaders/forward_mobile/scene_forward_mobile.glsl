@@ -1006,6 +1006,10 @@ layout(location = 0) out vec4 frag_color;
 float decal_coverage;
 #endif
 
+#if defined(DIRECT_DIFFUSE_WEIGHT_USED) && !(defined(USE_VERTEX_LIGHTING) && defined(LIGHT_CODE_USED))
+#define DIRECT_DIFFUSE_WEIGHTED
+#endif
+
 #if !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED) // && !defined(USE_VERTEX_LIGHTING)
 
 // Default to SPECULAR_SCHLICK_GGX.
@@ -1153,6 +1157,9 @@ void main() {
 #if defined(INDIRECT_COAT_USED)
 	vec3 indirect_coat_weight_highp = vec3(0.0);
 	float indirect_coat_roughness_highp = 0.0;
+#endif
+#if defined(DIRECT_DIFFUSE_WEIGHT_USED)
+	vec3 direct_diffuse_weight_highp = vec3(1.0);
 #endif
 #ifdef TEMPORAL_METADATA_USED
 	float temporal_mask = 0.0;
@@ -2446,14 +2453,20 @@ void main() {
 #else // MODE_RENDER_DEPTH
 
 	// multiply by albedo
+#ifdef DIRECT_DIFFUSE_WEIGHTED
+	diffuse_light *= hvec3(direct_diffuse_weight_highp);
+#else
 	diffuse_light *= albedo; // ambient must be multiplied by albedo at the end
+#endif
 
 	// apply direct light AO
 	diffuse_light *= ao;
 	direct_specular_light *= ao;
 
 	// apply metallic
+#ifndef DIRECT_DIFFUSE_WEIGHTED
 	diffuse_light *= half(1.0) - metallic;
+#endif
 #ifndef INDIRECT_DIFFUSE_WEIGHT_USED
 	ambient_light *= half(1.0) - metallic;
 #endif
