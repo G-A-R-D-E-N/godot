@@ -190,7 +190,7 @@ SkyRD::SkyShaderData::~SkyShaderData() {
 bool SkyRD::SkyMaterialData::update_parameters(const HashMap<StringName, Variant> &p_parameters, bool p_uniform_dirty, bool p_textures_dirty) {
 	RendererSceneRenderRD *scene_singleton = static_cast<RendererSceneRenderRD *>(RendererSceneRenderRD::singleton);
 
-	uniform_set_updated = true;
+	uniform_set_version++;
 
 	return update_parameters_uniform_set(p_parameters, p_uniform_dirty, p_textures_dirty, shader_data->uniforms, shader_data->ubo_offsets.ptr(), shader_data->texture_uniforms, shader_data->default_texture_params, shader_data->ubo_size, uniform_set, scene_singleton->sky.sky_shader.shader.version_get_shader(shader_data->version, 0), SKY_SET_MATERIAL, true, true);
 }
@@ -996,6 +996,12 @@ SkyRD::~SkyRD() {
 	}
 }
 
+static bool _sky_lights_match(const SkyRD::SkyDirectionalLightData &p_a, const SkyRD::SkyDirectionalLightData &p_b) {
+	return p_a.direction[0] == p_b.direction[0] && p_a.direction[1] == p_b.direction[1] && p_a.direction[2] == p_b.direction[2] &&
+			p_a.energy == p_b.energy && p_a.color[0] == p_b.color[0] && p_a.color[1] == p_b.color[1] && p_a.color[2] == p_b.color[2] &&
+			p_a.enabled == p_b.enabled && p_a.size == p_b.size;
+}
+
 void SkyRD::setup_sky(const RenderDataRD *p_render_data, const Size2i p_screen_size) {
 	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
 	ERR_FAIL_COND(p_render_data->environment.is_null());
@@ -1102,8 +1108,8 @@ void SkyRD::setup_sky(const RenderDataRD *p_render_data, const Size2i p_screen_s
 			sky->reflection.dirty = true;
 		}
 
-		if (material_data->uniform_set_updated) {
-			material_data->uniform_set_updated = false;
+		if (material_data->uniform_set_version != sky->prev_material_version) {
+			sky->prev_material_version = material_data->uniform_set_version;
 			sky->reflection.dirty = true;
 		}
 
@@ -1192,19 +1198,26 @@ void SkyRD::setup_sky(const RenderDataRD *p_render_data, const Size2i p_screen_s
 
 		if (!light_data_dirty) {
 			for (uint32_t i = 0; i < sky_scene_state.ubo.directional_light_count; i++) {
-				if (sky_scene_state.directional_lights[i].direction[0] != sky_scene_state.last_frame_directional_lights[i].direction[0] ||
-						sky_scene_state.directional_lights[i].direction[1] != sky_scene_state.last_frame_directional_lights[i].direction[1] ||
-						sky_scene_state.directional_lights[i].direction[2] != sky_scene_state.last_frame_directional_lights[i].direction[2] ||
-						sky_scene_state.directional_lights[i].energy != sky_scene_state.last_frame_directional_lights[i].energy ||
-						sky_scene_state.directional_lights[i].color[0] != sky_scene_state.last_frame_directional_lights[i].color[0] ||
-						sky_scene_state.directional_lights[i].color[1] != sky_scene_state.last_frame_directional_lights[i].color[1] ||
-						sky_scene_state.directional_lights[i].color[2] != sky_scene_state.last_frame_directional_lights[i].color[2] ||
-						sky_scene_state.directional_lights[i].enabled != sky_scene_state.last_frame_directional_lights[i].enabled ||
-						sky_scene_state.directional_lights[i].size != sky_scene_state.last_frame_directional_lights[i].size) {
+				if (!_sky_lights_match(sky_scene_state.directional_lights[i], sky_scene_state.last_frame_directional_lights[i])) {
 					light_data_dirty = true;
 					break;
 				}
 				cloud_shadow_dirty = cloud_shadow_dirty || memcmp(sky_scene_state.directional_lights[i].cloud_shadow, sky_scene_state.last_frame_directional_lights[i].cloud_shadow, sizeof(SkyDirectionalLightData::cloud_shadow)) != 0;
+			}
+		}
+
+		if (sky) {
+			uint32_t count = sky_scene_state.ubo.directional_light_count;
+			bool sky_lights_changed = count != sky->prev_lights.size();
+			for (uint32_t i = 0; i < count && !sky_lights_changed; i++) {
+				sky_lights_changed = !_sky_lights_match(sky_scene_state.directional_lights[i], sky->prev_lights[i]);
+			}
+			if (sky_lights_changed) {
+				sky->prev_lights.resize(count);
+				for (uint32_t i = 0; i < count; i++) {
+					sky->prev_lights[i] = sky_scene_state.directional_lights[i];
+				}
+				sky->reflection.dirty = true;
 			}
 		}
 
@@ -1215,9 +1228,6 @@ void SkyRD::setup_sky(const RenderDataRD *p_render_data, const Size2i p_screen_s
 			sky_scene_state.last_frame_directional_lights = sky_scene_state.directional_lights;
 			sky_scene_state.directional_lights = temp;
 			sky_scene_state.last_frame_directional_light_count = sky_scene_state.ubo.directional_light_count;
-			if (sky && light_data_dirty) {
-				sky->reflection.dirty = true;
-			}
 		}
 	}
 	_update_scene_uniform_set();
