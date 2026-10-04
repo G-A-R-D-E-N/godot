@@ -407,49 +407,72 @@ half sample_omni_pcf_shadow(texture2D shadow, float blur_scale, vec2 coord, vec4
 	return half(avg * (1.0 / float(sc_soft_shadow_samples())));
 }
 
-half sample_directional_soft_shadow(texture2D shadow, vec3 pssm_coord, vec2 tex_scale, float taa_frame_count) {
-	//find blocker
+vec2 directional_shadow_depth_gradient(mat4 shadow_matrix, vec3 normal, vec3 light_dir) {
+	if (dot(normal, light_dir) < 0.05) {
+		return vec2(0.0);
+	}
+	vec3 row_u = vec3(shadow_matrix[0][0], shadow_matrix[1][0], shadow_matrix[2][0]);
+	vec3 row_v = vec3(shadow_matrix[0][1], shadow_matrix[1][1], shadow_matrix[2][1]);
+	vec3 row_d = vec3(shadow_matrix[0][2], shadow_matrix[1][2], shadow_matrix[2][2]);
+	vec3 along_u = cross(normal, row_v);
+	vec3 along_v = cross(normal, row_u);
+	return vec2(dot(row_d, along_u) / dot(row_u, along_u), dot(row_d, along_v) / dot(row_v, along_v));
+}
+
+vec4 directional_shadow_gather_plane(vec2 uv, vec2 texel, vec2 depth_gradient) {
+	vec2 f = fract(uv / texel - 0.5);
+	vec4 dx = vec4(-f.x, 1.0 - f.x, 1.0 - f.x, -f.x) * texel.x;
+	vec4 dy = vec4(1.0 - f.y, 1.0 - f.y, -f.y, -f.y) * texel.y;
+	return depth_gradient.x * dx + depth_gradient.y * dy;
+}
+
+half sample_directional_soft_shadow(texture2D shadow, vec3 pssm_coord, vec2 depth_gradient, vec2 uv_per_meter, float z_range, float penumbra_scale, vec2 texel, float taa_frame_count) {
 	float blocker_count = 0.0;
-	float blocker_average = 0.0;
-
-	mat2 disk_rotation;
-	{
-		float r = quick_hash(gl_FragCoord.xy + vec2(taa_frame_count * 5.588238)) * 2.0 * M_PI;
-		float sr = sin(r);
-		float cr = cos(r);
-		disk_rotation = mat2(vec2(cr, -sr), vec2(sr, cr));
+	float blocker_sum = 0.0;
+	for (uint i = 0u; i < 4u; i++) {
+		vec2 offset = vec2((i & 1u) != 0u ? 1.0 : -1.0, (i & 2u) != 0u ? 1.0 : -1.0) * texel;
+		vec2 suv = pssm_coord.xy + offset;
+		vec4 d = textureGather(sampler2D(shadow, SAMPLER_NEAREST_CLAMP), suv, 0);
+		vec4 blocker = vec4(greaterThan(d, pssm_coord.z + dot(depth_gradient, offset) + directional_shadow_gather_plane(suv, texel, depth_gradient)));
+		blocker_count += dot(blocker, vec4(1.0));
+		blocker_sum += dot(blocker, d);
 	}
 
-	SPEC_CONSTANT_LOOP_ANNOTATION
-	for (uint i = 0; i < sc_directional_penumbra_shadow_samples(); i++) {
-		vec2 suv = pssm_coord.xy + (disk_rotation * scene_data_block.data.directional_penumbra_shadow_kernel[i].xy) * tex_scale;
-		float d = textureLod(sampler2D(shadow, SAMPLER_LINEAR_CLAMP), suv, 0.0).r;
-		if (d > pssm_coord.z) {
-			blocker_average += d;
-			blocker_count += 1.0;
-		}
-	}
+	float r = quick_hash(gl_FragCoord.xy + vec2(taa_frame_count * 5.588238)) * 2.0 * M_PI;
+	mat2 disk_rotation = mat2(vec2(cos(r), -sin(r)), vec2(sin(r), cos(r)));
 
-	if (blocker_count > 0.0) {
-		//blockers found, do soft shadow
-		blocker_average /= blocker_count;
-		float penumbra = (-pssm_coord.z + blocker_average) / (1.0 - blocker_average);
-		tex_scale *= penumbra;
-
-		float s = 0.0;
+	float penumbra_per_depth = z_range * penumbra_scale;
+	if (blocker_count == 0.0) {
+		vec2 search = max(uv_per_meter * (penumbra_per_depth * (1.0 - pssm_coord.z)), texel * 3.0);
+		float texel_meters = texel.x / uv_per_meter.x;
 
 		SPEC_CONSTANT_LOOP_ANNOTATION
 		for (uint i = 0; i < sc_directional_penumbra_shadow_samples(); i++) {
-			vec2 suv = pssm_coord.xy + (disk_rotation * scene_data_block.data.directional_penumbra_shadow_kernel[i].xy) * tex_scale;
-			s += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(suv, pssm_coord.z, 1.0));
+			vec2 kernel = scene_data_block.data.directional_penumbra_shadow_kernel[i].xy;
+			vec2 offset = (disk_rotation * kernel) * (search * dot(kernel, kernel));
+			vec2 suv = pssm_coord.xy + offset;
+			float reach = max(length(offset / uv_per_meter) - texel_meters, 0.0) / penumbra_per_depth;
+			vec4 d = textureGather(sampler2D(shadow, SAMPLER_NEAREST_CLAMP), suv, 0);
+			vec4 blocker = vec4(greaterThan(d, pssm_coord.z + dot(depth_gradient, offset) + reach + directional_shadow_gather_plane(suv, texel, depth_gradient)));
+			blocker_count += dot(blocker, vec4(1.0));
+			blocker_sum += dot(blocker, d);
 		}
 
-		return half(s / float(sc_directional_penumbra_shadow_samples()));
-
-	} else {
-		//no blockers found, so no shadow
-		return half(1.0);
+		if (blocker_count == 0.0) {
+			return half(1.0);
+		}
 	}
+
+	vec2 penumbra = max(uv_per_meter * (penumbra_per_depth * (blocker_sum / blocker_count - pssm_coord.z)), texel * 0.75);
+	float s = 0.0;
+
+	SPEC_CONSTANT_LOOP_ANNOTATION
+	for (uint i = 0; i < sc_directional_penumbra_shadow_samples(); i++) {
+		vec2 offset = (disk_rotation * scene_data_block.data.directional_penumbra_shadow_kernel[i].xy) * penumbra;
+		s += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(pssm_coord.xy + offset, pssm_coord.z + dot(depth_gradient, offset), 1.0));
+	}
+
+	return half(s / float(sc_directional_penumbra_shadow_samples()));
 }
 
 #endif // SHADOWS_DISABLED
