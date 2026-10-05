@@ -13,12 +13,16 @@ GODOT_PACKAGES = ["godot.net.sdk", "godotsharp", "godot.sourcegenerators", "godo
 
 # The race case is a wall-clock-bound stress loop (20000 iterations of three threads disposing
 # one object), so its duration follows the host's CPU count: about a second on a 12-core
-# machine, over two minutes on two cores. The other cases wait on fifteen-second gates that
-# print a FAIL of their own when they expire, so the short budget only backstops them.
+# machine, about 16 seconds on the Windows CI runner, and 135 seconds pinned to two cores,
+# all with the same PASS verdict. The budget is therefore more than twice the slowest
+# measured machine, and the process timeout is longer still so that a case which overruns the
+# budget is reported by the elapsed check instead of being killed. The other cases wait on
+# fifteen-second gates that print a FAIL of their own when they expire, so the short budget
+# only backstops them.
 GATED_CASE_ELAPSED_LIMIT = 15
 STRESS_CASE = "race"
-STRESS_CASE_ELAPSED_LIMIT = 120
-STRESS_CASE_TIMEOUT = 150
+STRESS_CASE_ELAPSED_LIMIT = 300
+STRESS_CASE_TIMEOUT = 360
 
 LEGACY = {
     "queued-held": [],
