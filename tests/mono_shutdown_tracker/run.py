@@ -7,6 +7,14 @@ import subprocess
 import time
 from pathlib import Path
 
+LEGACY = {
+    "queued-held": [],
+    "queued-drained": ["--release-before-quit"],
+    "running-held": ["--running-finalizer"],
+    "running-drained": ["--running-finalizer", "--release-before-quit"],
+}
+OWNERSHIP = {"overlap": "--overlap-finalizer", "race": "--race-dispose"}
+
 
 def identity(path):
     return {"path": str(path), "size": path.stat().st_size, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
@@ -26,10 +34,55 @@ def expected_leak_diagnostics(diagnostics, running):
     return all(any(re.fullmatch(pattern, line) for pattern in patterns) for line in diagnostics)
 
 
+def cases(version):
+    if version == "baseline":
+        return dict(LEGACY)
+    selected = {} if version == "control" else dict(LEGACY)
+    selected.update({name: [flag] for name, flag in OWNERSHIP.items()})
+    return selected
+
+
+def judge(version, case, result, elapsed, output, engine):
+    assembly_lines = [line[9:] for line in output.splitlines() if line.startswith("ASSEMBLY ")]
+    diagnostics = [
+        line
+        for line in output.splitlines()
+        if any(token in line.lower() for token in ["error:", "warning:", "leaked", "fail ", "crashed", "fatal:"])
+    ]
+    owned = case in OWNERSHIP
+    running = case.startswith("running")
+    drained = case.endswith("drained")
+    passed = elapsed < 15 and len(assembly_lines) == 1
+    passed &= Path(assembly_lines[0]).resolve().is_relative_to(engine.parent) if assembly_lines else False
+    if owned:
+        ready = "READY overlap finalizer held inside base disposal." in output or case == "race"
+        success = result.returncode == 0 and ready and f"PASS {case}:" in output and not diagnostics
+        if version == "control":
+            failed = f"FAIL {case}:" in output or result.returncode != 0
+            return passed and failed and f"PASS {case}:" not in output, diagnostics, assembly_lines
+        return passed and success, diagnostics, assembly_lines
+    ready = "READY running finalizer held before base disposal." if running else "READY queued finalizer held."
+    tracking = "TRACKING True" if version != "baseline" else "TRACKING False"
+    passed &= result.returncode == 0 and ready in output and tracking in output
+    if drained:
+        passed &= "CONTROL finalizer queue drained before shutdown." in output and not diagnostics
+    elif version == "baseline":
+        leaked_type = "RefCounted" if running else "BoxShape3D"
+        passed &= f"Leaked instance: {leaked_type}:" in output and "Leaked unsafe reference to object:" in output
+        passed &= expected_leak_diagnostics(diagnostics, running)
+        passed &= not any(token in output.lower() for token in ["fail ", "crashed", "fatal:"])
+    else:
+        passed &= not diagnostics
+        if running:
+            passed &= "PASS shutdown native pointer transition once; finalizer completed." in output
+    return passed, diagnostics, assembly_lines
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--baseline", type=Path, required=True)
+    parser.add_argument("--baseline", type=Path)
     parser.add_argument("--candidate", type=Path, required=True)
+    parser.add_argument("--control", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     project = Path(__file__).resolve().parent
@@ -44,7 +97,7 @@ def main():
             ["dotnet", "build", str(project / "ShutdownTrackerProbe.csproj"), "-c", "Debug"],
             capture_output=True,
             text=True,
-            timeout=90,
+            timeout=300,
             creationflags=flags,
         )
     finally:
@@ -56,65 +109,39 @@ def main():
     runs = []
     identities = [
         identity(project / "ShutdownTrackerProbe.cs"),
+        identity(project / "FinalizerOverlap.cs"),
         identity(project / ".godot/mono/temp/bin/Debug/ShutdownTrackerProbe.dll"),
     ]
-    for version, engine in [("baseline", args.baseline.resolve()), ("candidate", args.candidate.resolve())]:
+    engines = [("baseline", args.baseline), ("candidate", args.candidate), ("control", args.control)]
+    for version, engine in engines:
+        if engine is None:
+            continue
+        engine = engine.resolve()
         identities.append(identity(engine))
-        for running in [False, True]:
-            for drained in [False, True]:
-                name = f"{version}-{'running' if running else 'queued'}-{'drained' if drained else 'held'}"
-                user_args = (["--running-finalizer"] if running else []) + (
-                    ["--release-before-quit"] if drained else []
-                )
-                started = time.monotonic()
-                result = subprocess.run(
-                    [str(engine), "--headless", "--verbose", "--path", str(project), "--", *user_args],
-                    capture_output=True,
-                    text=True,
-                    timeout=40,
-                    creationflags=flags,
-                )
-                elapsed = time.monotonic() - started
-                output = result.stdout + result.stderr
-                (args.output / (name + ".log")).write_text(output, encoding="utf-8")
-                assembly_lines = [line[9:] for line in output.splitlines() if line.startswith("ASSEMBLY ")]
-                ready = (
-                    "READY running finalizer held before base disposal." if running else "READY queued finalizer held."
-                )
-                tracking = "TRACKING True" if version == "candidate" else "TRACKING False"
-                diagnostics = [
-                    line
-                    for line in output.splitlines()
-                    if any(
-                        token in line.lower()
-                        for token in ["error:", "warning:", "leaked", "fail ", "crashed", "fatal:"]
-                    )
-                ]
-                passed = result.returncode == 0 and ready in output and tracking in output and elapsed < 15
-                passed &= len(assembly_lines) == 1 and Path(assembly_lines[0]).resolve().is_relative_to(engine.parent)
-                if assembly_lines:
-                    identities.append(identity(Path(assembly_lines[0])))
-                if drained:
-                    passed &= "CONTROL finalizer queue drained before shutdown." in output and not diagnostics
-                elif version == "baseline":
-                    leaked_type = "RefCounted" if running else "BoxShape3D"
-                    passed &= (
-                        f"Leaked instance: {leaked_type}:" in output and "Leaked unsafe reference to object:" in output
-                    )
-                    passed &= expected_leak_diagnostics(diagnostics, running)
-                    passed &= not any(token in output.lower() for token in ["fail ", "crashed", "fatal:"])
-                else:
-                    passed &= not diagnostics
-                    if running:
-                        passed &= "PASS shutdown native pointer transition once; finalizer completed." in output
-                runs.append({
-                    "name": name,
-                    "exit": result.returncode,
-                    "elapsed_seconds": elapsed,
-                    "passed": bool(passed),
-                    "diagnostics": diagnostics,
-                })
-                print(name, "PASS" if passed else "FAIL", flush=True)
+        for case, user_args in cases(version).items():
+            name = f"{version}-{case}"
+            started = time.monotonic()
+            result = subprocess.run(
+                [str(engine), "--headless", "--verbose", "--path", str(project), "--", *user_args],
+                capture_output=True,
+                text=True,
+                timeout=40,
+                creationflags=flags,
+            )
+            elapsed = time.monotonic() - started
+            output = result.stdout + result.stderr
+            (args.output / (name + ".log")).write_text(output, encoding="utf-8")
+            passed, diagnostics, assembly_lines = judge(version, case, result, elapsed, output, engine)
+            if assembly_lines:
+                identities.append(identity(Path(assembly_lines[0])))
+            runs.append({
+                "name": name,
+                "exit": result.returncode,
+                "elapsed_seconds": elapsed,
+                "passed": bool(passed),
+                "diagnostics": diagnostics,
+            })
+            print(name, "PASS" if passed else "FAIL", flush=True)
     (args.output / "results.json").write_text(
         json.dumps({"identities": identities, "runs": runs}, indent=2), encoding="utf-8"
     )

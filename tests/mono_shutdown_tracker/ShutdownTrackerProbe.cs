@@ -40,6 +40,18 @@ public partial class ShutdownTrackerProbe : Node
             var args = OS.GetCmdlineUserArgs();
             var running = args.Contains("--running-finalizer");
             GD.Print("ASSEMBLY " + typeof(GodotObject).Assembly.Location);
+            if (args.Contains("--overlap-finalizer"))
+            {
+                FinalizerOverlap.Start();
+                tree.Quit();
+                return;
+            }
+            if (args.Contains("--race-dispose"))
+            {
+                DisposeRace.Run();
+                tree.Quit();
+                return;
+            }
             if (!running)
             {
                 BlockFinalizers();
