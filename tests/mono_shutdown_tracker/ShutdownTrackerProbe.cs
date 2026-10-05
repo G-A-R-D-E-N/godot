@@ -40,6 +40,18 @@ public partial class ShutdownTrackerProbe : Node
             var args = OS.GetCmdlineUserArgs();
             var running = args.Contains("--running-finalizer");
             GD.Print("ASSEMBLY " + typeof(GodotObject).Assembly.Location);
+            if (args.Contains("--throw-recover-shutdown") || args.Contains("--throw-recover-finalizer"))
+            {
+                DisposeFailure.StartThrow(args.Contains("--throw-recover-finalizer"));
+                tree.Quit();
+                return;
+            }
+            if (args.Contains("--owner-prebase-api"))
+            {
+                DisposeFailure.StartOwnerApi();
+                tree.Quit();
+                return;
+            }
             if (args.Contains("--overlap-finalizer") || args.Contains("--prebase-finalizer"))
             {
                 FinalizerOverlap.Start(args.Contains("--prebase-finalizer"));

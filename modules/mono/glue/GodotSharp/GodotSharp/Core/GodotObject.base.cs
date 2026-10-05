@@ -16,6 +16,7 @@ namespace Godot
         private const int DisposeWaitMilliseconds = 10000;
 
         private int _disposeOwner;
+        private bool _disposeCompleted;
         private static readonly Type _cachedType = typeof(GodotObject);
 
         private static readonly Dictionary<Type, StringName?> _nativeNames = new Dictionary<Type, StringName?>();
@@ -93,7 +94,10 @@ namespace Godot
             // NativePtr is assigned, that would result in UB or crashes when calling
             // native functions that receive the pointer, which can happen because the
             // debugger calls ToString() and tries to get the value of properties.
-            ObjectDisposedException.ThrowIf(instance._disposeOwner != 0 || instance.NativePtr == IntPtr.Zero, instance);
+            int owner = instance._disposeOwner;
+            ObjectDisposedException.ThrowIf(
+                (owner != 0 && (owner < 0 || owner != System.Environment.CurrentManagedThreadId)) ||
+                instance.NativePtr == IntPtr.Zero, instance);
 
             return instance.NativePtr;
         }
@@ -115,17 +119,22 @@ namespace Godot
         private void DisposeOwned(bool disposing)
         {
             int thread = System.Environment.CurrentManagedThreadId;
-            int owner = Interlocked.CompareExchange(ref _disposeOwner, thread, 0);
 
-            if (owner != 0)
+            while (true)
             {
-                if (disposing && owner > 0 && owner != thread &&
-                    !SpinWait.SpinUntil(() => Volatile.Read(ref _disposeOwner) < 0, DisposeWaitMilliseconds))
+                int owner = Interlocked.CompareExchange(ref _disposeOwner, thread, 0);
+
+                if (owner == 0)
+                    break;
+
+                if (!disposing || owner < 0 || owner == thread)
+                    return;
+
+                if (!SpinWait.SpinUntil(() => Volatile.Read(ref _disposeOwner) <= 0, DisposeWaitMilliseconds))
                 {
                     GD.PushError("Timed out waiting for another thread to finish disposing a Godot Object.");
+                    return;
                 }
-
-                return;
             }
 
             try
@@ -134,7 +143,7 @@ namespace Godot
             }
             finally
             {
-                Volatile.Write(ref _disposeOwner, -1);
+                Volatile.Write(ref _disposeOwner, Volatile.Read(ref _disposeCompleted) ? -1 : 0);
             }
         }
 
@@ -173,6 +182,8 @@ namespace Godot
             {
                 DisposablesTracker.UnregisterGodotObject(this, _weakReferenceToSelf);
             }
+
+            Volatile.Write(ref _disposeCompleted, true);
         }
 
         /// <summary>

@@ -13,10 +13,20 @@ LEGACY = {
     "running-held": ["--running-finalizer"],
     "running-drained": ["--running-finalizer", "--release-before-quit"],
 }
-OWNERSHIP = {"overlap": "--overlap-finalizer", "prebase": "--prebase-finalizer", "race": "--race-dispose"}
+OWNERSHIP = {
+    "overlap": "--overlap-finalizer",
+    "prebase": "--prebase-finalizer",
+    "race": "--race-dispose",
+    "throw-shutdown": "--throw-recover-shutdown",
+    "throw-finalizer": "--throw-recover-finalizer",
+    "owner-api": "--owner-prebase-api",
+}
+CONTROL = ["throw-shutdown", "throw-finalizer", "owner-api"]
 READY = {
     "overlap": "READY overlap finalizer held inside base disposal.",
     "prebase": "READY prebase finalizer held before base disposal.",
+    "throw-shutdown": "READY throw-shutdown disposal failed before base disposal;",
+    "throw-finalizer": "READY throw-finalizer disposal failed before base disposal;",
 }
 
 
@@ -42,7 +52,7 @@ def cases(version):
     if version == "baseline":
         return dict(LEGACY)
     if version == "control":
-        return {name: [OWNERSHIP[name]] for name in ["overlap", "prebase"]}
+        return {name: [OWNERSHIP[name]] for name in CONTROL}
     selected = dict(LEGACY)
     selected["running-held"] = ["--running-finalizer", "--release-after-quit"]
     selected.update({name: [flag] for name, flag in OWNERSHIP.items()})
@@ -62,7 +72,7 @@ def judge(version, case, result, elapsed, output, engine):
     passed = elapsed < 15 and len(assembly_lines) == 1
     passed &= Path(assembly_lines[0]).resolve().is_relative_to(engine.parent) if assembly_lines else False
     if owned:
-        ready = READY.get(case, "") in output or case == "race"
+        ready = READY.get(case, "") in output
         success = result.returncode == 0 and ready and f"PASS {case}:" in output and not diagnostics
         if version == "control":
             failed = f"FAIL {case}:" in output or result.returncode != 0
