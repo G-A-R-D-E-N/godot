@@ -59,9 +59,9 @@ public partial class OverlapResource : RefCounted
 {
     protected override void Dispose(bool disposing)
     {
-        if (disposing) FinalizerOverlap.ShutdownReached();
+        FinalizerOverlap.BodyEntered(disposing);
         base.Dispose(disposing);
-        if (disposing) FinalizerOverlap.ShutdownReturned();
+        FinalizerOverlap.BodyExited();
     }
 }
 
@@ -77,24 +77,28 @@ public partial class OverlapSentinel : RefCounted
 internal static class FinalizerOverlap
 {
     private static readonly ManualResetEventSlim Entered = new();
-    private static readonly ManualResetEventSlim Reached = new();
+    private static readonly ManualResetEventSlim Started = new();
     private static readonly ManualResetEventSlim Release = new();
     private static readonly ManualResetEventSlim Exited = new();
     private static readonly ManualResetEventSlim Done = new();
     private static readonly ConcurrentDictionary<IntPtr, int> SentinelOrder = new();
     private static readonly HashSet<IntPtr> SentinelPointers = new();
+    private static readonly HashSet<IntPtr> SentinelsAfterTarget = new();
     private static readonly List<OverlapSentinel> Sentinels = new();
     private static readonly List<WeakReference<GodotObject>> SentinelTracked = new();
     private static WeakReference<GodotObject>? targetTracked;
     private static IntPtr target;
-    private static int sequence, targetCalls, reachedOrder, exitOrder, returnedOrder, sentinelReturns, failed, finished, later;
+    private static bool preBase;
+    private static string label = "overlap";
+    private static int sequence, targetCalls, exitOrder, bodyEntries, finalizerEntries, active;
+    private static int sentinelReturns, failed, finished, later;
 
     private static int Next() => Interlocked.Increment(ref sequence);
 
     private static void Fail(string reason)
     {
         Interlocked.Exchange(ref failed, 1);
-        GD.PrintErr("FAIL overlap: " + reason);
+        GD.PrintErr($"FAIL {label}: " + reason);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -118,7 +122,11 @@ internal static class FinalizerOverlap
             var keys = instances.Keys.ToList();
             var targetIndex = keys.IndexOf(targetTracked!);
             later = SentinelTracked.Count(tracked => keys.IndexOf(tracked) > targetIndex);
-            if (later >= 4 && SentinelTracked.Count - later >= 4) return;
+            if (later < 4 || SentinelTracked.Count - later < 4) continue;
+            for (var s = 0; s < Sentinels.Count; s++)
+                if (keys.IndexOf(SentinelTracked[s]) > targetIndex)
+                    SentinelsAfterTarget.Add(Sentinels[s].NativeInstance);
+            return;
         }
         throw new Exception("Sentinels could not be placed around the target.");
     }
@@ -132,21 +140,20 @@ internal static class FinalizerOverlap
                 Fail("second native dispose of the target.");
                 return;
             }
-            Entered.Set();
-            if (!Release.Wait(TimeSpan.FromSeconds(15))) Fail("window gate timed out.");
+            if (!preBase)
+            {
+                Entered.Set();
+                if (!Release.Wait(TimeSpan.FromSeconds(15))) Fail("window gate timed out.");
+            }
             forward();
-            Volatile.Write(ref exitOrder, Next());
-            Exited.Set();
-            TryFinish();
         }
         else if (!finalizer && SentinelPointers.Contains(pointer))
         {
-            var order = Next();
-            if (!SentinelOrder.TryAdd(pointer, order)) Fail("second native dispose of a sentinel.");
-            var reached = Volatile.Read(ref reachedOrder);
-            if (reached != 0 && order > reached && Volatile.Read(ref exitOrder) == 0)
+            if (!SentinelOrder.TryAdd(pointer, Next())) Fail("second native dispose of a sentinel.");
+            Started.Set();
+            if (SentinelsAfterTarget.Contains(pointer) && Volatile.Read(ref exitOrder) == 0)
             {
-                Fail("shutdown disposed a later object while the finalizer was inside base disposal.");
+                Fail("shutdown disposed a later object before the target finished disposal.");
                 Release.Set();
             }
             forward();
@@ -155,15 +162,23 @@ internal static class FinalizerOverlap
         else forward();
     }
 
-    internal static void ShutdownReached()
+    internal static void BodyEntered(bool disposing)
     {
-        Volatile.Write(ref reachedOrder, Next());
-        Reached.Set();
+        Interlocked.Increment(ref bodyEntries);
+        if (!disposing) Interlocked.Increment(ref finalizerEntries);
+        if (Interlocked.Increment(ref active) > 1) Fail("two threads were inside the derived disposal body at once.");
+        if (preBase && !disposing && Volatile.Read(ref finalizerEntries) == 1)
+        {
+            Entered.Set();
+            if (!Release.Wait(TimeSpan.FromSeconds(15))) Fail("pre-base gate timed out.");
+        }
     }
 
-    internal static void ShutdownReturned()
+    internal static void BodyExited()
     {
-        Volatile.Write(ref returnedOrder, Next());
+        Volatile.Write(ref exitOrder, Next());
+        Interlocked.Decrement(ref active);
+        Exited.Set();
         TryFinish();
     }
 
@@ -175,41 +190,47 @@ internal static class FinalizerOverlap
 
     private static void TryFinish()
     {
-        var exit = Volatile.Read(ref exitOrder);
-        var returned = Volatile.Read(ref returnedOrder);
-        if (exit == 0 || returned == 0 || Volatile.Read(ref sentinelReturns) != Sentinels.Count) return;
+        if (Volatile.Read(ref exitOrder) == 0 || Volatile.Read(ref sentinelReturns) != Sentinels.Count) return;
         if (Interlocked.Exchange(ref finished, 1) != 0) return;
         var instances = DisposeShim.Instances();
         if (Volatile.Read(ref targetCalls) != 1) Fail("target native dispose count was " + targetCalls + ".");
-        if (returned < exit) Fail("shutdown returned before the finalizer completed base disposal.");
+        if (Volatile.Read(ref bodyEntries) != 1 || Volatile.Read(ref finalizerEntries) != 1)
+            Fail($"derived disposal body entries were {bodyEntries}, finalizer entries {finalizerEntries}.");
         if (instances.ContainsKey(targetTracked!)) Fail("target tracker entry remained.");
         if (SentinelTracked.Any(instances.ContainsKey)) Fail("sentinel tracker entries remained.");
         if (Volatile.Read(ref failed) == 0)
             GD.Print(
-                $"PASS overlap: one native dispose of the target; shutdown waited for the finalizer; {later} of "
-                + $"{Sentinels.Count} sentinels followed the target and all were disposed; tracker entries removed."
+                $"PASS {label}: one owner entered the derived body; one native dispose of the target; shutdown waited "
+                + $"for it; {later} of {Sentinels.Count} sentinels followed the target and all were disposed; "
+                + "tracker entries removed."
             );
         Done.Set();
     }
 
-    internal static void Start()
+    internal static void Start(bool beforeBase)
     {
+        preBase = beforeBase;
+        label = beforeBase ? "prebase" : "overlap";
         DisposeShim.Handler = Handle;
         DisposeShim.Install();
         MakeTarget();
         PlaceSentinels();
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, true, true);
-        if (!Entered.Wait(TimeSpan.FromSeconds(5))) throw new Exception("Finalizer did not enter base disposal.");
-        GD.Print("READY overlap finalizer held inside base disposal.");
+        if (!Entered.Wait(TimeSpan.FromSeconds(5))) throw new Exception("Finalizer did not enter its hold point.");
+        GD.Print(
+            beforeBase
+                ? "READY prebase finalizer held before base disposal."
+                : "READY overlap finalizer held inside base disposal."
+        );
         new Thread(Watch) { IsBackground = true }.Start();
     }
 
     private static void Watch()
     {
-        if (!Reached.Wait(TimeSpan.FromSeconds(10))) Fail("shutdown never reached the target.");
+        if (!Started.Wait(TimeSpan.FromSeconds(10))) Fail("shutdown never started disposing tracked objects.");
         Thread.Sleep(750);
         Release.Set();
-        if (!Exited.Wait(TimeSpan.FromSeconds(5))) Fail("finalizer did not leave base disposal.");
+        if (!Exited.Wait(TimeSpan.FromSeconds(5))) Fail("finalizer did not leave the derived disposal body.");
         if (!Done.Wait(TimeSpan.FromSeconds(5))) Fail("shutdown did not finish disposing tracked objects.");
     }
 }

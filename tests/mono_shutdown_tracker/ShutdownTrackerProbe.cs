@@ -40,9 +40,9 @@ public partial class ShutdownTrackerProbe : Node
             var args = OS.GetCmdlineUserArgs();
             var running = args.Contains("--running-finalizer");
             GD.Print("ASSEMBLY " + typeof(GodotObject).Assembly.Location);
-            if (args.Contains("--overlap-finalizer"))
+            if (args.Contains("--overlap-finalizer") || args.Contains("--prebase-finalizer"))
             {
-                FinalizerOverlap.Start();
+                FinalizerOverlap.Start(args.Contains("--prebase-finalizer"));
                 tree.Quit();
                 return;
             }
@@ -72,6 +72,12 @@ public partial class ShutdownTrackerProbe : Node
                 if (running && PointerTransitions != 1) throw new Exception("Expected one native pointer transition.");
                 GD.Print("CONTROL finalizer queue drained before shutdown.");
             }
+            if (running && args.Contains("--release-after-quit"))
+                new Thread(() =>
+                {
+                    Thread.Sleep(750);
+                    Release.Set();
+                }) { IsBackground = true }.Start();
             tree.Quit();
         }
         catch (Exception error)
@@ -87,7 +93,8 @@ public partial class RunningFinalizerResource : RefCounted
 {
     protected override void Dispose(bool disposing)
     {
-        if (!disposing)
+        if (disposing) GD.PrintErr("FAIL shutdown entered the derived disposal body.");
+        else
         {
             ShutdownTrackerProbe.Entered.Set();
             if (!ShutdownTrackerProbe.Release.Wait(TimeSpan.FromSeconds(15)))
@@ -104,14 +111,7 @@ public partial class RunningFinalizerResource : RefCounted
         {
             if (!disposing) ShutdownTrackerProbe.Finished.Set();
         }
-        if (disposing)
-        {
-            ShutdownTrackerProbe.Release.Set();
-            if (!ShutdownTrackerProbe.Finished.Wait(TimeSpan.FromSeconds(5)))
-                GD.PrintErr("FAIL finalizer did not complete during shutdown disposal.");
-            if (ShutdownTrackerProbe.PointerTransitions != 1)
-                GD.PrintErr("FAIL unexpected native pointer transition count.");
-            else GD.Print("PASS shutdown native pointer transition once; finalizer completed.");
-        }
+        if (!disposing && ShutdownTrackerProbe.PointerTransitions == 1)
+            GD.Print("PASS running: the finalizer owned the only native pointer transition.");
     }
 }

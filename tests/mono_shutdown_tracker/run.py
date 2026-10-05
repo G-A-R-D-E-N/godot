@@ -13,7 +13,11 @@ LEGACY = {
     "running-held": ["--running-finalizer"],
     "running-drained": ["--running-finalizer", "--release-before-quit"],
 }
-OWNERSHIP = {"overlap": "--overlap-finalizer", "race": "--race-dispose"}
+OWNERSHIP = {"overlap": "--overlap-finalizer", "prebase": "--prebase-finalizer", "race": "--race-dispose"}
+READY = {
+    "overlap": "READY overlap finalizer held inside base disposal.",
+    "prebase": "READY prebase finalizer held before base disposal.",
+}
 
 
 def identity(path):
@@ -37,7 +41,10 @@ def expected_leak_diagnostics(diagnostics, running):
 def cases(version):
     if version == "baseline":
         return dict(LEGACY)
-    selected = {} if version == "control" else dict(LEGACY)
+    if version == "control":
+        return {name: [OWNERSHIP[name]] for name in ["overlap", "prebase"]}
+    selected = dict(LEGACY)
+    selected["running-held"] = ["--running-finalizer", "--release-after-quit"]
     selected.update({name: [flag] for name, flag in OWNERSHIP.items()})
     return selected
 
@@ -55,7 +62,7 @@ def judge(version, case, result, elapsed, output, engine):
     passed = elapsed < 15 and len(assembly_lines) == 1
     passed &= Path(assembly_lines[0]).resolve().is_relative_to(engine.parent) if assembly_lines else False
     if owned:
-        ready = "READY overlap finalizer held inside base disposal." in output or case == "race"
+        ready = READY.get(case, "") in output or case == "race"
         success = result.returncode == 0 and ready and f"PASS {case}:" in output and not diagnostics
         if version == "control":
             failed = f"FAIL {case}:" in output or result.returncode != 0
@@ -74,7 +81,7 @@ def judge(version, case, result, elapsed, output, engine):
     else:
         passed &= not diagnostics
         if running:
-            passed &= "PASS shutdown native pointer transition once; finalizer completed." in output
+            passed &= "PASS running: the finalizer owned the only native pointer transition." in output
     return passed, diagnostics, assembly_lines
 
 
