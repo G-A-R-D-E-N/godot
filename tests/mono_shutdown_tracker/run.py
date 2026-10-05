@@ -3,9 +3,13 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 from pathlib import Path
+
+# Packages the probe restores from the candidate engine's own nupkgs directory.
+GODOT_PACKAGES = ["godot.net.sdk", "godotsharp", "godot.sourcegenerators", "godotsharpeditor"]
 
 LEGACY = {
     "queued-held": [],
@@ -19,6 +23,7 @@ OWNERSHIP = {
     "race": "--race-dispose",
     "throw-shutdown": "--throw-recover-shutdown",
     "throw-finalizer": "--throw-recover-finalizer",
+    "reentrant-throw": "--reentrant-throw-finalizer",
     "owner-api": "--owner-prebase-api",
 }
 CONTROL = ["throw-shutdown", "throw-finalizer", "owner-api"]
@@ -27,11 +32,70 @@ READY = {
     "prebase": "READY prebase finalizer held before base disposal.",
     "throw-shutdown": "READY throw-shutdown disposal failed before base disposal;",
     "throw-finalizer": "READY throw-finalizer disposal failed before base disposal;",
+    "reentrant-throw": "READY reentrant-throw disposal failed before base disposal;",
 }
 
 
 def identity(path):
     return {"path": str(path), "size": path.stat().st_size, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
+def matching_sdk_version(engine, flags):
+    """The Godot.NET.Sdk version the candidate engine's own build produced.
+
+    The status in the engine's own version string is what GODOT_VERSION_STATUS set for its
+    build, and build_assemblies.py turns it into the package version. Deriving it from the
+    engine under test is what makes the probe build against that engine instead of whatever
+    package version happens to sit in a NuGet cache.
+    """
+    feed = engine.parent / "GodotSharp" / "Tools" / "nupkgs"
+    if not feed.is_dir():
+        raise RuntimeError(f"No Godot.NET.Sdk feed next to the candidate engine: {feed}")
+    version = subprocess.run(
+        [str(engine), "--version"], capture_output=True, text=True, timeout=60, creationflags=flags
+    )
+    version_text = (version.stdout + version.stderr).strip()
+    match = re.search(r"\d+\.\d+\.(.+?)\.mono\.double", version_text)
+    if version.returncode != 0 or not match:
+        raise RuntimeError(f"Could not read a Mono double version from {engine}: {version_text!r}")
+    status = match.group(1)
+    prerelease = re.sub(r"(\d+)$", r".\1", status)
+    versions = {
+        found.group(1)
+        for package in feed.glob("Godot.NET.Sdk.*.nupkg")
+        if (found := re.fullmatch(r"Godot\.NET\.Sdk\.(.+)\.nupkg", package.name))
+        and "-" in found.group(1)
+        and found.group(1).split("-", 1)[1] == prerelease
+    }
+    if len(versions) != 1:
+        raise RuntimeError(
+            f"The candidate engine reports {status}, which is package version {prerelease}, but {feed} "
+            f"has {sorted(versions) or 'no matching package'}. Build the assemblies with the same "
+            "GODOT_VERSION_STATUS as the engine; the probe must not fall back to a cached package."
+        )
+    return versions.pop(), feed
+
+
+def require_matching_packages(project, packages, feed, version):
+    """The restore must have taken the candidate's own packages, not a cached older build."""
+    for package_id, file_name in [
+        ("godot.net.sdk", f"Godot.NET.Sdk.{version}.nupkg"),
+        ("godotsharp", f"GodotSharp.{version}.nupkg"),
+    ]:
+        restored = packages / package_id / version / f"{package_id}.{version}.nupkg"
+        if not restored.is_file():
+            raise RuntimeError(f"{file_name} was not restored into {restored}.")
+        if identity(restored)["sha256"] != identity(feed / file_name)["sha256"]:
+            raise RuntimeError(
+                f"{file_name} in {restored} is not the candidate engine's package. "
+                "A stale NuGet cache or a different package source was used."
+            )
+    assets = json.loads((project / ".godot/mono/temp/obj/project.assets.json").read_text(encoding="utf-8"))
+    resolved = sorted(name for name in assets["libraries"] if name.startswith("Godot"))
+    stale = [name for name in resolved if name.split("/", 1)[1] != version]
+    if stale:
+        raise RuntimeError(f"The probe resolved packages other than {version}: {stale}.")
+    return resolved
 
 
 def expected_leak_diagnostics(diagnostics, running):
@@ -103,19 +167,45 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     project = Path(__file__).resolve().parent
-    args.output.mkdir(parents=True, exist_ok=False)
+    candidate = args.candidate.resolve()
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    sdk_version, feed = matching_sdk_version(candidate, flags)
+    args.output.mkdir(parents=True, exist_ok=False)
+    print(f"candidate build package version {sdk_version} from {feed}", flush=True)
+    # The probe must use the candidate's own packages, so clear any earlier restore of them.
+    packages = project / ".nuget-packages"
+    for package_id in GODOT_PACKAGES:
+        cached = packages / package_id / sdk_version
+        if cached.exists():
+            shutil.rmtree(cached)
     config = project / "NuGet.config"
     created_config = not config.exists()
     if created_config:
-        config.write_bytes((project / "NuGet.sources.xml").read_bytes())
+        sources = (project / "NuGet.sources.xml").read_text(encoding="utf-8")
+        config.write_text(
+            re.sub(
+                r'(<add key="matching-engine" value=")[^"]*(")',
+                lambda match: match.group(1) + str(feed) + match.group(2),
+                sources,
+            ),
+            encoding="utf-8",
+            newline="\n",
+        )
     try:
         build = subprocess.run(
-            ["dotnet", "build", str(project / "ShutdownTrackerProbe.csproj"), "-c", "Debug"],
+            [
+                "dotnet",
+                "build",
+                str(project / "ShutdownTrackerProbe.csproj"),
+                "-c",
+                "Debug",
+                "-p:MatchingEngineSdkVersion=" + sdk_version,
+            ],
             capture_output=True,
             text=True,
             timeout=300,
             creationflags=flags,
+            env=dict(os.environ, NUGET_PACKAGES=str(packages)),
         )
     finally:
         if created_config:
@@ -123,13 +213,20 @@ def main():
     (args.output / "build.log").write_text(build.stdout + build.stderr, encoding="utf-8")
     if build.returncode:
         raise RuntimeError("Probe build failed; see build.log.")
+    resolved = require_matching_packages(project, packages, feed, sdk_version)
     runs = []
     identities = [
         identity(project / "ShutdownTrackerProbe.cs"),
         identity(project / "FinalizerOverlap.cs"),
         identity(project / ".godot/mono/temp/bin/Debug/ShutdownTrackerProbe.dll"),
     ]
-    engines = [("baseline", args.baseline), ("candidate", args.candidate), ("control", args.control)]
+    for package_id, file_name in [
+        ("godot.net.sdk", f"Godot.NET.Sdk.{sdk_version}.nupkg"),
+        ("godotsharp", f"GodotSharp.{sdk_version}.nupkg"),
+    ]:
+        identities.append(identity(feed / file_name))
+        identities.append(identity(packages / package_id / sdk_version / f"{package_id}.{sdk_version}.nupkg"))
+    engines = [("baseline", args.baseline), ("candidate", candidate), ("control", args.control)]
     for version, engine in engines:
         if engine is None:
             continue
@@ -160,7 +257,18 @@ def main():
             })
             print(name, "PASS" if passed else "FAIL", flush=True)
     (args.output / "results.json").write_text(
-        json.dumps({"identities": identities, "runs": runs}, indent=2), encoding="utf-8"
+        json.dumps(
+            {
+                "matching_sdk_version": sdk_version,
+                "matching_sdk_feed": str(feed),
+                "resolved_packages": resolved,
+                "nuget_packages": str(packages),
+                "identities": identities,
+                "runs": runs,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
     )
     if not all(run["passed"] for run in runs):
         raise RuntimeError("Shutdown tracker comparison failed; see results.json.")

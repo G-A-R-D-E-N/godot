@@ -112,11 +112,22 @@ namespace Godot
         /// </summary>
         public void Dispose()
         {
-            DisposeOwned(true);
-            GC.SuppressFinalize(this);
+            // Only suppress finalization when disposal actually completed. A re-entrant call
+            // (the owner itself) or a losing finalizer owns nothing: suppressing there would
+            // strand the native resource and the tracker entry if the owner then failed before
+            // base disposal, because the finalizer could no longer finish the cleanup.
+            if (DisposeOwned(true))
+            {
+                GC.SuppressFinalize(this);
+            }
         }
 
-        private void DisposeOwned(bool disposing)
+        /// <summary>
+        /// Runs disposal under a single owner. Returns whether disposal has completed by the
+        /// time this call returns, either because it performed it or because it waited for an
+        /// owner that did.
+        /// </summary>
+        private bool DisposeOwned(bool disposing)
         {
             int thread = System.Environment.CurrentManagedThreadId;
 
@@ -125,25 +136,36 @@ namespace Godot
                 int owner = Interlocked.CompareExchange(ref _disposeOwner, thread, 0);
 
                 if (owner == 0)
-                    break;
+                {
+                    try
+                    {
+                        Dispose(disposing);
+                    }
+                    finally
+                    {
+                        Volatile.Write(ref _disposeOwner, Volatile.Read(ref _disposeCompleted) ? -1 : 0);
+                    }
 
-                if (!disposing || owner < 0 || owner == thread)
-                    return;
+                    return Volatile.Read(ref _disposeCompleted);
+                }
+
+                if (owner < 0)
+                {
+                    return true;
+                }
+
+                if (!disposing || owner == thread)
+                {
+                    // A finalizer must not wait for an owner, and a re-entrant call from the
+                    // owner's thread has not disposed anything.
+                    return false;
+                }
 
                 if (!SpinWait.SpinUntil(() => Volatile.Read(ref _disposeOwner) <= 0, DisposeWaitMilliseconds))
                 {
                     GD.PushError("Timed out waiting for another thread to finish disposing a Godot Object.");
-                    return;
+                    return Volatile.Read(ref _disposeOwner) < 0;
                 }
-            }
-
-            try
-            {
-                Dispose(disposing);
-            }
-            finally
-            {
-                Volatile.Write(ref _disposeOwner, Volatile.Read(ref _disposeCompleted) ? -1 : 0);
             }
         }
 

@@ -1,4 +1,7 @@
-﻿<Project Sdk="Godot.NET.Sdk/4.8.0-dev-double">
+﻿<Project Sdk="Godot.NET.Sdk/$(MatchingEngineSdkVersion)">
+  <!-- run.py resolves MatchingEngineSdkVersion from the candidate engine's own
+       bin/GodotSharp/Tools/nupkgs and passes it on the command line, so the probe is
+       always compiled against the engine under test instead of a cached older package. -->
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>

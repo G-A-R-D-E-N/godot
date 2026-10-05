@@ -46,6 +46,12 @@ public partial class ShutdownTrackerProbe : Node
                 tree.Quit();
                 return;
             }
+            if (args.Contains("--reentrant-throw-finalizer"))
+            {
+                DisposeFailure.StartReentrantThrow();
+                tree.Quit();
+                return;
+            }
             if (args.Contains("--owner-prebase-api"))
             {
                 DisposeFailure.StartOwnerApi();
