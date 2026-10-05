@@ -11,6 +11,15 @@ from pathlib import Path
 # Packages the probe restores from the candidate engine's own nupkgs directory.
 GODOT_PACKAGES = ["godot.net.sdk", "godotsharp", "godot.sourcegenerators", "godotsharpeditor"]
 
+# The race case is a wall-clock-bound stress loop (20000 iterations of three threads disposing
+# one object), so its duration follows the host's CPU count: about a second on a 12-core
+# machine, over two minutes on two cores. The other cases wait on fifteen-second gates that
+# print a FAIL of their own when they expire, so the short budget only backstops them.
+GATED_CASE_ELAPSED_LIMIT = 15
+STRESS_CASE = "race"
+STRESS_CASE_ELAPSED_LIMIT = 120
+STRESS_CASE_TIMEOUT = 150
+
 LEGACY = {
     "queued-held": [],
     "queued-drained": ["--release-before-quit"],
@@ -123,6 +132,10 @@ def cases(version):
     return selected
 
 
+def case_elapsed_limit(case):
+    return STRESS_CASE_ELAPSED_LIMIT if case == STRESS_CASE else GATED_CASE_ELAPSED_LIMIT
+
+
 def judge(version, case, result, elapsed, output, engine):
     assembly_lines = [line[9:] for line in output.splitlines() if line.startswith("ASSEMBLY ")]
     diagnostics = [
@@ -133,7 +146,7 @@ def judge(version, case, result, elapsed, output, engine):
     owned = case in OWNERSHIP
     running = case.startswith("running")
     drained = case.endswith("drained")
-    passed = elapsed < 15 and len(assembly_lines) == 1
+    passed = elapsed < case_elapsed_limit(case) and len(assembly_lines) == 1
     passed &= Path(assembly_lines[0]).resolve().is_relative_to(engine.parent) if assembly_lines else False
     if owned:
         ready = READY.get(case, "") in output
@@ -239,7 +252,7 @@ def main():
                 [str(engine), "--headless", "--verbose", "--path", str(project), "--", *user_args],
                 capture_output=True,
                 text=True,
-                timeout=40,
+                timeout=STRESS_CASE_TIMEOUT if case == STRESS_CASE else 40,
                 creationflags=flags,
             )
             elapsed = time.monotonic() - started
@@ -255,7 +268,9 @@ def main():
                 "passed": bool(passed),
                 "diagnostics": diagnostics,
             })
-            print(name, "PASS" if passed else "FAIL", flush=True)
+            print(f"{name} {'PASS' if passed else 'FAIL'} ({elapsed:.1f}s)", flush=True)
+            if not passed and diagnostics:
+                print("  " + " | ".join(diagnostics[:3]), flush=True)
     (args.output / "results.json").write_text(
         json.dumps(
             {
