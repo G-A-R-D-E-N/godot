@@ -1,0 +1,4 @@
+.godot/
+.nuget-packages/
+.proof/
+*.cs.uid
