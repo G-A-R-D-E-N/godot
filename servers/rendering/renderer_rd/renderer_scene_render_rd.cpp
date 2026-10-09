@@ -770,6 +770,9 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 
 		tonemap.luminance_multiplier = rb->get_luminance_multiplier();
 		tonemap.view_count = rb->get_view_count();
+		if (can_use_effects) {
+			_setup_night_vision(tonemap, p_render_data);
+		}
 
 		RID dest_fb;
 		RD::DataFormat dest_fb_format;
@@ -986,6 +989,9 @@ void RendererSceneRenderRD::_post_process_subpass(RID p_source_texture, RID p_fr
 
 	tonemap.luminance_multiplier = rb->get_luminance_multiplier();
 	tonemap.view_count = rb->get_view_count();
+	if (can_use_effects) {
+		_setup_night_vision(tonemap, p_render_data);
+	}
 
 	if (rb->get_use_debanding() && !using_hdr) {
 		tonemap.debanding_mode = RendererRD::ToneMapper::TonemapSettings::DebandingMode::DEBANDING_MODE_8_BIT;
@@ -996,6 +1002,14 @@ void RendererSceneRenderRD::_post_process_subpass(RID p_source_texture, RID p_fr
 	tone_mapper->tonemapper_subpass(draw_list, p_source_texture, RD::get_singleton()->framebuffer_get_format(p_framebuffer), tonemap);
 
 	RD::get_singleton()->draw_command_end_label();
+}
+
+void RendererSceneRenderRD::_setup_night_vision(RendererRD::ToneMapper::TonemapSettings &r_tonemap, const RenderDataRD *p_render_data) {
+	if (p_render_data->environment.is_null()) {
+		return;
+	}
+	r_tonemap.night_vision = environment_get_night_vision(p_render_data->environment);
+	r_tonemap.night_vision_exposure_normalization = is_using_physical_light_units() && p_render_data->camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes) : 1.0f;
 }
 
 void RendererSceneRenderRD::_disable_clear_request(const RenderDataRD *p_render_data) {

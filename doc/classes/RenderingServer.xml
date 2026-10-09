@@ -1418,6 +1418,20 @@
 				Configures glow for the specified environment RID. See [code]glow_*[/code] properties in [Environment] for more information.
 			</description>
 		</method>
+		<method name="environment_set_night_vision">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="mesopic_min" type="float" />
+			<param index="3" name="mesopic_max" type="float" />
+			<param index="4" name="blue_shift" type="float" />
+			<param index="5" name="blue_shift_chromaticity" type="Vector2" />
+			<param index="6" name="desaturation" type="float" />
+			<param index="7" name="acuity_radius" type="float" />
+			<description>
+				Configures the low-light vision simulation of the tonemapper for the specified environment RID. See [code]night_vision_*[/code] properties in [Environment] for more information.
+			</description>
+		</method>
 		<method name="environment_set_sdfgi">
 			<return type="void" />
 			<param index="0" name="env" type="RID" />

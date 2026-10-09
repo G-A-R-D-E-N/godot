@@ -344,6 +344,14 @@ float RendererSceneRender::environment_get_aerial_perspective_max_distance(RID p
 	return environment_storage.environment_get_aerial_perspective_max_distance(p_env);
 }
 
+void RendererSceneRender::environment_set_night_vision(RID p_env, bool p_enable, float p_mesopic_min, float p_mesopic_max, float p_blue_shift, const Vector2 &p_blue_shift_chromaticity, float p_desaturation, float p_acuity_radius) {
+	environment_storage.environment_set_night_vision(p_env, p_enable, p_mesopic_min, p_mesopic_max, p_blue_shift, p_blue_shift_chromaticity, p_desaturation, p_acuity_radius);
+}
+
+RendererEnvironmentStorage::NightVision RendererSceneRender::environment_get_night_vision(RID p_env) const {
+	return environment_storage.environment_get_night_vision(p_env);
+}
+
 // Volumetric Fog
 
 void RendererSceneRender::environment_set_volumetric_fog(RID p_env, bool p_enable, float p_density, const Color &p_albedo, const Color &p_emission, float p_emission_energy, float p_anisotropy, float p_length, float p_detail_spread, float p_gi_inject, bool p_temporal_reprojection, float p_temporal_reprojection_amount, float p_ambient_inject, float p_sky_affect) {

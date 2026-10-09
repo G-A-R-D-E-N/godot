@@ -205,6 +205,16 @@ private:
 
 	void _update_aerial_perspective();
 
+	bool night_vision_enabled = false;
+	float night_vision_mesopic_min = 0.005;
+	float night_vision_mesopic_max = 5.0;
+	float night_vision_blue_shift = 1.0;
+	Vector2 night_vision_blue_shift_chromaticity = Vector2(0.25, 0.25);
+	float night_vision_desaturation = 1.0;
+	float night_vision_acuity_radius = 1.0;
+
+	void _update_night_vision();
+
 	// Volumetric Fog
 	bool volumetric_fog_enabled = false;
 	float volumetric_fog_density = 0.05;
@@ -421,6 +431,21 @@ public:
 	Ref<Texture3D> get_aerial_perspective_texture() const;
 	void set_aerial_perspective_max_distance(float p_distance);
 	float get_aerial_perspective_max_distance() const;
+
+	void set_night_vision_enabled(bool p_enabled);
+	bool is_night_vision_enabled() const;
+	void set_night_vision_mesopic_min(float p_luminance);
+	float get_night_vision_mesopic_min() const;
+	void set_night_vision_mesopic_max(float p_luminance);
+	float get_night_vision_mesopic_max() const;
+	void set_night_vision_blue_shift(float p_amount);
+	float get_night_vision_blue_shift() const;
+	void set_night_vision_blue_shift_chromaticity(const Vector2 &p_chromaticity);
+	Vector2 get_night_vision_blue_shift_chromaticity() const;
+	void set_night_vision_desaturation(float p_amount);
+	float get_night_vision_desaturation() const;
+	void set_night_vision_acuity_radius(float p_radius);
+	float get_night_vision_acuity_radius() const;
 
 	// Volumetric Fog
 	void set_volumetric_fog_enabled(bool p_enable);
