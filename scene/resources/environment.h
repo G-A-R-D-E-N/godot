@@ -212,6 +212,7 @@ private:
 	Vector2 night_vision_blue_shift_chromaticity = Vector2(0.25, 0.25);
 	float night_vision_desaturation = 1.0;
 	float night_vision_acuity_radius = 1.0;
+	float night_vision_highlight_range = 0.0;
 
 	void _update_night_vision();
 
@@ -446,6 +447,8 @@ public:
 	float get_night_vision_desaturation() const;
 	void set_night_vision_acuity_radius(float p_radius);
 	float get_night_vision_acuity_radius() const;
+	void set_night_vision_highlight_range(float p_range);
+	float get_night_vision_highlight_range() const;
 
 	// Volumetric Fog
 	void set_volumetric_fog_enabled(bool p_enable);

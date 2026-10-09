@@ -1007,8 +1007,17 @@ float Environment::get_night_vision_acuity_radius() const {
 	return night_vision_acuity_radius;
 }
 
+void Environment::set_night_vision_highlight_range(float p_range) {
+	night_vision_highlight_range = p_range;
+	_update_night_vision();
+}
+
+float Environment::get_night_vision_highlight_range() const {
+	return night_vision_highlight_range;
+}
+
 void Environment::_update_night_vision() {
-	RS::get_singleton()->environment_set_night_vision(environment, night_vision_enabled, night_vision_mesopic_min, night_vision_mesopic_max, night_vision_blue_shift, night_vision_blue_shift_chromaticity, night_vision_desaturation, night_vision_acuity_radius);
+	RS::get_singleton()->environment_set_night_vision(environment, night_vision_enabled, night_vision_mesopic_min, night_vision_mesopic_max, night_vision_blue_shift, night_vision_blue_shift_chromaticity, night_vision_desaturation, night_vision_acuity_radius, night_vision_highlight_range);
 }
 
 // Volumetric Fog
@@ -1719,6 +1728,8 @@ void Environment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_night_vision_desaturation"), &Environment::get_night_vision_desaturation);
 	ClassDB::bind_method(D_METHOD("set_night_vision_acuity_radius", "radius"), &Environment::set_night_vision_acuity_radius);
 	ClassDB::bind_method(D_METHOD("get_night_vision_acuity_radius"), &Environment::get_night_vision_acuity_radius);
+	ClassDB::bind_method(D_METHOD("set_night_vision_highlight_range", "range"), &Environment::set_night_vision_highlight_range);
+	ClassDB::bind_method(D_METHOD("get_night_vision_highlight_range"), &Environment::get_night_vision_highlight_range);
 
 	ADD_GROUP("Night Vision", "night_vision_");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "night_vision_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_night_vision_enabled", "is_night_vision_enabled");
@@ -1728,6 +1739,7 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "night_vision_blue_shift_chromaticity"), "set_night_vision_blue_shift_chromaticity", "get_night_vision_blue_shift_chromaticity");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "night_vision_desaturation", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_night_vision_desaturation", "get_night_vision_desaturation");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "night_vision_acuity_radius", PROPERTY_HINT_RANGE, "0,8,0.01,or_greater,suffix:px"), "set_night_vision_acuity_radius", "get_night_vision_acuity_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "night_vision_highlight_range", PROPERTY_HINT_RANGE, "0,16,0.01,or_greater"), "set_night_vision_highlight_range", "get_night_vision_highlight_range");
 
 	// Constants
 

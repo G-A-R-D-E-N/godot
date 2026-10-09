@@ -193,6 +193,9 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 
 	tonemap.push_constant.flags |= p_settings.night_vision.enabled ? TONEMAP_FLAG_USE_NIGHT_VISION : 0;
 	write_night_vision(tonemap.push_constant, p_settings);
+	if (p_settings.night_vision.enabled) {
+		tonemap.push_constant.flags |= uint32_t(Math::make_half_float(p_settings.night_vision.highlight_range)) << TONEMAP_FLAG_HIGHLIGHT_RANGE_SHIFT;
+	}
 
 	if (p_settings.view_count > 1) {
 		// Use USE_MULTIVIEW versions
@@ -275,6 +278,7 @@ void ToneMapper::tonemapper_mobile(RID p_source_color, RID p_dst_framebuffer, co
 	tonemap_mobile.push_constant.tonemapper_params[3] = p_settings.tonemapper_params[3];
 
 	write_night_vision(tonemap_mobile.push_constant, p_settings);
+	tonemap_mobile.push_constant.night_vision_highlight_range = p_settings.night_vision.enabled ? p_settings.night_vision.highlight_range : 0.0f;
 
 	uint32_t spec_constant = 0;
 	spec_constant |= p_settings.use_bcs ? TONEMAP_MOBILE_FLAG_USE_BCS : 0;
@@ -368,6 +372,7 @@ void ToneMapper::tonemapper_subpass(RD::DrawListID p_subpass_draw_list, RID p_so
 	tonemap_mobile.push_constant.tonemapper_params[3] = p_settings.tonemapper_params[3];
 
 	write_night_vision(tonemap_mobile.push_constant, p_settings);
+	tonemap_mobile.push_constant.night_vision_highlight_range = p_settings.night_vision.enabled ? p_settings.night_vision.highlight_range : 0.0f;
 
 	uint32_t spec_constant = TONEMAP_MOBILE_ADRENO_BUG;
 	spec_constant |= p_settings.use_bcs ? TONEMAP_MOBILE_FLAG_USE_BCS : 0;

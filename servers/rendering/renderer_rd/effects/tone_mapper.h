@@ -77,6 +77,7 @@ private:
 		TONEMAP_FLAG_USE_8_BIT_DEBANDING = (1 << 5),
 		TONEMAP_FLAG_CONVERT_TO_SRGB = (1 << 6),
 		TONEMAP_FLAG_USE_NIGHT_VISION = (1 << 7),
+		TONEMAP_FLAG_HIGHLIGHT_RANGE_SHIFT = 16,
 	};
 
 	enum FlagsMobile {
@@ -150,7 +151,8 @@ private:
 		uint32_t night_vision_chromaticity; // offset 76
 
 		uint32_t night_vision_strength_acuity; // offset 80
-		float pad[3]; // offset 84, size 96
+		float night_vision_highlight_range; // offset 84
+		float pad[2]; // offset 88, size 96
 	};
 
 	/* tonemap actually writes to a framebuffer, which is

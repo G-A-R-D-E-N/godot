@@ -99,7 +99,8 @@ layout(push_constant, std430) uniform Params {
 	uint night_vision_chromaticity;
 
 	uint night_vision_strength_acuity;
-	float pad[3];
+	float night_vision_highlight_range;
+	float pad[2];
 }
 params;
 
@@ -739,6 +740,17 @@ vec3 apply_night_vision(vec3 color, float exposure) {
 	return mix(color, rod * tint, (1.0 - photopic) * strength_acuity.x);
 }
 
+#define NIGHT_VISION_HIGHLIGHT_KNEE 0.25
+
+vec3 apply_night_highlights(vec3 color, float range) {
+	float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
+	if (range <= 0.0 || luminance <= NIGHT_VISION_HIGHLIGHT_KNEE) {
+		return color;
+	}
+	float excess = luminance - NIGHT_VISION_HIGHLIGHT_KNEE;
+	return color * ((NIGHT_VISION_HIGHLIGHT_KNEE + range * log(1.0 + excess / range)) / luminance);
+}
+
 // From https://alex.vlachos.com/graphics/Alex_Vlachos_Advanced_VR_Rendering_GDC2015.pdf
 // and https://www.shadertoy.com/view/MslGR8 (5th one starting from the bottom)
 // NOTE: `frag_coord` is in pixels (i.e. not normalized UV).
@@ -798,6 +810,7 @@ void main() {
 
 	if (params.night_vision_inv_range > 0.0) {
 		color.rgb = apply_night_vision(color.rgb, params.exposure);
+		color.rgb = apply_night_highlights(color.rgb, params.night_vision_highlight_range);
 	}
 
 	// Tonemap to lower dynamic range.

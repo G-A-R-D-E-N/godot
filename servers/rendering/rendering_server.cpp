@@ -3112,7 +3112,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("environment_set_fog", "env", "enable", "light_color", "light_energy", "sun_scatter", "density", "height", "height_density", "aerial_perspective", "sky_affect", "fog_mode"), &RenderingServer::environment_set_fog, DEFVAL(RSE::ENV_FOG_MODE_EXPONENTIAL));
 	ClassDB::bind_method(D_METHOD("environment_set_fog_depth", "env", "curve", "begin", "end"), &RenderingServer::environment_set_fog_depth);
 	ClassDB::bind_method(D_METHOD("environment_set_aerial_perspective", "env", "enable", "texture", "max_distance"), &RenderingServer::environment_set_aerial_perspective);
-	ClassDB::bind_method(D_METHOD("environment_set_night_vision", "env", "enable", "mesopic_min", "mesopic_max", "blue_shift", "blue_shift_chromaticity", "desaturation", "acuity_radius"), &RenderingServer::environment_set_night_vision);
+	ClassDB::bind_method(D_METHOD("environment_set_night_vision", "env", "enable", "mesopic_min", "mesopic_max", "blue_shift", "blue_shift_chromaticity", "desaturation", "acuity_radius", "highlight_range"), &RenderingServer::environment_set_night_vision);
 	ClassDB::bind_method(D_METHOD("environment_set_sdfgi", "env", "enable", "cascades", "min_cell_size", "y_scale", "use_occlusion", "bounce_feedback", "read_sky", "energy", "normal_bias", "probe_bias"), &RenderingServer::environment_set_sdfgi);
 	ClassDB::bind_method(D_METHOD("environment_set_volumetric_fog", "env", "enable", "density", "albedo", "emission", "emission_energy", "anisotropy", "length", "detail_spread", "gi_inject", "temporal_reprojection", "temporal_reprojection_amount", "ambient_inject", "sky_affect"), &RenderingServer::environment_set_volumetric_fog);
 

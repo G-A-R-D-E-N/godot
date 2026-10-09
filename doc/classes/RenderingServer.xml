@@ -1428,6 +1428,7 @@
 			<param index="5" name="blue_shift_chromaticity" type="Vector2" />
 			<param index="6" name="desaturation" type="float" />
 			<param index="7" name="acuity_radius" type="float" />
+			<param index="8" name="highlight_range" type="float" />
 			<description>
 				Configures the low-light vision simulation of the tonemapper for the specified environment RID. See [code]night_vision_*[/code] properties in [Environment] for more information.
 			</description>

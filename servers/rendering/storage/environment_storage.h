@@ -66,6 +66,7 @@ public:
 		Vector2 blue_shift_chromaticity = Vector2(0.25, 0.25);
 		float desaturation = 1.0;
 		float acuity_radius = 1.0;
+		float highlight_range = 0.0;
 	};
 
 private:
@@ -272,7 +273,7 @@ public:
 	RID environment_get_aerial_perspective_texture(RID p_env) const;
 	float environment_get_aerial_perspective_max_distance(RID p_env) const;
 
-	void environment_set_night_vision(RID p_env, bool p_enable, float p_mesopic_min, float p_mesopic_max, float p_blue_shift, const Vector2 &p_blue_shift_chromaticity, float p_desaturation, float p_acuity_radius);
+	void environment_set_night_vision(RID p_env, bool p_enable, float p_mesopic_min, float p_mesopic_max, float p_blue_shift, const Vector2 &p_blue_shift_chromaticity, float p_desaturation, float p_acuity_radius, float p_highlight_range);
 	NightVision environment_get_night_vision(RID p_env) const;
 
 	// Volumetric Fog
