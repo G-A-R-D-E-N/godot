@@ -344,8 +344,8 @@ float RendererSceneRender::environment_get_aerial_perspective_max_distance(RID p
 	return environment_storage.environment_get_aerial_perspective_max_distance(p_env);
 }
 
-void RendererSceneRender::environment_set_night_vision(RID p_env, bool p_enable, float p_mesopic_min, float p_mesopic_max, float p_blue_shift, const Vector2 &p_blue_shift_chromaticity, float p_desaturation, float p_acuity_radius) {
-	environment_storage.environment_set_night_vision(p_env, p_enable, p_mesopic_min, p_mesopic_max, p_blue_shift, p_blue_shift_chromaticity, p_desaturation, p_acuity_radius);
+void RendererSceneRender::environment_set_night_vision(RID p_env, bool p_enable, float p_mesopic_min, float p_mesopic_max, float p_blue_shift, const Vector2 &p_blue_shift_chromaticity, float p_desaturation, float p_acuity_radius, float p_highlight_range) {
+	environment_storage.environment_set_night_vision(p_env, p_enable, p_mesopic_min, p_mesopic_max, p_blue_shift, p_blue_shift_chromaticity, p_desaturation, p_acuity_radius, p_highlight_range);
 }
 
 RendererEnvironmentStorage::NightVision RendererSceneRender::environment_get_night_vision(RID p_env) const {
