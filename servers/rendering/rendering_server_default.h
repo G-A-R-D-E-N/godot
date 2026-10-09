@@ -890,6 +890,7 @@ public:
 
 	FUNC4(environment_set_fog_depth, RID, float, float, float)
 	FUNC4(environment_set_aerial_perspective, RID, bool, RID, float)
+	FUNC8(environment_set_night_vision, RID, bool, float, float, float, const Vector2 &, float, float)
 	FUNC14(environment_set_volumetric_fog, RID, bool, float, const Color &, const Color &, float, float, float, float, float, bool, float, float, float)
 
 	FUNC2(environment_set_volumetric_fog_volume_size, int, int)

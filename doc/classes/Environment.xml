@@ -210,6 +210,29 @@
 			The strength that is used when blurring across the screen to generate the glow effect. This affects the distance and intensity of the blur. When using the Mobile rendering method, this should be increased to compensate for the lower dynamic range.
 			[b]Note:[/b] [member glow_strength] has no effect when using the Compatibility rendering method, due to this rendering method using a simpler glow implementation optimized for low-end devices.
 		</member>
+		<member name="night_vision_acuity_radius" type="float" setter="set_night_vision_acuity_radius" getter="get_night_vision_acuity_radius" default="1.0">
+			The radius, in pixels of the internal render resolution, of the blur applied to the rod (scotopic) image of fully scotopic pixels. It shrinks linearly to [code]0.0[/code] as a pixel becomes photopic, so dim regions lose fine detail while bright ones stay sharp. [code]0.0[/code] disables the blur and its four extra texture samples.
+			[b]Note:[/b] The blur is not applied when the Mobile rendering method tonemaps in a subpass.
+		</member>
+		<member name="night_vision_blue_shift" type="float" setter="set_night_vision_blue_shift" getter="get_night_vision_blue_shift" default="1.0">
+			How far the chromaticity of the rod (scotopic) image moves from the D65 white point ([code]x = 0.3127, y = 0.3290[/code]) toward [member night_vision_blue_shift_chromaticity]. [code]0.0[/code] renders the rod image as neutral grey, [code]1.0[/code] uses the blue-shift chromaticity itself.
+		</member>
+		<member name="night_vision_blue_shift_chromaticity" type="Vector2" setter="set_night_vision_blue_shift_chromaticity" getter="get_night_vision_blue_shift_chromaticity" default="Vector2(0.25, 0.25)">
+			The CIE 1931 [code]xy[/code] chromaticity of the rod (scotopic) image at full [member night_vision_blue_shift]. The default is the blue shift of Thompson, Shirley and Ferwerda, "A Spatial Post-Processing Algorithm for Images of Night Scenes" (2002). Rod vision is achromatic; the shift reproduces how a rod-dominated scene is perceived (the Purkinje shift), independent of the color of the light.
+		</member>
+		<member name="night_vision_desaturation" type="float" setter="set_night_vision_desaturation" getter="get_night_vision_desaturation" default="1.0">
+			The fraction of a fully scotopic pixel that is replaced by the rod image. [code]1.0[/code] follows the mesopic weight exactly, [code]0.0[/code] leaves every pixel unchanged.
+		</member>
+		<member name="night_vision_enabled" type="bool" setter="set_night_vision_enabled" getter="is_night_vision_enabled" default="false">
+			If [code]true[/code], the tonemapper simulates low-light (mesopic and scotopic) vision per pixel, from the pixel's absolute luminance. The luminance is the pixel's linear Rec. 709 luma divided by the display exposure and by the camera's exposure normalization when physical light units are used, so it is in nits regardless of exposure. The rod (scotopic) signal is [code]0.6033 G + 0.3967 B[/code], the non-negative least-squares fit of the CIE 1951 scotopic luminosity function to the Rec. 709 color matching functions, normalized so that white keeps its luminance. Each pixel is blended from its color toward the rod signal rendered with the blue-shift chromaticity, by a weight that is [code]0.0[/code] at or above [member night_vision_mesopic_max] and [code]1.0[/code] at or below [member night_vision_mesopic_min], with a smoothstep of the logarithm of the luminance in between. Bright pixels such as lamps keep their color while dim regions become desaturated, bluish and, with [member night_vision_acuity_radius], slightly soft. Pixels at or above [member night_vision_mesopic_max] are left exactly unchanged. The effect is applied after glow and before tonemapping, and never in debug draw modes.
+			[b]Note:[/b] This is only supported in the Forward+ and Mobile rendering methods.
+		</member>
+		<member name="night_vision_mesopic_max" type="float" setter="set_night_vision_mesopic_max" getter="get_night_vision_mesopic_max" default="5.0">
+			The luminance, in nits (cd/m²), above which vision is fully photopic (cones only). The default is the upper limit of the mesopic range of the CIE system for mesopic photometry (CIE 191:2010).
+		</member>
+		<member name="night_vision_mesopic_min" type="float" setter="set_night_vision_mesopic_min" getter="get_night_vision_mesopic_min" default="0.005">
+			The luminance, in nits (cd/m²), below which vision is fully scotopic (rods only). The default is the lower limit of the mesopic range of the CIE system for mesopic photometry (CIE 191:2010).
+		</member>
 		<member name="reflected_light_source" type="int" setter="set_reflection_source" getter="get_reflection_source" enum="Environment.ReflectionSource" default="0">
 			The reflected (specular) light source.
 		</member>

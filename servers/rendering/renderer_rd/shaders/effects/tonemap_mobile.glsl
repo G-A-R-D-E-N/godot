@@ -94,6 +94,11 @@ layout(push_constant, std430) uniform Params {
 	vec4 tonemapper_params;
 
 	float output_max_value;
+	float night_vision_log_min;
+	float night_vision_inv_range;
+	uint night_vision_chromaticity;
+
+	uint night_vision_strength_acuity;
 	float pad[3];
 }
 params;
@@ -707,6 +712,33 @@ vec3 do_fxaa(vec3 color, float exposure, vec2 uv_interp) {
 }
 #endif // !SUBPASS
 
+#define NIGHT_VISION_ROD_WEIGHTS vec3(0.0, 0.6033, 0.3967)
+
+vec3 apply_night_vision(vec3 color, float exposure) {
+	float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
+	float photopic = smoothstep(0.0, 1.0, (log2(max(luminance, 1e-30)) - log2(exposure) - params.night_vision_log_min) * params.night_vision_inv_range);
+	if (photopic >= 1.0) {
+		return color;
+	}
+	vec2 strength_acuity = unpackHalf2x16(params.night_vision_strength_acuity);
+	float rod = dot(color, NIGHT_VISION_ROD_WEIGHTS);
+#ifndef SUBPASS
+	float radius = strength_acuity.y * (1.0 - photopic);
+	if (radius > 0.0) {
+		vec2 offset = radius * params.src_pixel_size;
+#ifdef USE_MULTIVIEW
+		vec3 taps = textureLod(source_color, vec3(uv_interp - offset, ViewIndex), 0.0).rgb + textureLod(source_color, vec3(uv_interp + offset, ViewIndex), 0.0).rgb + textureLod(source_color, vec3(uv_interp + vec2(offset.x, -offset.y), ViewIndex), 0.0).rgb + textureLod(source_color, vec3(uv_interp + vec2(-offset.x, offset.y), ViewIndex), 0.0).rgb;
+#else
+		vec3 taps = textureLod(source_color, uv_interp - offset, 0.0).rgb + textureLod(source_color, uv_interp + offset, 0.0).rgb + textureLod(source_color, uv_interp + vec2(offset.x, -offset.y), 0.0).rgb + textureLod(source_color, uv_interp + vec2(-offset.x, offset.y), 0.0).rgb;
+#endif
+		rod = 0.5 * rod + 0.125 * dot(taps, NIGHT_VISION_ROD_WEIGHTS) * params.luminance_multiplier * exposure;
+	}
+#endif
+	vec2 xy = unpackHalf2x16(params.night_vision_chromaticity);
+	vec3 tint = mat3(vec3(3.2404542, -0.9692660, 0.0556434), vec3(-1.5371385, 1.8760108, -0.2040259), vec3(-0.4985314, 0.0415560, 1.0572252)) * vec3(xy.x / xy.y, 1.0, (1.0 - xy.x - xy.y) / xy.y);
+	return mix(color, rod * tint, (1.0 - photopic) * strength_acuity.x);
+}
+
 // From https://alex.vlachos.com/graphics/Alex_Vlachos_Advanced_VR_Rendering_GDC2015.pdf
 // and https://www.shadertoy.com/view/MslGR8 (5th one starting from the bottom)
 // NOTE: `frag_coord` is in pixels (i.e. not normalized UV).
@@ -763,6 +795,10 @@ void main() {
 		}
 	}
 #endif
+
+	if (params.night_vision_inv_range > 0.0) {
+		color.rgb = apply_night_vision(color.rgb, params.exposure);
+	}
 
 	// Tonemap to lower dynamic range.
 
