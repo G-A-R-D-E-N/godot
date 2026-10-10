@@ -3011,6 +3011,7 @@ void SceneShaderData::set_code(const String &p_code) {
 	uses_transmittance = false;
 	uses_screen_texture = false;
 	uses_screen_texture_mipmaps = false;
+	screen_texture_filter = ShaderLanguage::FILTER_DEFAULT;
 	uses_depth_texture = false;
 	uses_normal_texture = false;
 	uses_bent_normal_texture = false;
@@ -3171,6 +3172,7 @@ void SceneShaderData::set_code(const String &p_code) {
 
 	uses_screen_texture = gen_code.uses_screen_texture;
 	uses_screen_texture_mipmaps = gen_code.uses_screen_texture_mipmaps;
+	screen_texture_filter = gen_code.screen_texture_filter;
 	uses_depth_texture = gen_code.uses_depth_texture;
 	uses_normal_texture = gen_code.uses_normal_roughness_texture;
 	uses_vertex_time = gen_code.uses_vertex_time;
