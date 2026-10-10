@@ -3412,11 +3412,14 @@ void fragment_shader(in SceneData scene_data) {
 
 #else
 
+	bool sss_emission_unblurred = sss_strength > 0.0 && max(sss_radius.r, max(sss_radius.g, sss_radius.b)) > 0.0;
+	vec3 diffuse_emission = sss_emission_unblurred ? vec3(0.0) : emission;
+	vec3 specular_emission = sss_emission_unblurred ? emission : vec3(0.0);
 #ifdef SSS_MODE_SKIN
 	sss_strength = -sss_strength;
 #endif
-	diffuse_buffer = vec4(emission + diffuse_light + ambient_light, sss_strength);
-	specular_buffer = vec4(direct_specular_light + indirect_specular_light, clamp(temporal_reactive, 0.0, 1.0) * (1.0 - scene_data.pass_alpha_multiplier));
+	diffuse_buffer = vec4(diffuse_emission + diffuse_light + ambient_light, sss_strength);
+	specular_buffer = vec4(direct_specular_light + indirect_specular_light + specular_emission, clamp(temporal_reactive, 0.0, 1.0) * (1.0 - scene_data.pass_alpha_multiplier));
 	sss_radius_buffer = vec4(max(sss_radius, vec3(0.0)), 0.0);
 #endif
 
