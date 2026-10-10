@@ -1607,10 +1607,21 @@ void SSEffects::generate_ssao(Ref<RenderSceneBuffersRD> p_render_buffers, SSAORe
 	RD::get_singleton()->buffer_update(ssao.importance_map_load_counter, 0, sizeof(uint32_t), &zero);
 }
 
-void SSEffects::gtao_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, GTAORenderBuffers &p_gtao_buffers, const GTAOSettings &p_settings) {
+bool SSEffects::gtao_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, GTAORenderBuffers &p_gtao_buffers, const GTAOSettings &p_settings) {
 	Size2i work_size = p_settings.full_screen_size;
 	if (p_settings.half_size) {
 		work_size = Size2i((work_size.x + 1) / 2, (work_size.y + 1) / 2);
+	}
+
+	if (MAX(work_size.x, work_size.y) < (1 << (GTAO_DEPTH_MIPMAPS - 1))) {
+		if (p_render_buffers->has_texture(RB_SCOPE_GTAO, RB_GTAO_DEPTH)) {
+			p_render_buffers->clear_context(RB_SCOPE_GTAO);
+		}
+		if (p_render_buffers->has_texture(RB_SCOPE_SSAO, RB_FINAL)) {
+			p_render_buffers->clear_context(RB_SCOPE_SSAO);
+		}
+		p_gtao_buffers = GTAORenderBuffers();
+		return false;
 	}
 
 	if (p_gtao_buffers.half_size != p_settings.half_size || p_gtao_buffers.bent_normals != p_settings.bent_normals || p_gtao_buffers.work_size != work_size) {
@@ -1625,7 +1636,7 @@ void SSEffects::gtao_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers
 	}
 
 	const uint32_t usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
-	p_render_buffers->create_texture(RB_SCOPE_GTAO, RB_GTAO_DEPTH, RD::DATA_FORMAT_R32_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1, work_size, 0, 5);
+	p_render_buffers->create_texture(RB_SCOPE_GTAO, RB_GTAO_DEPTH, RD::DATA_FORMAT_R32_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1, work_size, 0, GTAO_DEPTH_MIPMAPS);
 	p_render_buffers->create_texture(RB_SCOPE_GTAO, RB_GTAO_NORMAL, RD::DATA_FORMAT_R32_UINT, usage_bits, RD::TEXTURE_SAMPLES_1, work_size);
 	p_render_buffers->create_texture(RB_SCOPE_GTAO, RB_GTAO_TERM, RD::DATA_FORMAT_R32_UINT, usage_bits, RD::TEXTURE_SAMPLES_1, work_size);
 	p_render_buffers->create_texture(RB_SCOPE_GTAO, RB_GTAO_TERM_PONG, RD::DATA_FORMAT_R32_UINT, usage_bits, RD::TEXTURE_SAMPLES_1, work_size);
@@ -1634,6 +1645,7 @@ void SSEffects::gtao_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers
 		p_render_buffers->create_texture(RB_SCOPE_GTAO, RB_GTAO_BENT_NORMAL, RD::DATA_FORMAT_R8G8B8A8_UNORM, usage_bits, RD::TEXTURE_SAMPLES_1);
 	}
 	p_render_buffers->create_texture(RB_SCOPE_SSAO, RB_FINAL, RD::DATA_FORMAT_R8_UNORM, usage_bits, RD::TEXTURE_SAMPLES_1);
+	return true;
 }
 
 void SSEffects::generate_gtao(Ref<RenderSceneBuffersRD> p_render_buffers, GTAORenderBuffers &p_gtao_buffers, uint32_t p_view, RID p_normal_buffer, const Projection &p_projection, const GTAOSettings &p_settings) {
@@ -1692,7 +1704,7 @@ void SSEffects::generate_gtao(Ref<RenderSceneBuffersRD> p_render_buffers, GTAORe
 	push_constant.full_pixel_size[1] = 1.0f / full_size.y;
 
 	RID depth_texture = p_render_buffers->get_depth_texture(p_view);
-	RID working_depth = p_render_buffers->get_texture_slice(RB_SCOPE_GTAO, RB_GTAO_DEPTH, p_view, 0, 1, 5);
+	RID working_depth = p_render_buffers->get_texture_slice(RB_SCOPE_GTAO, RB_GTAO_DEPTH, p_view, 0, 1, GTAO_DEPTH_MIPMAPS);
 	RID working_normal = p_render_buffers->get_texture_slice(RB_SCOPE_GTAO, RB_GTAO_NORMAL, p_view, 0);
 	RID edges = p_render_buffers->get_texture_slice(RB_SCOPE_GTAO, RB_EDGES, p_view, 0);
 	RID terms[2] = {
@@ -1713,7 +1725,7 @@ void SSEffects::generate_gtao(Ref<RenderSceneBuffersRD> p_render_buffers, GTAORe
 
 		thread_local LocalVector<RD::Uniform> u_outputs;
 		u_outputs.clear();
-		for (uint32_t i = 0; i < 5; i++) {
+		for (uint32_t i = 0; i < GTAO_DEPTH_MIPMAPS; i++) {
 			u_outputs.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, i, p_render_buffers->get_texture_slice(RB_SCOPE_GTAO, RB_GTAO_DEPTH, p_view, i)));
 		}
 		u_outputs.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 5, working_normal));
