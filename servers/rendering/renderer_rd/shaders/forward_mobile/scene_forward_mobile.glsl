@@ -14,7 +14,7 @@
 #define SHADER_SPACE_FAR 0.0
 
 #ifdef SHADOW_PASS
-#define IN_SHADOW_PASS true
+#define IN_SHADOW_PASS (!sc_back_depth_pass())
 #else
 #define IN_SHADOW_PASS false
 #endif
@@ -643,8 +643,14 @@ void vertex_shader(in vec3 vertex,
 	gl_Position = projection_matrix * vec4(vertex_interp, 1.0);
 #endif // OVERRIDE_POSITION
 
-#if defined(Z_CLIP_SCALE_USED) && !defined(SHADOW_PASS)
+#ifdef Z_CLIP_SCALE_USED
+#ifdef SHADOW_PASS
+	if (sc_back_depth_pass()) {
+		gl_Position.z = mix(gl_Position.w, gl_Position.z, z_clip_scale);
+	}
+#else
 	gl_Position.z = mix(gl_Position.w, gl_Position.z, z_clip_scale);
+#endif
 #endif
 
 #ifdef MODE_RENDER_DEPTH
@@ -827,7 +833,7 @@ void main() {
 #define SHADER_SPACE_FAR 0.0
 
 #ifdef SHADOW_PASS
-#define IN_SHADOW_PASS true
+#define IN_SHADOW_PASS (!sc_back_depth_pass())
 #else
 #define IN_SHADOW_PASS false
 #endif

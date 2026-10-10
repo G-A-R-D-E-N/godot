@@ -64,6 +64,7 @@
 
 #define RB_TEX_BACK_COLOR SNAME("back_color")
 #define RB_TEX_BACK_DEPTH SNAME("back_depth")
+#define RB_TEX_SURFACE_BACK_DEPTH SNAME("surface_back_depth")
 
 class RenderSceneBuffersRD : public RenderSceneBuffers {
 	GDCLASS(RenderSceneBuffersRD, RenderSceneBuffers);

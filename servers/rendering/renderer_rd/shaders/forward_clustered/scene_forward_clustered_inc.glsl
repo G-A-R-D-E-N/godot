@@ -449,6 +449,7 @@ layout(r32ui, set = 1, binding = 27) uniform restrict uimage3D geom_facing_grid;
 #define depth_buffer shadow_atlas
 #define color_buffer shadow_atlas
 #define normal_roughness_buffer shadow_atlas
+#define back_depth_buffer shadow_atlas
 
 #define multiviewSampler sampler2D
 #else
@@ -512,6 +513,12 @@ layout(set = 1, binding = 40) uniform texture2D ss_exposure_texture;
 
 layout(set = 1, binding = 41) uniform texture2D cloud_shadow_textures[MAX_DIRECTIONAL_LIGHT_DATA_STRUCTS];
 layout(set = 1, binding = 42) uniform texture3D aerial_perspective_texture;
+
+#ifdef USE_MULTIVIEW
+layout(set = 1, binding = 44) uniform texture2DArray back_depth_buffer;
+#else
+layout(set = 1, binding = 44) uniform texture2D back_depth_buffer;
+#endif
 
 #endif
 
