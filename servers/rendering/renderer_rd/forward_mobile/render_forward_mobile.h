@@ -119,6 +119,7 @@ private:
 		PASS_MODE_DEPTH_MATERIAL,
 		// PASS_MODE_SDF,
 		PASS_MODE_MOTION_VECTORS,
+		PASS_MODE_BACK_DEPTH,
 	};
 
 	enum ShadowFade {
@@ -177,7 +178,8 @@ private:
 
 	/* Render Scene */
 
-	RID _setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, bool p_use_directional_shadow_atlas = false, uint32_t p_pass_offset = 0u);
+	RID _setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, bool p_use_directional_shadow_atlas = false, uint32_t p_pass_offset = 0u, bool p_bind_back_depth = true);
+	void _render_back_depth_pass(const RenderDataRD *p_render_data, bool p_reverse_cull, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, const SceneShaderForwardMobile::ShaderSpecialization &p_base_specialization, bool p_use_material_feedback);
 	void _pre_opaque_render(RenderDataRD *p_render_data);
 
 	uint64_t lightmap_texture_array_version = 0xFFFFFFFF;
@@ -310,6 +312,7 @@ private:
 
 		bool used_screen_texture = false;
 		bool used_depth_texture = false;
+		bool used_back_depth_texture = false;
 		bool used_lightmap = false;
 		bool used_opaque_stencil = false;
 
@@ -494,6 +497,7 @@ protected:
 			FLAG_USES_DOUBLE_SIDED_SHADOWS = 32768,
 			FLAG_USES_PARTICLE_TRAILS = 65536,
 			FLAG_USES_STENCIL = 131072,
+			FLAG_USES_BACK_DEPTH_TEXTURE = 262144,
 		};
 
 		union {

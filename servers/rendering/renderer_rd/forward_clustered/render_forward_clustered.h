@@ -182,8 +182,9 @@ private:
 	uint64_t lightmap_texture_array_version = 0xFFFFFFFF;
 
 	void _update_render_base_uniform_set();
+	void _render_back_depth_pass(const RenderDataRD *p_render_data, bool p_reverse_cull, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, const SceneShaderForwardClustered::ShaderSpecialization &p_base_specialization);
 	RID _setup_sdfgi_render_pass_uniform_set(RID p_albedo_texture, RID p_emission_texture, RID p_emission_aniso_texture, RID p_geom_facing_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index);
-	RID _setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas = false);
+	RID _setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas = false, bool p_bind_back_depth = true);
 
 	struct BestFitNormal {
 		BestFitNormalShaderRD shader;
@@ -213,6 +214,7 @@ private:
 		PASS_MODE_DEPTH_NORMAL_ROUGHNESS_VOXEL_GI,
 		PASS_MODE_DEPTH_MATERIAL,
 		PASS_MODE_SDF,
+		PASS_MODE_BACK_DEPTH,
 		PASS_MODE_MAX
 	};
 
@@ -453,6 +455,7 @@ private:
 		bool used_screen_texture = false;
 		bool used_normal_texture = false;
 		bool used_depth_texture = false;
+		bool used_back_depth_texture = false;
 		bool used_sss = false;
 		bool used_lightmap = false;
 		bool used_opaque_stencil = false;
@@ -542,6 +545,7 @@ private:
 			FLAG_USES_PARTICLE_TRAILS = 65536,
 			FLAG_USES_MOTION_VECTOR = 131072,
 			FLAG_USES_STENCIL = 262144,
+			FLAG_USES_BACK_DEPTH_TEXTURE = 524288,
 		};
 
 		union {
@@ -671,6 +675,7 @@ private:
 		bool uses_opaque = false;
 		bool uses_transparent = false;
 		bool uses_depth = false;
+		bool uses_back_depth = false;
 		bool can_use_lightmap = false;
 	};
 

@@ -385,6 +385,10 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 			continue;
 		}
 
+		if (p_pass_mode == PASS_MODE_BACK_DEPTH && !(surf->flags & GeometryInstanceSurfaceDataCache::FLAG_USES_BACK_DEPTH_TEXTURE)) {
+			continue;
+		}
+
 		push_constant.base_index = i + p_params->element_offset;
 
 		RID material_uniform_set;
@@ -516,6 +520,9 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 			case PASS_MODE_DEPTH_NORMAL_ROUGHNESS_VOXEL_GI: {
 				pipeline_key.version = p_params->view_count > 1 ? SceneShaderForwardClustered::PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_MULTIVIEW : SceneShaderForwardClustered::PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI;
 			} break;
+			case PASS_MODE_BACK_DEPTH: {
+				pipeline_key.version = p_params->view_count > 1 ? SceneShaderForwardClustered::PIPELINE_VERSION_BACK_DEPTH_MULTIVIEW : SceneShaderForwardClustered::PIPELINE_VERSION_BACK_DEPTH;
+			} break;
 			case PASS_MODE_DEPTH_MATERIAL: {
 				ERR_FAIL_COND_MSG(p_params->view_count > 1, "Multiview not supported for material pass");
 				pipeline_key.version = SceneShaderForwardClustered::PIPELINE_VERSION_DEPTH_PASS_WITH_MATERIAL;
@@ -533,7 +540,10 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 
 		bool emulate_point_size = shader->uses_point_size && scene_shader.emulate_point_size;
 
-		const RD::PolygonCullMode cull_mode = shader->get_cull_mode_from_cull_variant(cull_variant);
+		RD::PolygonCullMode cull_mode = shader->get_cull_mode_from_cull_variant(cull_variant);
+		if constexpr (p_pass_mode == PASS_MODE_BACK_DEPTH) {
+			cull_mode = cull_variant == SceneShaderForwardClustered::ShaderData::CULL_VARIANT_REVERSED ? RD::POLYGON_CULL_BACK : RD::POLYGON_CULL_FRONT;
+		}
 		RID vertex_array_rd;
 		RID index_array_rd;
 		RID pipeline_rd;
@@ -711,6 +721,9 @@ void RenderForwardClustered::_render_list(RenderingDevice::DrawListID p_draw_lis
 		case PASS_MODE_DEPTH_NORMAL_ROUGHNESS_VOXEL_GI: {
 			_render_list_template<PASS_MODE_DEPTH_NORMAL_ROUGHNESS_VOXEL_GI>(p_draw_list, p_framebuffer_Format, p_params, p_from_element, p_to_element);
 		} break;
+		case PASS_MODE_BACK_DEPTH: {
+			_render_list_template<PASS_MODE_BACK_DEPTH>(p_draw_list, p_framebuffer_Format, p_params, p_from_element, p_to_element);
+		} break;
 		case PASS_MODE_DEPTH_MATERIAL: {
 			_render_list_template<PASS_MODE_DEPTH_MATERIAL>(p_draw_list, p_framebuffer_Format, p_params, p_from_element, p_to_element);
 		} break;
@@ -730,6 +743,29 @@ void RenderForwardClustered::_render_list_with_draw_list(RenderListParameters *p
 	RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(p_framebuffer, p_draw_flags, p_clear_color_values, p_clear_depth_value, p_clear_stencil_value, p_region);
 	_render_list(draw_list, fb_format, p_params, 0, p_params->element_count);
 	RD::get_singleton()->draw_list_end();
+}
+
+void RenderForwardClustered::_render_back_depth_pass(const RenderDataRD *p_render_data, bool p_reverse_cull, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, const SceneShaderForwardClustered::ShaderSpecialization &p_base_specialization) {
+	Ref<RenderSceneBuffersRD> rb = p_render_data->render_buffers;
+	ERR_FAIL_COND(rb.is_null());
+
+	if (!rb->has_depth_texture()) {
+		return;
+	}
+
+	const bool can_be_storage = _render_buffers_can_be_storage();
+	rb->create_texture(RB_SCOPE_BUFFERS, RB_TEX_SURFACE_BACK_DEPTH, RenderSceneBuffersRD::get_depth_format(false, false, can_be_storage), RenderSceneBuffersRD::get_depth_usage_bits(false, false, can_be_storage), RD::TEXTURE_SAMPLES_1);
+
+	RENDER_TIMESTAMP("Render Back Faces Depth");
+	RD::get_singleton()->draw_command_begin_label("Render Back Faces Depth");
+
+	RID framebuffer = FramebufferCacheRD::get_singleton()->get_cache_multiview(rb->get_view_count(), rb->get_texture(RB_SCOPE_BUFFERS, RB_TEX_SURFACE_BACK_DEPTH));
+	RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_ALPHA, p_render_data, p_is_multiview, p_radiance_texture, p_samplers, p_uniform_buffer_index, true, false);
+
+	RenderListParameters render_list_params(render_list[RENDER_LIST_ALPHA].elements.ptr(), render_list[RENDER_LIST_ALPHA].element_info.ptr(), render_list[RENDER_LIST_ALPHA].elements.size(), p_reverse_cull, PASS_MODE_BACK_DEPTH, 0, true, p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, p_base_specialization, false);
+	_render_list_with_draw_list(&render_list_params, framebuffer, RD::DRAW_CLEAR_ALL, Vector<Color>(), 0.0f, 0u, p_render_data->render_region);
+
+	RD::get_singleton()->draw_command_end_label();
 }
 
 uint32_t RenderForwardClustered::_setup_environment(const RenderDataRD *p_render_data, bool p_no_fog, const Size2i &p_screen_size, const Size2 &p_viewport_size, const Color &p_default_bg_color, bool p_opaque_render_buffers, bool p_apply_alpha_multiplier, bool p_pancake_shadows) {
@@ -995,6 +1031,7 @@ void RenderForwardClustered::_fill_render_list(RenderListType p_render_list, con
 		scene_state.used_screen_texture = false;
 		scene_state.used_normal_texture = false;
 		scene_state.used_depth_texture = false;
+		scene_state.used_back_depth_texture = false;
 		scene_state.used_lightmap = false;
 		scene_state.used_opaque_stencil = false;
 	}
@@ -1245,6 +1282,9 @@ void RenderForwardClustered::_fill_render_list(RenderListType p_render_list, con
 				}
 				if (surf->flags & GeometryInstanceSurfaceDataCache::FLAG_USES_DEPTH_TEXTURE) {
 					scene_state.used_depth_texture = true;
+				}
+				if (surf->flags & GeometryInstanceSurfaceDataCache::FLAG_USES_BACK_DEPTH_TEXTURE) {
+					scene_state.used_back_depth_texture = true;
 				}
 				if ((surf->flags & GeometryInstanceSurfaceDataCache::FLAG_USES_STENCIL) && !force_alpha && (surf->flags & (GeometryInstanceSurfaceDataCache::FLAG_PASS_DEPTH | GeometryInstanceSurfaceDataCache::FLAG_PASS_OPAQUE))) {
 					scene_state.used_opaque_stencil = true;
@@ -2750,6 +2790,10 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 	uint32_t transparent_pass_uniform_buffer_index = _setup_environment(p_render_data, is_reflection_probe, screen_size, screen_size, p_default_bg_color, false);
 
+	if (scene_state.used_back_depth_texture && rb_data.is_valid()) {
+		_render_back_depth_pass(p_render_data, reverse_cull, is_multiview, radiance_texture, samplers, transparent_pass_uniform_buffer_index, base_specialization);
+	}
+
 	rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_ALPHA, p_render_data, is_multiview, radiance_texture, samplers, transparent_pass_uniform_buffer_index, true);
 
 	{
@@ -3764,7 +3808,7 @@ void RenderForwardClustered::_update_render_base_uniform_set() {
 	}
 }
 
-RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas) {
+RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas, bool p_bind_back_depth) {
 	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
 	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
 
@@ -4188,6 +4232,19 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
 		RID aerial_perspective = p_render_data && is_environment(p_render_data->environment) ? _get_aerial_perspective_texture(p_render_data->environment) : RID();
 		u.append_id(aerial_perspective.is_valid() ? aerial_perspective : texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_3D_WHITE));
+		uniforms.push_back(u);
+	}
+	{
+		RD::Uniform u;
+		u.binding = 44;
+		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		RID texture;
+		if (p_bind_back_depth && rb.is_valid() && rb->has_texture(RB_SCOPE_BUFFERS, RB_TEX_SURFACE_BACK_DEPTH)) {
+			texture = rb->get_texture(RB_SCOPE_BUFFERS, RB_TEX_SURFACE_BACK_DEPTH);
+		} else {
+			texture = texture_storage->texture_rd_get_default(is_multiview ? RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_WHITE : RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_WHITE);
+		}
+		u.append_id(texture);
 		uniforms.push_back(u);
 	}
 #ifdef MODULE_TEXTURE_STREAMING_ENABLED
@@ -4623,6 +4680,10 @@ void RenderForwardClustered::_geometry_instance_add_surface_with_material(Geomet
 	if (p_material->shader_data->uses_depth_texture) {
 		flags |= GeometryInstanceSurfaceDataCache::FLAG_USES_DEPTH_TEXTURE;
 		global_surface_data.depth_texture_used = true;
+	}
+
+	if (p_material->shader_data->uses_back_depth_texture) {
+		flags |= GeometryInstanceSurfaceDataCache::FLAG_USES_BACK_DEPTH_TEXTURE;
 	}
 
 	if (p_material->shader_data->uses_normal_texture) {
@@ -5224,6 +5285,13 @@ void RenderForwardClustered::_mesh_compile_pipelines_for_surface(const SurfacePi
 		}
 	}
 
+	if (p_surface.uses_back_depth) {
+		pipeline_key.color_pass_flags = 0;
+		pipeline_key.version = SceneShaderForwardClustered::PIPELINE_VERSION_BACK_DEPTH;
+		pipeline_key.framebuffer_format_id = _get_depth_framebuffer_format_for_pipeline(buffers_can_be_storage, RD::TEXTURE_SAMPLES_1, false, false);
+		_mesh_compile_pipeline_for_surface(p_surface.shader, p_surface.mesh_surface, true, p_surface.instanced, p_source, pipeline_key, r_pipeline_pairs);
+	}
+
 	if (!p_surface.uses_depth) {
 		return;
 	}
@@ -5307,6 +5375,7 @@ void RenderForwardClustered::_mesh_generate_all_pipelines_for_surface_cache(Geom
 	surface.instanced = p_surface_cache->owner->mesh_instance.is_valid();
 	surface.uses_opaque = !uses_alpha_pass;
 	surface.uses_transparent = uses_alpha_pass || uses_fade;
+	surface.uses_back_depth = (p_surface_cache->flags & GeometryInstanceSurfaceDataCache::FLAG_USES_BACK_DEPTH_TEXTURE) != 0;
 	surface.uses_depth = (p_surface_cache->flags & (GeometryInstanceSurfaceDataCache::FLAG_PASS_DEPTH | GeometryInstanceSurfaceDataCache::FLAG_PASS_OPAQUE | GeometryInstanceSurfaceDataCache::FLAG_PASS_SHADOW)) != 0;
 	surface.can_use_lightmap = p_surface_cache->owner->lightmap_instance.is_valid() || p_surface_cache->owner->lightmap_sh;
 	_mesh_compile_pipelines_for_surface(surface, p_global, RSE::PIPELINE_SOURCE_SURFACE);

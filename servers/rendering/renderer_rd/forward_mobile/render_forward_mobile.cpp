@@ -476,7 +476,7 @@ bool RenderForwardMobile::_render_buffers_can_be_storage() {
 	return false;
 }
 
-RID RenderForwardMobile::_setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, bool p_use_directional_shadow_atlas, uint32_t p_pass_offset) {
+RID RenderForwardMobile::_setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, bool p_use_directional_shadow_atlas, uint32_t p_pass_offset, bool p_bind_back_depth) {
 	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
 	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
 
@@ -729,6 +729,22 @@ RID RenderForwardMobile::_setup_render_pass_uniform_set(RenderListType p_render_
 
 	p_samplers.append_uniforms(uniforms, 13);
 
+	{
+		RD::Uniform u;
+		u.binding = 26;
+		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		RID texture;
+		if (p_bind_back_depth && rb.is_valid() && rb->has_texture(RB_SCOPE_BUFFERS, RB_TEX_SURFACE_BACK_DEPTH)) {
+			texture = rb->get_texture(RB_SCOPE_BUFFERS, RB_TEX_SURFACE_BACK_DEPTH);
+		} else if (is_multiview) {
+			texture = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_WHITE);
+		} else {
+			texture = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_WHITE);
+		}
+		u.append_id(texture);
+		uniforms.push_back(u);
+	}
+
 #ifdef MODULE_TEXTURE_STREAMING_ENABLED
 	{
 		RD::Uniform u;
@@ -744,6 +760,28 @@ RID RenderForwardMobile::_setup_render_pass_uniform_set(RenderListType p_render_
 #endif // MODULE_TEXTURE_STREAMING_ENABLED
 
 	return UniformSetCacheRD::get_singleton()->get_cache_vec(scene_shader.get_default_shader_rd(is_multiview), RENDER_PASS_UNIFORM_SET, uniforms);
+}
+
+void RenderForwardMobile::_render_back_depth_pass(const RenderDataRD *p_render_data, bool p_reverse_cull, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, const SceneShaderForwardMobile::ShaderSpecialization &p_base_specialization, bool p_use_material_feedback) {
+	Ref<RenderSceneBuffersRD> rb = p_render_data->render_buffers;
+	ERR_FAIL_COND(rb.is_null());
+
+	if (!rb->has_depth_texture()) {
+		return;
+	}
+
+	rb->create_texture(RB_SCOPE_BUFFERS, RB_TEX_SURFACE_BACK_DEPTH, RenderSceneBuffersRD::get_depth_format(false, false, false), RenderSceneBuffersRD::get_depth_usage_bits(false, false, false), RD::TEXTURE_SAMPLES_1);
+
+	RENDER_TIMESTAMP("Render Back Faces Depth");
+	RD::get_singleton()->draw_command_begin_label("Render Back Faces Depth");
+
+	RID framebuffer = FramebufferCacheRD::get_singleton()->get_cache_multiview(rb->get_view_count(), rb->get_texture(RB_SCOPE_BUFFERS, RB_TEX_SURFACE_BACK_DEPTH));
+	RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_ALPHA, p_render_data, p_is_multiview, p_radiance_texture, p_samplers, true, 0u, false);
+
+	RenderListParameters render_list_params(render_list[RENDER_LIST_ALPHA].elements.ptr(), render_list[RENDER_LIST_ALPHA].element_info.ptr(), render_list[RENDER_LIST_ALPHA].elements.size(), p_reverse_cull, PASS_MODE_BACK_DEPTH, rp_uniform_set, p_base_specialization, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, p_use_material_feedback);
+	_render_list_with_draw_list(&render_list_params, framebuffer, RD::DRAW_CLEAR_ALL, Vector<Color>(), 0.0f, 0u, p_render_data->render_region);
+
+	RD::get_singleton()->draw_command_end_label();
 }
 
 void RenderForwardMobile::_setup_lightmaps(const RenderDataRD *p_render_data, const PagedArray<RID> &p_lightmaps, const Transform3D &p_cam_transform) {
@@ -1017,7 +1055,7 @@ void RenderForwardMobile::_render_scene(RenderDataRD *p_render_data, const Color
 			resolve_depth_buffer = true;
 		}
 
-		if (scene_state.used_screen_texture || scene_state.used_depth_texture) {
+		if (scene_state.used_screen_texture || scene_state.used_depth_texture || scene_state.used_back_depth_texture) {
 			// can't use our last two subpasses because we're reading from screen texture or depth texture
 			merge_transparent_pass = false;
 			using_subpass_post_process = false;
@@ -1386,6 +1424,10 @@ void RenderForwardMobile::_render_scene(RenderDataRD *p_render_data, const Color
 					// Copy depth texture to backbuffer so we can read from it.
 					_render_buffers_copy_depth_texture(p_render_data, use_msaa && !supports_depth_resolve); // Note, once fallback for has_depth_texture_override works, we also don't need to do our resolve here.
 				}
+			}
+
+			if (scene_state.used_back_depth_texture && rb_data.is_valid()) {
+				_render_back_depth_pass(p_render_data, reverse_cull, is_multiview, radiance_texture, samplers, base_specialization, !is_reflection_probe);
 			}
 
 			if (render_list[RENDER_LIST_ALPHA].element_info.size() > 0) {
@@ -2220,6 +2262,7 @@ void RenderForwardMobile::_fill_render_list(RenderListType p_render_list, const 
 	if (p_render_list == RENDER_LIST_OPAQUE) {
 		scene_state.used_screen_texture = false;
 		scene_state.used_depth_texture = false;
+		scene_state.used_back_depth_texture = false;
 		scene_state.used_lightmap = false;
 	}
 	uint32_t lightmap_captures_used = 0;
@@ -2395,6 +2438,9 @@ void RenderForwardMobile::_fill_render_list(RenderListType p_render_list, const 
 				if (surf->flags & GeometryInstanceSurfaceDataCache::FLAG_USES_DEPTH_TEXTURE) {
 					scene_state.used_depth_texture = true;
 				}
+				if (surf->flags & GeometryInstanceSurfaceDataCache::FLAG_USES_BACK_DEPTH_TEXTURE) {
+					scene_state.used_back_depth_texture = true;
+				}
 				if ((surf->flags & GeometryInstanceSurfaceDataCache::FLAG_USES_STENCIL) && !force_alpha && (surf->flags & (GeometryInstanceSurfaceDataCache::FLAG_PASS_DEPTH | GeometryInstanceSurfaceDataCache::FLAG_PASS_OPAQUE))) {
 					scene_state.used_opaque_stencil = true;
 				}
@@ -2463,7 +2509,10 @@ void RenderForwardMobile::_render_list(RenderingDevice::DrawListID p_draw_list, 
 		} break;
 		case PASS_MODE_MOTION_VECTORS: {
 			_render_list_template<PASS_MODE_MOTION_VECTORS>(p_draw_list, p_framebuffer_Format, p_params, p_from_element, p_to_element);
-		}
+		} break;
+		case PASS_MODE_BACK_DEPTH: {
+			_render_list_template<PASS_MODE_BACK_DEPTH>(p_draw_list, p_framebuffer_Format, p_params, p_from_element, p_to_element);
+		} break;
 	}
 }
 
@@ -2515,6 +2564,10 @@ void RenderForwardMobile::_render_list_template(RenderingDevice::DrawListID p_dr
 			continue;
 		}
 
+		if (p_pass_mode == PASS_MODE_BACK_DEPTH && !(surf->flags & GeometryInstanceSurfaceDataCache::FLAG_USES_BACK_DEPTH_TEXTURE)) {
+			continue;
+		}
+
 		SceneShaderForwardMobile::ShaderSpecialization pipeline_specialization = p_params->base_specialization;
 		pipeline_specialization.multimesh = bool(inst->flags_cache & INSTANCE_DATA_FLAG_MULTIMESH);
 		pipeline_specialization.multimesh_format_2d = bool(inst->flags_cache & INSTANCE_DATA_FLAG_MULTIMESH_FORMAT_2D);
@@ -2522,6 +2575,7 @@ void RenderForwardMobile::_render_list_template(RenderingDevice::DrawListID p_dr
 		pipeline_specialization.multimesh_has_custom_data = bool(inst->flags_cache & INSTANCE_DATA_FLAG_MULTIMESH_HAS_CUSTOM_DATA);
 		pipeline_specialization.material_feedback = p_params->use_material_feedback && surf->material->material_feedback_rid.is_valid();
 		pipeline_specialization.dithered_instance_fade = element_info.uses_dithered_fade;
+		pipeline_specialization.back_depth_pass = p_pass_mode == PASS_MODE_BACK_DEPTH;
 
 		SceneState::PushConstant push_constant;
 		push_constant.base_index = i + p_params->element_offset;
@@ -2616,8 +2670,12 @@ void RenderForwardMobile::_render_list_template(RenderingDevice::DrawListID p_dr
 			} break;
 			case PASS_MODE_MOTION_VECTORS: {
 				pipeline_key.version = SceneShaderForwardMobile::SHADER_VERSION_MOTION_VECTORS_MULTIVIEW;
-			}
+			} break;
+			case PASS_MODE_BACK_DEPTH: {
+				pipeline_key.version = p_params->view_count > 1 ? SceneShaderForwardMobile::SHADER_VERSION_SHADOW_PASS_MULTIVIEW : SceneShaderForwardMobile::SHADER_VERSION_SHADOW_PASS;
+			} break;
 		}
+		pipeline_key.back_depth = p_pass_mode == PASS_MODE_BACK_DEPTH;
 
 		pipeline_key.framebuffer_format_id = framebuffer_format;
 		pipeline_key.wireframe = p_params->force_wireframe;
@@ -2626,7 +2684,10 @@ void RenderForwardMobile::_render_list_template(RenderingDevice::DrawListID p_dr
 
 		bool emulate_point_size = shader->uses_point_size && scene_shader.emulate_point_size;
 
-		const RD::PolygonCullMode cull_mode = shader->get_cull_mode_from_cull_variant(cull_variant);
+		RD::PolygonCullMode cull_mode = shader->get_cull_mode_from_cull_variant(cull_variant);
+		if constexpr (p_pass_mode == PASS_MODE_BACK_DEPTH) {
+			cull_mode = cull_variant == SceneShaderForwardMobile::ShaderData::CULL_VARIANT_REVERSED ? RD::POLYGON_CULL_BACK : RD::POLYGON_CULL_FRONT;
+		}
 		RD::VertexFormatID vertex_format = -1;
 		RID pipeline_rd;
 		RID vertex_array_rd;
@@ -2955,6 +3016,10 @@ void RenderForwardMobile::_geometry_instance_add_surface_with_material(GeometryI
 	if (p_material->shader_data->uses_depth_texture) {
 		flags |= GeometryInstanceSurfaceDataCache::FLAG_USES_DEPTH_TEXTURE;
 		global_surface_data.depth_texture_used = true;
+	}
+
+	if (p_material->shader_data->uses_back_depth_texture) {
+		flags |= GeometryInstanceSurfaceDataCache::FLAG_USES_BACK_DEPTH_TEXTURE;
 	}
 
 	if (p_material->shader_data->uses_normal_texture) {

@@ -1354,9 +1354,11 @@ void ShaderPreprocessor::_prepare_state(ShaderPreprocessor::State &rp_state, con
 		if (rendering_method == "forward_plus") {
 			insert_builtin_define("CURRENT_RENDERER", _MKSTR(2), rp_state);
 			insert_builtin_define("SSS_RADIUS_AVAILABLE", _MKSTR(1), rp_state);
+			insert_builtin_define("BACK_DEPTH_AVAILABLE", _MKSTR(1), rp_state);
 			insert_builtin_define("SPECULAR_OCCLUSION_COMBINED_AVAILABLE", _MKSTR(1), rp_state);
 		} else if (rendering_method == "mobile") {
 			insert_builtin_define("CURRENT_RENDERER", _MKSTR(1), rp_state);
+			insert_builtin_define("BACK_DEPTH_AVAILABLE", _MKSTR(1), rp_state);
 		} else { // gl_compatibility
 			insert_builtin_define("CURRENT_RENDERER", _MKSTR(0), rp_state);
 		}
