@@ -98,13 +98,33 @@ layout(push_constant, std430) uniform Params {
 	float scale;
 
 	float depth_scale;
-	uint pad[3];
+	float unit_uv_x;
+	float unit_uv_y;
+	uint pad;
 }
 params;
 
 layout(set = 0, binding = 0) uniform sampler2D source_image;
 layout(rgba16f, set = 1, binding = 0) uniform restrict writeonly image2D dest_image;
 layout(set = 2, binding = 0) uniform sampler2D source_depth;
+layout(set = 3, binding = 0) uniform sampler2D source_radius;
+
+void do_filter_radius(inout vec3 color_accum, inout vec3 divisor, vec2 uv, vec2 step, vec3 inv_two_sigma2, float radius_max) {
+	for (int i = 1; i < kernel_size; i++) {
+		vec2 offset = uv + kernel[i].y * step;
+		vec4 color = texture(source_image, offset);
+
+		if (abs(color.a) < 0.001) {
+			break;
+		}
+
+		float x = kernel[i].y * radius_max;
+		float spacing = 0.5 * (kernel[min(i + 1, kernel_size - 1)].y - kernel[i - 1].y);
+		vec3 w = exp(-x * x * inv_two_sigma2) * spacing;
+		color_accum += color.rgb * w;
+		divisor += w;
+	}
+}
 
 void do_filter(inout vec3 color_accum, inout vec3 divisor, vec2 uv, vec2 step, bool p_skin) {
 	// Accumulate the other samples:
@@ -160,6 +180,21 @@ void main() {
 		}
 
 		float scale = mix(params.scale, depth_scale, params.depth_scale);
+
+		vec3 radius = texture(source_radius, uv).rgb;
+		float radius_max = max(radius.r, max(radius.g, radius.b));
+		if (radius_max > 0.0) {
+			float unit_uv = (params.vertical ? params.unit_uv_y : params.unit_uv_x) / (params.orthogonal ? 1.0 : depth);
+			vec2 radius_step = dir * (radius_max * unit_uv);
+			vec3 inv_two_sigma2 = 1.0 / (2.0 * max(radius * radius, vec3(1e-10)));
+			vec3 radius_divisor = vec3(kernel[1].y);
+			vec3 radius_color = base_color.rgb * radius_divisor;
+			do_filter_radius(radius_color, radius_divisor, uv, radius_step, inv_two_sigma2, radius_max);
+			do_filter_radius(radius_color, radius_divisor, uv, -radius_step, inv_two_sigma2, radius_max);
+			base_color.rgb = mix(base_color.rgb, radius_color / radius_divisor, strength);
+			imageStore(dest_image, ssC, base_color);
+			return;
+		}
 
 		// Calculate the final step to fetch the surrounding pixels:
 		vec2 step = scale * dir;

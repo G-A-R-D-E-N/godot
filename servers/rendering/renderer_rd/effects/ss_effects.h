@@ -231,7 +231,7 @@ public:
 	RSE::SubSurfaceScatteringQuality sss_get_quality() const;
 	void sss_set_scale(float p_scale, float p_depth_scale);
 
-	void sub_surface_scattering(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_diffuse, RID p_depth, const Projection &p_camera, const Size2i &p_screen_size);
+	void sub_surface_scattering(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_diffuse, RID p_depth, RID p_radius, const Projection &p_camera, const Size2i &p_screen_size);
 
 	/* Screen Space Shadows */
 	struct SSCSRenderBuffers {
@@ -754,7 +754,9 @@ private:
 		float scale;
 
 		float depth_scale;
-		uint32_t pad[3];
+		float unit_uv_x;
+		float unit_uv_y;
+		uint32_t pad;
 	};
 
 	struct SubSurfaceScattering {

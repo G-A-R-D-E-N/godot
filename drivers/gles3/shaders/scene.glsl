@@ -2367,6 +2367,7 @@ void main() {
 	vec2 screen_uv = gl_FragCoord.xy * scene_data_block.data.screen_pixel_size;
 
 	float sss_strength = 0.0;
+	vec3 sss_radius = vec3(0.0);
 
 #ifdef STREAMING_LOD_USED
 	// Not used, but needed so shaders that write STREAMING_LOD still compile.
