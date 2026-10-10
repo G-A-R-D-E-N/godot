@@ -32,6 +32,7 @@
 
 TEST_FORCE_LINK(test_shader_preprocessor)
 
+#include "servers/rendering/shader_language.h"
 #include "servers/rendering/shader_preprocessor.h"
 
 #include <cctype>
@@ -325,6 +326,20 @@ TEST_CASE("[ShaderPreprocessor] Invalid concatenations") {
 	CHECK_NE(preprocessor.preprocess("#define X(y)   ##  ", filename, result), Error::OK);
 	CHECK_NE(preprocessor.preprocess("#define X(y) y ##  ", filename, result), Error::OK);
 	CHECK_NE(preprocessor.preprocess("#define X(y) ## y", filename, result), Error::OK);
+}
+
+TEST_CASE("[ShaderLanguage] Combined screen texture filter keeps every requested capability") {
+	using SL = ShaderLanguage;
+
+	CHECK(SL::combine_texture_filters(SL::FILTER_DEFAULT, SL::FILTER_DEFAULT) == SL::FILTER_DEFAULT);
+	CHECK(SL::combine_texture_filters(SL::FILTER_DEFAULT, SL::FILTER_NEAREST) == SL::FILTER_NEAREST);
+	CHECK(SL::combine_texture_filters(SL::FILTER_LINEAR, SL::FILTER_DEFAULT) == SL::FILTER_LINEAR);
+	CHECK(SL::combine_texture_filters(SL::FILTER_LINEAR, SL::FILTER_NEAREST_MIPMAP) == SL::FILTER_LINEAR_MIPMAP);
+	CHECK(SL::combine_texture_filters(SL::FILTER_NEAREST_MIPMAP, SL::FILTER_LINEAR) == SL::FILTER_LINEAR_MIPMAP);
+	CHECK(SL::combine_texture_filters(SL::FILTER_NEAREST, SL::FILTER_NEAREST_MIPMAP) == SL::FILTER_NEAREST_MIPMAP);
+	CHECK(SL::combine_texture_filters(SL::FILTER_LINEAR, SL::FILTER_NEAREST_MIPMAP_ANISOTROPIC) == SL::FILTER_LINEAR_MIPMAP_ANISOTROPIC);
+	CHECK(SL::combine_texture_filters(SL::FILTER_LINEAR_MIPMAP, SL::FILTER_NEAREST_MIPMAP_ANISOTROPIC) == SL::FILTER_LINEAR_MIPMAP_ANISOTROPIC);
+	CHECK(SL::combine_texture_filters(SL::FILTER_LINEAR_MIPMAP, SL::FILTER_LINEAR_MIPMAP) == SL::FILTER_LINEAR_MIPMAP);
 }
 
 } // namespace TestShaderPreprocessor
