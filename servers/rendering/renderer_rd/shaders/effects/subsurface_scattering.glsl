@@ -100,7 +100,7 @@ layout(push_constant, std430) uniform Params {
 	float depth_scale;
 	float unit_uv_x;
 	float unit_uv_y;
-	uint pad;
+	uint frame;
 }
 params;
 
@@ -109,18 +109,37 @@ layout(rgba16f, set = 1, binding = 0) uniform restrict writeonly image2D dest_im
 layout(set = 2, binding = 0) uniform sampler2D source_depth;
 layout(set = 3, binding = 0) uniform sampler2D source_radius;
 
-void do_filter_radius(inout vec3 color_accum, inout vec3 divisor, vec2 uv, vec2 step, vec3 inv_two_sigma2, float radius_max) {
-	for (int i = 1; i < kernel_size; i++) {
-		vec2 offset = uv + kernel[i].y * step;
-		vec4 color = texture(source_image, offset);
+const int RADIUS_TAPS_MIN = 4;
+#ifdef USE_25_SAMPLES
+const int RADIUS_TAPS_MAX = 32;
+#endif
+#ifdef USE_17_SAMPLES
+const int RADIUS_TAPS_MAX = 24;
+#endif
+#ifdef USE_11_SAMPLES
+const int RADIUS_TAPS_MAX = 16;
+#endif
+const float RADIUS_REACH = 3.0;
+const float RADIUS_START_PX = 0.5;
+const float RADIUS_GROWTH = 1.2;
 
-		if (abs(color.a) < 0.001) {
+float interleaved_gradient_noise(vec2 p) {
+	return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+}
+
+void do_filter_radius(inout vec3 color_accum, inout vec3 divisor, vec2 uv, vec2 px_step, vec3 inv_two_sigma2, float growth, int taps, float jitter, vec2 gather_shift) {
+	float log_growth = log(growth);
+	for (int i = 0; i < taps; i++) {
+		float x = RADIUS_START_PX * exp(log_growth * (float(i) + jitter));
+		vec2 at = uv + x * px_step;
+
+		vec4 footprint = textureGather(source_image, at + gather_shift, 3);
+		if (any(lessThan(abs(params.vertical ? footprint.xw : footprint.zw), vec2(0.001)))) {
 			break;
 		}
 
-		float x = kernel[i].y * radius_max;
-		float spacing = 0.5 * (kernel[min(i + 1, kernel_size - 1)].y - kernel[i - 1].y);
-		vec3 w = exp(-x * x * inv_two_sigma2) * spacing;
+		vec4 color = textureLod(source_image, at, 0.0);
+		vec3 w = exp(-x * x * inv_two_sigma2) * (x * log_growth);
 		color_accum += color.rgb * w;
 		divisor += w;
 	}
@@ -185,13 +204,25 @@ void main() {
 		float radius_max = max(radius.r, max(radius.g, radius.b));
 		if (radius_max > 0.0) {
 			float unit_uv = (params.vertical ? params.unit_uv_y : params.unit_uv_x) / (params.orthogonal ? 1.0 : depth);
-			vec2 radius_step = dir * (radius_max * unit_uv);
-			vec3 inv_two_sigma2 = 1.0 / (2.0 * max(radius * radius, vec3(1e-10)));
-			vec3 radius_divisor = vec3(kernel[1].y);
-			vec3 radius_color = base_color.rgb * radius_divisor;
-			do_filter_radius(radius_color, radius_divisor, uv, radius_step, inv_two_sigma2, radius_max);
-			do_filter_radius(radius_color, radius_divisor, uv, -radius_step, inv_two_sigma2, radius_max);
-			base_color.rgb = mix(base_color.rgb, radius_color / radius_divisor, strength);
+			float screen_dim = params.vertical ? float(params.screen_size.y) : float(params.screen_size.x);
+			float px_per_unit = unit_uv * screen_dim;
+			float reach_px = RADIUS_REACH * radius_max * px_per_unit;
+			if (reach_px > RADIUS_START_PX) {
+				float span = log(reach_px / RADIUS_START_PX);
+				int taps = clamp(int(ceil(span / log(RADIUS_GROWTH))), RADIUS_TAPS_MIN, RADIUS_TAPS_MAX);
+				float growth = exp(span / float(taps));
+				vec2 px_step = dir / vec2(params.screen_size);
+				vec2 gather_shift = params.vertical ? vec2(0.25 / float(params.screen_size.x), 0.0) : vec2(0.0, 0.25 / float(params.screen_size.y));
+				vec2 noise_pos = (params.vertical ? vec2(ssC.yx) + 17.0 : vec2(ssC)) + 5.588238 * float(params.frame);
+				float jitter = interleaved_gradient_noise(noise_pos);
+				vec3 sigma_px = max(radius * px_per_unit, vec3(1e-5));
+				vec3 inv_two_sigma2 = 0.5 / (sigma_px * sigma_px);
+				vec3 radius_divisor = vec3(1.0);
+				vec3 radius_color = base_color.rgb;
+				do_filter_radius(radius_color, radius_divisor, uv, px_step, inv_two_sigma2, growth, taps, jitter, gather_shift);
+				do_filter_radius(radius_color, radius_divisor, uv, -px_step, inv_two_sigma2, growth, taps, fract(jitter + 0.5), gather_shift);
+				base_color.rgb = mix(base_color.rgb, radius_color / radius_divisor, strength);
+			}
 			imageStore(dest_image, ssC, base_color);
 			return;
 		}
