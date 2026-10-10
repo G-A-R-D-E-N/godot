@@ -1138,7 +1138,8 @@ vec4 volumetric_fog_process(vec2 screen_uv, float z) {
 float directional_cloud_shadow(uint p_index, vec3 p_vertex) {
 	vec2 uv = vec2(dot(directional_lights.data[p_index].cloud_shadow_u.xyz, p_vertex), dot(directional_lights.data[p_index].cloud_shadow_v.xyz, p_vertex)) + vec2(directional_lights.data[p_index].cloud_shadow_u.w, directional_lights.data[p_index].cloud_shadow_v.w);
 	float transmittance = pow(texture(sampler2D(cloud_shadow_textures[p_index], SAMPLER_LINEAR_WITH_MIPMAPS_REPEAT), uv).r, directional_lights.data[p_index].cloud_shadow_exponent);
-	return mix(1.0, transmittance, directional_lights.data[p_index].cloud_shadow_strength);
+	float below = clamp(-dot(directional_lights.data[p_index].cloud_shadow_plane, vec4(p_vertex, 1.0)), 0.0, 1.0);
+	return mix(1.0, transmittance, directional_lights.data[p_index].cloud_shadow_strength * below);
 }
 
 vec4 fog_process(vec3 vertex) {
