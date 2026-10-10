@@ -2991,10 +2991,10 @@ void RasterizerSceneGLES3::render_scene(const Ref<RenderSceneBuffers> &p_render_
 				rb->generate_backbuffer_mipmaps();
 			}
 		}
-
-		// Bound framebuffer may have changed, so change it back
-		glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 	}
+
+	// Bound framebuffer may have changed, so change it back
+	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 
 	RENDER_TIMESTAMP("Render 3D Transparent Pass");
 	scene_state.enable_gl_blend(true);
