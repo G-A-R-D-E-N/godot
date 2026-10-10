@@ -235,6 +235,7 @@ private:
 		float cloud_shadow_strength;
 		float cloud_shadow_exponent;
 		float cloud_shadow_pad[2];
+		float cloud_shadow_plane[4];
 	};
 
 	uint32_t max_directional_lights;
@@ -242,7 +243,8 @@ private:
 	RID directional_light_buffer;
 	RID directional_cloud_shadow_textures[RendererSceneRender::MAX_DIRECTIONAL_LIGHTS];
 
-	float _get_cloud_shadow(const Light *p_light, const Transform3D &p_light_transform, const Transform3D &p_camera_transform, float *r_u, float *r_v, float *r_exponent) const;
+	static constexpr real_t CLOUD_SHADOW_FADE_METERS = 10.0;
+	float _get_cloud_shadow(const Light *p_light, const Transform3D &p_light_transform, const Transform3D &p_camera_transform, float *r_u, float *r_v, float *r_exponent, float *r_plane) const;
 
 	/* REFLECTION PROBE */
 

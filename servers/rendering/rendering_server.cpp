@@ -3714,8 +3714,9 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/contact_shadow/shadow_length", PROPERTY_HINT_ENUM, "Short (Fast),Medium (Average),Long (Slow)"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/lights_and_shadows/contact_shadow/surface_thickness", PROPERTY_HINT_RANGE, "0.001,0.1,0.001"), 0.01);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/contact_shadow/max_local_lights", PROPERTY_HINT_RANGE, "0,16,1"), 4);
-	GLOBAL_DEF("rendering/lights_and_shadows/contact_shadow/ray_completion_confidence", true);
-	GLOBAL_DEF("rendering/lights_and_shadows/contact_shadow/receiver_plane_rejection", true);
+	GLOBAL_DEF("rendering/lights_and_shadows/contact_shadow/ray_completion_confidence", false);
+	GLOBAL_DEF("rendering/lights_and_shadows/contact_shadow/receiver_plane_rejection", false);
+	GLOBAL_DEF("rendering/lights_and_shadows/directional_shadow/soft_shadow_thin_casters", false);
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/directional_shadow/size", PROPERTY_HINT_RANGE, "256,16384"), 4096);
 	GLOBAL_DEF("rendering/lights_and_shadows/directional_shadow/size.mobile", 2048);
@@ -3792,8 +3793,8 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssil/fadeout_from", PROPERTY_HINT_RANGE, "0.0,512,0.1,or_greater"), 50.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssil/fadeout_to", PROPERTY_HINT_RANGE, "64,65536,0.1,or_greater"), 300.0);
 
-	GLOBAL_DEF("rendering/environment/screen_space_lighting/legacy_last_frame_source", false);
-	GLOBAL_DEF("rendering/environment/screen_space_lighting/temporal_validation", true);
+	GLOBAL_DEF("rendering/environment/screen_space_lighting/legacy_last_frame_source", true);
+	GLOBAL_DEF("rendering/environment/screen_space_lighting/temporal_validation", false);
 
 	// Move the project setting definitions here so they are available when we init the rendering internals.
 	GLOBAL_DEF_BASIC("rendering/viewport/hdr_2d", false);
@@ -3869,7 +3870,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/volumetric_fog/volume_size", PROPERTY_HINT_RANGE, "16,512,1"), 64);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/volumetric_fog/volume_depth", PROPERTY_HINT_RANGE, "16,512,1"), 64);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/volumetric_fog/use_filter", PROPERTY_HINT_ENUM, "No (Faster),Yes (Higher Quality)"), 1);
-	GLOBAL_DEF("rendering/environment/volumetric_fog/use_temporal_clamp", true);
+	GLOBAL_DEF("rendering/environment/volumetric_fog/use_temporal_clamp", false);
 
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/limits/spatial_indexer/update_iterations_per_frame", PROPERTY_HINT_RANGE, "0,1024,1"), 10);
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/limits/spatial_indexer/threaded_cull_minimum_instances", PROPERTY_HINT_RANGE, "32,65536,1"), 1000);

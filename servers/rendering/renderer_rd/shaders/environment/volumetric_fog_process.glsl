@@ -445,7 +445,7 @@ void main() {
 
 				if (directional_lights.data[i].cloud_shadow_strength > 0.0) {
 					vec2 cloud_uv = vec2(dot(directional_lights.data[i].cloud_shadow_u.xyz, view_pos), dot(directional_lights.data[i].cloud_shadow_v.xyz, view_pos)) + vec2(directional_lights.data[i].cloud_shadow_u.w, directional_lights.data[i].cloud_shadow_v.w);
-					shadow_attenuation *= mix(1.0, pow(textureLod(sampler2D(cloud_shadow_textures[i], cloud_shadow_sampler), cloud_uv, 0.0).r, directional_lights.data[i].cloud_shadow_exponent), directional_lights.data[i].cloud_shadow_strength);
+					shadow_attenuation *= mix(1.0, pow(textureLod(sampler2D(cloud_shadow_textures[i], cloud_shadow_sampler), cloud_uv, 0.0).r, directional_lights.data[i].cloud_shadow_exponent), directional_lights.data[i].cloud_shadow_strength * clamp(-dot(directional_lights.data[i].cloud_shadow_plane, vec4(view_pos, 1.0)), 0.0, 1.0));
 				}
 
 				total_light += shadow_attenuation * directional_lights.data[i].color * directional_lights.data[i].energy * henyey_greenstein(dot(safe_normalize(view_pos), safe_normalize(directional_lights.data[i].direction)), params.phase_g) * directional_lights.data[i].volumetric_fog_energy;

@@ -5796,7 +5796,7 @@
 			[b]Note:[/b] Only supported when using the Forward+ or Mobile rendering methods.
 		</constant>
 		<constant name="VIEWPORT_DEBUG_DRAW_SSR_HIT_DISTANCE" value="47" enum="ViewportDebugDraw">
-			Draws the distance from each surface to its stochastic screen-space reflection hits, mapped as [code]d / (d + 2)[/code] for [code]d[/code] in meters (black = no hit, grey = 2 m).
+			Draws the distance from each surface to its stochastic screen-space reflection hits, mapped as [code]d / (d + 2)[/code] for [code]d[/code] in meters (black = no hit, gray = 2 m).
 			[b]Note:[/b] Only supported when using the Forward+ rendering method, with [member ProjectSettings.rendering/environment/screen_space_reflection/backend] set to Stochastic.
 		</constant>
 		<constant name="VIEWPORT_VRS_DISABLED" value="0" enum="ViewportVRSMode">

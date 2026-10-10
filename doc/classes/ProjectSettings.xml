@@ -2995,11 +2995,11 @@
 		<member name="rendering/environment/gtao/steps" type="int" setter="" getter="" default="3">
 			Number of depth samples per slice side used by GTAO. Only used when [member rendering/environment/ssao/backend] is [code]GTAO[/code].
 		</member>
-		<member name="rendering/environment/screen_space_lighting/legacy_last_frame_source" type="bool" setter="" getter="" default="false">
+		<member name="rendering/environment/screen_space_lighting/legacy_last_frame_source" type="bool" setter="" getter="" default="true">
 			If [code]false[/code], screen-space indirect lighting samples a bounce source written by the opaque pass (direct diffuse light plus emission weighted by [code]EMISSION_BOUNCE_WEIGHT[/code]) and screen-space reflections sample a reflection source (the opaque radiance without the screen-space reflection term and without fog). Both effects compress samples relative to the exposure the tonemapper uses, so their strength does not depend on the scale of the stored HDR values. Both reproject their samples with the camera and reject a sample when the previous frame held a different surface there (the reflection source stores the linear view depth in its alpha, SSIL keeps the previous frame's depth mipmaps), so moving objects and newly exposed surfaces leave no trail; a rejected sample counts as a miss. If [code]true[/code], both effects sample a copy of the previous final frame and compress the stored values directly, as in earlier versions; the previous frame feeds their own output and fog back into the next frame.
 			[b]Note:[/b] Only used by the Forward+ rendering method. Viewports with MSAA always sample the previous final frame, with the exposure-relative compression unless this setting is enabled.
 		</member>
-		<member name="rendering/environment/screen_space_lighting/temporal_validation" type="bool" setter="" getter="" default="true">
+		<member name="rendering/environment/screen_space_lighting/temporal_validation" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], screen-space indirect lighting and screen-space reflections compare each sample of the previous frame's bounce or reflection source against the previous frame's depth and treat a mismatch (a moved object or a newly exposed surface) as a miss, so the probe, sky or ambient fallback keeps that share. Static scenes are unaffected. Only used when [member rendering/environment/screen_space_lighting/legacy_last_frame_source] is [code]false[/code].
 		</member>
 		<member name="rendering/environment/screen_space_reflection/backend" type="int" setter="" getter="" default="0">
@@ -3072,7 +3072,7 @@
 		<member name="rendering/environment/volumetric_fog/use_filter" type="int" setter="" getter="" default="1">
 			Enables filtering of the volumetric fog effect prior to integration. This substantially blurs the fog which reduces fine details but also smooths out harsh edges and aliasing artifacts. Disable when more detail is required.
 		</member>
-		<member name="rendering/environment/volumetric_fog/use_temporal_clamp" type="bool" setter="" getter="" default="true">
+		<member name="rendering/environment/volumetric_fog/use_temporal_clamp" type="bool" setter="" getter="" default="false">
 			If [code]true[/code] and [member Environment.volumetric_fog_temporal_reprojection_enabled] is [code]true[/code], the reprojected fog from previous frames is clamped to the range of the current frame's neighboring froxels before blending. This removes the trails that moving lights leave in the fog, while fog lit by static lights keeps its temporal smoothing. If [code]false[/code], the previous frames are blended in unclamped.
 		</member>
 		<member name="rendering/environment/volumetric_fog/volume_depth" type="int" setter="" getter="" default="64">
@@ -3238,10 +3238,10 @@
 		<member name="rendering/lights_and_shadows/contact_shadow/max_local_lights" type="int" setter="" getter="" default="4">
 			Maximum number of [OmniLight3D] and [SpotLight3D] nodes that receive screen-space contact shadows per viewport. Lights with [member Light3D.shadow_contact_shadows_allow] enabled are ranked by their energy divided by their squared distance to the camera, closest and brightest first. A light without a shadow map uses the contact shadow as its only visibility. Set to [code]0[/code] to restrict contact shadows to [DirectionalLight3D].
 		</member>
-		<member name="rendering/lights_and_shadows/contact_shadow/ray_completion_confidence" type="bool" setter="" getter="" default="true">
+		<member name="rendering/lights_and_shadows/contact_shadow/ray_completion_confidence" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], each contact shadow ray is weighted by the fraction of its length that could be tested on screen, so rays that leave the screen fade out and hand the pixel back to the shadow map instead of ending abruptly at the screen edge.
 		</member>
-		<member name="rendering/lights_and_shadows/contact_shadow/receiver_plane_rejection" type="bool" setter="" getter="" default="true">
+		<member name="rendering/lights_and_shadows/contact_shadow/receiver_plane_rejection" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], contact shadow samples that lie on or behind the receiver's own surface plane (reconstructed from the depth buffer and extrapolated along the ray) cannot occlude it. This removes the self-shadowing streaks flat ground shows at grazing light angles, while objects standing on the surface keep their contact shadows.
 		</member>
 		<member name="rendering/lights_and_shadows/contact_shadow/shadow_length" type="int" setter="" getter="" default="1">
@@ -3266,6 +3266,10 @@
 		</member>
 		<member name="rendering/lights_and_shadows/directional_shadow/soft_shadow_filter_quality.mobile" type="int" setter="" getter="" default="0">
 			Lower-end override for [member rendering/lights_and_shadows/directional_shadow/soft_shadow_filter_quality] on mobile devices, due to performance concerns or driver support.
+		</member>
+		<member name="rendering/lights_and_shadows/directional_shadow/soft_shadow_thin_casters" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], shadows of [DirectionalLight3D]s with a [member Light3D.light_angular_distance] above [code]0.0[/code] use a blocker search and filter that follow the receiver's slope and widen the search where it finds no blocker, so casters thinner than the penumbra (railings, poles, foliage) keep a shadow at a distance. If [code]false[/code], the previous percentage-closer soft shadows are used.
+			[b]Note:[/b] Only used by the Forward+ rendering method.
 		</member>
 		<member name="rendering/lights_and_shadows/multi_bounce_occlusion/enabled" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], approximates local multi-bounce global illumination in ambient occlusion by integrating albedo information.

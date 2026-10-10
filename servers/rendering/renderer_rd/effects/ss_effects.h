@@ -198,7 +198,8 @@ public:
 		Size2i full_screen_size;
 	};
 
-	void gtao_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, GTAORenderBuffers &p_gtao_buffers, const GTAOSettings &p_settings);
+	static constexpr int GTAO_DEPTH_MIPMAPS = 5;
+	bool gtao_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, GTAORenderBuffers &p_gtao_buffers, const GTAOSettings &p_settings);
 	void generate_gtao(Ref<RenderSceneBuffersRD> p_render_buffers, GTAORenderBuffers &p_gtao_buffers, uint32_t p_view, RID p_normal_buffer, const Projection &p_projection, const GTAOSettings &p_settings);
 
 	/* Screen Space Reflection */
