@@ -170,6 +170,7 @@ HashMap<String, String> TextShaderPreview::builtin_spatial_types = {
 	{ "CLEARCOAT_ROUGHNESS", "float" },
 	{ "ANISOTROPY", "float" },
 	{ "SSS_STRENGTH", "float" },
+	{ "SSS_RADIUS", "vec3" },
 	{ "SSS_TRANSMITTANCE_DEPTH", "float" },
 	{ "SSS_TRANSMITTANCE_BOOST", "float" },
 	{ "AO", "float" },

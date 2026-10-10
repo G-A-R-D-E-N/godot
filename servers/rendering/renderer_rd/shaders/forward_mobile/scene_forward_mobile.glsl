@@ -1221,6 +1221,7 @@ void main() {
 	vec2 screen_uv = gl_FragCoord.xy * scene_data.screen_pixel_size;
 
 	float sss_strength_highp = 0.0;
+	vec3 sss_radius_highp = vec3(0.0);
 
 #ifdef ALPHA_SCISSOR_USED
 	float alpha_scissor_threshold_highp = 1.0;

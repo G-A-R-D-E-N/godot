@@ -60,8 +60,10 @@ void RenderForwardClustered::RenderBufferDataForwardClustered::ensure_specular()
 	if (!render_buffers->has_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_SPECULAR)) {
 		bool msaa = render_buffers->get_msaa_3d() != RSE::VIEWPORT_MSAA_DISABLED;
 		render_buffers->create_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_SPECULAR, get_specular_format(), get_specular_usage_bits(msaa, false, render_buffers->get_can_be_storage()));
+		render_buffers->create_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_SSS_RADIUS, get_specular_format(), get_specular_usage_bits(msaa, false, render_buffers->get_can_be_storage()));
 		if (msaa) {
 			render_buffers->create_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_SPECULAR_MSAA, get_specular_format(), get_specular_usage_bits(false, msaa, render_buffers->get_can_be_storage()), render_buffers->get_texture_samples());
+			render_buffers->create_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_SSS_RADIUS_MSAA, get_specular_format(), get_specular_usage_bits(false, msaa, render_buffers->get_can_be_storage()), render_buffers->get_texture_samples());
 		}
 	}
 }
@@ -192,9 +194,11 @@ RID RenderForwardClustered::RenderBufferDataForwardClustered::get_color_pass_fb(
 	RID color = use_msaa ? render_buffers->get_texture(RB_SCOPE_BUFFERS, RB_TEX_COLOR_MSAA) : render_buffers->get_internal_texture();
 
 	RID specular;
+	RID sss_radius;
 	if (p_color_pass_flags & COLOR_PASS_FLAG_SEPARATE_SPECULAR) {
 		ensure_specular();
 		specular = render_buffers->get_texture(RB_SCOPE_FORWARD_CLUSTERED, use_msaa ? RB_TEX_SPECULAR_MSAA : RB_TEX_SPECULAR);
+		sss_radius = render_buffers->get_texture(RB_SCOPE_FORWARD_CLUSTERED, use_msaa ? RB_TEX_SSS_RADIUS_MSAA : RB_TEX_SSS_RADIUS);
 	}
 
 	RID velocity_buffer;
@@ -206,6 +210,15 @@ RID RenderForwardClustered::RenderBufferDataForwardClustered::get_color_pass_fb(
 	}
 
 	RID depth = use_msaa ? render_buffers->get_texture(RB_SCOPE_BUFFERS, RB_TEX_DEPTH_MSAA) : render_buffers->get_depth_texture();
+
+	if (sss_radius.is_valid()) {
+		RID bounce = (p_color_pass_flags & COLOR_PASS_FLAG_BOUNCE_SOURCE) ? render_buffers->get_texture_slice(RB_SCOPE_BOUNCE_SOURCE, RB_SOURCE, 0, 0, v_count) : RID();
+		RID reflection = (p_color_pass_flags & COLOR_PASS_FLAG_REFLECTION_SOURCE) ? render_buffers->get_texture_slice(RB_SCOPE_REFLECTION_SOURCE, RB_SOURCE, 0, 0, v_count) : RID();
+		if (render_buffers->has_texture(RB_SCOPE_VRS, RB_TEXTURE)) {
+			return FramebufferCacheRD::get_singleton()->get_cache_multiview(v_count, color, specular, velocity_buffer, bounce, reflection, reactive, sss_radius, depth, render_buffers->get_texture(RB_SCOPE_VRS, RB_TEXTURE));
+		}
+		return FramebufferCacheRD::get_singleton()->get_cache_multiview(v_count, color, specular, velocity_buffer, bounce, reflection, reactive, sss_radius, depth);
+	}
 
 	if (p_color_pass_flags & (COLOR_PASS_FLAG_BOUNCE_SOURCE | COLOR_PASS_FLAG_REFLECTION_SOURCE | COLOR_PASS_FLAG_MOTION_VECTORS)) {
 		RID bounce = (p_color_pass_flags & COLOR_PASS_FLAG_BOUNCE_SOURCE) ? render_buffers->get_texture_slice(RB_SCOPE_BOUNCE_SOURCE, RB_SOURCE, 0, 0, v_count) : RID();
@@ -1965,10 +1978,12 @@ void RenderForwardClustered::_process_sss(Ref<RenderSceneBuffersRD> p_render_buf
 
 	p_render_buffers->allocate_blur_textures();
 
+	Ref<RenderBufferDataForwardClustered> rb_data = p_render_buffers->get_custom_data(RB_SCOPE_FORWARD_CLUSTERED);
+	ERR_FAIL_COND(rb_data.is_null());
 	for (uint32_t v = 0; v < p_render_buffers->get_view_count(); v++) {
 		RID internal_texture = p_render_buffers->get_internal_texture(v);
 		RID depth_texture = p_render_buffers->get_depth_texture(v);
-		ss_effects->sub_surface_scattering(p_render_buffers, internal_texture, depth_texture, p_camera, internal_size);
+		ss_effects->sub_surface_scattering(p_render_buffers, internal_texture, depth_texture, rb_data->get_sss_radius(v), p_camera, internal_size);
 	}
 }
 
@@ -2635,6 +2650,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			if (using_separate_specular) {
 				for (uint32_t v = 0; v < rb->get_view_count(); v++) {
 					RD::get_singleton()->texture_resolve_multisample(rb_data->get_specular_msaa(v), rb_data->get_specular(v));
+					RD::get_singleton()->texture_resolve_multisample(rb_data->get_sss_radius_msaa(v), rb_data->get_sss_radius(v));
 				}
 			}
 		}
@@ -4989,6 +5005,15 @@ static RD::FramebufferFormatID _get_color_framebuffer_format_for_pipeline(RD::Da
 	if (p_velocity) {
 		attachment.format = RD::DATA_FORMAT_R8_UNORM;
 		attachment.usage_flags = RenderSceneBuffersRD::get_reactive_usage_bits(multisampling);
+		attachments.push_back(attachment);
+	}
+
+	if (p_specular) {
+		while (attachments.size() < 6) {
+			attachments.push_back(unused_attachment);
+		}
+		attachment.format = RenderForwardClustered::RenderBufferDataForwardClustered::get_specular_format();
+		attachment.usage_flags = RenderForwardClustered::RenderBufferDataForwardClustered::get_specular_usage_bits(false, multisampling, p_can_be_storage);
 		attachments.push_back(attachment);
 	}
 

@@ -131,6 +131,7 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 	actions.render_mode_flags["depth_prepass_alpha"] = &uses_depth_prepass_alpha;
 
 	actions.usage_flag_pointers["SSS_STRENGTH"] = &uses_sss;
+	actions.usage_flag_pointers["SSS_RADIUS"] = &uses_sss;
 	actions.usage_flag_pointers["SSS_TRANSMITTANCE_DEPTH"] = &uses_transmittance;
 
 	actions.usage_flag_pointers["DISCARD"] = &uses_discard;
@@ -356,8 +357,8 @@ void SceneShaderForwardClustered::ShaderData::_create_pipeline(PipelineKey p_pip
 	// Color pass -> attachment 0: Color/Diffuse, attachment 1: Separate Specular, attachment 2: Motion Vectors
 	RD::PipelineColorBlendState::Attachment blend_attachment = blend_mode_to_blend_attachment(BlendMode(blend_mode));
 	RD::PipelineColorBlendState blend_state_color_blend;
-	blend_state_color_blend.attachments = { blend_attachment, RD::PipelineColorBlendState::Attachment(), RD::PipelineColorBlendState::Attachment(), RD::PipelineColorBlendState::Attachment(), RD::PipelineColorBlendState::Attachment(), RD::PipelineColorBlendState::Attachment() };
-	RD::PipelineColorBlendState blend_state_color_opaque = RD::PipelineColorBlendState::create_disabled(6);
+	blend_state_color_blend.attachments = { blend_attachment, RD::PipelineColorBlendState::Attachment(), RD::PipelineColorBlendState::Attachment(), RD::PipelineColorBlendState::Attachment(), RD::PipelineColorBlendState::Attachment(), RD::PipelineColorBlendState::Attachment(), RD::PipelineColorBlendState::Attachment() };
+	RD::PipelineColorBlendState blend_state_color_opaque = RD::PipelineColorBlendState::create_disabled(7);
 	RD::PipelineColorBlendState blend_state_depth_normal_roughness = RD::PipelineColorBlendState::create_disabled(1);
 	RD::PipelineColorBlendState blend_state_depth_normal_roughness_giprobe = RD::PipelineColorBlendState::create_disabled(2);
 
@@ -785,6 +786,7 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 		actions.renames["SSS_TRANSMITTANCE_COLOR"] = "transmittance_color";
 		actions.renames["SSS_TRANSMITTANCE_DEPTH"] = "transmittance_depth";
 		actions.renames["SSS_TRANSMITTANCE_BOOST"] = "transmittance_boost";
+		actions.renames["SSS_RADIUS"] = "sss_radius";
 		actions.renames["BACKLIGHT"] = "backlight";
 		actions.renames["AO"] = "ao";
 		actions.renames["AO_LIGHT_AFFECT"] = "ao_light_affect";
