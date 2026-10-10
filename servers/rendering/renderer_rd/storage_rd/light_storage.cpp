@@ -2000,9 +2000,9 @@ bool LightStorage::reflection_probe_instance_postprocess_step(RID p_instance) {
 		data.create_reflection_fast_filter(false);
 	} else {
 		const int mip_count = (int)data.layers[0].mipmaps.size();
-		const int last = rpi->atlas_index < 0 ? mip_count : MIN(rpi->processing_layer + 1, mip_count);
-		for (; rpi->processing_layer < last; rpi->processing_layer++) {
+		if (rpi->processing_layer < mip_count) {
 			data.create_reflection_importance_sample(false, rpi->processing_layer, RendererSceneRenderRD::get_singleton()->get_sky()->sky_ggx_samples_quality);
+			rpi->processing_layer++;
 		}
 		if (rpi->processing_layer < mip_count) {
 			return false;
