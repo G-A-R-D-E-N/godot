@@ -2487,6 +2487,14 @@ TEST_CASE("[HashFuncs] hash_murmur3_buffer matches MurmurHash3_x86_32") {
 	CHECK(hash_murmur3_buffer(bytes, 3, 0) == 0x7E4A8634);
 	CHECK(hash_murmur3_buffer(ff, 4, 0) == 0x76293B50);
 	CHECK(hash_murmur3_buffer(ab, 11, 0) == 0x5F94DEAD);
+
+	const uint8_t counting[10] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+	CHECK(hash_murmur3_buffer(counting, 5, 0) == 0xA291B9C8);
+	CHECK(hash_murmur3_buffer(counting, 6, 0) == 0xD7BFB23E);
+	CHECK(hash_murmur3_buffer(counting, 7, 0) == 0xFC5897B5);
+	CHECK(hash_murmur3_buffer(counting, 8, 0) == 0x0D4B1FBB);
+	CHECK(hash_murmur3_buffer(counting, 9, 0) == 0xA198F0A8);
+	CHECK(hash_murmur3_buffer(counting, 10, 0) == 0x4DC93CCA);
 	CHECK(hash_murmur3_buffer(ab, 11) == 0x1A742B8A);
 }
 
