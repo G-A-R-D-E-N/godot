@@ -792,7 +792,7 @@ uint32_t RenderForwardClustered::_setup_environment(const RenderDataRD *p_render
 		uint32_t ss_flags = 0;
 		if (p_opaque_render_buffers) {
 			bool last_frame_valid = rd.is_null() || !rd->get_history_reset();
-			ss_flags |= environment_get_ssao_enabled(p_render_data->environment) ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSAO : 0;
+			ss_flags |= environment_get_ssao_enabled(p_render_data->environment) && (rd.is_null() || rd->has_texture(RB_SCOPE_SSAO, RB_FINAL)) ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSAO : 0;
 			ss_flags |= environment_get_ssil_enabled(p_render_data->environment) && last_frame_valid ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSIL : 0;
 			ss_flags |= environment_get_ssr_enabled(p_render_data->environment) && last_frame_valid ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSR : 0;
 			ss_flags |= bool(GLOBAL_GET_CACHED(bool, "rendering/lights_and_shadows/contact_shadow/enabled")) ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSCS : 0;
@@ -1516,7 +1516,9 @@ void RenderForwardClustered::_process_ssao(Ref<RenderSceneBuffersRD> p_render_bu
 		gtao_settings.noise_index = uint32_t(p_taa_frame_count);
 		gtao_settings.full_screen_size = p_render_buffers->get_internal_size();
 
-		ss_effects->gtao_allocate_buffers(p_render_buffers, rb_data->ss_effects_data.gtao, gtao_settings);
+		if (!ss_effects->gtao_allocate_buffers(p_render_buffers, rb_data->ss_effects_data.gtao, gtao_settings)) {
+			return;
+		}
 
 		for (uint32_t v = 0; v < p_render_buffers->get_view_count(); v++) {
 			ss_effects->generate_gtao(p_render_buffers, rb_data->ss_effects_data.gtao, v, p_normal_buffers[v], p_projections[v], gtao_settings);
