@@ -366,9 +366,9 @@ public:
 		RID area_light_atlas;
 		RID directional_shadow_depth;
 		RID directional_light_buffer;
-		bool reset_history;
+		bool reset_history = false;
 		bool debug_history_clamp = false;
-		float exposure_normalization;
+		float exposure_normalization = 1.0;
 
 		// Objects related to our render buffer
 		Ref<VolumetricFog> vfog;
