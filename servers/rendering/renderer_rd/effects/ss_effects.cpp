@@ -2388,7 +2388,11 @@ void SSEffects::screen_space_contact_shadows(Ref<RenderSceneBuffersRD> p_render_
 					projected_light.y * p_sscs_buffers.size.height * 0.5,
 					projected_light.z,
 					0);
-			light = light / MAX(Math::abs(light.x), Math::abs(light.y));
+			const float longest = MAX(Math::abs(light.x), Math::abs(light.y));
+			if (longest == 0.0f) {
+				continue;
+			}
+			light = light / longest;
 
 			bound_start = Vector2i(
 					light.x > 0 && light.x < Math::abs(light.y) ? -1 : 0,
@@ -2401,7 +2405,7 @@ void SSEffects::screen_space_contact_shadows(Ref<RenderSceneBuffersRD> p_render_
 		Size2i bound_size = bound_end - bound_start;
 
 		RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
-		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, sscs.sscs_pipelines[p_settings.quality].get_rid());
+		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, sscs.sscs_pipelines[CLAMP(int(p_settings.quality), 0, int(std_size(sscs.sscs_pipelines)) - 1)].get_rid());
 
 		ScreenSpaceContactShadowsPushConstant push_constant = {};
 		push_constant.ray_confidence = p_settings.ray_confidence;
