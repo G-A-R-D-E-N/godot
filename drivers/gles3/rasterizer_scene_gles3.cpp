@@ -1707,10 +1707,10 @@ void RasterizerSceneGLES3::_setup_environment(const RenderDataGLES3 *p_render_da
 
 	scene_state.data.IBL_exposure_normalization = 1.0;
 	RID sky_rid = is_environment(p_render_data->environment) ? environment_get_sky(p_render_data->environment) : RID();
-	if (sky_rid.is_valid()) {
+	if (sky_rid.is_valid() && (use_physical_light_units || p_render_data->camera_attributes.is_valid())) {
 		float camera_exposure = p_render_data->camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes) : 1.0f;
 		float current_exposure = camera_exposure * environment_get_bg_intensity(p_render_data->environment);
-		scene_state.data.IBL_exposure_normalization = current_exposure / MAX(1e-6f, sky_get_baked_exposure(sky_rid));
+		scene_state.data.IBL_exposure_normalization = current_exposure / MAX(use_physical_light_units ? 1e-6f : 0.001f, sky_get_baked_exposure(sky_rid));
 	}
 
 	_update_scene_ubo(scene_state.ubo_buffer, SCENE_DATA_UNIFORM_LOCATION, sizeof(SceneState::UBO), &scene_state.data, "Scene state UBO");
