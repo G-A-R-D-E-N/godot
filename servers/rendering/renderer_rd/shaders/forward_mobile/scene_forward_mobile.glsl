@@ -1164,6 +1164,9 @@ void main() {
 	vec3 indirect_coat_weight_highp = vec3(0.0);
 	float indirect_coat_roughness_highp = 0.0;
 #endif
+#if defined(INDIRECT_COAT_NORMAL_USED)
+	vec3 indirect_coat_normal_highp = vec3(0.0);
+#endif
 #if defined(DIRECT_DIFFUSE_WEIGHT_USED)
 	vec3 direct_diffuse_weight_highp = vec3(1.0);
 #endif
@@ -1362,6 +1365,13 @@ void main() {
 #ifdef NORMAL_USED
 	hvec3 geo_normal = normalize(normal);
 #endif // NORMAL_USED
+#ifdef INDIRECT_COAT_NORMAL_USED
+	bool cc_custom = dot(indirect_coat_normal_highp, indirect_coat_normal_highp) > 0.0;
+	hvec3 cc_normal = cc_custom ? hvec3(normalize(indirect_coat_normal_highp)) : geo_normal;
+#define CLEARCOAT_NORMAL cc_normal
+#else
+#define CLEARCOAT_NORMAL geo_normal
+#endif
 
 #ifdef LIGHT_TRANSMITTANCE_USED
 #ifdef SSS_MODE_SKIN
@@ -1734,12 +1744,12 @@ void main() {
 	hvec3 cc_specular_light = hvec3(0.0);
 	hvec3 cc_ref_vec = hvec3(0.0);
 #ifdef INDIRECT_COAT_USED
-	cc_ref_vec = mix(reflect(-view, geo_normal), geo_normal, CLEARCOAT_IBL_BEND);
+	cc_ref_vec = mix(reflect(-view, CLEARCOAT_NORMAL), CLEARCOAT_NORMAL, CLEARCOAT_IBL_BEND);
 #endif
 
 	if (sc_scene_use_reflection_cubemap()) {
-		cc_ref_vec = reflect(-view, geo_normal);
-		cc_ref_vec = mix(cc_ref_vec, geo_normal, CLEARCOAT_IBL_BEND);
+		cc_ref_vec = reflect(-view, CLEARCOAT_NORMAL);
+		cc_ref_vec = mix(cc_ref_vec, CLEARCOAT_NORMAL, CLEARCOAT_IBL_BEND);
 
 		hvec3 cc_radiance_ref_vec = hvec3(scene_data.radiance_inverse_xform * vec3(cc_ref_vec));
 		float roughness_lod = sqrt(CLEARCOAT_IBL_LOD_ROUGHNESS) * MAX_ROUGHNESS_LOD;
@@ -1880,7 +1890,7 @@ void main() {
 								rim, rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-								clearcoat, clearcoat_roughness, geo_normal,
+								clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif
 #ifdef LIGHT_ANISOTROPY_USED
 								binormal, tangent, anisotropy,
@@ -1992,7 +2002,19 @@ void main() {
 	specular_occlusion = mix(specular_occlusion, cos_b * (half(1.0) - ao), roughness);
 	indirect_specular_light *= specular_occlusion;
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+#ifdef INDIRECT_COAT_NORMAL_USED
+	if (cc_custom) {
+		half cc_roughness = max(half(indirect_coat_roughness_highp), half(0.001));
+		half cc_cos_b = max(dot(reflect(-view, cc_normal), bent_normal_vector), half(0.0));
+		half cc_specular_occlusion = clamp((ao - (half(1.0) - cc_cos_b)) / cc_roughness, half(0.0), half(1.0));
+		cc_specular_occlusion = mix(cc_specular_occlusion, cc_cos_b * (half(1.0) - ao), cc_roughness);
+		cc_specular_light *= cc_specular_occlusion;
+	} else {
+		cc_specular_light *= specular_occlusion;
+	}
+#else
 	cc_specular_light *= specular_occlusion;
+#endif
 #endif
 #else // BENT_NORMAL_MAP_USED
 	half specular_occlusion = (ambient_light.r * half(0.3) + ambient_light.g * half(0.59) + ambient_light.b * half(0.11)) * half(2.0); // Luminance of ambient light.
@@ -2057,7 +2079,7 @@ void main() {
 #if defined(INDIRECT_COAT_USED)
 		indirect_specular_light += cc_specular_light * hvec3(indirect_coat_weight_highp * (1.0 - decal_coverage));
 #elif defined(LIGHT_CLEARCOAT_USED)
-		half geo_NdotV = max(dot(geo_normal, view), half(0.0001)); // We want to use geometric normal, not normal_map
+		half geo_NdotV = max(dot(CLEARCOAT_NORMAL, view), half(0.0001));
 		// The clearcoat layer assumes an IOR of 1.5 (4% reflectance).
 		// Attenuate underlying diffuse/specular by clearcoat fresnel (ONLY fresnel, hence we don't just invert the BRDF below).
 		half NdotV5 = SchlickFresnel(geo_NdotV);
@@ -2311,7 +2333,7 @@ void main() {
 					rim, rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-					clearcoat, clearcoat_roughness, geo_normal,
+					clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_CLEARCOAT_USED
 #ifdef LIGHT_ANISOTROPY_USED
 					binormal, tangent, anisotropy,
@@ -2347,7 +2369,7 @@ void main() {
 				rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-				clearcoat, clearcoat_roughness, geo_normal,
+				clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_CLEARCOAT_USED
 #ifdef LIGHT_ANISOTROPY_USED
 				binormal, tangent, anisotropy,
@@ -2379,7 +2401,7 @@ void main() {
 				rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-				clearcoat, clearcoat_roughness, geo_normal,
+				clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_CLEARCOAT_USED
 #ifdef LIGHT_ANISOTROPY_USED
 				binormal, tangent, anisotropy,
@@ -2411,7 +2433,7 @@ void main() {
 				rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-				clearcoat, clearcoat_roughness, geo_normal,
+				clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_CLEARCOAT_USED
 #ifdef LIGHT_ANISOTROPY_USED
 				binormal, tangent, anisotropy,
