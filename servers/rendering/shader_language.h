@@ -349,6 +349,14 @@ public:
 		FILTER_DEFAULT,
 	};
 
+	static constexpr TextureFilter combine_texture_filters(TextureFilter p_a, TextureFilter p_b) {
+		if (p_a == FILTER_DEFAULT || p_b == FILTER_DEFAULT) {
+			return p_a == FILTER_DEFAULT ? p_b : p_a;
+		}
+		const int level = (int(p_a) >> 1) > (int(p_b) >> 1) ? (int(p_a) >> 1) : (int(p_b) >> 1);
+		return TextureFilter(level * 2 + ((int(p_a) | int(p_b)) & 1));
+	}
+
 	enum TextureRepeat {
 		REPEAT_DISABLE,
 		REPEAT_ENABLE,
