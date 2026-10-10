@@ -1337,6 +1337,9 @@ void fragment_shader(in SceneData scene_data) {
 	vec3 indirect_coat_weight = vec3(0.0);
 	float indirect_coat_roughness = 0.0;
 #endif
+#if defined(INDIRECT_COAT_NORMAL_USED)
+	vec3 indirect_coat_normal = vec3(0.0);
+#endif
 #if defined(DIRECT_DIFFUSE_WEIGHT_USED)
 	vec3 direct_diffuse_weight = vec3(1.0);
 #endif
@@ -1489,6 +1492,16 @@ void fragment_shader(in SceneData scene_data) {
 #ifdef NORMAL_USED
 	vec3 geo_normal = normalize(normal);
 #endif // NORMAL_USED
+#ifdef INDIRECT_COAT_NORMAL_USED
+	bool cc_custom = dot(indirect_coat_normal, indirect_coat_normal) > 0.0;
+	vec3 cc_normal = cc_custom ? normalize(indirect_coat_normal) : geo_normal;
+#define CLEARCOAT_NORMAL cc_normal
+#ifdef INDIRECT_COAT_USED
+#define INDIRECT_COAT_NORMAL_ACTIVE
+#endif
+#else
+#define CLEARCOAT_NORMAL geo_normal
+#endif
 
 #ifndef USE_SHADOW_TO_OPACITY
 
@@ -1954,12 +1967,12 @@ void fragment_shader(in SceneData scene_data) {
 	vec3 cc_specular_light = vec3(0.0);
 	vec3 cc_ref_vec = vec3(0.0);
 #ifdef INDIRECT_COAT_USED
-	cc_ref_vec = mix(reflect(-view, geo_normal), geo_normal, CLEARCOAT_IBL_BEND);
+	cc_ref_vec = mix(reflect(-view, CLEARCOAT_NORMAL), CLEARCOAT_NORMAL, CLEARCOAT_IBL_BEND);
 #endif
 
 	if (bool(scene_data.flags & SCENE_DATA_FLAGS_USE_REFLECTION_CUBEMAP)) {
-		cc_ref_vec = reflect(-view, geo_normal);
-		cc_ref_vec = mix(cc_ref_vec, geo_normal, CLEARCOAT_IBL_BEND);
+		cc_ref_vec = reflect(-view, CLEARCOAT_NORMAL);
+		cc_ref_vec = mix(cc_ref_vec, CLEARCOAT_NORMAL, CLEARCOAT_IBL_BEND);
 
 		vec3 cc_radiance_ref_vec = scene_data.radiance_inverse_xform * cc_ref_vec;
 		float roughness_lod = sqrt(CLEARCOAT_IBL_ROUGHNESS) * MAX_ROUGHNESS_LOD;
@@ -2104,7 +2117,7 @@ void fragment_shader(in SceneData scene_data) {
 								rim, rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-								clearcoat, clearcoat_roughness, geo_normal,
+								clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_CLEARCOAT_USED
 #ifdef LIGHT_ANISOTROPY_USED
 								binormal,
@@ -2172,6 +2185,19 @@ void fragment_shader(in SceneData scene_data) {
 			float blend;
 			vec3 diffuse, specular;
 			sdfgi_process(cascade, cascade_pos, cam_pos, cam_normal, cam_reflection, use_specular, roughness, diffuse, specular, blend);
+#ifdef INDIRECT_COAT_NORMAL_ACTIVE
+			bool cc_split = cc_custom && dot(cc_normal, indirect_normal) < 0.99999;
+			vec3 cam_cc_reflection = vec3(0.0);
+			vec3 cc_specular = specular;
+			if (cc_split) {
+				cam_cc_reflection = mat3(inv_view_matrix) * reflect(-view, cc_normal);
+				cam_cc_reflection.y *= sdfgi.y_mult;
+				cam_cc_reflection = normalize(cam_cc_reflection);
+				vec3 cc_diffuse;
+				float cc_blend;
+				sdfgi_process(cascade, cascade_pos, cam_pos, cam_normal, cam_cc_reflection, true, indirect_coat_roughness, cc_diffuse, cc_specular, cc_blend);
+			}
+#endif
 
 			if (blend > 0.0) {
 				//blend
@@ -2185,6 +2211,16 @@ void fragment_shader(in SceneData scene_data) {
 					float blend2;
 					cascade_pos = (cam_pos - sdfgi.cascades[cascade + 1].position) * sdfgi.cascades[cascade + 1].to_probe;
 					sdfgi_process(cascade + 1, cascade_pos, cam_pos, cam_normal, cam_reflection, use_specular, roughness, diffuse2, specular2, blend2);
+#ifdef INDIRECT_COAT_NORMAL_ACTIVE
+					if (cc_split) {
+						vec3 cc_diffuse2, cc_specular2;
+						float cc_blend2;
+						sdfgi_process(cascade + 1, cascade_pos, cam_pos, cam_normal, cam_cc_reflection, true, indirect_coat_roughness, cc_diffuse2, cc_specular2, cc_blend2);
+						cc_specular = mix(cc_specular, cc_specular2, blend);
+					} else {
+						cc_specular = mix(specular, specular2, blend);
+					}
+#endif
 					diffuse = mix(diffuse, diffuse2, blend);
 					if (use_specular) {
 						specular = mix(specular, specular2, blend);
@@ -2198,7 +2234,11 @@ void fragment_shader(in SceneData scene_data) {
 				indirect_specular_light = specular;
 				specular_source = vec4(0.0, 1.0, 0.0, 0.0);
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+#ifdef INDIRECT_COAT_NORMAL_ACTIVE
+				cc_specular_light = cc_specular;
+#else
 				cc_specular_light = specular;
+#endif
 #endif
 			}
 		}
@@ -2238,16 +2278,38 @@ void fragment_shader(in SceneData scene_data) {
 			amb_accum.rgb /= amb_accum.a;
 		}
 
-#ifdef VOXEL_GI_ENVIRONMENT_WEIGHT
-		vec3 cc_environment = cc_specular_light - indirect_specular_light;
+#ifdef INDIRECT_COAT_NORMAL_ACTIVE
+		if (cc_custom && dot(cc_normal, indirect_normal) < 0.99999) {
+			vec3 cc_ref_world = mat3(inv_view_matrix) * normalize(reflect(-view, cc_normal));
+			vec4 cc_spec_accum = vec4(0.0);
+			float cc_environment_weight = 0.0;
+			vec3 cc_environment = cc_specular_light - indirect_specular_light;
+			voxel_gi_coat_compute(index1, cam_pos, cam_normal, cc_ref_world, indirect_coat_roughness * indirect_coat_roughness, indirect_specular_light, cc_spec_accum, cc_environment_weight);
+			if (index2 != 0xFFFF) {
+				voxel_gi_coat_compute(index2, cam_pos, cam_normal, cc_ref_world, indirect_coat_roughness * indirect_coat_roughness, indirect_specular_light, cc_spec_accum, cc_environment_weight);
+			}
+			if (cc_spec_accum.a > 0.0) {
+				cc_specular_light = cc_spec_accum.rgb / cc_spec_accum.a + cc_environment * (cc_environment_weight / cc_spec_accum.a);
+			} else {
+				cc_specular_light = cc_spec_accum.rgb;
+			}
+			if (spec_accum.a > 0.0) {
+				spec_accum.rgb /= spec_accum.a;
+			}
+		} else
 #endif
-		if (spec_accum.a > 0.0) {
-			spec_accum.rgb /= spec_accum.a;
+		{
 #ifdef VOXEL_GI_ENVIRONMENT_WEIGHT
-			cc_specular_light = spec_accum.rgb + cc_environment * (environment_weight / spec_accum.a);
-		} else {
-			cc_specular_light = spec_accum.rgb;
+			vec3 cc_environment = cc_specular_light - indirect_specular_light;
 #endif
+			if (spec_accum.a > 0.0) {
+				spec_accum.rgb /= spec_accum.a;
+#ifdef VOXEL_GI_ENVIRONMENT_WEIGHT
+				cc_specular_light = spec_accum.rgb + cc_environment * (environment_weight / spec_accum.a);
+			} else {
+				cc_specular_light = spec_accum.rgb;
+#endif
+			}
 		}
 
 		indirect_specular_light = spec_accum.rgb;
@@ -2460,7 +2522,11 @@ void fragment_shader(in SceneData scene_data) {
 		float specular_occlusion = specular_occlusion_cone(ao, roughness, bent_normal_vector, reflect(-view, normal));
 		indirect_specular_light *= specular_occlusion;
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+#ifdef INDIRECT_COAT_NORMAL_ACTIVE
+		cc_specular_light *= cc_custom ? specular_occlusion_cone(ao, indirect_coat_roughness, bent_normal_vector, reflect(-view, cc_normal)) : specular_occlusion;
+#else
 		cc_specular_light *= specular_occlusion;
+#endif
 #endif
 #else // BENT_NORMAL_MAP_USED
 #ifdef SPECULAR_OCCLUSION_COMBINED
@@ -2475,6 +2541,9 @@ void fragment_shader(in SceneData scene_data) {
 		specular_occlusion = max(min(reflective_f * specular_occlusion * 10.0, 1.0), specular_occlusion);
 		specular_occlusion = bool(scene_data.flags & SCENE_DATA_FLAGS_USE_PHYSICAL_LIGHT_UNITS) ? 1.0 : specular_occlusion;
 #endif
+#ifdef INDIRECT_COAT_NORMAL_ACTIVE
+		float cc_specular_occlusion = specular_occlusion;
+#endif
 		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_BENT_NORMALS)) {
 #ifdef USE_MULTIVIEW
 			vec3 occlusion_bent_normal = normalize(textureLod(sampler2DArray(gtao_bent_normal_buffer, SAMPLER_LINEAR_CLAMP), vec3(screen_uv, ViewIndex), 0.0).xyz * 2.0 - 1.0);
@@ -2482,11 +2551,16 @@ void fragment_shader(in SceneData scene_data) {
 			vec3 occlusion_bent_normal = normalize(textureLod(sampler2D(gtao_bent_normal_buffer, SAMPLER_LINEAR_CLAMP), screen_uv, 0.0).xyz * 2.0 - 1.0);
 #endif
 			specular_occlusion = specular_occlusion_cone(ao, roughness, occlusion_bent_normal, reflect(-view, normal));
+#ifdef INDIRECT_COAT_NORMAL_ACTIVE
+			cc_specular_occlusion = cc_custom ? specular_occlusion_cone(ao, indirect_coat_roughness, occlusion_bent_normal, reflect(-view, cc_normal)) : specular_occlusion;
+#endif
 		}
 		indirect_specular_light *= specular_occlusion;
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
 #ifdef SPECULAR_OCCLUSION_COMBINED
-		cc_specular_light *= specular_occlusion_lagarde(clamp(dot(geo_normal, view), 0.0, 1.0), ao, indirect_coat_roughness * indirect_coat_roughness);
+		cc_specular_light *= specular_occlusion_lagarde(clamp(dot(CLEARCOAT_NORMAL, view), 0.0, 1.0), ao, indirect_coat_roughness * indirect_coat_roughness);
+#elif defined(INDIRECT_COAT_NORMAL_ACTIVE)
+		cc_specular_light *= cc_specular_occlusion;
 #else
 		cc_specular_light *= specular_occlusion;
 #endif
@@ -2603,7 +2677,7 @@ void fragment_shader(in SceneData scene_data) {
 		source_specular_light += source_cc_specular_light * indirect_coat_weight * (1.0 - decal_coverage);
 #endif
 #elif defined(LIGHT_CLEARCOAT_USED)
-		float geo_NdotV = max(dot(geo_normal, view), 0.0001); // We want to use geometric normal, not normal_map
+		float geo_NdotV = max(dot(CLEARCOAT_NORMAL, view), 0.0001);
 		// The clearcoat layer assumes an IOR of 1.5 (4% reflectance).
 		// Attenuate underlying diffuse/specular by clearcoat fresnel (ONLY fresnel, hence we don't just invert the BRDF below).
 		float NdotV5 = SchlickFresnel(geo_NdotV);
@@ -2995,7 +3069,7 @@ void fragment_shader(in SceneData scene_data) {
 					rim, rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-					clearcoat, clearcoat_roughness, geo_normal,
+					clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_CLEARCOAT_USED
 #ifdef LIGHT_ANISOTROPY_USED
 					binormal,
@@ -3059,7 +3133,7 @@ void fragment_shader(in SceneData scene_data) {
 						rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-						clearcoat, clearcoat_roughness, geo_normal,
+						clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_CLEARCOAT_USED
 #ifdef LIGHT_ANISOTROPY_USED
 						binormal, tangent, anisotropy,
@@ -3120,7 +3194,7 @@ void fragment_shader(in SceneData scene_data) {
 						rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-						clearcoat, clearcoat_roughness, geo_normal,
+						clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_CLEARCOAT_USED
 #ifdef LIGHT_ANISOTROPY_USED
 						binormal, tangent, anisotropy,
@@ -3181,7 +3255,7 @@ void fragment_shader(in SceneData scene_data) {
 						rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-						clearcoat, clearcoat_roughness, geo_normal,
+						clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif
 #ifdef LIGHT_ANISOTROPY_USED
 						binormal, tangent, anisotropy,

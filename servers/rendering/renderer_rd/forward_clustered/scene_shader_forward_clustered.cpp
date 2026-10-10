@@ -811,6 +811,7 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 		actions.renames["INDIRECT_SPECULAR_WEIGHT"] = "indirect_specular_weight";
 		actions.renames["INDIRECT_COAT_WEIGHT"] = "indirect_coat_weight";
 		actions.renames["INDIRECT_COAT_ROUGHNESS"] = "indirect_coat_roughness";
+		actions.renames["INDIRECT_COAT_NORMAL"] = "indirect_coat_normal";
 		actions.renames["DIRECT_DIFFUSE_WEIGHT"] = "direct_diffuse_weight";
 		actions.renames["EMISSION_BOUNCE_WEIGHT"] = "emission_bounce_weight";
 		actions.renames["DECAL_COVERAGE"] = "decal_coverage";
@@ -899,6 +900,7 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 		actions.usage_defines["INDIRECT_SPECULAR_WEIGHT"] = "#define INDIRECT_SPECULAR_WEIGHT_USED\n";
 		actions.usage_defines["INDIRECT_COAT_WEIGHT"] = "#define INDIRECT_COAT_USED\n#define LIGHT_CLEARCOAT_USED\n";
 		actions.usage_defines["INDIRECT_COAT_ROUGHNESS"] = "@INDIRECT_COAT_WEIGHT";
+		actions.usage_defines["INDIRECT_COAT_NORMAL"] = "#define INDIRECT_COAT_NORMAL_USED\n#define NORMAL_USED\n";
 		actions.usage_defines["DIRECT_DIFFUSE_WEIGHT"] = "#define DIRECT_DIFFUSE_WEIGHT_USED\n";
 		actions.usage_defines["DECAL_COVERAGE"] = "#define DECAL_COVERAGE_USED\n";
 		actions.usage_defines["TEMPORAL_MASK"] = "#define TEMPORAL_METADATA_USED\n";
