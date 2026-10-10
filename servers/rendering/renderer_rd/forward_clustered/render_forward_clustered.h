@@ -158,7 +158,7 @@ public:
 #endif
 
 		RID get_color_only_fb();
-		RID get_color_pass_fb(uint32_t p_color_pass_flags);
+		RID get_color_pass_fb(uint32_t p_color_pass_flags, uint32_t *r_color_attachments = nullptr);
 		RID get_depth_fb(DepthFrameBufferType p_type = DEPTH_FB);
 		RID get_specular_only_fb();
 		RID get_velocity_only_fb();
