@@ -30,6 +30,7 @@
 
 #include "render_scene_data_rd.h"
 
+#include "core/config/project_settings.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
@@ -156,6 +157,7 @@ void RenderSceneDataRD::update_ubo(RID p_uniform_buffer, RSE::ViewportDebugDraw 
 	ubo.flags |= material_uv2_mode ? SCENE_DATA_FLAGS_USE_UV2_MATERIAL : 0;
 	ubo.flags |= shadow_pass ? SCENE_DATA_FLAGS_IN_SHADOW_PASS : 0;
 	ubo.flags |= render_scene_render->is_using_physical_light_units() ? SCENE_DATA_FLAGS_USE_PHYSICAL_LIGHT_UNITS : 0;
+	ubo.flags |= GLOBAL_GET_CACHED(bool, "rendering/lights_and_shadows/directional_shadow/soft_shadow_thin_casters") ? SCENE_DATA_FLAGS_USE_THIN_CASTER_PCSS : 0;
 
 	if (p_debug_mode == RSE::VIEWPORT_DEBUG_DRAW_UNSHADED) {
 		ubo.flags |= SCENE_DATA_FLAGS_USE_AMBIENT_LIGHT;
@@ -262,10 +264,13 @@ void RenderSceneDataRD::update_ubo(RID p_uniform_buffer, RSE::ViewportDebugDraw 
 
 	ubo.IBL_exposure_normalization = 1.0;
 	RID sky_rid = p_env.is_valid() ? render_scene_render->environment_get_sky(p_env) : RID();
-	if (sky_rid.is_valid()) {
+	if (sky_rid.is_valid() && render_scene_render->is_using_physical_light_units()) {
 		float camera_exposure = p_camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes) : 1.0f;
 		float current_exposure = camera_exposure * render_scene_render->environment_get_bg_intensity(p_env);
 		ubo.IBL_exposure_normalization = current_exposure / MAX(1e-6f, render_scene_render->get_sky()->sky_get_baked_exposure(sky_rid));
+	} else if (sky_rid.is_valid() && p_camera_attributes.is_valid()) {
+		float current_exposure = RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes) * render_scene_render->environment_get_bg_intensity(p_env) / p_luminance_multiplier;
+		ubo.IBL_exposure_normalization = current_exposure / MAX(0.001, render_scene_render->get_sky()->sky_get_baked_exposure(sky_rid));
 	}
 
 	bool roughness_limiter_enabled = p_opaque_render_buffers && render_scene_render->screen_space_roughness_limiter_is_active();

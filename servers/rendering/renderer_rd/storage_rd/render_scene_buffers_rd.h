@@ -79,6 +79,9 @@ private:
 	float history_exposure_normalization = 1.0;
 	bool history_valid = false;
 	bool history_reset = false;
+	bool history_discard = false;
+	bool history_cut = false;
+	uint64_t history_frame = UINT64_MAX;
 	RSE::ViewportVRSMode vrs_mode = RSE::VIEWPORT_VRS_DISABLED;
 
 	// Our render target represents our final destination that we display on screen.
@@ -258,13 +261,21 @@ public:
 	uint64_t get_auto_exposure_version() const { return auto_exposure_version; }
 	void set_auto_exposure_version(const uint64_t p_auto_exposure_version) { auto_exposure_version = p_auto_exposure_version; }
 
-	void update_history_reset(int p_serial, float p_exposure_normalization) {
-		history_reset = !history_valid || p_serial != history_reset_serial || p_exposure_normalization != history_exposure_normalization;
+	void update_history_reset(uint64_t p_frame, int p_serial, float p_exposure_normalization) {
+		if (p_frame == history_frame) {
+			return;
+		}
+		history_frame = p_frame;
+		history_cut = p_serial != history_reset_serial;
+		history_reset = history_cut || p_exposure_normalization != history_exposure_normalization;
+		history_discard = history_reset || !history_valid;
 		history_valid = true;
 		history_reset_serial = p_serial;
 		history_exposure_normalization = p_exposure_normalization;
 	}
 	bool get_history_reset() const { return history_reset; }
+	bool get_history_discard() const { return history_discard; }
+	bool get_history_cut() const { return history_cut; }
 
 	// For our internal textures we provide some easy access methods.
 

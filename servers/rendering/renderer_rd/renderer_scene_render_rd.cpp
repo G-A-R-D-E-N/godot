@@ -1531,8 +1531,8 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 	Color clear_color;
 	if (p_render_buffers.is_valid() && p_reflection_probe.is_null()) {
 		clear_color = texture_storage->render_target_get_clear_request_color(rb->get_render_target());
-		float exposure_normalization = p_camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes) : 1.0f;
-		rb->update_history_reset(GLOBAL_GET_CACHED(int, "rendering/anti_aliasing/quality/history_reset_serial"), exposure_normalization);
+		float exposure_normalization = is_using_physical_light_units() && p_camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes) : 1.0f;
+		rb->update_history_reset(RSG::rasterizer->get_frame_number(), GLOBAL_GET_CACHED(int, "rendering/anti_aliasing/quality/history_reset_serial"), exposure_normalization);
 	} else {
 		clear_color = RSG::texture_storage->get_default_clear_color();
 	}

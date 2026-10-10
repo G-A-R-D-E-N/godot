@@ -407,6 +407,48 @@ half sample_omni_pcf_shadow(texture2D shadow, float blur_scale, vec2 coord, vec4
 	return half(avg * (1.0 / float(sc_soft_shadow_samples())));
 }
 
+half sample_directional_soft_shadow(texture2D shadow, vec3 pssm_coord, vec2 tex_scale, float taa_frame_count) {
+	float blocker_count = 0.0;
+	float blocker_average = 0.0;
+
+	mat2 disk_rotation;
+	{
+		float r = quick_hash(gl_FragCoord.xy + vec2(taa_frame_count * 5.588238)) * 2.0 * M_PI;
+		float sr = sin(r);
+		float cr = cos(r);
+		disk_rotation = mat2(vec2(cr, -sr), vec2(sr, cr));
+	}
+
+	SPEC_CONSTANT_LOOP_ANNOTATION
+	for (uint i = 0; i < sc_directional_penumbra_shadow_samples(); i++) {
+		vec2 suv = pssm_coord.xy + (disk_rotation * scene_data_block.data.directional_penumbra_shadow_kernel[i].xy) * tex_scale;
+		float d = textureLod(sampler2D(shadow, SAMPLER_LINEAR_CLAMP), suv, 0.0).r;
+		if (d > pssm_coord.z) {
+			blocker_average += d;
+			blocker_count += 1.0;
+		}
+	}
+
+	if (blocker_count > 0.0) {
+		blocker_average /= blocker_count;
+		float penumbra = (-pssm_coord.z + blocker_average) / (1.0 - blocker_average);
+		tex_scale *= penumbra;
+
+		float s = 0.0;
+
+		SPEC_CONSTANT_LOOP_ANNOTATION
+		for (uint i = 0; i < sc_directional_penumbra_shadow_samples(); i++) {
+			vec2 suv = pssm_coord.xy + (disk_rotation * scene_data_block.data.directional_penumbra_shadow_kernel[i].xy) * tex_scale;
+			s += textureProj(sampler2DShadow(shadow, shadow_sampler), vec4(suv, pssm_coord.z, 1.0));
+		}
+
+		return half(s / float(sc_directional_penumbra_shadow_samples()));
+
+	} else {
+		return half(1.0);
+	}
+}
+
 vec2 directional_shadow_depth_gradient(mat4 shadow_matrix, vec3 normal, vec3 light_dir) {
 	if (dot(normal, light_dir) < 0.05) {
 		return vec2(0.0);
@@ -426,7 +468,7 @@ vec4 directional_shadow_gather_plane(vec2 uv, vec2 texel, vec2 depth_gradient) {
 	return depth_gradient.x * dx + depth_gradient.y * dy;
 }
 
-half sample_directional_soft_shadow(texture2D shadow, vec3 pssm_coord, vec2 depth_gradient, vec2 uv_per_meter, float z_range, float penumbra_scale, vec2 texel, float taa_frame_count) {
+half sample_directional_thin_caster_shadow(texture2D shadow, vec3 pssm_coord, vec2 depth_gradient, vec2 uv_per_meter, float z_range, float penumbra_scale, vec2 texel, float taa_frame_count) {
 	float blocker_count = 0.0;
 	float blocker_sum = 0.0;
 	for (uint i = 0u; i < 4u; i++) {
