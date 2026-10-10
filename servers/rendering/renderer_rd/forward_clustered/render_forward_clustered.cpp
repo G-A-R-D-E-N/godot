@@ -186,7 +186,7 @@ RID RenderForwardClustered::RenderBufferDataForwardClustered::get_color_only_fb(
 	}
 }
 
-RID RenderForwardClustered::RenderBufferDataForwardClustered::get_color_pass_fb(uint32_t p_color_pass_flags) {
+RID RenderForwardClustered::RenderBufferDataForwardClustered::get_color_pass_fb(uint32_t p_color_pass_flags, uint32_t *r_color_attachments) {
 	ERR_FAIL_NULL_V(render_buffers, RID());
 	bool use_msaa = render_buffers->get_msaa_3d() != RSE::VIEWPORT_MSAA_DISABLED;
 
@@ -211,6 +211,11 @@ RID RenderForwardClustered::RenderBufferDataForwardClustered::get_color_pass_fb(
 
 	RID depth = use_msaa ? render_buffers->get_texture(RB_SCOPE_BUFFERS, RB_TEX_DEPTH_MSAA) : render_buffers->get_depth_texture();
 
+	const bool sources_or_velocity = p_color_pass_flags & (COLOR_PASS_FLAG_BOUNCE_SOURCE | COLOR_PASS_FLAG_REFLECTION_SOURCE | COLOR_PASS_FLAG_MOTION_VECTORS);
+	if (r_color_attachments) {
+		*r_color_attachments = sss_radius.is_valid() ? 7 : (sources_or_velocity ? 6 : 3);
+	}
+
 	if (sss_radius.is_valid()) {
 		RID bounce = (p_color_pass_flags & COLOR_PASS_FLAG_BOUNCE_SOURCE) ? render_buffers->get_texture_slice(RB_SCOPE_BOUNCE_SOURCE, RB_SOURCE, 0, 0, v_count) : RID();
 		RID reflection = (p_color_pass_flags & COLOR_PASS_FLAG_REFLECTION_SOURCE) ? render_buffers->get_texture_slice(RB_SCOPE_REFLECTION_SOURCE, RB_SOURCE, 0, 0, v_count) : RID();
@@ -220,7 +225,7 @@ RID RenderForwardClustered::RenderBufferDataForwardClustered::get_color_pass_fb(
 		return FramebufferCacheRD::get_singleton()->get_cache_multiview(v_count, color, specular, velocity_buffer, bounce, reflection, reactive, sss_radius, depth);
 	}
 
-	if (p_color_pass_flags & (COLOR_PASS_FLAG_BOUNCE_SOURCE | COLOR_PASS_FLAG_REFLECTION_SOURCE | COLOR_PASS_FLAG_MOTION_VECTORS)) {
+	if (sources_or_velocity) {
 		RID bounce = (p_color_pass_flags & COLOR_PASS_FLAG_BOUNCE_SOURCE) ? render_buffers->get_texture_slice(RB_SCOPE_BOUNCE_SOURCE, RB_SOURCE, 0, 0, v_count) : RID();
 		RID reflection = (p_color_pass_flags & COLOR_PASS_FLAG_REFLECTION_SOURCE) ? render_buffers->get_texture_slice(RB_SCOPE_REFLECTION_SOURCE, RB_SOURCE, 0, 0, v_count) : RID();
 		if (render_buffers->has_texture(RB_SCOPE_VRS, RB_TEXTURE)) {
@@ -2570,14 +2575,6 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 					clear_color.a = 0;
 				}
 				c.push_back(clear_color);
-
-				if (rb_data.is_valid()) {
-					c.push_back(Color(0, 0, 0, 0)); // Separate specular.
-					c.push_back(Color(0, 0, 0, 0)); // Motion vector. Pushed to the clear color vector even if the framebuffer isn't bound.
-					c.push_back(Color(0, 0, 0, 0));
-					c.push_back(Color(0, 0, 0, 0));
-					c.push_back(Color(0, 0, 0, 0));
-				}
 			} else {
 				if (using_bounce_source || using_reflection_source) {
 					ss_effects->clear_lighting_sources(rb);
@@ -2589,7 +2586,11 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			}
 
 			uint32_t opaque_color_pass_flags = using_motion_pass ? (color_pass_flags & ~uint32_t(COLOR_PASS_FLAG_MOTION_VECTORS)) : color_pass_flags;
-			RID opaque_framebuffer = using_motion_pass ? rb_data->get_color_pass_fb(opaque_color_pass_flags) : color_framebuffer;
+			uint32_t opaque_color_attachments = 1;
+			RID opaque_framebuffer = rb_data.is_valid() ? rb_data->get_color_pass_fb(opaque_color_pass_flags, &opaque_color_attachments) : color_framebuffer;
+			while (!load_color && uint32_t(c.size()) < opaque_color_attachments) {
+				c.push_back(Color(0, 0, 0, 0));
+			}
 			BitField<RD::DrawFlags> opaque_draw_flags = RD::DrawFlags(load_color ? RD::DRAW_DEFAULT_ALL : RD::DRAW_CLEAR_COLOR_ALL) | (depth_pre_pass ? RD::DRAW_DEFAULT_ALL : RD::DRAW_CLEAR_DEPTH);
 			if (RenderSceneBuffersRD::get_temporal_metadata() && (opaque_color_pass_flags & COLOR_PASS_FLAG_MOTION_VECTORS)) {
 				RD::get_singleton()->draw_list_begin(rb_data->get_velocity_only_fb(), RD::DRAW_CLEAR_ALL, Vector<Color>({ Color(0, 0, 0, 0) }));
