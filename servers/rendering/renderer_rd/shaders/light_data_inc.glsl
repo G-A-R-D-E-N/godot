@@ -96,4 +96,5 @@ struct DirectionalLightData {
 	float cloud_shadow_strength;
 	float cloud_shadow_exponent;
 	vec2 cloud_shadow_pad;
+	vec4 cloud_shadow_plane;
 };

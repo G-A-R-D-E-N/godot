@@ -13,7 +13,7 @@
 	</tutorials>
 	<members>
 		<member name="cloud_shadow_altitude" type="float" setter="set_cloud_shadow_altitude" getter="get_cloud_shadow_altitude" default="2000.0">
-			The height of the cloud layer above world Y = 0, in meters.
+			The height of the cloud layer above world Y = 0, in meters. Only what lies below the layer is shadowed: the shadow fades in over the first 10 meters under it, and surfaces, fog and a camera above the layer get the full light.
 		</member>
 		<member name="cloud_shadow_offset" type="Vector2" setter="set_cloud_shadow_offset" getter="get_cloud_shadow_offset" default="Vector2(0, 0)">
 			Added to the texture coordinates of [member cloud_shadow_texture], in tiles. Animate it to move the clouds with the wind.
