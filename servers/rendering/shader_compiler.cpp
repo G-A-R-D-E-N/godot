@@ -955,6 +955,9 @@ String ShaderCompiler::_dump_node_code(const SL::Node *p_node, int p_level, Gene
 							if (u.filter >= ShaderLanguage::FILTER_NEAREST_MIPMAP) {
 								r_gen_code.uses_screen_texture_mipmaps = true;
 							}
+							if (u.filter != ShaderLanguage::FILTER_DEFAULT && (r_gen_code.screen_texture_filter == ShaderLanguage::FILTER_DEFAULT || u.filter > r_gen_code.screen_texture_filter)) {
+								r_gen_code.screen_texture_filter = u.filter;
+							}
 							r_gen_code.uses_screen_texture = true;
 						} else if (u.hint == ShaderLanguage::ShaderNode::Uniform::HINT_NORMAL_ROUGHNESS_TEXTURE) {
 							name = "normal_roughness_buffer";
@@ -1660,6 +1663,7 @@ Error ShaderCompiler::compile(RSE::ShaderMode p_mode, const String &p_code, Iden
 	r_gen_code.uses_vertex_time = false;
 	r_gen_code.uses_global_textures = false;
 	r_gen_code.uses_screen_texture_mipmaps = false;
+	r_gen_code.screen_texture_filter = ShaderLanguage::FILTER_DEFAULT;
 	r_gen_code.uses_screen_texture = false;
 	r_gen_code.uses_depth_texture = false;
 	r_gen_code.uses_back_depth_texture = false;
