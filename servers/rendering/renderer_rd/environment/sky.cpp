@@ -1421,7 +1421,7 @@ void SkyRD::update_radiance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, 
 			}
 			sky->processing_layer = 1;
 		}
-		sky->baked_exposure = p_brightness_multiplier;
+		sky->baked_exposure = RendererSceneRenderRD::get_singleton()->is_using_physical_light_units() ? p_brightness_multiplier : p_luminance_multiplier;
 		sky->reflection.dirty = false;
 
 	} else {

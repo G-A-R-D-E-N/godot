@@ -840,13 +840,14 @@ uint32_t RenderForwardClustered::_setup_environment(const RenderDataRD *p_render
 		scene_state.ubo.ssao_light_affect = environment_get_ssao_direct_light_affect(p_render_data->environment);
 		uint32_t ss_flags = 0;
 		if (p_opaque_render_buffers) {
-			bool last_frame_valid = rd.is_null() || !rd->get_history_reset();
-			ss_flags |= environment_get_ssao_enabled(p_render_data->environment) ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSAO : 0;
+			ss_flags |= environment_get_ssao_enabled(p_render_data->environment) && (rd.is_null() || rd->has_texture(RB_SCOPE_SSAO, RB_FINAL)) ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSAO : 0;
+			bool last_frame_valid = rd.is_null() || !rd->get_history_cut();
 			ss_flags |= environment_get_ssil_enabled(p_render_data->environment) && last_frame_valid ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSIL : 0;
 			ss_flags |= environment_get_ssr_enabled(p_render_data->environment) && last_frame_valid ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSR : 0;
 			ss_flags |= bool(GLOBAL_GET_CACHED(bool, "rendering/lights_and_shadows/contact_shadow/enabled")) ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSCS : 0;
 
 			if (rd.is_valid()) {
+				ss_flags |= (!GLOBAL_GET_CACHED(bool, "rendering/environment/screen_space_lighting/legacy_last_frame_source") && rd->get_msaa_3d() == RSE::VIEWPORT_MSAA_DISABLED) ? SCREEN_SPACE_EFFECTS_FLAGS_LIGHTING_SOURCES : 0;
 				Ref<RenderBufferDataForwardClustered> rb_data;
 				if (rd->has_custom_data(RB_SCOPE_FORWARD_CLUSTERED)) {
 					rb_data = rd->get_custom_data(RB_SCOPE_FORWARD_CLUSTERED);
@@ -1569,7 +1570,9 @@ void RenderForwardClustered::_process_ssao(Ref<RenderSceneBuffersRD> p_render_bu
 		gtao_settings.noise_index = uint32_t(p_taa_frame_count);
 		gtao_settings.full_screen_size = p_render_buffers->get_internal_size();
 
-		ss_effects->gtao_allocate_buffers(p_render_buffers, rb_data->ss_effects_data.gtao, gtao_settings);
+		if (!ss_effects->gtao_allocate_buffers(p_render_buffers, rb_data->ss_effects_data.gtao, gtao_settings)) {
+			return;
+		}
 
 		for (uint32_t v = 0; v < p_render_buffers->get_view_count(); v++) {
 			ss_effects->generate_gtao(p_render_buffers, rb_data->ss_effects_data.gtao, v, p_normal_buffers[v], p_projections[v], gtao_settings);
@@ -1691,7 +1694,7 @@ void RenderForwardClustered::_process_ssr(Ref<RenderSceneBuffersRD> p_render_buf
 	temporal.cur_to_prev = rb_data->ss_effects_data.ssr_last_frame_transform.affine_inverse() * p_transform;
 	temporal.frame = uint32_t(RSG::rasterizer->get_frame_number() & 1023);
 	temporal.validate_source = GLOBAL_GET_CACHED(bool, "rendering/environment/screen_space_lighting/temporal_validation");
-	temporal.history_valid = !p_render_buffers->get_history_reset();
+	temporal.history_valid = !p_render_buffers->get_history_discard();
 	temporal.write_hit_distance = get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SSR_HIT_DISTANCE;
 	rb_data->ss_effects_data.ssr_last_frame_transform = p_transform;
 

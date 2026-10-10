@@ -357,7 +357,11 @@ void store_rejected_history(uvec2 pos_screen, vec2 uv_reprojected, float factor_
 #endif
 	float clamped = max(smoothstep(0.02, 0.2, length(reinhard(history) - reinhard(history_clipped))), reactive);
 	vec3 color = vec3(0.25 * luminance(reinhard(color_input))) + vec3(factor_disocclusion, clamped * (1.0 - factor_disocclusion), 0.0);
-	color = factor_screen > 0.0 ? vec3(0.0, 0.0, 1.0) : id_mismatch ? vec3(1.0, 0.0, 1.0) : color;
+	if (factor_screen > 0.0) {
+		color = vec3(0.0, 0.0, 1.0);
+	} else if (id_mismatch) {
+		color = vec3(1.0, 0.0, 1.0);
+	}
 	imageStore(rejected_buffer, ivec2(pos_screen), vec4(min(color, vec3(1.0)), 1.0));
 }
 #endif

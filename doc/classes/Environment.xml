@@ -215,7 +215,7 @@
 			[b]Note:[/b] The blur is not applied when the Mobile rendering method tonemaps in a subpass.
 		</member>
 		<member name="night_vision_blue_shift" type="float" setter="set_night_vision_blue_shift" getter="get_night_vision_blue_shift" default="1.0">
-			How far the chromaticity of the rod (scotopic) image moves from the D65 white point ([code]x = 0.3127, y = 0.3290[/code]) toward [member night_vision_blue_shift_chromaticity]. [code]0.0[/code] renders the rod image as neutral grey, [code]1.0[/code] uses the blue-shift chromaticity itself.
+			How far the chromaticity of the rod (scotopic) image moves from the D65 white point ([code]x = 0.3127, y = 0.3290[/code]) toward [member night_vision_blue_shift_chromaticity]. [code]0.0[/code] renders the rod image as neutral gray, [code]1.0[/code] uses the blue-shift chromaticity itself.
 		</member>
 		<member name="night_vision_blue_shift_chromaticity" type="Vector2" setter="set_night_vision_blue_shift_chromaticity" getter="get_night_vision_blue_shift_chromaticity" default="Vector2(0.25, 0.25)">
 			The CIE 1931 [code]xy[/code] chromaticity of the rod (scotopic) image at full [member night_vision_blue_shift]. The default is the blue shift of Thompson, Shirley and Ferwerda, "A Spatial Post-Processing Algorithm for Images of Night Scenes" (2002). Rod vision is achromatic; the shift reproduces how a rod-dominated scene is perceived (the Purkinje shift), independent of the color of the light.

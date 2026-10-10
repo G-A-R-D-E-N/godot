@@ -36,14 +36,12 @@
 
 using namespace RendererRD;
 
-namespace {
-
-uint32_t pack_half2(float p_low, float p_high) {
+static uint32_t pack_half2(float p_low, float p_high) {
 	return uint32_t(Math::make_half_float(p_low)) | (uint32_t(Math::make_half_float(p_high)) << 16);
 }
 
 template <typename T>
-void write_night_vision(T &r_push, const ToneMapper::TonemapSettings &p_settings) {
+static void write_night_vision(T &r_push, const ToneMapper::TonemapSettings &p_settings) {
 	const RendererEnvironmentStorage::NightVision &night = p_settings.night_vision;
 	if (!night.enabled) {
 		return;
@@ -53,8 +51,6 @@ void write_night_vision(T &r_push, const ToneMapper::TonemapSettings &p_settings
 	r_push.night_vision_inv_range = 1.0f / Math::log2(night.mesopic_max / night.mesopic_min);
 	r_push.night_vision_chromaticity = pack_half2(float(chromaticity.x), float(chromaticity.y));
 	r_push.night_vision_strength_acuity = pack_half2(night.desaturation, night.acuity_radius);
-}
-
 }
 
 ToneMapper::ToneMapper(bool p_use_mobile_version) {

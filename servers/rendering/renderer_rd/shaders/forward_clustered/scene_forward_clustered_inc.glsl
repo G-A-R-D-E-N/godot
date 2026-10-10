@@ -212,6 +212,7 @@ layout(set = 0, binding = 2) uniform sampler shadow_sampler;
 #define SCREEN_SPACE_EFFECTS_FLAGS_USE_SSCS (1 << 4)
 #define SCREEN_SPACE_EFFECTS_FLAGS_USE_BENT_NORMALS (1 << 5)
 #define SCREEN_SPACE_EFFECTS_FLAGS_STOCHASTIC_SSR (1 << 6)
+#define SCREEN_SPACE_EFFECTS_FLAGS_LIGHTING_SOURCES (1 << 7)
 
 layout(set = 0, binding = 3, std430) restrict readonly buffer OmniLights {
 	LightData data[];
