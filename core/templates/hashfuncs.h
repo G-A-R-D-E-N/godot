@@ -151,7 +151,7 @@ _FORCE_INLINE_ uint32_t hash_fmix32(uint32_t p_h) {
 	return p_h;
 }
 
-uint32_t hash_murmur3_buffer(const void *p_key, int p_length, uint32_t p_seed = HASH_MURMUR3_SEED);
+uint32_t hash_murmur3_buffer(const void *p_key, size_t p_length, uint32_t p_seed = HASH_MURMUR3_SEED);
 
 uint32_t hash_djb2_one_float(double p_in, uint32_t p_prev = 5381);
 uint64_t hash_djb2_one_float_64(double p_in, uint64_t p_prev = 5381);

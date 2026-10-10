@@ -32,6 +32,7 @@
 
 TEST_FORCE_LINK(test_variant)
 
+#include "core/templates/hashfuncs.h"
 #include "core/variant/variant.h"
 #include "core/variant/variant_parser.h"
 
@@ -2464,6 +2465,43 @@ TEST_CASE("[Variant] Operator NOT") {
 		REQUIRE_EQ(result.get_type(), Variant::BOOL);
 		CHECK_EQ(!value.booleanize(), result.operator bool());
 	}
+}
+
+TEST_CASE("[HashFuncs] hash_murmur3_buffer matches MurmurHash3_x86_32") {
+	const uint8_t zeros[4] = {};
+	const uint8_t bytes[3] = { 0x21, 0x43, 0x65 };
+	uint8_t ff[4];
+	memset(ff, 0xff, sizeof(ff));
+	uint8_t ab[11];
+	memset(ab, 0xab, sizeof(ab));
+
+	CHECK(hash_murmur3_buffer(zeros, 0, 0) == 0x00000000);
+	CHECK(hash_murmur3_buffer(zeros, 0, 1) == 0x514E28B7);
+	CHECK(hash_murmur3_buffer(zeros, 0, 0xffffffff) == 0x81F16F39);
+	CHECK(hash_murmur3_buffer(zeros, 1, 0) == 0x514E28B7);
+	CHECK(hash_murmur3_buffer(zeros, 2, 0) == 0x30F4C306);
+	CHECK(hash_murmur3_buffer(zeros, 3, 0) == 0x85F0B427);
+	CHECK(hash_murmur3_buffer(zeros, 4, 0) == 0x2362F9DE);
+	CHECK(hash_murmur3_buffer(bytes, 1, 0) == 0x72661CF4);
+	CHECK(hash_murmur3_buffer(bytes, 2, 0) == 0xA0F7B07A);
+	CHECK(hash_murmur3_buffer(bytes, 3, 0) == 0x7E4A8634);
+	CHECK(hash_murmur3_buffer(ff, 4, 0) == 0x76293B50);
+	CHECK(hash_murmur3_buffer(ab, 11, 0) == 0x5F94DEAD);
+	CHECK(hash_murmur3_buffer(ab, 11) == 0x1A742B8A);
+}
+
+TEST_CASE("[HashFuncs] hash_murmur3_buffer reads buffers larger than 2 GiB") {
+	const int64_t length = ((int64_t)1 << 31) + 7;
+
+	PackedByteArray data;
+	if (data.resize_initialized(length) != OK) {
+		MESSAGE("Skipped: a buffer larger than 2 GiB could not be allocated.");
+		return;
+	}
+	memset(data.ptrw() + length - 7, 0xff, 7);
+
+	CHECK(hash_murmur3_buffer(data.ptr(), length) == 0x66455C03);
+	CHECK(Variant(data).hash() == 0x66455C03);
 }
 
 } // namespace TestVariant

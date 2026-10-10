@@ -8864,6 +8864,12 @@ Vector<uint8_t> RenderingDevice::_load_pipeline_cache() {
 	DirAccess::make_dir_recursive_absolute(pipeline_cache_file_path.get_base_dir());
 
 	if (FileAccess::exists(pipeline_cache_file_path)) {
+		const int64_t max_size_mb = GLOBAL_GET("rendering/rendering_device/pipeline_cache/max_size_mb");
+		if (max_size_mb > 0 && FileAccess::get_size(pipeline_cache_file_path) > max_size_mb * 1024 * 1024) {
+			print_verbose(vformat("Pipeline cache file is larger than %d MiB. Existing shader pipeline cache will be ignored and rebuilt, which may result in stuttering during gameplay.", max_size_mb));
+			return Vector<uint8_t>();
+		}
+
 		Error file_error;
 		Vector<uint8_t> file_data = FileAccess::get_file_as_bytes(pipeline_cache_file_path, &file_error);
 		return file_data;

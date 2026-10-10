@@ -5337,7 +5337,7 @@ bool RenderingDeviceDriverVulkan::pipeline_cache_create(const Vector<uint8_t> &p
 				print_verbose("Invalid Vulkan pipelines cache magic number. Existing shader pipeline cache will be ignored, which may result in stuttering during gameplay.");
 			} else {
 				const uint8_t *loaded_buffer_start = p_data.ptr() + sizeof(PipelineCacheHeader);
-				uint32_t loaded_buffer_size = p_data.size() - sizeof(PipelineCacheHeader);
+				size_t loaded_buffer_size = p_data.size() - sizeof(PipelineCacheHeader);
 				const PipelineCacheHeader *current_header = (PipelineCacheHeader *)pipelines_cache.buffer.ptr();
 				if (loaded_header->data_hash != hash_murmur3_buffer(loaded_buffer_start, loaded_buffer_size) ||
 						loaded_header->data_size != loaded_buffer_size ||
