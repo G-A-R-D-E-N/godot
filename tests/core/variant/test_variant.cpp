@@ -2490,14 +2490,16 @@ TEST_CASE("[HashFuncs] hash_murmur3_buffer matches MurmurHash3_x86_32") {
 	CHECK(hash_murmur3_buffer(ab, 11) == 0x1A742B8A);
 }
 
-TEST_CASE("[HashFuncs] hash_murmur3_buffer reads buffers larger than 2 GiB") {
+TEST_CASE("[HashFuncs] hash_murmur3_buffer reads buffers larger than 2 GiB" * doctest::skip(sizeof(size_t) < 8)) {
 	const int64_t length = ((int64_t)1 << 31) + 7;
 
 	PackedByteArray data;
-	if (data.resize_initialized(length) != OK) {
-		MESSAGE("Skipped: a buffer larger than 2 GiB could not be allocated.");
-		return;
-	}
+	REQUIRE_MESSAGE(data.resize_initialized(length) == OK, "A buffer larger than 2 GiB could not be allocated.");
+
+	CHECK(hash_murmur3_buffer(data.ptr(), (size_t)INT32_MAX - 1) == 0x0AEECCF8);
+	CHECK(hash_murmur3_buffer(data.ptr(), (size_t)INT32_MAX) == 0xA36ABAD9);
+	CHECK(hash_murmur3_buffer(data.ptr(), (size_t)INT32_MAX + 1) == 0x83ADBE67);
+
 	memset(data.ptrw() + length - 7, 0xff, 7);
 
 	CHECK(hash_murmur3_buffer(data.ptr(), length) == 0x66455C03);

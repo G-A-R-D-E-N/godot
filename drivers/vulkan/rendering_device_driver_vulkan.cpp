@@ -5397,7 +5397,9 @@ size_t RenderingDeviceDriverVulkan::pipeline_cache_query_size() {
 Vector<uint8_t> RenderingDeviceDriverVulkan::pipeline_cache_serialize() {
 	DEV_ASSERT(pipelines_cache.vk_cache);
 
-	pipelines_cache.buffer.resize(pipelines_cache.current_size + sizeof(PipelineCacheHeader));
+	static_assert(PipelineCacheHeader::fits(UINT32_MAX) && !PipelineCacheHeader::fits((uint64_t)UINT32_MAX + 1));
+	ERR_FAIL_COND_V_MSG(!PipelineCacheHeader::fits(pipelines_cache.current_size), Vector<uint8_t>(), vformat("The Vulkan pipeline cache holds %d bytes, more than its file header can describe (4 GiB). It is not saved.", (uint64_t)pipelines_cache.current_size));
+	ERR_FAIL_COND_V_MSG(pipelines_cache.buffer.resize(pipelines_cache.current_size + sizeof(PipelineCacheHeader)) != OK, Vector<uint8_t>(), "Couldn't allocate the buffer for the Vulkan pipeline cache. It is not saved.");
 
 	VkResult err = vkGetPipelineCacheData(vk_device, pipelines_cache.vk_cache, &pipelines_cache.current_size, pipelines_cache.buffer.ptrw() + sizeof(PipelineCacheHeader));
 	// Incomplete is OK because the cache may have grown since the size was queried (unless when exiting).

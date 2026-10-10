@@ -8915,6 +8915,12 @@ void RenderingDevice::update_pipeline_cache(bool p_closing) {
 		} else {
 			return;
 		}
+
+		const int64_t max_size_mb = GLOBAL_GET("rendering/rendering_device/pipeline_cache/max_size_mb");
+		if (max_size_mb > 0 && !pipeline_cache_over_limit && new_pipelines_cache_size / (1024 * 1024) >= (uint64_t)max_size_mb) {
+			pipeline_cache_over_limit = true;
+			WARN_PRINT(vformat("The pipeline cache has grown to %d MiB, past rendering/rendering_device/pipeline_cache/max_size_mb (%d MiB). It is still saved, and the next start discards it and compiles its pipelines again. If every run prints this, one run alone compiles more than the limit: raise the setting or set it to 0.", (int64_t)(new_pipelines_cache_size / (1024 * 1024)), max_size_mb));
+		}
 	}
 
 	if (p_closing) {
@@ -8934,12 +8940,25 @@ void RenderingDevice::_save_pipeline_cache(void *p_data) {
 	if (cache_blob.is_empty()) {
 		return;
 	}
-	print_verbose(vformat("Updated PSO cache (%.1f MiB)", cache_blob.size() / (1024.0f * 1024.0f)));
 
-	Ref<FileAccess> f = FileAccess::open(self->pipeline_cache_file_path, FileAccess::WRITE, nullptr);
-	if (f.is_valid()) {
-		f->store_buffer(cache_blob);
+	const String temp_path = self->pipeline_cache_file_path + ".tmp";
+	Ref<DirAccess> dir = DirAccess::create_for_path(temp_path);
+	ERR_FAIL_COND(dir.is_null());
+	bool written = false;
+	{
+		Ref<FileAccess> f = FileAccess::open(temp_path, FileAccess::WRITE, nullptr);
+		if (f.is_valid()) {
+			written = f->store_buffer(cache_blob);
+			f->flush();
+			written = written && f->get_error() == OK;
+		}
 	}
+	if (!written || dir->rename(temp_path, self->pipeline_cache_file_path) != OK) {
+		dir->remove(temp_path);
+		WARN_PRINT(vformat("Couldn't save the pipeline cache to '%s'. The previous file is kept.", self->pipeline_cache_file_path));
+		return;
+	}
+	print_verbose(vformat("Updated PSO cache (%.1f MiB)", cache_blob.size() / (1024.0f * 1024.0f)));
 }
 
 template <typename T>

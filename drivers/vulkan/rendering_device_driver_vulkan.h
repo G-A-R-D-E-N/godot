@@ -591,6 +591,8 @@ private:
 		uint32_t driver_version = 0;
 		uint8_t uuid[VK_UUID_SIZE] = {};
 		uint8_t driver_abi = 0;
+
+		static constexpr bool fits(uint64_t p_data_size) { return p_data_size <= UINT32_MAX; }
 	};
 
 	struct PipelineCache {

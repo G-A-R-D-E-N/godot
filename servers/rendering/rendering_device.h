@@ -1244,6 +1244,7 @@ private:
 
 	bool pipeline_cache_enabled = false;
 	size_t pipeline_cache_size = 0;
+	bool pipeline_cache_over_limit = false;
 	String pipeline_cache_file_path;
 	WorkerThreadPool::TaskID pipeline_cache_save_task = WorkerThreadPool::INVALID_TASK_ID;
 
