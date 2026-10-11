@@ -56,12 +56,15 @@
 #define RB_TEX_DEPTH_MSAA_SUBSAMPLED SNAME("depth_msaa_subsampled")
 #define RB_TEX_VELOCITY SNAME("velocity")
 #define RB_TEX_VELOCITY_MSAA SNAME("velocity_msaa")
+#define RB_TEX_REACTIVE SNAME("reactive")
+#define RB_TEX_REACTIVE_MSAA SNAME("reactive_msaa")
 
 #define RB_TEX_BLUR_0 SNAME("blur_0")
 #define RB_TEX_BLUR_1 SNAME("blur_1")
 
 #define RB_TEX_BACK_COLOR SNAME("back_color")
 #define RB_TEX_BACK_DEPTH SNAME("back_depth")
+#define RB_TEX_SURFACE_BACK_DEPTH SNAME("surface_back_depth")
 
 class RenderSceneBuffersRD : public RenderSceneBuffers {
 	GDCLASS(RenderSceneBuffersRD, RenderSceneBuffers);
@@ -73,6 +76,13 @@ private:
 	RD::DataFormat preferred_data_format = RD::DATA_FORMAT_MAX;
 	RendererRD::VRS *vrs = nullptr;
 	uint64_t auto_exposure_version = 1;
+	int history_reset_serial = 0;
+	float history_exposure_normalization = 1.0;
+	bool history_valid = false;
+	bool history_reset = false;
+	bool history_discard = false;
+	bool history_cut = false;
+	uint64_t history_frame = UINT64_MAX;
 	RSE::ViewportVRSMode vrs_mode = RSE::VIEWPORT_VRS_DISABLED;
 
 	// Our render target represents our final destination that we display on screen.
@@ -252,6 +262,22 @@ public:
 	uint64_t get_auto_exposure_version() const { return auto_exposure_version; }
 	void set_auto_exposure_version(const uint64_t p_auto_exposure_version) { auto_exposure_version = p_auto_exposure_version; }
 
+	void update_history_reset(uint64_t p_frame, int p_serial, float p_exposure_normalization) {
+		if (p_frame == history_frame) {
+			return;
+		}
+		history_frame = p_frame;
+		history_cut = p_serial != history_reset_serial;
+		history_reset = history_cut || p_exposure_normalization != history_exposure_normalization;
+		history_discard = history_reset || !history_valid;
+		history_valid = true;
+		history_reset_serial = p_serial;
+		history_exposure_normalization = p_exposure_normalization;
+	}
+	bool get_history_reset() const { return history_reset; }
+	bool get_history_discard() const { return history_discard; }
+	bool get_history_cut() const { return history_cut; }
+
 	// For our internal textures we provide some easy access methods.
 
 	_FORCE_INLINE_ bool has_internal_texture() const {
@@ -327,6 +353,7 @@ public:
 	RID get_velocity_buffer(bool p_get_msaa, uint32_t p_layer);
 
 	RID get_velocity_depth_buffer();
+	RID get_reactive_buffer(bool p_get_msaa, uint32_t p_layer = 0, uint32_t p_layers = 1);
 
 	// Samplers adjusted with the mipmap bias that is best fit for the configuration of these render buffers.
 
@@ -355,6 +382,7 @@ public:
 	static uint32_t get_depth_usage_bits(bool p_resolve, bool p_msaa, bool p_storage);
 	static bool get_temporal_metadata();
 	static RD::DataFormat get_velocity_format();
+	static uint32_t get_reactive_usage_bits(bool p_msaa);
 	static uint32_t get_velocity_usage_bits(bool p_resolve, bool p_msaa, bool p_storage);
 	static RD::DataFormat get_vrs_format();
 	static uint32_t get_vrs_usage_bits();

@@ -54,6 +54,10 @@ layout(rg16f, set = 0, binding = 3) uniform restrict readonly image2D last_veloc
 #endif
 layout(set = 0, binding = 4) uniform sampler2D history_buffer;
 layout(rgba16f, set = 0, binding = 5) uniform restrict writeonly image2D output_buffer;
+layout(set = 0, binding = 6) uniform sampler2D reactive_buffer;
+#ifdef MODE_REJECTED_HISTORY
+layout(rgba8, set = 0, binding = 7) uniform restrict writeonly image2D rejected_buffer;
+#endif
 
 layout(push_constant, std430) uniform Params {
 	vec2 resolution;
@@ -342,6 +346,26 @@ float get_factor_garden_disocclusion(vec2 uv_reprojected, vec2 velocity, float m
 }
 #endif
 
+#ifdef MODE_REJECTED_HISTORY
+void store_rejected_history(uvec2 pos_screen, vec2 uv_reprojected, float factor_screen, float factor_disocclusion, float reactive, vec3 color_input, vec3 history, vec3 history_clipped) {
+#ifdef GARDEN_TAA
+	float id = imageLoad(velocity_buffer, ivec2(pos_screen)).w;
+	float id_previous = imageLoad(last_velocity_buffer, ivec2(uv_reprojected * params.resolution)).w;
+	bool id_mismatch = id > 0.5 && id_previous > 0.5 && abs(id - id_previous) > 0.5;
+#else
+	bool id_mismatch = false;
+#endif
+	float clamped = max(smoothstep(0.02, 0.2, length(reinhard(history) - reinhard(history_clipped))), reactive);
+	vec3 color = vec3(0.25 * luminance(reinhard(color_input))) + vec3(factor_disocclusion, clamped * (1.0 - factor_disocclusion), 0.0);
+	if (factor_screen > 0.0) {
+		color = vec3(0.0, 0.0, 1.0);
+	} else if (id_mismatch) {
+		color = vec3(1.0, 0.0, 1.0);
+	}
+	imageStore(rejected_buffer, ivec2(pos_screen), vec4(min(color, vec3(1.0)), 1.0));
+}
+#endif
+
 vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_screen, vec2 uv, sampler2D tex_history) {
 	// Get the velocity of the current pixel
 #ifdef GARDEN_TAA
@@ -361,6 +385,9 @@ vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_
 
 	// Get history color (catmull-rom reduces a lot of the blurring that you get under motion)
 	vec3 color_history = sample_catmull_rom_9(tex_history, uv_reprojected, params.resolution).rgb;
+#ifdef MODE_REJECTED_HISTORY
+	vec3 history_unclipped = color_history;
+#endif
 
 	// Clip history to the neighbourhood of the current sample (fixes a lot of the ghosting).
 	vec2 velocity_closest = vec2(0.0); // This is best done by using the velocity with the closest depth.
@@ -370,6 +397,8 @@ vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_
 	get_closest_pixel_velocity_3x3(pos_group, pos_group_top_left, velocity_closest);
 #endif
 	color_history = clip_history_3x3(pos_group, color_history, velocity_closest);
+
+	float reactive = texelFetch(reactive_buffer, ivec2(pos_screen), 0).r;
 
 	// Compute blend factor
 	float blend_factor = RPC_16; // We want to be able to accumulate as many jitter samples as we generated, that is, 16.
@@ -386,7 +415,11 @@ vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_
 
 		// Add to the blend factor
 		blend_factor = clamp(blend_factor + factor_screen + factor_disocclusion, 0.0, 1.0);
+#ifdef MODE_REJECTED_HISTORY
+		store_rejected_history(pos_screen, uv_reprojected, factor_screen, factor_disocclusion, reactive, color_input, history_unclipped, color_history);
+#endif
 	}
+	blend_factor = max(blend_factor, reactive);
 
 	// Resolve
 	vec3 color_resolved = vec3(0.0);
@@ -404,6 +437,7 @@ vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_
 #ifdef GARDEN_TAA
 		diff = mix(diff, 1.0, mask);
 #endif
+		diff = mix(diff, 1.0, reactive);
 		blend_factor = mix(0.0, blend_factor, diff);
 
 		// Lerp/blend

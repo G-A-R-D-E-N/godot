@@ -87,6 +87,10 @@ layout(set = 3, binding = 1) uniform ProjectionConstants {
 	mat4 reprojection;
 }
 projection_constants;
+layout(set = 3, binding = 2) uniform sampler2D source_exposure;
+#ifdef VALIDATE_SOURCE
+layout(set = 3, binding = 3) uniform sampler2DArray previous_depth_mipmaps;
+#endif
 
 layout(push_constant, std430) uniform Params {
 	ivec2 screen_size;
@@ -99,14 +103,14 @@ layout(push_constant, std430) uniform Params {
 	vec2 NDC_to_view_mul;
 	vec2 NDC_to_view_add;
 
-	vec2 pad2;
+	vec2 depth_ndc;
 	float z_near;
 	float z_far;
 
 	float radius;
 	float intensity;
 	int size_multiplier;
-	int pad;
+	float exposure;
 
 	float fade_out_mul;
 	float fade_out_add;
@@ -172,6 +176,20 @@ vec3 load_normal(ivec2 p_pos, ivec2 p_offset) {
 	return encoded_normal;
 }
 
+float sample_exposure;
+
+#ifdef VALIDATE_SOURCE
+bool previous_depth_matches(vec2 p_uv, float p_mip_level, float p_expected) {
+	vec2 texel = exp2(clamp(floor(p_mip_level + 0.5), 0.0, float(SSIL_DEPTH_MIP_LEVELS - 1))) / vec2(textureSize(previous_depth_mipmaps, 0).xy);
+	vec4 previous = vec4(
+			textureLod(previous_depth_mipmaps, vec3(p_uv + vec2(-0.5, -0.5) * texel, params.pass), p_mip_level).x,
+			textureLod(previous_depth_mipmaps, vec3(p_uv + vec2(0.5, -0.5) * texel, params.pass), p_mip_level).x,
+			textureLod(previous_depth_mipmaps, vec3(p_uv + vec2(-0.5, 0.5) * texel, params.pass), p_mip_level).x,
+			textureLod(previous_depth_mipmaps, vec3(p_uv + vec2(0.5, 0.5) * texel, params.pass), p_mip_level).x);
+	return any(lessThanEqual(abs(previous - vec4(p_expected)), vec4(max(p_expected * 0.03, 0.02))));
+}
+#endif
+
 // all vectors in viewspace
 float calculate_pixel_obscurance(vec3 p_pixel_normal, vec3 p_hit_delta, float p_fallof_sq) {
 	float length_sq = dot(p_hit_delta, p_hit_delta);
@@ -201,14 +219,23 @@ void SSIL_tap_inner(const int p_quality_level, inout vec3 r_color_sum, inout flo
 	}
 
 	// Translate sampling_uv to last screen's coordinates
+#ifdef VALIDATE_SOURCE
+	const vec4 sample_pos = projection_constants.reprojection * vec4(p_sampling_uv * 2.0 - 1.0, params.depth_ndc.x + params.depth_ndc.y / viewspace_sample_z, 1.0);
+#else
 	const vec4 sample_pos = projection_constants.reprojection * vec4(p_sampling_uv * 2.0 - 1.0, (viewspace_sample_z - params.z_near) / (params.z_far - params.z_near) * 2.0 - 1.0, 1.0);
+#endif
 	vec2 reprojected_sampling_uv = (sample_pos.xy / sample_pos.w) * 0.5 + 0.5;
+#ifdef VALIDATE_SOURCE
+	if (!previous_depth_matches(reprojected_sampling_uv, p_mip_level, sample_pos.w * viewspace_sample_z)) {
+		obscurance = 0.0;
+	}
+#endif
 
 	weight *= p_weight_mod;
 
 	r_obscurance_sum += obscurance * weight;
 
-	vec3 sample_color = textureLod(last_frame, reprojected_sampling_uv, 5.0).rgb;
+	vec3 sample_color = textureLod(last_frame, reprojected_sampling_uv, 5.0).rgb * sample_exposure;
 	// Reduce impact of fireflies by tonemapping before averaging: http://graphicrants.blogspot.com/2013/12/tone-mapping.html
 	sample_color /= (1.0 + dot(sample_color, vec3(0.299, 0.587, 0.114)));
 	r_color_sum += sample_color * obscurance * weight * mix(1.0, smoothstep(0.0, 0.1, -dot(sample_normal, normalize(hit_delta))), params.normal_rejection_amount);
@@ -256,6 +283,7 @@ void SSILTap(const int p_quality_level, inout vec3 r_color_sum, inout float r_ob
 }
 
 void generate_SSIL(out vec3 r_color, out vec4 r_edges, out float r_obscurance, out float r_weight, const vec2 p_pos, int p_quality_level, bool p_adaptive_base) {
+	sample_exposure = params.exposure / max(texelFetch(source_exposure, ivec2(0, 0), 0).r, 1e-6);
 	vec2 pos_rounded = trunc(p_pos);
 	uvec2 upos = uvec2(pos_rounded);
 
@@ -392,6 +420,7 @@ void generate_SSIL(out vec3 r_color, out vec4 r_edges, out float r_obscurance, o
 	// Calculate weighted average
 	vec3 color = color_sum / weight_sum;
 	color /= 1.0 - dot(color, vec3(0.299, 0.587, 0.114));
+	color /= sample_exposure;
 
 	// Calculate fadeout (1 close, gradient, 0 far)
 	float fade_out = clamp(pix_center_pos.z * params.fade_out_mul + params.fade_out_add, 0.0, 1.0);

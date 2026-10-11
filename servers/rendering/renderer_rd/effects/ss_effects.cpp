@@ -35,6 +35,7 @@
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_scene_buffers_rd.h"
 #include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
+#include "servers/rendering/rendering_server_globals.h"
 
 using namespace RendererRD;
 
@@ -107,6 +108,9 @@ SSEffects::SSEffects() {
 		ssil_modes.push_back("\n");
 		ssil_modes.push_back("\n#define SSIL_BASE\n");
 		ssil_modes.push_back("\n#define ADAPTIVE\n");
+		ssil_modes.push_back("\n#define VALIDATE_SOURCE\n");
+		ssil_modes.push_back("\n#define SSIL_BASE\n#define VALIDATE_SOURCE\n");
+		ssil_modes.push_back("\n#define ADAPTIVE\n#define VALIDATE_SOURCE\n");
 
 		ssil.gather_shader.initialize(ssil_modes);
 
@@ -114,6 +118,7 @@ SSEffects::SSEffects() {
 
 		for (int i = SSIL_GATHER; i <= SSIL_GATHER_ADAPTIVE; i++) {
 			ssil.pipelines[i].create_compute_pipeline(ssil.gather_shader.version_get_shader(ssil.gather_shader_version, i));
+			ssil.pipelines[SSIL_GATHER_VALIDATE + i].create_compute_pipeline(ssil.gather_shader.version_get_shader(ssil.gather_shader_version, SSIL_VALIDATE_VARIANT + i));
 		}
 		ssil.projection_uniform_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(SSILProjectionUniforms));
 	}
@@ -277,6 +282,36 @@ SSEffects::SSEffects() {
 		ss_effects.mirror_sampler = RD::get_singleton()->sampler_create(sampler);
 	}
 
+	{
+		Vector<String> gtao_modes;
+		gtao_modes.push_back("\n#define MODE_PREFILTER\n");
+		gtao_modes.push_back("\n#define MODE_PREFILTER\n#define HALF_SIZE\n");
+		gtao_modes.push_back("\n#define MODE_MAIN\n");
+		gtao_modes.push_back("\n#define MODE_MAIN\n#define XE_GTAO_COMPUTE_BENT_NORMALS\n");
+		gtao_modes.push_back("\n#define MODE_DENOISE\n");
+		gtao_modes.push_back("\n#define MODE_DENOISE\n#define XE_GTAO_COMPUTE_BENT_NORMALS\n");
+		gtao_modes.push_back("\n#define MODE_RESOLVE\n");
+		gtao_modes.push_back("\n#define MODE_RESOLVE\n#define HALF_SIZE\n");
+		gtao_modes.push_back("\n#define MODE_RESOLVE\n#define XE_GTAO_COMPUTE_BENT_NORMALS\n");
+		gtao_modes.push_back("\n#define MODE_RESOLVE\n#define HALF_SIZE\n#define XE_GTAO_COMPUTE_BENT_NORMALS\n");
+
+		gtao.shader.initialize(gtao_modes);
+		gtao.shader_version = gtao.shader.version_create();
+		for (int i = 0; i < GTAO_MAX; i++) {
+			gtao.pipelines[i].create_compute_pipeline(gtao.shader.version_get_shader(gtao.shader_version, i));
+		}
+
+		RD::SamplerState sampler;
+		sampler.mag_filter = RD::SAMPLER_FILTER_NEAREST;
+		sampler.min_filter = RD::SAMPLER_FILTER_NEAREST;
+		sampler.mip_filter = RD::SAMPLER_FILTER_NEAREST;
+		sampler.repeat_u = RD::SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE;
+		sampler.repeat_v = RD::SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE;
+		sampler.repeat_w = RD::SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE;
+		sampler.max_lod = 4;
+		gtao.point_sampler = RD::get_singleton()->sampler_create(sampler);
+	}
+
 	// Screen Space Reflections
 	ssr_half_size = GLOBAL_GET("rendering/environment/screen_space_reflection/half_size");
 
@@ -314,11 +349,13 @@ SSEffects::SSEffects() {
 		{
 			Vector<String> ssr_modes;
 			ssr_modes.push_back("\n");
+			ssr_modes.push_back("\n#define VALIDATE_SOURCE\n");
 
 			ssr.ssr_shader.initialize(ssr_modes);
 			ssr.ssr_shader_version = ssr.ssr_shader.version_create();
 
 			ssr.ssr_pipeline.create_compute_pipeline(ssr.ssr_shader.version_get_shader(ssr.ssr_shader_version, 0));
+			ssr.ssr_validate_pipeline.create_compute_pipeline(ssr.ssr_shader.version_get_shader(ssr.ssr_shader_version, 1));
 		}
 
 		{
@@ -339,6 +376,21 @@ SSEffects::SSEffects() {
 			ssr.resolve_shader_version = ssr.resolve_shader.version_create();
 
 			ssr.resolve_pipeline.create_compute_pipeline(ssr.resolve_shader.version_get_shader(ssr.resolve_shader_version, 0));
+		}
+
+		{
+			Vector<String> stochastic_modes;
+			stochastic_modes.push_back("\n#define MODE_TRACE\n");
+			stochastic_modes.push_back("\n#define MODE_RESOLVE\n");
+			stochastic_modes.push_back("\n#define MODE_RESOLVE\n#define WRITE_HIT_DISTANCE\n");
+			stochastic_modes.push_back("\n");
+
+			ssr.stochastic_shader.initialize(stochastic_modes);
+			ssr.stochastic_shader_version = ssr.stochastic_shader.version_create();
+
+			for (uint32_t i = 0; i < SCREEN_SPACE_REFLECTION_STOCHASTIC_MAX; i++) {
+				ssr.stochastic_pipelines[i].create_compute_pipeline(ssr.stochastic_shader.version_get_shader(ssr.stochastic_shader_version, i));
+			}
 		}
 	}
 
@@ -365,6 +417,14 @@ SSEffects::SSEffects() {
 			}
 
 			sscs.border_sampler = border_sampler;
+		}
+
+		{
+			Vector<String> combine_modes;
+			combine_modes.push_back("\n");
+			sscs.combine_shader.initialize(combine_modes);
+			sscs.combine_shader_version = sscs.combine_shader.version_create();
+			sscs.combine_pipeline.create_compute_pipeline(sscs.combine_shader.version_get_shader(sscs.combine_shader_version, 0));
 		}
 	}
 
@@ -446,6 +506,50 @@ void SSEffects::copy_internal_texture_to_last_frame(Ref<RenderSceneBuffersRD> p_
 	}
 }
 
+static void _allocate_lighting_source(Ref<RenderSceneBuffersRD> p_render_buffers, const StringName &p_context, bool p_needed, uint32_t p_mipmaps) {
+	if (p_render_buffers->has_texture(p_context, RB_SOURCE) && (!p_needed || p_render_buffers->get_texture_format(p_context, RB_SOURCE).mipmaps != p_mipmaps)) {
+		p_render_buffers->clear_context(p_context);
+	}
+	if (p_needed && !p_render_buffers->has_texture(p_context, RB_SOURCE)) {
+		RID source = p_render_buffers->create_texture(p_context, RB_SOURCE, SSEffects::LIGHTING_SOURCE_FORMAT, SSEffects::LIGHTING_SOURCE_USAGE_BITS, RD::TEXTURE_SAMPLES_1, Size2i(), 0, p_mipmaps);
+		RD::get_singleton()->texture_clear(source, Color(0, 0, 0, 0), 0, p_mipmaps, 0, p_render_buffers->get_view_count());
+	}
+}
+
+void SSEffects::allocate_lighting_sources(Ref<RenderSceneBuffersRD> p_render_buffers, bool p_bounce, bool p_reflection) {
+	_allocate_lighting_source(p_render_buffers, RB_SCOPE_BOUNCE_SOURCE, p_bounce, 6);
+	_allocate_lighting_source(p_render_buffers, RB_SCOPE_REFLECTION_SOURCE, p_reflection, ssr_half_size ? 2 : 1);
+	if ((p_bounce || p_reflection) && p_render_buffers->has_texture(RB_SCOPE_SSLF, RB_LAST_FRAME)) {
+		p_render_buffers->clear_context(RB_SCOPE_SSLF);
+	}
+}
+
+void SSEffects::clear_lighting_sources(Ref<RenderSceneBuffersRD> p_render_buffers) {
+	const StringName contexts[2] = { RB_SCOPE_BOUNCE_SOURCE, RB_SCOPE_REFLECTION_SOURCE };
+	for (const StringName &context : contexts) {
+		if (p_render_buffers->has_texture(context, RB_SOURCE)) {
+			RD::get_singleton()->texture_clear(p_render_buffers->get_texture(context, RB_SOURCE), Color(0, 0, 0, 0), 0, 1, 0, p_render_buffers->get_view_count());
+		}
+	}
+}
+
+void SSEffects::build_lighting_source_mipmaps(Ref<RenderSceneBuffersRD> p_render_buffers, CopyEffects &p_copy_effects) {
+	const StringName contexts[2] = { RB_SCOPE_BOUNCE_SOURCE, RB_SCOPE_REFLECTION_SOURCE };
+	for (const StringName &context : contexts) {
+		if (!p_render_buffers->has_texture(context, RB_SOURCE)) {
+			continue;
+		}
+		uint32_t mipmaps = p_render_buffers->get_texture_format(context, RB_SOURCE).mipmaps;
+		for (uint32_t v = 0; v < p_render_buffers->get_view_count(); v++) {
+			for (uint32_t m = 1; m < mipmaps; m++) {
+				RID source = p_render_buffers->get_texture_slice(context, RB_SOURCE, v, m - 1);
+				RID dest = p_render_buffers->get_texture_slice(context, RB_SOURCE, v, m);
+				p_copy_effects.make_mipmap(source, dest, RD::get_singleton()->texture_size(dest));
+			}
+		}
+	}
+}
+
 SSEffects::~SSEffects() {
 	{
 		// Cleanup SS Reflections
@@ -456,14 +560,19 @@ SSEffects::~SSEffects() {
 			ssr.hiz_pipelines[i].free();
 		}
 		ssr.ssr_pipeline.free();
+		ssr.ssr_validate_pipeline.free();
 		ssr.filter_pipeline.free();
 		ssr.resolve_pipeline.free();
+		for (int i = 0; i < SCREEN_SPACE_REFLECTION_STOCHASTIC_MAX; i++) {
+			ssr.stochastic_pipelines[i].free();
+		}
 
 		ssr.downsample_shader.version_free(ssr.downsample_shader_version);
 		ssr.hiz_shader.version_free(ssr.hiz_shader_version);
 		ssr.ssr_shader.version_free(ssr.ssr_shader_version);
 		ssr.filter_shader.version_free(ssr.filter_shader_version);
 		ssr.resolve_shader.version_free(ssr.resolve_shader_version);
+		ssr.stochastic_shader.version_free(ssr.stochastic_shader_version);
 
 		if (ssr.ubo.is_valid()) {
 			RD::get_singleton()->free_rid(ssr.ubo);
@@ -475,6 +584,8 @@ SSEffects::~SSEffects() {
 			sscs.sscs_pipelines[i].free();
 		}
 		sscs.sscs_shader.version_free(sscs.sscs_shader_version);
+		sscs.combine_pipeline.free();
+		sscs.combine_shader.version_free(sscs.combine_shader_version);
 
 		RD::get_singleton()->free_rid(sscs.border_sampler);
 	}
@@ -521,6 +632,14 @@ SSEffects::~SSEffects() {
 	}
 
 	{
+		for (int i = 0; i < GTAO_MAX; i++) {
+			gtao.pipelines[i].free();
+		}
+		gtao.shader.version_free(gtao.shader_version);
+		RD::get_singleton()->free_rid(gtao.point_sampler);
+	}
+
+	{
 		// Cleanup Subsurface scattering
 		for (int i = 0; i < SUBSURFACE_SCATTERING_MODE_MAX; i++) {
 			sss.pipelines[i].free();
@@ -546,7 +665,7 @@ void SSEffects::downsample_depth(Ref<RenderSceneBuffersRD> p_render_buffers, uin
 
 	// Make sure our buffers exist, buffers are automatically cleared if view count or size changes.
 	if (!p_render_buffers->has_texture(RB_SCOPE_SSDS, RB_LINEAR_DEPTH)) {
-		p_render_buffers->create_texture(RB_SCOPE_SSDS, RB_LINEAR_DEPTH, RD::DATA_FORMAT_R16_SFLOAT, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, size, view_count * 4, 5);
+		p_render_buffers->create_texture(RB_SCOPE_SSDS, RB_LINEAR_DEPTH, RD::DATA_FORMAT_R16_SFLOAT, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT, RD::TEXTURE_SAMPLES_1, size, view_count * 4, 5);
 	}
 
 	// Downsample and deinterleave the depth buffer for SSAO and SSIL
@@ -679,7 +798,7 @@ void SSEffects::gather_ssil(RD::ComputeListID p_compute_list, const RID *p_ssil_
 	}
 	RD::get_singleton()->compute_list_bind_uniform_set(p_compute_list, p_projection_uniform_set, 3);
 
-	RID shader = ssil.gather_shader.version_get_shader(ssil.gather_shader_version, 0);
+	RID shader = ssil.gather_shader.version_get_shader(ssil.gather_shader_version, p_settings.depth_ndc.y != 0.0f ? SSIL_VALIDATE_VARIANT : 0);
 
 	for (int i = 0; i < 4; i++) {
 		if ((ssil_quality == RSE::ENV_SSIL_QUALITY_VERY_LOW) && ((i == 1) || (i == 2))) {
@@ -762,7 +881,8 @@ void SSEffects::screen_space_indirect_lighting(Ref<RenderSceneBuffersRD> p_rende
 	RD::get_singleton()->draw_command_begin_label("Process Screen-Space Indirect Lighting");
 
 	// Obtain our (cached) buffer slices for the view we are rendering.
-	RID last_frame = p_render_buffers->get_texture_slice(RB_SCOPE_SSLF, RB_LAST_FRAME, p_view, 0, 1, 6);
+	const bool bounce_source = p_render_buffers->has_texture(RB_SCOPE_BOUNCE_SOURCE, RB_SOURCE);
+	RID last_frame = p_render_buffers->get_texture_slice(bounce_source ? RB_SCOPE_BOUNCE_SOURCE : RB_SCOPE_SSLF, bounce_source ? RB_SOURCE : RB_LAST_FRAME, p_view, 0, 1, 6);
 	RID deinterleaved = p_render_buffers->get_texture_slice(RB_SCOPE_SSIL, RB_DEINTERLEAVED, p_view * 4, 0, 4, 1);
 	RID deinterleaved_pong = p_render_buffers->get_texture_slice(RB_SCOPE_SSIL, RB_DEINTERLEAVED_PONG, 4 * p_view, 0, 4, 1);
 	RID edges = p_render_buffers->get_texture_slice(RB_SCOPE_SSIL, RB_EDGES, 4 * p_view, 0, 4, 1);
@@ -786,7 +906,10 @@ void SSEffects::screen_space_indirect_lighting(Ref<RenderSceneBuffersRD> p_rende
 
 	memset(&ssil.gather_push_constant, 0, sizeof(SSILGatherPushConstant));
 
-	RID shader = ssil.gather_shader.version_get_shader(ssil.gather_shader_version, SSIL_GATHER);
+	const bool validate = p_settings.depth_ndc.y != 0.0f;
+	const int variant = validate ? SSIL_VALIDATE_VARIANT : 0;
+	const int validate_pipeline = validate ? SSIL_GATHER_VALIDATE : 0;
+	RID shader = ssil.gather_shader.version_get_shader(ssil.gather_shader_version, variant + SSIL_GATHER);
 	RID default_sampler = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 	RID default_mipmap_sampler = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 
@@ -836,6 +959,9 @@ void SSEffects::screen_space_indirect_lighting(Ref<RenderSceneBuffersRD> p_rende
 
 		ssil.gather_push_constant.quality = MAX(0, ssil_quality - 1);
 		ssil.gather_push_constant.size_multiplier = ssil_half_size ? 2 : 1;
+		ssil.gather_push_constant.exposure = p_settings.exposure;
+		ssil.gather_push_constant.depth_ndc[0] = p_settings.depth_ndc.x;
+		ssil.gather_push_constant.depth_ndc[1] = p_settings.depth_ndc.y;
 
 		// We are using our uniform cache so our uniform sets are automatically freed when our textures are freed.
 		// It also ensures that we're reusing the right cached entry in a multiview situation without us having to
@@ -854,7 +980,16 @@ void SSEffects::screen_space_indirect_lighting(Ref<RenderSceneBuffersRD> p_rende
 			u_projection.binding = 1;
 			u_projection.append_id(ssil.projection_uniform_buffer);
 
-			projection_uniform_set = uniform_set_cache->get_cache(shader, 3, u_last_frame, u_projection);
+			RD::Uniform u_exposure(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, Vector<RID>{ default_sampler, p_settings.exposure_texture });
+
+			if (validate) {
+				const StringName previous_name = p_render_buffers->has_texture(RB_SCOPE_SSDS, RB_LINEAR_DEPTH_PREVIOUS) ? RB_LINEAR_DEPTH_PREVIOUS : RB_LINEAR_DEPTH;
+				RID previous_depth_view = p_render_buffers->get_texture_slice(RB_SCOPE_SSDS, previous_name, p_view * 4, ssil_half_size ? 1 : 0, 4, 4);
+				RD::Uniform u_previous_depth(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, Vector<RID>{ ss_effects.mirror_sampler, previous_depth_view });
+				projection_uniform_set = uniform_set_cache->get_cache(shader, 3, u_last_frame, u_projection, u_exposure, u_previous_depth);
+			} else {
+				projection_uniform_set = uniform_set_cache->get_cache(shader, 3, u_last_frame, u_projection, u_exposure);
+			}
 		}
 
 		RID gather_uniform_set;
@@ -898,7 +1033,7 @@ void SSEffects::screen_space_indirect_lighting(Ref<RenderSceneBuffersRD> p_rende
 			u_load_counter.binding = 2;
 			u_load_counter.append_id(ssil.importance_map_load_counter);
 
-			RID shader_adaptive = ssil.gather_shader.version_get_shader(ssil.gather_shader_version, SSIL_GATHER_ADAPTIVE);
+			RID shader_adaptive = ssil.gather_shader.version_get_shader(ssil.gather_shader_version, variant + SSIL_GATHER_ADAPTIVE);
 			importance_map_uniform_set = uniform_set_cache->get_cache(shader_adaptive, 1, u_pong, u_importance_map, u_load_counter);
 		}
 
@@ -909,7 +1044,7 @@ void SSEffects::screen_space_indirect_lighting(Ref<RenderSceneBuffersRD> p_rende
 			ssil.importance_map_push_constant.intensity = p_settings.intensity * Math::PI;
 
 			//base pass
-			RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, ssil.pipelines[SSIL_GATHER_BASE].get_rid());
+			RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, ssil.pipelines[validate_pipeline + SSIL_GATHER_BASE].get_rid());
 			gather_ssil(compute_list, deinterleaved_pong_slices, edges_slices, p_settings, true, gather_uniform_set, importance_map_uniform_set, projection_uniform_set);
 
 			//generate importance map
@@ -950,9 +1085,9 @@ void SSEffects::screen_space_indirect_lighting(Ref<RenderSceneBuffersRD> p_rende
 
 			RD::get_singleton()->draw_command_end_label(); // Importance Map
 
-			RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, ssil.pipelines[SSIL_GATHER_ADAPTIVE].get_rid());
+			RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, ssil.pipelines[validate_pipeline + SSIL_GATHER_ADAPTIVE].get_rid());
 		} else {
-			RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, ssil.pipelines[SSIL_GATHER].get_rid());
+			RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, ssil.pipelines[validate_pipeline + SSIL_GATHER].get_rid());
 		}
 
 		gather_ssil(compute_list, deinterleaved_slices, edges_slices, p_settings, false, gather_uniform_set, importance_map_uniform_set, projection_uniform_set);
@@ -1073,6 +1208,24 @@ void SSEffects::screen_space_indirect_lighting(Ref<RenderSceneBuffersRD> p_rende
 
 	int zero[1] = { 0 };
 	RD::get_singleton()->buffer_update(ssil.importance_map_load_counter, 0, sizeof(uint32_t), &zero);
+}
+
+void SSEffects::ssil_store_previous_depth(Ref<RenderSceneBuffersRD> p_render_buffers) {
+	if (!p_render_buffers->has_texture(RB_SCOPE_SSDS, RB_LINEAR_DEPTH)) {
+		return;
+	}
+	const RD::TextureFormat format = p_render_buffers->get_texture_format(RB_SCOPE_SSDS, RB_LINEAR_DEPTH);
+	if (!p_render_buffers->has_texture(RB_SCOPE_SSDS, RB_LINEAR_DEPTH_PREVIOUS)) {
+		p_render_buffers->create_texture(RB_SCOPE_SSDS, RB_LINEAR_DEPTH_PREVIOUS, format.format, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT, RD::TEXTURE_SAMPLES_1, Size2i(format.width, format.height), format.array_layers, format.mipmaps);
+	}
+	RID source = p_render_buffers->get_texture(RB_SCOPE_SSDS, RB_LINEAR_DEPTH);
+	RID destination = p_render_buffers->get_texture(RB_SCOPE_SSDS, RB_LINEAR_DEPTH_PREVIOUS);
+	for (uint32_t m = 0; m < format.mipmaps; m++) {
+		Vector3 size(MAX(1u, format.width >> m), MAX(1u, format.height >> m), 1);
+		for (uint32_t layer = 0; layer < format.array_layers; layer++) {
+			RD::get_singleton()->texture_copy(source, destination, Vector3(), Vector3(), size, m, m, layer, layer);
+		}
+	}
 }
 
 /* SSAO */
@@ -1454,16 +1607,228 @@ void SSEffects::generate_ssao(Ref<RenderSceneBuffersRD> p_render_buffers, SSAORe
 	RD::get_singleton()->buffer_update(ssao.importance_map_load_counter, 0, sizeof(uint32_t), &zero);
 }
 
+bool SSEffects::gtao_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, GTAORenderBuffers &p_gtao_buffers, const GTAOSettings &p_settings) {
+	Size2i work_size = p_settings.full_screen_size;
+	if (p_settings.half_size) {
+		work_size = Size2i((work_size.x + 1) / 2, (work_size.y + 1) / 2);
+	}
+
+	if (MAX(work_size.x, work_size.y) < (1 << (GTAO_DEPTH_MIPMAPS - 1))) {
+		if (p_render_buffers->has_texture(RB_SCOPE_GTAO, RB_GTAO_DEPTH)) {
+			p_render_buffers->clear_context(RB_SCOPE_GTAO);
+		}
+		if (p_render_buffers->has_texture(RB_SCOPE_SSAO, RB_FINAL)) {
+			p_render_buffers->clear_context(RB_SCOPE_SSAO);
+		}
+		p_gtao_buffers = GTAORenderBuffers();
+		return false;
+	}
+
+	if (p_gtao_buffers.half_size != p_settings.half_size || p_gtao_buffers.bent_normals != p_settings.bent_normals || p_gtao_buffers.work_size != work_size) {
+		p_render_buffers->clear_context(RB_SCOPE_GTAO);
+	}
+	p_gtao_buffers.half_size = p_settings.half_size;
+	p_gtao_buffers.bent_normals = p_settings.bent_normals;
+	p_gtao_buffers.work_size = work_size;
+
+	if (p_render_buffers->has_texture(RB_SCOPE_SSAO, RB_DEINTERLEAVED)) {
+		p_render_buffers->clear_context(RB_SCOPE_SSAO);
+	}
+
+	const uint32_t usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
+	p_render_buffers->create_texture(RB_SCOPE_GTAO, RB_GTAO_DEPTH, RD::DATA_FORMAT_R32_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1, work_size, 0, GTAO_DEPTH_MIPMAPS);
+	p_render_buffers->create_texture(RB_SCOPE_GTAO, RB_GTAO_NORMAL, RD::DATA_FORMAT_R32_UINT, usage_bits, RD::TEXTURE_SAMPLES_1, work_size);
+	p_render_buffers->create_texture(RB_SCOPE_GTAO, RB_GTAO_TERM, RD::DATA_FORMAT_R32_UINT, usage_bits, RD::TEXTURE_SAMPLES_1, work_size);
+	p_render_buffers->create_texture(RB_SCOPE_GTAO, RB_GTAO_TERM_PONG, RD::DATA_FORMAT_R32_UINT, usage_bits, RD::TEXTURE_SAMPLES_1, work_size);
+	p_render_buffers->create_texture(RB_SCOPE_GTAO, RB_EDGES, RD::DATA_FORMAT_R8_UNORM, usage_bits, RD::TEXTURE_SAMPLES_1, work_size);
+	if (p_settings.bent_normals) {
+		p_render_buffers->create_texture(RB_SCOPE_GTAO, RB_GTAO_BENT_NORMAL, RD::DATA_FORMAT_R8G8B8A8_UNORM, usage_bits, RD::TEXTURE_SAMPLES_1);
+	}
+	p_render_buffers->create_texture(RB_SCOPE_SSAO, RB_FINAL, RD::DATA_FORMAT_R8_UNORM, usage_bits, RD::TEXTURE_SAMPLES_1);
+	return true;
+}
+
+void SSEffects::generate_gtao(Ref<RenderSceneBuffersRD> p_render_buffers, GTAORenderBuffers &p_gtao_buffers, uint32_t p_view, RID p_normal_buffer, const Projection &p_projection, const GTAOSettings &p_settings) {
+	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
+	ERR_FAIL_NULL(uniform_set_cache);
+
+	const Size2i work_size = p_gtao_buffers.work_size;
+	const Size2i full_size = p_settings.full_screen_size;
+	const bool half_size = p_gtao_buffers.half_size;
+	const bool bent_normals = p_gtao_buffers.bent_normals;
+
+	GTAOPushConstant push_constant;
+	memset(&push_constant, 0, sizeof(GTAOPushConstant));
+	push_constant.viewport_size[0] = work_size.x;
+	push_constant.viewport_size[1] = work_size.y;
+	push_constant.viewport_pixel_size[0] = 1.0f / work_size.x;
+	push_constant.viewport_pixel_size[1] = 1.0f / work_size.y;
+
+	Projection correction;
+	correction.set_depth_correction(false);
+	Projection temp = correction * p_projection;
+	float depth_linearize_mul = -temp.columns[3][2];
+	float depth_linearize_add = temp.columns[2][2];
+	if (depth_linearize_mul * depth_linearize_add < 0) {
+		depth_linearize_add = -depth_linearize_add;
+	}
+	push_constant.depth_unpack_consts[0] = depth_linearize_mul;
+	push_constant.depth_unpack_consts[1] = depth_linearize_add;
+
+	float tan_half_fov_x = 1.0f / p_projection.columns[0][0];
+	float tan_half_fov_y = 1.0f / p_projection.columns[1][1];
+	push_constant.camera_tan_half_fov[0] = tan_half_fov_x;
+	push_constant.camera_tan_half_fov[1] = tan_half_fov_y;
+	push_constant.ndc_to_view_mul[0] = tan_half_fov_x * 2.0f;
+	push_constant.ndc_to_view_mul[1] = tan_half_fov_y * -2.0f;
+	push_constant.ndc_to_view_add[0] = tan_half_fov_x * -1.0f;
+	push_constant.ndc_to_view_add[1] = tan_half_fov_y;
+	push_constant.ndc_to_view_mul_x_pixel_size[0] = push_constant.ndc_to_view_mul[0] * push_constant.viewport_pixel_size[0];
+	push_constant.ndc_to_view_mul_x_pixel_size[1] = push_constant.ndc_to_view_mul[1] * push_constant.viewport_pixel_size[1];
+
+	push_constant.effect_radius = p_settings.radius;
+	push_constant.effect_falloff_range = 0.615f;
+	push_constant.radius_multiplier = 1.457f;
+	push_constant.final_value_power = MAX(2.2f * (p_settings.power / 1.5f) * (p_settings.intensity / 2.0f), 0.01f);
+	push_constant.denoise_blur_beta = p_settings.denoise_passes == 0 ? 1e4f : 1.2f;
+	push_constant.sample_distribution_power = 2.0f;
+	push_constant.thin_occluder_compensation = 0.0f;
+	push_constant.depth_mip_sampling_offset = 3.30f;
+	push_constant.noise_index = p_settings.denoise_passes > 0 ? int32_t(p_settings.noise_index % 64) : 0;
+
+	push_constant.slice_count = p_settings.slices;
+	push_constant.steps_per_slice = p_settings.steps;
+	push_constant.full_size[0] = full_size.x;
+	push_constant.full_size[1] = full_size.y;
+	push_constant.full_pixel_size[0] = 1.0f / full_size.x;
+	push_constant.full_pixel_size[1] = 1.0f / full_size.y;
+
+	RID depth_texture = p_render_buffers->get_depth_texture(p_view);
+	RID working_depth = p_render_buffers->get_texture_slice(RB_SCOPE_GTAO, RB_GTAO_DEPTH, p_view, 0, 1, GTAO_DEPTH_MIPMAPS);
+	RID working_normal = p_render_buffers->get_texture_slice(RB_SCOPE_GTAO, RB_GTAO_NORMAL, p_view, 0);
+	RID edges = p_render_buffers->get_texture_slice(RB_SCOPE_GTAO, RB_EDGES, p_view, 0);
+	RID terms[2] = {
+		p_render_buffers->get_texture_slice(RB_SCOPE_GTAO, RB_GTAO_TERM, p_view, 0),
+		p_render_buffers->get_texture_slice(RB_SCOPE_GTAO, RB_GTAO_TERM_PONG, p_view, 0)
+	};
+	RID ao_final = p_render_buffers->get_texture_slice(RB_SCOPE_SSAO, RB_FINAL, p_view, 0);
+
+	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
+	RD::get_singleton()->draw_command_begin_label("Process GTAO");
+
+	{
+		const GTAOMode mode = half_size ? GTAO_PREFILTER_HALF : GTAO_PREFILTER;
+		RID shader = gtao.shader.version_get_shader(gtao.shader_version, mode);
+
+		RD::Uniform u_depth(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ gtao.point_sampler, depth_texture }));
+		RD::Uniform u_normal(RD::UNIFORM_TYPE_IMAGE, 1, p_normal_buffer);
+
+		thread_local LocalVector<RD::Uniform> u_outputs;
+		u_outputs.clear();
+		for (uint32_t i = 0; i < GTAO_DEPTH_MIPMAPS; i++) {
+			u_outputs.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, i, p_render_buffers->get_texture_slice(RB_SCOPE_GTAO, RB_GTAO_DEPTH, p_view, i)));
+		}
+		u_outputs.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 5, working_normal));
+
+		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, gtao.pipelines[mode].get_rid());
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_depth, u_normal), 0);
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache_vec(shader, 1, u_outputs), 1);
+		RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(GTAOPushConstant));
+		RD::get_singleton()->compute_list_dispatch_threads(compute_list, (work_size.x + 1) / 2, (work_size.y + 1) / 2, 1);
+		RD::get_singleton()->compute_list_add_barrier(compute_list);
+	}
+
+	{
+		const GTAOMode mode = bent_normals ? GTAO_MAIN_BENT : GTAO_MAIN;
+		RID shader = gtao.shader.version_get_shader(gtao.shader_version, mode);
+
+		RD::Uniform u_depth(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ gtao.point_sampler, working_depth }));
+		RD::Uniform u_normal(RD::UNIFORM_TYPE_IMAGE, 1, working_normal);
+		RD::Uniform u_term(RD::UNIFORM_TYPE_IMAGE, 0, terms[0]);
+		RD::Uniform u_edges(RD::UNIFORM_TYPE_IMAGE, 1, edges);
+
+		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, gtao.pipelines[mode].get_rid());
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_depth, u_normal), 0);
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 1, u_term, u_edges), 1);
+		RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(GTAOPushConstant));
+		RD::get_singleton()->compute_list_dispatch_threads(compute_list, work_size.x, work_size.y, 1);
+		RD::get_singleton()->compute_list_add_barrier(compute_list);
+	}
+
+	const int denoise_passes = MAX(1, p_settings.denoise_passes);
+	{
+		const GTAOMode mode = bent_normals ? GTAO_DENOISE_BENT : GTAO_DENOISE;
+		RID shader = gtao.shader.version_get_shader(gtao.shader_version, mode);
+		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, gtao.pipelines[mode].get_rid());
+
+		for (int i = 0; i < denoise_passes; i++) {
+			RD::Uniform u_term(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ gtao.point_sampler, terms[i % 2] }));
+			RD::Uniform u_edges(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, Vector<RID>({ gtao.point_sampler, edges }));
+			RD::Uniform u_output(RD::UNIFORM_TYPE_IMAGE, 0, terms[(i + 1) % 2]);
+
+			push_constant.final_apply = i == denoise_passes - 1;
+			RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_term, u_edges), 0);
+			RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 1, u_output), 1);
+			RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(GTAOPushConstant));
+			RD::get_singleton()->compute_list_dispatch_threads(compute_list, (work_size.x + 1) / 2, work_size.y, 1);
+			RD::get_singleton()->compute_list_add_barrier(compute_list);
+		}
+	}
+
+	{
+		GTAOMode mode = half_size ? GTAO_RESOLVE_HALF : GTAO_RESOLVE;
+		if (bent_normals) {
+			mode = half_size ? GTAO_RESOLVE_HALF_BENT : GTAO_RESOLVE_BENT;
+		}
+		RID shader = gtao.shader.version_get_shader(gtao.shader_version, mode);
+
+		thread_local LocalVector<RD::Uniform> u_inputs;
+		u_inputs.clear();
+		u_inputs.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ gtao.point_sampler, terms[denoise_passes % 2] })));
+		if (half_size) {
+			u_inputs.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, Vector<RID>({ gtao.point_sampler, working_depth })));
+			u_inputs.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 2, working_normal));
+			u_inputs.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, Vector<RID>({ gtao.point_sampler, depth_texture })));
+			u_inputs.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 4, p_normal_buffer));
+		}
+
+		thread_local LocalVector<RD::Uniform> u_outputs;
+		u_outputs.clear();
+		u_outputs.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 0, ao_final));
+		if (bent_normals) {
+			u_outputs.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 1, p_render_buffers->get_texture_slice(RB_SCOPE_GTAO, RB_GTAO_BENT_NORMAL, p_view, 0)));
+		}
+
+		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, gtao.pipelines[mode].get_rid());
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache_vec(shader, 0, u_inputs), 0);
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache_vec(shader, 1, u_outputs), 1);
+		RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(GTAOPushConstant));
+		RD::get_singleton()->compute_list_dispatch_threads(compute_list, full_size.x, full_size.y, 1);
+	}
+
+	RD::get_singleton()->draw_command_end_label();
+	RD::get_singleton()->compute_list_end();
+}
+
 /* Screen Space Reflection */
 
 void SSEffects::ssr_set_half_size(bool p_half_size) {
 	ssr_half_size = p_half_size;
 }
 
+RID SSEffects::ssr_get_output(Ref<RenderSceneBuffersRD> p_render_buffers, const SSRRenderBuffers &p_ssr_buffers) const {
+	const StringName name = p_ssr_buffers.stochastic ? (p_ssr_buffers.history_index ? RB_SSR_OUTPUT_1 : RB_SSR_OUTPUT_0) : (p_ssr_buffers.half_size ? RB_FINAL : RB_SSR);
+	return p_render_buffers->has_texture(RB_SCOPE_SSR, name) ? p_render_buffers->get_texture(RB_SCOPE_SSR, name) : RID();
+}
+
 void SSEffects::ssr_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, SSRRenderBuffers &p_ssr_buffers, const RD::DataFormat p_color_format) {
-	if (p_ssr_buffers.half_size != ssr_half_size) {
+	const bool stochastic = GLOBAL_GET_CACHED(int, "rendering/environment/screen_space_reflection/backend") == 1;
+	const uint32_t rays = CLAMP(GLOBAL_GET_CACHED(int, "rendering/environment/screen_space_reflection/stochastic/rays_per_pixel"), 1, 4);
+	if (p_ssr_buffers.half_size != ssr_half_size || p_ssr_buffers.stochastic != stochastic || p_ssr_buffers.rays != rays) {
 		p_render_buffers->clear_context(RB_SCOPE_SSR);
 	}
+	p_ssr_buffers.stochastic = stochastic;
+	p_ssr_buffers.rays = rays;
 
 	Vector2i internal_size = p_render_buffers->get_internal_size();
 	p_ssr_buffers.size = ssr_half_size ? (internal_size / 2) : internal_size;
@@ -1491,6 +1856,26 @@ void SSEffects::ssr_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers,
 	}
 
 	p_render_buffers->create_texture(RB_SCOPE_SSR, RB_HIZ, RD::DATA_FORMAT_R32_SFLOAT, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, p_ssr_buffers.size, view_count, p_ssr_buffers.mipmaps);
+
+	if (stochastic) {
+		const Size2i ray_size(p_ssr_buffers.size.width * rays, p_ssr_buffers.size.height);
+		p_render_buffers->create_texture(RB_SCOPE_SSR, RB_SSR_RAY_RADIANCE, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, ray_size, view_count);
+		p_render_buffers->create_texture(RB_SCOPE_SSR, RB_SSR_RAY_HIT, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, ray_size, view_count);
+		p_render_buffers->create_texture(RB_SCOPE_SSR, RB_SSR_RESOLVED, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, internal_size, view_count);
+		p_render_buffers->create_texture(RB_SCOPE_SSR, RB_SSR_RESOLVED_INFO, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, internal_size, view_count);
+		const StringName outputs[2] = { RB_SSR_OUTPUT_0, RB_SSR_OUTPUT_1 };
+		const StringName lengths[2] = { RB_SSR_HISTORY_LENGTH_0, RB_SSR_HISTORY_LENGTH_1 };
+		for (int i = 0; i < 2; i++) {
+			if (!p_render_buffers->has_texture(RB_SCOPE_SSR, outputs[i])) {
+				RID output = p_render_buffers->create_texture(RB_SCOPE_SSR, outputs[i], RD::DATA_FORMAT_R16G16B16A16_SFLOAT, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT, RD::TEXTURE_SAMPLES_1, internal_size, view_count);
+				RD::get_singleton()->texture_clear(output, Color(0, 0, 0, 0), 0, 1, 0, view_count);
+				RID length = p_render_buffers->create_texture(RB_SCOPE_SSR, lengths[i], RD::DATA_FORMAT_R8_UNORM, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT, RD::TEXTURE_SAMPLES_1, internal_size, view_count);
+				RD::get_singleton()->texture_clear(length, Color(0, 0, 0, 0), 0, 1, 0, view_count);
+			}
+		}
+		return;
+	}
+
 	p_render_buffers->create_texture(RB_SCOPE_SSR, RB_SSR, p_color_format, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, p_ssr_buffers.size, view_count, p_ssr_buffers.mipmaps);
 	p_render_buffers->create_texture(RB_SCOPE_SSR, RB_MIP_LEVEL, RD::DATA_FORMAT_R8_UNORM, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, p_ssr_buffers.size, view_count);
 
@@ -1499,7 +1884,7 @@ void SSEffects::ssr_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers,
 	}
 }
 
-void SSEffects::screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffers, SSRRenderBuffers &p_ssr_buffers, const RID *p_normal_roughness_slices, int p_max_steps, float p_fade_in, float p_fade_out, float p_tolerance, const Projection *p_projections, const Projection *p_reprojections, const Vector3 *p_eye_offsets, RendererRD::CopyEffects &p_copy_effects) {
+void SSEffects::screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffers, SSRRenderBuffers &p_ssr_buffers, const RID *p_normal_roughness_slices, int p_max_steps, float p_fade_in, float p_fade_out, float p_tolerance, const Projection *p_projections, const Projection *p_reprojections, const Vector3 *p_eye_offsets, RendererRD::CopyEffects &p_copy_effects, float p_exposure, RID p_exposure_texture, const SSRTemporalData &p_temporal) {
 	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
 	ERR_FAIL_NULL(uniform_set_cache);
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
@@ -1527,7 +1912,9 @@ void SSEffects::screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffe
 			scene_data.eye_offset[v][1] = p_eye_offsets[v].y;
 			scene_data.eye_offset[v][2] = p_eye_offsets[v].z;
 			scene_data.eye_offset[v][3] = 0.0f;
+			store_camera(p_temporal.prev_projections ? p_temporal.prev_projections[v].inverse() : projection.inverse(), scene_data.prev_inv_projection[v]);
 		}
+		store_camera(Projection(p_temporal.cur_to_prev), scene_data.cur_to_prev);
 
 		RD::get_singleton()->buffer_update(ssr.ubo, 0, sizeof(ScreenSpaceReflectionSceneData), &scene_data);
 	}
@@ -1592,6 +1979,7 @@ void SSEffects::screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffe
 		RD::get_singleton()->draw_command_end_label();
 	}
 
+	RENDER_TIMESTAMP("SSR HI-Z");
 	RD::get_singleton()->draw_command_begin_label("SSR HI-Z");
 
 	for (uint32_t v = 0; v < view_count; v++) {
@@ -1643,14 +2031,21 @@ void SSEffects::screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffe
 
 	RD::get_singleton()->draw_command_end_label();
 
+	if (p_ssr_buffers.stochastic) {
+		screen_space_reflection_stochastic(p_render_buffers, p_ssr_buffers, p_normal_roughness_slices, p_max_steps, p_fade_in, p_fade_out, p_tolerance, p_projections, p_exposure, p_exposure_texture, p_temporal);
+		return;
+	}
+
+	RENDER_TIMESTAMP("SSR Main");
 	RD::get_singleton()->draw_command_begin_label("SSR Main");
 
-	RID ssr_shader = ssr.ssr_shader.version_get_shader(ssr.ssr_shader_version, 0);
+	const bool validate_source = p_temporal.validate_source && p_render_buffers->has_texture(RB_SCOPE_REFLECTION_SOURCE, RB_SOURCE);
+	RID ssr_shader = ssr.ssr_shader.version_get_shader(ssr.ssr_shader_version, validate_source ? 1 : 0);
 
 	for (uint32_t v = 0; v < view_count; v++) {
 		RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 
-		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, ssr.ssr_pipeline.get_rid());
+		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, (validate_source ? ssr.ssr_validate_pipeline : ssr.ssr_pipeline).get_rid());
 
 		ScreenSpaceReflectionPushConstant push_constant;
 		push_constant.screen_size[0] = p_ssr_buffers.size.width;
@@ -1662,11 +2057,17 @@ void SSEffects::screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffe
 		push_constant.depth_tolerance = p_tolerance;
 		push_constant.orthogonal = p_projections[v].is_orthogonal();
 		push_constant.view_index = v;
+		push_constant.exposure = p_exposure;
 
-		RID last_frame_texture = p_render_buffers->get_texture_slice(RB_SCOPE_SSLF, RB_LAST_FRAME, v, 0);
-		if (ssr_half_size && RD::get_singleton()->texture_size(last_frame_texture) != p_ssr_buffers.size) {
-			// SSIL is likely also enabled. The texture we need is in the second mipmap in this case.
-			last_frame_texture = p_render_buffers->get_texture_slice(RB_SCOPE_SSLF, RB_LAST_FRAME, v, 1);
+		RID last_frame_texture;
+		if (p_render_buffers->has_texture(RB_SCOPE_REFLECTION_SOURCE, RB_SOURCE)) {
+			last_frame_texture = p_render_buffers->get_texture_slice(RB_SCOPE_REFLECTION_SOURCE, RB_SOURCE, v, ssr_half_size ? 1 : 0);
+		} else {
+			last_frame_texture = p_render_buffers->get_texture_slice(RB_SCOPE_SSLF, RB_LAST_FRAME, v, 0);
+			if (ssr_half_size && RD::get_singleton()->texture_size(last_frame_texture) != p_ssr_buffers.size) {
+				// SSIL is likely also enabled. The texture we need is in the second mipmap in this case.
+				last_frame_texture = p_render_buffers->get_texture_slice(RB_SCOPE_SSLF, RB_LAST_FRAME, v, 1);
+			}
 		}
 
 		RID hiz_texture = p_render_buffers->get_texture_slice(RB_SCOPE_SSR, RB_HIZ, v, 0, 1, p_ssr_buffers.mipmaps);
@@ -1680,7 +2081,13 @@ void SSEffects::screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffe
 		RD::Uniform u_ssr(RD::UNIFORM_TYPE_IMAGE, 3, ssr_texture);
 		RD::Uniform u_mip_level(RD::UNIFORM_TYPE_IMAGE, 4, mip_level_texture);
 		RD::Uniform u_scene_data(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 5, ssr.ubo);
-		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(ssr_shader, 0, u_last_frame, u_hiz, u_normal_roughness, u_ssr, u_mip_level, u_scene_data), 0);
+		RD::Uniform u_exposure(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, Vector<RID>{ nearest_sampler, p_exposure_texture });
+		if (validate_source) {
+			RD::Uniform u_previous_depth(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 7, Vector<RID>{ nearest_sampler, p_render_buffers->get_texture_slice(RB_SCOPE_REFLECTION_SOURCE, RB_SOURCE, v, 0) });
+			RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(ssr_shader, 0, u_last_frame, u_hiz, u_normal_roughness, u_ssr, u_mip_level, u_scene_data, u_exposure, u_previous_depth), 0);
+		} else {
+			RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(ssr_shader, 0, u_last_frame, u_hiz, u_normal_roughness, u_ssr, u_mip_level, u_scene_data, u_exposure), 0);
+		}
 
 		RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(push_constant));
 		RD::get_singleton()->compute_list_dispatch_threads(compute_list, p_ssr_buffers.size.width, p_ssr_buffers.size.height, 1);
@@ -1690,6 +2097,7 @@ void SSEffects::screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffe
 
 	RD::get_singleton()->draw_command_end_label();
 
+	RENDER_TIMESTAMP("SSR Roughness Filter");
 	RD::get_singleton()->draw_command_begin_label("SSR Roughness Filter");
 
 	RID filter_shader = ssr.filter_shader.version_get_shader(ssr.filter_shader_version, 0);
@@ -1721,6 +2129,7 @@ void SSEffects::screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffe
 	RD::get_singleton()->draw_command_end_label();
 
 	if (ssr_half_size) {
+		RENDER_TIMESTAMP("SSR Resolve");
 		RD::get_singleton()->draw_command_begin_label("SSR Resolve");
 
 		RID resolve_shader = ssr.resolve_shader.version_get_shader(ssr.resolve_shader_version, 0);
@@ -1735,6 +2144,7 @@ void SSEffects::screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffe
 			ScreenSpaceReflectionResolvePushConstant push_constant;
 			push_constant.screen_size[0] = internal_size.x;
 			push_constant.screen_size[1] = internal_size.y;
+			push_constant.exposure = p_exposure;
 
 			RID depth_texture = p_render_buffers->get_depth_texture(v);
 			RID depth_half_texture = p_render_buffers->get_texture_slice(RB_SCOPE_SSR, RB_HIZ, v, 0);
@@ -1750,7 +2160,8 @@ void SSEffects::screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffe
 			RD::Uniform u_ssr(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, Vector<RID>{ linear_sampler, ssr_texture });
 			RD::Uniform u_mip_level(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, Vector<RID>{ nearest_sampler, mip_level_texture });
 			RD::Uniform u_output(RD::UNIFORM_TYPE_IMAGE, 6, output_texture);
-			RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(resolve_shader, 0, u_depth, u_normal_roughness, u_depth_half, u_normal_roughness_half, u_ssr, u_mip_level, u_output), 0);
+			RD::Uniform u_exposure(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 7, Vector<RID>{ nearest_sampler, p_exposure_texture });
+			RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(resolve_shader, 0, u_depth, u_normal_roughness, u_depth_half, u_normal_roughness_half, u_ssr, u_mip_level, u_output, u_exposure), 0);
 
 			RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(push_constant));
 			RD::get_singleton()->compute_list_dispatch_threads(compute_list, internal_size.width, internal_size.height, 1);
@@ -1760,6 +2171,149 @@ void SSEffects::screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffe
 
 		RD::get_singleton()->draw_command_end_label();
 	}
+}
+
+void SSEffects::screen_space_reflection_stochastic(Ref<RenderSceneBuffersRD> p_render_buffers, SSRRenderBuffers &p_ssr_buffers, const RID *p_normal_roughness_slices, int p_max_steps, float p_fade_in, float p_fade_out, float p_tolerance, const Projection *p_projections, float p_exposure, RID p_exposure_texture, const SSRTemporalData &p_temporal) {
+	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
+	MaterialStorage *material_storage = MaterialStorage::get_singleton();
+	RID linear_sampler = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
+	RID nearest_sampler = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST_WITH_MIPMAPS, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
+
+	const uint32_t view_count = p_render_buffers->get_view_count();
+	const Size2i internal_size = p_render_buffers->get_internal_size();
+	const int32_t rays = p_ssr_buffers.rays;
+	const float roughness_cutoff = CLAMP(GLOBAL_GET_CACHED(float, "rendering/environment/screen_space_reflection/stochastic/roughness_cutoff"), 0.1f, 1.0f);
+	const bool has_source = p_render_buffers->has_texture(RB_SCOPE_REFLECTION_SOURCE, RB_SOURCE);
+	const StringName source_context = has_source ? RB_SCOPE_REFLECTION_SOURCE : RB_SCOPE_SSLF;
+	const StringName source_name = has_source ? RB_SOURCE : RB_LAST_FRAME;
+	const RD::TextureFormat source_format = p_render_buffers->get_texture_format(source_context, source_name);
+	const bool temporal = has_source && GLOBAL_GET_CACHED(bool, "rendering/environment/screen_space_reflection/stochastic/temporal");
+
+	p_ssr_buffers.history_index ^= 1;
+	const StringName output_name = p_ssr_buffers.history_index ? RB_SSR_OUTPUT_1 : RB_SSR_OUTPUT_0;
+	const StringName history_name = p_ssr_buffers.history_index ? RB_SSR_OUTPUT_0 : RB_SSR_OUTPUT_1;
+	const StringName length_name = p_ssr_buffers.history_index ? RB_SSR_HISTORY_LENGTH_1 : RB_SSR_HISTORY_LENGTH_0;
+	const StringName previous_length_name = p_ssr_buffers.history_index ? RB_SSR_HISTORY_LENGTH_0 : RB_SSR_HISTORY_LENGTH_1;
+
+	if (p_temporal.write_hit_distance && !p_render_buffers->has_texture(RB_SCOPE_SSR, RB_SSR_HIT_DISTANCE)) {
+		p_render_buffers->create_texture(RB_SCOPE_SSR, RB_SSR_HIT_DISTANCE, RD::DATA_FORMAT_R16_SFLOAT, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, internal_size, view_count);
+	}
+	const bool write_hit_distance = p_temporal.write_hit_distance && p_render_buffers->has_texture(RB_SCOPE_SSR, RB_SSR_HIT_DISTANCE);
+
+	RENDER_TIMESTAMP("SSR Stochastic Trace");
+	RD::get_singleton()->draw_command_begin_label("SSR Stochastic Trace");
+
+	RID trace_shader = ssr.stochastic_shader.version_get_shader(ssr.stochastic_shader_version, SCREEN_SPACE_REFLECTION_STOCHASTIC_TRACE);
+	for (uint32_t v = 0; v < view_count; v++) {
+		RID source_texture = p_render_buffers->get_texture_slice(source_context, source_name, v, 0, 1, source_format.mipmaps);
+		RID hiz_texture = p_render_buffers->get_texture_slice(RB_SCOPE_SSR, RB_HIZ, v, 0, 1, p_ssr_buffers.mipmaps);
+		RID normal_roughness_texture = ssr_half_size ? p_render_buffers->get_texture_slice(RB_SCOPE_SSR, RB_NORMAL_ROUGHNESS, v, 0) : p_normal_roughness_slices[v];
+
+		ScreenSpaceReflectionTracePushConstant push_constant;
+		push_constant.screen_size[0] = p_ssr_buffers.size.width;
+		push_constant.screen_size[1] = p_ssr_buffers.size.height;
+		push_constant.mipmaps = p_ssr_buffers.mipmaps;
+		push_constant.num_steps = p_max_steps;
+		push_constant.distance_fade = p_fade_out;
+		push_constant.curve_fade_in = p_fade_in;
+		push_constant.depth_tolerance = p_tolerance;
+		push_constant.orthogonal = p_projections[v].is_orthogonal();
+		push_constant.view_index = v;
+		push_constant.frame = p_temporal.frame;
+		push_constant.rays = rays;
+		push_constant.roughness_cutoff = roughness_cutoff;
+		push_constant.validate_source = has_source && p_temporal.validate_source;
+		push_constant.source_mip = (ssr_half_size && source_format.mipmaps > 1) ? 1.0f : 0.0f;
+		push_constant.pad[0] = 0;
+		push_constant.pad[1] = 0;
+
+		RD::Uniform u_scene_data(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, ssr.ubo);
+		RD::Uniform u_source(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, Vector<RID>{ linear_sampler, source_texture });
+		RD::Uniform u_hiz(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, Vector<RID>{ nearest_sampler, hiz_texture });
+		RD::Uniform u_normal_roughness(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, Vector<RID>{ nearest_sampler, normal_roughness_texture });
+		RD::Uniform u_ray_radiance(RD::UNIFORM_TYPE_IMAGE, 4, p_render_buffers->get_texture_slice(RB_SCOPE_SSR, RB_SSR_RAY_RADIANCE, v, 0));
+		RD::Uniform u_ray_hit(RD::UNIFORM_TYPE_IMAGE, 5, p_render_buffers->get_texture_slice(RB_SCOPE_SSR, RB_SSR_RAY_HIT, v, 0));
+
+		RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
+		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, ssr.stochastic_pipelines[SCREEN_SPACE_REFLECTION_STOCHASTIC_TRACE].get_rid());
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(trace_shader, 0, u_scene_data, u_source, u_hiz, u_normal_roughness, u_ray_radiance, u_ray_hit), 0);
+		RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(push_constant));
+		RD::get_singleton()->compute_list_dispatch_threads(compute_list, p_ssr_buffers.size.width, p_ssr_buffers.size.height, 1);
+		RD::get_singleton()->compute_list_end();
+	}
+
+	RD::get_singleton()->draw_command_end_label();
+
+	RENDER_TIMESTAMP("SSR Stochastic Resolve");
+	RD::get_singleton()->draw_command_begin_label("SSR Stochastic Resolve");
+
+	const ScreenSpaceReflectionStochasticMode resolve_mode = write_hit_distance ? SCREEN_SPACE_REFLECTION_STOCHASTIC_RESOLVE_HIT_DISTANCE : SCREEN_SPACE_REFLECTION_STOCHASTIC_RESOLVE;
+	RID resolve_shader = ssr.stochastic_shader.version_get_shader(ssr.stochastic_shader_version, resolve_mode);
+	RID temporal_shader = ssr.stochastic_shader.version_get_shader(ssr.stochastic_shader_version, SCREEN_SPACE_REFLECTION_STOCHASTIC_TEMPORAL);
+	for (uint32_t v = 0; v < view_count; v++) {
+		RID normal_roughness_trace = ssr_half_size ? p_render_buffers->get_texture_slice(RB_SCOPE_SSR, RB_NORMAL_ROUGHNESS, v, 0) : p_normal_roughness_slices[v];
+		RID resolved = p_render_buffers->get_texture_slice(RB_SCOPE_SSR, RB_SSR_RESOLVED, v, 0);
+		RID resolved_info = p_render_buffers->get_texture_slice(RB_SCOPE_SSR, RB_SSR_RESOLVED_INFO, v, 0);
+
+		ScreenSpaceReflectionResolvePushConstantStochastic push_constant;
+		push_constant.screen_size[0] = internal_size.width;
+		push_constant.screen_size[1] = internal_size.height;
+		push_constant.trace_size[0] = p_ssr_buffers.size.width;
+		push_constant.trace_size[1] = p_ssr_buffers.size.height;
+		push_constant.rays = rays;
+		push_constant.frame = p_temporal.frame;
+		push_constant.roughness_cutoff = roughness_cutoff;
+		push_constant.temporal = temporal && !p_projections[v].is_orthogonal();
+		push_constant.history_valid = p_temporal.history_valid;
+		push_constant.orthogonal = p_projections[v].is_orthogonal();
+		push_constant.view_index = v;
+		push_constant.exposure = p_exposure;
+
+		thread_local LocalVector<RD::Uniform> uniforms;
+		uniforms.clear();
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, ssr.ubo));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, Vector<RID>{ nearest_sampler, p_render_buffers->get_texture_slice(RB_SCOPE_SSR, RB_SSR_RAY_RADIANCE, v, 0) }));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, Vector<RID>{ nearest_sampler, p_render_buffers->get_texture_slice(RB_SCOPE_SSR, RB_SSR_RAY_HIT, v, 0) }));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, Vector<RID>{ nearest_sampler, p_render_buffers->get_texture_slice(RB_SCOPE_SSR, RB_HIZ, v, 0, 1, p_ssr_buffers.mipmaps) }));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, Vector<RID>{ nearest_sampler, normal_roughness_trace }));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, Vector<RID>{ nearest_sampler, p_render_buffers->get_depth_texture(v) }));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, Vector<RID>{ nearest_sampler, p_normal_roughness_slices[v] }));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 7, resolved));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 8, resolved_info));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 9, Vector<RID>{ nearest_sampler, p_exposure_texture }));
+		if (write_hit_distance) {
+			uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, p_render_buffers->get_texture_slice(RB_SCOPE_SSR, RB_SSR_HIT_DISTANCE, v, 0)));
+		}
+
+		RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
+		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, ssr.stochastic_pipelines[resolve_mode].get_rid());
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache_vec(resolve_shader, 0, uniforms), 0);
+		RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(push_constant));
+		RD::get_singleton()->compute_list_dispatch_threads(compute_list, internal_size.width, internal_size.height, 1);
+		RD::get_singleton()->compute_list_end();
+
+		RENDER_TIMESTAMP("SSR Stochastic Temporal");
+		uniforms.clear();
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, ssr.ubo));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, Vector<RID>{ nearest_sampler, resolved }));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, Vector<RID>{ nearest_sampler, resolved_info }));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, Vector<RID>{ nearest_sampler, p_render_buffers->get_depth_texture(v) }));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, Vector<RID>{ nearest_sampler, p_normal_roughness_slices[v] }));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, Vector<RID>{ linear_sampler, p_render_buffers->get_texture_slice(RB_SCOPE_SSR, history_name, v, 0) }));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, Vector<RID>{ nearest_sampler, p_render_buffers->get_texture_slice(RB_SCOPE_SSR, previous_length_name, v, 0) }));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 7, Vector<RID>{ nearest_sampler, p_render_buffers->get_texture_slice(source_context, source_name, v, 0) }));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 8, p_render_buffers->get_texture_slice(RB_SCOPE_SSR, output_name, v, 0)));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 9, p_render_buffers->get_texture_slice(RB_SCOPE_SSR, length_name, v, 0)));
+
+		compute_list = RD::get_singleton()->compute_list_begin();
+		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, ssr.stochastic_pipelines[SCREEN_SPACE_REFLECTION_STOCHASTIC_TEMPORAL].get_rid());
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache_vec(temporal_shader, 0, uniforms), 0);
+		RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(push_constant));
+		RD::get_singleton()->compute_list_dispatch_threads(compute_list, internal_size.width, internal_size.height, 1);
+		RD::get_singleton()->compute_list_end();
+	}
+
+	RD::get_singleton()->draw_command_end_label();
 }
 
 /* Screen Space Shadows */
@@ -1791,7 +2345,7 @@ void SSEffects::sscs_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers
 	}
 }
 
-void SSEffects::screen_space_contact_shadows(Ref<RenderSceneBuffersRD> p_render_buffers, SSCSRenderBuffers &p_sscs_buffers, const SSCSSettings &p_settings, const Projection *p_projections, Vector3 p_light_direction, uint32_t p_light_index, float p_opacity, float p_blur, float p_taa_frame_count) {
+void SSEffects::screen_space_contact_shadows(Ref<RenderSceneBuffersRD> p_render_buffers, SSCSRenderBuffers &p_sscs_buffers, const SSCSSettings &p_settings, const Projection *p_projections, const Vector4 &p_light_vector, uint32_t p_light_index, float p_blur, float p_taa_frame_count) {
 	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
 	ERR_FAIL_NULL(uniform_set_cache);
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
@@ -1808,7 +2362,7 @@ void SSEffects::screen_space_contact_shadows(Ref<RenderSceneBuffersRD> p_render_
 	for (uint32_t v = 0; v < view_count; v++) {
 		// Calculate light coordinate in screen space
 		Projection projection = correction * p_projections[v];
-		Vector4 projected_light = projection.xform(Vector4(p_light_direction.x, p_light_direction.y, p_light_direction.z, 0));
+		Vector4 projected_light = projection.xform(p_light_vector);
 
 		const int wave_size = 64;
 		Vector4 light;
@@ -1834,7 +2388,11 @@ void SSEffects::screen_space_contact_shadows(Ref<RenderSceneBuffersRD> p_render_
 					projected_light.y * p_sscs_buffers.size.height * 0.5,
 					projected_light.z,
 					0);
-			light = light / MAX(Math::abs(light.x), Math::abs(light.y));
+			const float longest = MAX(Math::abs(light.x), Math::abs(light.y));
+			if (longest == 0.0f) {
+				continue;
+			}
+			light = light / longest;
 
 			bound_start = Vector2i(
 					light.x > 0 && light.x < Math::abs(light.y) ? -1 : 0,
@@ -1847,13 +2405,14 @@ void SSEffects::screen_space_contact_shadows(Ref<RenderSceneBuffersRD> p_render_
 		Size2i bound_size = bound_end - bound_start;
 
 		RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
-		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, sscs.sscs_pipelines[p_settings.quality].get_rid());
+		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, sscs.sscs_pipelines[CLAMP(int(p_settings.quality), 0, int(std_size(sscs.sscs_pipelines)) - 1)].get_rid());
 
-		ScreenSpaceContactShadowsPushConstant push_constant;
+		ScreenSpaceContactShadowsPushConstant push_constant = {};
+		push_constant.ray_confidence = p_settings.ray_confidence;
+		push_constant.plane_rejection = p_settings.plane_rejection;
 		push_constant.screen_size[0] = p_sscs_buffers.size.width;
 		push_constant.screen_size[1] = p_sscs_buffers.size.height;
 		push_constant.surface_thickness = p_settings.surface_thickness;
-		push_constant.opacity = p_opacity;
 		push_constant.blur = p_blur;
 		push_constant.taa_frame_count = p_taa_frame_count;
 		push_constant.light_coordinates[0] = light.x;
@@ -1880,6 +2439,33 @@ void SSEffects::screen_space_contact_shadows(Ref<RenderSceneBuffersRD> p_render_
 	RD::get_singleton()->draw_command_end_label();
 }
 
+RID SSEffects::sscs_combine_for_debug(Ref<RenderSceneBuffersRD> p_render_buffers, const SSCSRenderBuffers &p_sscs_buffers) {
+	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
+	ERR_FAIL_NULL_V(uniform_set_cache, RID());
+	ERR_FAIL_COND_V(!p_render_buffers->has_texture(RB_SCOPE_SSCS, RB_SSCS), RID());
+
+	RID combined = p_render_buffers->create_texture(RB_SCOPE_SSCS, RB_SSCS_COMBINED, RD::DATA_FORMAT_R8_UNORM, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, p_sscs_buffers.size, 1);
+
+	ScreenSpaceContactShadowsCombinePushConstant push_constant;
+	push_constant.screen_size[0] = p_sscs_buffers.size.width;
+	push_constant.screen_size[1] = p_sscs_buffers.size.height;
+	push_constant.layer_count = p_sscs_buffers.light_count;
+	push_constant.layer_stride = p_render_buffers->get_view_count();
+
+	RID shader = sscs.combine_shader.version_get_shader(sscs.combine_shader_version, 0);
+	RD::Uniform u_shadows(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ sscs.border_sampler, p_render_buffers->get_texture(RB_SCOPE_SSCS, RB_SSCS) }));
+	RD::Uniform u_combined(RD::UNIFORM_TYPE_IMAGE, 1, combined);
+
+	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
+	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, sscs.combine_pipeline.get_rid());
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_shadows, u_combined), 0);
+	RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(push_constant));
+	RD::get_singleton()->compute_list_dispatch_threads(compute_list, p_sscs_buffers.size.width, p_sscs_buffers.size.height, 1);
+	RD::get_singleton()->compute_list_end();
+
+	return combined;
+}
+
 /* Subsurface scattering */
 
 void SSEffects::sss_set_quality(RSE::SubSurfaceScatteringQuality p_quality) {
@@ -1895,7 +2481,7 @@ void SSEffects::sss_set_scale(float p_scale, float p_depth_scale) {
 	sss_depth_scale = p_depth_scale;
 }
 
-void SSEffects::sub_surface_scattering(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_diffuse, RID p_depth, const Projection &p_camera, const Size2i &p_screen_size) {
+void SSEffects::sub_surface_scattering(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_diffuse, RID p_depth, RID p_radius, const Projection &p_camera, const Size2i &p_screen_size, uint32_t p_taa_frame) {
 	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
 	ERR_FAIL_NULL(uniform_set_cache);
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
@@ -1926,6 +2512,9 @@ void SSEffects::sub_surface_scattering(Ref<RenderSceneBuffersRD> p_render_buffer
 		sss.push_constant.vertical = false;
 		sss.push_constant.scale = sss_scale;
 		sss.push_constant.depth_scale = sss_depth_scale;
+		sss.push_constant.unit_uv_x = float(0.5 * Math::abs(p_camera.columns[0][0]));
+		sss.push_constant.unit_uv_y = float(0.5 * Math::abs(p_camera.columns[1][1]));
+		sss.push_constant.frame = p_taa_frame;
 
 		RID shader = sss.shader.version_get_shader(sss.shader_version, sss_quality - 1);
 		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, sss.pipelines[sss_quality - 1].get_rid());
@@ -1935,12 +2524,14 @@ void SSEffects::sub_surface_scattering(Ref<RenderSceneBuffersRD> p_render_buffer
 		RD::Uniform u_intermediate_with_sampler(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, intermediate }));
 		RD::Uniform u_intermediate(RD::UNIFORM_TYPE_IMAGE, 0, Vector<RID>({ intermediate }));
 		RD::Uniform u_depth_with_sampler(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, p_depth }));
+		RD::Uniform u_radius_with_sampler(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, p_radius }));
 
 		// horizontal
 
 		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_diffuse_with_sampler), 0);
 		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 1, u_intermediate), 1);
 		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 2, u_depth_with_sampler), 2);
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 3, u_radius_with_sampler), 3);
 
 		RD::get_singleton()->compute_list_set_push_constant(compute_list, &sss.push_constant, sizeof(SubSurfaceScatteringPushConstant));
 
@@ -1953,6 +2544,7 @@ void SSEffects::sub_surface_scattering(Ref<RenderSceneBuffersRD> p_render_buffer
 		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_intermediate_with_sampler), 0);
 		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 1, u_diffuse), 1);
 		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 2, u_depth_with_sampler), 2);
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 3, u_radius_with_sampler), 3);
 
 		sss.push_constant.vertical = true;
 		RD::get_singleton()->compute_list_set_push_constant(compute_list, &sss.push_constant, sizeof(SubSurfaceScatteringPushConstant));

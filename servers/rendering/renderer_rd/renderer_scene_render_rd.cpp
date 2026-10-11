@@ -561,7 +561,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 		Ref<RendererRD::Luminance::LuminanceBuffers> luminance_buffers = luminance->get_luminance_buffers(rb);
 
 		uint64_t auto_exposure_version = RSG::camera_attributes->camera_attributes_get_auto_exposure_version(p_render_data->camera_attributes);
-		bool set_immediate = auto_exposure_version != rb->get_auto_exposure_version();
+		bool set_immediate = auto_exposure_version != rb->get_auto_exposure_version() || rb->get_history_reset();
 		rb->set_auto_exposure_version(auto_exposure_version);
 
 		double step = RSG::camera_attributes->camera_attributes_get_auto_exposure_adjust_speed(p_render_data->camera_attributes) * time_step;
@@ -745,6 +745,11 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 			tonemap.exposure = environment_get_exposure(p_render_data->environment);
 			tonemap.max_value = max_value;
 		}
+		if (debug_draw >= RSE::VIEWPORT_DEBUG_DRAW_PERSISTENT_AO && debug_draw <= RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE) {
+			tonemap.tonemap_mode = RSE::ENV_TONE_MAPPER_LINEAR;
+			tonemap.exposure = 1.0;
+			tonemap.white = 1.0;
+		}
 
 		tonemap.use_color_correction = false;
 		tonemap.use_1d_color_correction = false;
@@ -765,6 +770,9 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 
 		tonemap.luminance_multiplier = rb->get_luminance_multiplier();
 		tonemap.view_count = rb->get_view_count();
+		if (can_use_effects) {
+			_setup_night_vision(tonemap, p_render_data);
+		}
 
 		RID dest_fb;
 		RD::DataFormat dest_fb_format;
@@ -981,6 +989,9 @@ void RendererSceneRenderRD::_post_process_subpass(RID p_source_texture, RID p_fr
 
 	tonemap.luminance_multiplier = rb->get_luminance_multiplier();
 	tonemap.view_count = rb->get_view_count();
+	if (can_use_effects) {
+		_setup_night_vision(tonemap, p_render_data);
+	}
 
 	if (rb->get_use_debanding() && !using_hdr) {
 		tonemap.debanding_mode = RendererRD::ToneMapper::TonemapSettings::DebandingMode::DEBANDING_MODE_8_BIT;
@@ -991,6 +1002,14 @@ void RendererSceneRenderRD::_post_process_subpass(RID p_source_texture, RID p_fr
 	tone_mapper->tonemapper_subpass(draw_list, p_source_texture, RD::get_singleton()->framebuffer_get_format(p_framebuffer), tonemap);
 
 	RD::get_singleton()->draw_command_end_label();
+}
+
+void RendererSceneRenderRD::_setup_night_vision(RendererRD::ToneMapper::TonemapSettings &r_tonemap, const RenderDataRD *p_render_data) {
+	if (p_render_data->environment.is_null()) {
+		return;
+	}
+	r_tonemap.night_vision = environment_get_night_vision(p_render_data->environment);
+	r_tonemap.night_vision_exposure_normalization = is_using_physical_light_units() && p_render_data->camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes) : 1.0f;
 }
 
 void RendererSceneRenderRD::_disable_clear_request(const RenderDataRD *p_render_data) {
@@ -1018,6 +1037,9 @@ bool RendererSceneRenderRD::_debug_draw_can_use_effects(RSE::ViewportDebugDraw p
 		case RSE::VIEWPORT_DEBUG_DRAW_CLUSTER_DECALS:
 		case RSE::VIEWPORT_DEBUG_DRAW_CLUSTER_REFLECTION_PROBES:
 		case RSE::VIEWPORT_DEBUG_DRAW_INTERNAL_BUFFER:
+		case RSE::VIEWPORT_DEBUG_DRAW_PERSISTENT_AO:
+		case RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_SPECULAR:
+		case RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE:
 			can_use_effects = false;
 			break;
 		// Modes that draws information over part of the viewport needs camera effects because we see partially the normal draw mode.
@@ -1155,6 +1177,10 @@ void RendererSceneRenderRD::_render_buffers_debug_draw(const RenderDataRD *p_ren
 		Size2i resolution = rb->get_internal_size();
 
 		debug_effects->draw_motion_vectors(velocity, depth, dest_fb, p_render_data->scene_data->cam_projection, p_render_data->scene_data->cam_transform, p_render_data->scene_data->prev_cam_projection, p_render_data->scene_data->prev_cam_transform, resolution);
+	}
+
+	if (debug_draw == RSE::VIEWPORT_DEBUG_DRAW_LINEAR_DEPTH && rb->has_depth_texture()) {
+		debug_effects->draw_linear_depth(rb->get_depth_texture(0), texture_storage->render_target_get_rd_framebuffer(render_target), p_render_data->scene_data->view_projection[0], p_render_data->scene_data->z_near, p_render_data->scene_data->z_far);
 	}
 }
 
@@ -1505,6 +1531,8 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 	Color clear_color;
 	if (p_render_buffers.is_valid() && p_reflection_probe.is_null()) {
 		clear_color = texture_storage->render_target_get_clear_request_color(rb->get_render_target());
+		float exposure_normalization = is_using_physical_light_units() && p_camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes) : 1.0f;
+		rb->update_history_reset(RSG::rasterizer->get_frame_number(), GLOBAL_GET_CACHED(int, "rendering/anti_aliasing/quality/history_reset_serial"), exposure_normalization);
 	} else {
 		clear_color = RSG::texture_storage->get_default_clear_color();
 	}

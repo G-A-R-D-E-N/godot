@@ -534,6 +534,7 @@ String ShaderCompiler::_dump_node_code(const SL::Node *p_node, int p_level, Gene
 					if (E.value.hint == SL::ShaderNode::Uniform::HINT_SCREEN_TEXTURE ||
 							E.value.hint == SL::ShaderNode::Uniform::HINT_NORMAL_ROUGHNESS_TEXTURE ||
 							E.value.hint == SL::ShaderNode::Uniform::HINT_DEPTH_TEXTURE ||
+							E.value.hint == SL::ShaderNode::Uniform::HINT_BACK_DEPTH_TEXTURE ||
 							E.value.hint == SL::ShaderNode::Uniform::HINT_BLIT_SOURCE0 ||
 							E.value.hint == SL::ShaderNode::Uniform::HINT_BLIT_SOURCE1 ||
 							E.value.hint == SL::ShaderNode::Uniform::HINT_BLIT_SOURCE2 ||
@@ -583,6 +584,7 @@ String ShaderCompiler::_dump_node_code(const SL::Node *p_node, int p_level, Gene
 				if (uniform.hint == SL::ShaderNode::Uniform::HINT_SCREEN_TEXTURE ||
 						uniform.hint == SL::ShaderNode::Uniform::HINT_NORMAL_ROUGHNESS_TEXTURE ||
 						uniform.hint == SL::ShaderNode::Uniform::HINT_DEPTH_TEXTURE ||
+						uniform.hint == SL::ShaderNode::Uniform::HINT_BACK_DEPTH_TEXTURE ||
 						uniform.hint == SL::ShaderNode::Uniform::HINT_BLIT_SOURCE0 ||
 						uniform.hint == SL::ShaderNode::Uniform::HINT_BLIT_SOURCE1 ||
 						uniform.hint == SL::ShaderNode::Uniform::HINT_BLIT_SOURCE2 ||
@@ -953,6 +955,7 @@ String ShaderCompiler::_dump_node_code(const SL::Node *p_node, int p_level, Gene
 							if (u.filter >= ShaderLanguage::FILTER_NEAREST_MIPMAP) {
 								r_gen_code.uses_screen_texture_mipmaps = true;
 							}
+							r_gen_code.screen_texture_filter = ShaderLanguage::combine_texture_filters(r_gen_code.screen_texture_filter, u.filter);
 							r_gen_code.uses_screen_texture = true;
 						} else if (u.hint == ShaderLanguage::ShaderNode::Uniform::HINT_NORMAL_ROUGHNESS_TEXTURE) {
 							name = "normal_roughness_buffer";
@@ -960,6 +963,9 @@ String ShaderCompiler::_dump_node_code(const SL::Node *p_node, int p_level, Gene
 						} else if (u.hint == ShaderLanguage::ShaderNode::Uniform::HINT_DEPTH_TEXTURE) {
 							name = "depth_buffer";
 							r_gen_code.uses_depth_texture = true;
+						} else if (u.hint == ShaderLanguage::ShaderNode::Uniform::HINT_BACK_DEPTH_TEXTURE) {
+							name = "back_depth_buffer";
+							r_gen_code.uses_back_depth_texture = true;
 						} else if (u.hint == ShaderLanguage::ShaderNode::Uniform::HINT_BLIT_SOURCE0) {
 							name = "source0";
 						} else if (u.hint == ShaderLanguage::ShaderNode::Uniform::HINT_BLIT_SOURCE1) {
@@ -1319,7 +1325,7 @@ String ShaderCompiler::_dump_node_code(const SL::Node *p_node, int p_level, Gene
 										const ShaderLanguage::ShaderNode::Uniform &u = shader->uniforms[texture_uniform];
 										if (u.hint == ShaderLanguage::ShaderNode::Uniform::HINT_SCREEN_TEXTURE) {
 											is_screen_texture = true;
-										} else if (u.hint == ShaderLanguage::ShaderNode::Uniform::HINT_DEPTH_TEXTURE) {
+										} else if (u.hint == ShaderLanguage::ShaderNode::Uniform::HINT_DEPTH_TEXTURE || u.hint == ShaderLanguage::ShaderNode::Uniform::HINT_BACK_DEPTH_TEXTURE) {
 											is_depth_texture = true;
 										} else if (u.hint == ShaderLanguage::ShaderNode::Uniform::HINT_NORMAL_ROUGHNESS_TEXTURE) {
 											is_normal_roughness_texture = true;
@@ -1339,7 +1345,7 @@ String ShaderCompiler::_dump_node_code(const SL::Node *p_node, int p_level, Gene
 												if (function->arguments[j].tex_argument_check) {
 													if (function->arguments[j].tex_hint == ShaderLanguage::ShaderNode::Uniform::HINT_SCREEN_TEXTURE) {
 														is_screen_texture = true;
-													} else if (function->arguments[j].tex_hint == ShaderLanguage::ShaderNode::Uniform::HINT_DEPTH_TEXTURE) {
+													} else if (function->arguments[j].tex_hint == ShaderLanguage::ShaderNode::Uniform::HINT_DEPTH_TEXTURE || function->arguments[j].tex_hint == ShaderLanguage::ShaderNode::Uniform::HINT_BACK_DEPTH_TEXTURE) {
 														is_depth_texture = true;
 													} else if (function->arguments[j].tex_hint == ShaderLanguage::ShaderNode::Uniform::HINT_NORMAL_ROUGHNESS_TEXTURE) {
 														is_normal_roughness_texture = true;
@@ -1384,7 +1390,7 @@ String ShaderCompiler::_dump_node_code(const SL::Node *p_node, int p_level, Gene
 									if (actions.check_multiview_samplers) {
 										if (u.hint == ShaderLanguage::ShaderNode::Uniform::HINT_SCREEN_TEXTURE) {
 											multiview_uv_needed = true;
-										} else if (u.hint == ShaderLanguage::ShaderNode::Uniform::HINT_DEPTH_TEXTURE) {
+										} else if (u.hint == ShaderLanguage::ShaderNode::Uniform::HINT_DEPTH_TEXTURE || u.hint == ShaderLanguage::ShaderNode::Uniform::HINT_BACK_DEPTH_TEXTURE) {
 											multiview_uv_needed = true;
 										} else if (u.hint == ShaderLanguage::ShaderNode::Uniform::HINT_NORMAL_ROUGHNESS_TEXTURE) {
 											multiview_uv_needed = true;
@@ -1655,8 +1661,10 @@ Error ShaderCompiler::compile(RSE::ShaderMode p_mode, const String &p_code, Iden
 	r_gen_code.uses_vertex_time = false;
 	r_gen_code.uses_global_textures = false;
 	r_gen_code.uses_screen_texture_mipmaps = false;
+	r_gen_code.screen_texture_filter = ShaderLanguage::FILTER_DEFAULT;
 	r_gen_code.uses_screen_texture = false;
 	r_gen_code.uses_depth_texture = false;
+	r_gen_code.uses_back_depth_texture = false;
 	r_gen_code.uses_normal_roughness_texture = false;
 
 	used_name_defines.clear();

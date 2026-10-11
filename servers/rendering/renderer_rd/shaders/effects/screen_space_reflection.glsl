@@ -20,6 +20,8 @@ layout(set = 0, binding = 5, std140) uniform SceneData {
 }
 scene_data;
 
+layout(set = 0, binding = 6) uniform sampler2D source_exposure;
+
 layout(push_constant, std430) uniform Params {
 	ivec2 screen_size;
 	int mipmaps;
@@ -29,11 +31,17 @@ layout(push_constant, std430) uniform Params {
 	float depth_tolerance;
 	bool orthogonal;
 	int view_index;
-	int pad1;
+	float exposure;
 	int pad2;
 	int pad3;
 }
 params;
+
+#ifdef VALIDATE_SOURCE
+layout(set = 0, binding = 7) uniform sampler2D source_depth_previous;
+
+#include "screen_space_source_validation_inc.glsl"
+#endif
 
 vec2 compute_cell_count(int level) {
 	int cell_count_x = max(1, params.screen_size.x >> level);
@@ -283,8 +291,18 @@ void main() {
 
 		validity *= fade * margin_blend;
 
+#ifdef VALIDATE_SOURCE
+		if (validity > 0.0 && !params.orthogonal) {
+			vec4 hit_reprojected = scene_data.reprojection[params.view_index] * vec4(cur_screen_pos.xy * 2.0 - 1.0, hit_depth, 1.0);
+			if (!source_sample_valid(source_depth_previous, hit_reprojected, -hit_pos.z, vec2(params.screen_size))) {
+				validity = 0.0;
+			}
+		}
+#endif
+
 		if (validity > 0.0) {
 			color = vec4(textureLod(source_last_frame, reprojected_pos.xy, 0).xyz, 1.0) * validity;
+			color.rgb *= params.exposure / max(texelFetch(source_exposure, ivec2(0, 0), 0).r, 1e-6);
 
 			// Tone map the SSR color to have smoother roughness filtering across samples with varying luminance.
 			const vec3 rec709_luminance_weights = vec3(0.2126, 0.7152, 0.0722);

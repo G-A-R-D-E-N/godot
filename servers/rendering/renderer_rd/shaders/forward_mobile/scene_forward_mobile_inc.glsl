@@ -154,11 +154,11 @@ bool sc_scene_roughness_limiter_enabled() {
 }
 
 uint sc_soft_shadow_samples() {
-	return (sc_packed_0() >> 24) & 63U;
+	return (sc_packed_0() >> 20) & 63U;
 }
 
 uint sc_penumbra_shadow_samples() {
-	return (sc_packed_0() >> 30) & 63U;
+	return (sc_packed_0() >> 26) & 63U;
 }
 
 uint sc_directional_soft_shadow_samples() {
@@ -235,6 +235,10 @@ bool sc_material_feedback() {
 
 bool sc_dithered_instance_fade() {
 	return ((sc_packed_2() >> 2) & 1U) != 0;
+}
+
+bool sc_back_depth_pass() {
+	return ((sc_packed_2() >> 3) & 1U) != 0;
 }
 
 layout(constant_id = 3) const bool sc_emulate_point_size = false;
@@ -410,10 +414,12 @@ layout(set = 1, binding = 6) uniform texture2DArray lightmap_textures[MAX_LIGHTM
 #ifdef USE_MULTIVIEW
 layout(set = 1, binding = 9) uniform texture2DArray depth_buffer;
 layout(set = 1, binding = 10) uniform texture2DArray color_buffer;
+layout(set = 1, binding = 26) uniform texture2DArray back_depth_buffer;
 #define multiviewSampler sampler2DArray
 #else
 layout(set = 1, binding = 9) uniform texture2D depth_buffer;
 layout(set = 1, binding = 10) uniform texture2D color_buffer;
+layout(set = 1, binding = 26) uniform texture2D back_depth_buffer;
 #define multiviewSampler sampler2D
 #endif // USE_MULTIVIEW
 

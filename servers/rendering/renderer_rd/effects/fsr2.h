@@ -38,6 +38,7 @@
 #include "servers/rendering/renderer_rd/shaders/effects/fsr2/fsr2_rcas_pass.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/fsr2/fsr2_reconstruct_previous_depth_pass.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/fsr2/fsr2_tcr_autogen_pass.glsl.gen.h"
+#include "servers/rendering/renderer_rd/shaders/effects/rejected_history.glsl.gen.h"
 
 // This flag doesn't actually control anything GCC specific in FSR2. It determines
 // if symbols should be exported, which is not required for Godot.
@@ -176,8 +177,13 @@ public:
 	~FSR2Effect();
 	FSR2Context *create_context(Size2i p_internal_size, Size2i p_target_size);
 	void upscale(const Parameters &p_params);
+	void rejected_history(FSR2Context *p_context, RID p_output, Size2i p_size);
 
 private:
+	RejectedHistoryShaderRD rejected_history_shader;
+	RID rejected_history_version;
+	RID rejected_history_pipeline;
+
 	struct {
 		Fsr2DepthClipPassShaderRD depth_clip;
 		Fsr2ReconstructPreviousDepthPassShaderRD reconstruct_previous_depth;

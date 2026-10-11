@@ -190,7 +190,7 @@ SkyRD::SkyShaderData::~SkyShaderData() {
 bool SkyRD::SkyMaterialData::update_parameters(const HashMap<StringName, Variant> &p_parameters, bool p_uniform_dirty, bool p_textures_dirty) {
 	RendererSceneRenderRD *scene_singleton = static_cast<RendererSceneRenderRD *>(RendererSceneRenderRD::singleton);
 
-	uniform_set_updated = true;
+	uniform_set_version++;
 
 	return update_parameters_uniform_set(p_parameters, p_uniform_dirty, p_textures_dirty, shader_data->uniforms, shader_data->ubo_offsets.ptr(), shader_data->texture_uniforms, shader_data->default_texture_params, shader_data->ubo_size, uniform_set, scene_singleton->sky.sky_shader.shader.version_get_shader(shader_data->version, 0), SKY_SET_MATERIAL, true, true);
 }
@@ -262,6 +262,50 @@ void SkyRD::_render_sky(RD::DrawListID p_list, float p_time, RID p_fb, PipelineC
 	RD::get_singleton()->draw_list_set_push_constant(draw_list, &sky_push_constant, sizeof(SkyPushConstant));
 
 	RD::get_singleton()->draw_list_draw(draw_list, false, 1u, 3u);
+}
+
+void SkyRD::_update_scene_uniform_set() {
+	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
+	LocalVector<RD::Uniform> uniforms;
+
+	{
+		RD::Uniform u;
+		u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+		u.binding = 1;
+		u.append_id(RendererRD::MaterialStorage::get_singleton()->global_shader_uniforms_get_storage_buffer());
+		uniforms.push_back(u);
+	}
+
+	{
+		RD::Uniform u;
+		u.binding = 2;
+		u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER;
+		u.append_id(sky_scene_state.uniform_buffer);
+		uniforms.push_back(u);
+	}
+
+	{
+		RD::Uniform u;
+		u.binding = 3;
+		u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER;
+		u.append_id(sky_scene_state.directional_light_buffer);
+		uniforms.push_back(u);
+	}
+
+	{
+		RD::Uniform u;
+		u.binding = 16;
+		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		for (uint32_t i = 0; i < sky_scene_state.max_directional_lights; i++) {
+			RID texture = sky_scene_state.cloud_shadow_textures[i];
+			u.append_id(texture.is_valid() ? texture : texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_WHITE));
+		}
+		uniforms.push_back(u);
+	}
+
+	RendererRD::MaterialStorage::get_singleton()->samplers_rd_get_default().append_uniforms(uniforms, SAMPLERS_BINDING_FIRST_INDEX);
+
+	sky_scene_state.uniform_set = UniformSetCacheRD::get_singleton()->get_cache_vec(sky_shader.default_shader_rd, SKY_SET_UNIFORMS, uniforms);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -845,35 +889,7 @@ void sky() {
 
 		sky_scene_state.uniform_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(SkySceneState::UBO));
 
-		Vector<RD::Uniform> uniforms;
-
-		{
-			RD::Uniform u;
-			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
-			u.binding = 1;
-			u.append_id(RendererRD::MaterialStorage::get_singleton()->global_shader_uniforms_get_storage_buffer());
-			uniforms.push_back(u);
-		}
-
-		{
-			RD::Uniform u;
-			u.binding = 2;
-			u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER;
-			u.append_id(sky_scene_state.uniform_buffer);
-			uniforms.push_back(u);
-		}
-
-		{
-			RD::Uniform u;
-			u.binding = 3;
-			u.uniform_type = RD::UNIFORM_TYPE_UNIFORM_BUFFER;
-			u.append_id(sky_scene_state.directional_light_buffer);
-			uniforms.push_back(u);
-		}
-
-		material_storage->samplers_rd_get_default().append_uniforms(uniforms, SAMPLERS_BINDING_FIRST_INDEX);
-
-		sky_scene_state.uniform_set = RD::get_singleton()->uniform_set_create(uniforms, sky_shader.default_shader_rd, SKY_SET_UNIFORMS);
+		_update_scene_uniform_set();
 	}
 
 	{
@@ -967,10 +983,6 @@ SkyRD::~SkyRD() {
 	material_storage->shader_free(sky_scene_state.fog_shader);
 	material_storage->material_free(sky_scene_state.fog_material);
 
-	if (RD::get_singleton()->uniform_set_is_valid(sky_scene_state.uniform_set)) {
-		RD::get_singleton()->free_rid(sky_scene_state.uniform_set);
-	}
-
 	if (RD::get_singleton()->uniform_set_is_valid(sky_scene_state.default_fog_uniform_set)) {
 		RD::get_singleton()->free_rid(sky_scene_state.default_fog_uniform_set);
 	}
@@ -982,6 +994,12 @@ SkyRD::~SkyRD() {
 	if (sky_scene_state.fog_only_texture_multiview_uniform_set.is_valid() && RD::get_singleton()->uniform_set_is_valid(sky_scene_state.fog_only_texture_multiview_uniform_set)) {
 		RD::get_singleton()->free_rid(sky_scene_state.fog_only_texture_multiview_uniform_set);
 	}
+}
+
+static bool _sky_lights_match(const SkyRD::SkyDirectionalLightData &p_a, const SkyRD::SkyDirectionalLightData &p_b) {
+	return p_a.direction[0] == p_b.direction[0] && p_a.direction[1] == p_b.direction[1] && p_a.direction[2] == p_b.direction[2] &&
+			p_a.energy == p_b.energy && p_a.color[0] == p_b.color[0] && p_a.color[1] == p_b.color[1] && p_a.color[2] == p_b.color[2] &&
+			p_a.enabled == p_b.enabled && p_a.size == p_b.size;
 }
 
 void SkyRD::setup_sky(const RenderDataRD *p_render_data, const Size2i p_screen_size) {
@@ -1090,8 +1108,8 @@ void SkyRD::setup_sky(const RenderDataRD *p_render_data, const Size2i p_screen_s
 			sky->reflection.dirty = true;
 		}
 
-		if (material_data->uniform_set_updated) {
-			material_data->uniform_set_updated = false;
+		if (material_data->uniform_set_version != sky->prev_material_version) {
+			sky->prev_material_version = material_data->uniform_set_version;
 			sky->reflection.dirty = true;
 		}
 
@@ -1103,6 +1121,9 @@ void SkyRD::setup_sky(const RenderDataRD *p_render_data, const Size2i p_screen_s
 
 	bool sun_scatter_enabled = RendererSceneRenderRD::get_singleton()->environment_get_fog_enabled(p_render_data->environment) && RendererSceneRenderRD::get_singleton()->environment_get_fog_sun_scatter(p_render_data->environment) > 0.001;
 	sky_scene_state.ubo.directional_light_count = 0;
+	for (RID &cloud_shadow_texture : sky_scene_state.cloud_shadow_textures) {
+		cloud_shadow_texture = RID();
+	}
 	if (shader_data->uses_light || sun_scatter_enabled) {
 		const PagedArray<RID> &lights = *p_render_data->lights;
 		// Run through the list of lights in the scene and pick out the Directional Lights.
@@ -1146,6 +1167,13 @@ void SkyRD::setup_sky(const RenderDataRD *p_render_data, const Size2i p_screen_s
 
 				float angular_diameter = light_storage->light_get_param(base, RSE::LIGHT_PARAM_SIZE);
 				sky_light_data.size = Math::deg_to_rad(angular_diameter);
+
+				float cloud_shadow_u[4];
+				float cloud_shadow_v[4];
+				sky_scene_state.cloud_shadow_textures[sky_scene_state.ubo.directional_light_count] = light_storage->light_directional_get_cloud_shadow_texture(base);
+				sky_light_data.cloud_shadow[2] = light_storage->light_instance_get_cloud_shadow(lights[i], p_render_data->scene_data->cam_transform, cloud_shadow_u, cloud_shadow_v, &sky_light_data.cloud_shadow[3]);
+				sky_light_data.cloud_shadow[0] = cloud_shadow_u[3];
+				sky_light_data.cloud_shadow[1] = cloud_shadow_v[3];
 				sky_scene_state.ubo.directional_light_count++;
 				if (sky_scene_state.ubo.directional_light_count >= sky_scene_state.max_directional_lights) {
 					break;
@@ -1154,6 +1182,7 @@ void SkyRD::setup_sky(const RenderDataRD *p_render_data, const Size2i p_screen_s
 		}
 		// Check whether the directional_light_buffer changes.
 		bool light_data_dirty = false;
+		bool cloud_shadow_dirty = false;
 
 		// Light buffer is dirty if we have fewer or more lights.
 		// If we have fewer lights, make sure that old lights are disabled.
@@ -1169,33 +1198,39 @@ void SkyRD::setup_sky(const RenderDataRD *p_render_data, const Size2i p_screen_s
 
 		if (!light_data_dirty) {
 			for (uint32_t i = 0; i < sky_scene_state.ubo.directional_light_count; i++) {
-				if (sky_scene_state.directional_lights[i].direction[0] != sky_scene_state.last_frame_directional_lights[i].direction[0] ||
-						sky_scene_state.directional_lights[i].direction[1] != sky_scene_state.last_frame_directional_lights[i].direction[1] ||
-						sky_scene_state.directional_lights[i].direction[2] != sky_scene_state.last_frame_directional_lights[i].direction[2] ||
-						sky_scene_state.directional_lights[i].energy != sky_scene_state.last_frame_directional_lights[i].energy ||
-						sky_scene_state.directional_lights[i].color[0] != sky_scene_state.last_frame_directional_lights[i].color[0] ||
-						sky_scene_state.directional_lights[i].color[1] != sky_scene_state.last_frame_directional_lights[i].color[1] ||
-						sky_scene_state.directional_lights[i].color[2] != sky_scene_state.last_frame_directional_lights[i].color[2] ||
-						sky_scene_state.directional_lights[i].enabled != sky_scene_state.last_frame_directional_lights[i].enabled ||
-						sky_scene_state.directional_lights[i].size != sky_scene_state.last_frame_directional_lights[i].size) {
+				if (!_sky_lights_match(sky_scene_state.directional_lights[i], sky_scene_state.last_frame_directional_lights[i])) {
 					light_data_dirty = true;
 					break;
 				}
+				cloud_shadow_dirty = cloud_shadow_dirty || memcmp(sky_scene_state.directional_lights[i].cloud_shadow, sky_scene_state.last_frame_directional_lights[i].cloud_shadow, sizeof(SkyDirectionalLightData::cloud_shadow)) != 0;
 			}
 		}
 
-		if (light_data_dirty) {
+		if (sky) {
+			uint32_t count = sky_scene_state.ubo.directional_light_count;
+			bool sky_lights_changed = count != sky->prev_lights.size();
+			for (uint32_t i = 0; i < count && !sky_lights_changed; i++) {
+				sky_lights_changed = !_sky_lights_match(sky_scene_state.directional_lights[i], sky->prev_lights[i]);
+			}
+			if (sky_lights_changed) {
+				sky->prev_lights.resize(count);
+				for (uint32_t i = 0; i < count; i++) {
+					sky->prev_lights[i] = sky_scene_state.directional_lights[i];
+				}
+				sky->reflection.dirty = true;
+			}
+		}
+
+		if (light_data_dirty || cloud_shadow_dirty) {
 			RD::get_singleton()->buffer_update(sky_scene_state.directional_light_buffer, 0, sizeof(SkyDirectionalLightData) * sky_scene_state.max_directional_lights, sky_scene_state.directional_lights);
 
 			SkyDirectionalLightData *temp = sky_scene_state.last_frame_directional_lights;
 			sky_scene_state.last_frame_directional_lights = sky_scene_state.directional_lights;
 			sky_scene_state.directional_lights = temp;
 			sky_scene_state.last_frame_directional_light_count = sky_scene_state.ubo.directional_light_count;
-			if (sky) {
-				sky->reflection.dirty = true;
-			}
 		}
 	}
+	_update_scene_uniform_set();
 
 	// Setup fog variables.
 	sky_scene_state.ubo.volumetric_fog_enabled = false;
@@ -1264,9 +1299,12 @@ void SkyRD::setup_sky(const RenderDataRD *p_render_data, const Size2i p_screen_s
 	sky_scene_state.ubo.z_far = p_render_data->scene_data->view_projection[0].get_z_far(); // Should be the same for all projection.
 	sky_scene_state.ubo.fog_enabled = RendererSceneRenderRD::get_singleton()->environment_get_fog_enabled(p_render_data->environment);
 	sky_scene_state.ubo.fog_density = RendererSceneRenderRD::get_singleton()->environment_get_fog_density(p_render_data->environment);
-	sky_scene_state.ubo.fog_aerial_perspective = RendererSceneRenderRD::get_singleton()->environment_get_fog_aerial_perspective(p_render_data->environment);
+	sky_scene_state.ubo.fog_aerial_perspective = RendererSceneRenderRD::get_singleton()->environment_get_aerial_perspective_texture(p_render_data->environment).is_valid() ? 0.0f : RendererSceneRenderRD::get_singleton()->environment_get_fog_aerial_perspective(p_render_data->environment);
 	Color fog_color = RendererSceneRenderRD::get_singleton()->environment_get_fog_light_color(p_render_data->environment).srgb_to_linear();
 	float fog_energy = RendererSceneRenderRD::get_singleton()->environment_get_fog_light_energy(p_render_data->environment);
+	if (RendererSceneRenderRD::get_singleton()->is_using_physical_light_units() && p_render_data->camera_attributes.is_valid()) {
+		fog_energy *= RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes);
+	}
 	sky_scene_state.ubo.fog_light_color[0] = fog_color.r * fog_energy;
 	sky_scene_state.ubo.fog_light_color[1] = fog_color.g * fog_energy;
 	sky_scene_state.ubo.fog_light_color[2] = fog_color.b * fog_energy;
@@ -1383,7 +1421,7 @@ void SkyRD::update_radiance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, 
 			}
 			sky->processing_layer = 1;
 		}
-		sky->baked_exposure = p_luminance_multiplier;
+		sky->baked_exposure = RendererSceneRenderRD::get_singleton()->is_using_physical_light_units() ? p_brightness_multiplier : p_luminance_multiplier;
 		sky->reflection.dirty = false;
 
 	} else {

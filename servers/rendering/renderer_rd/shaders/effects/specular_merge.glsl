@@ -65,8 +65,7 @@ layout(set = 2, binding = 0) uniform sampler2D diffuse;
 layout(location = 0) out vec4 frag_color;
 
 void main() {
-	frag_color.rgb = texture(specular, uv_interp).rgb;
-	frag_color.a = 0.0;
+	frag_color = texture(specular, uv_interp);
 #ifdef MODE_SSR
 
 	vec4 ssr_color = texture(ssr, uv_interp);
@@ -74,7 +73,7 @@ void main() {
 #endif
 
 #ifdef MODE_MERGE
-	frag_color += texture(diffuse, uv_interp);
+	frag_color.rgb += texture(diffuse, uv_interp).rgb;
 #endif
 	//added using additive blend
 }

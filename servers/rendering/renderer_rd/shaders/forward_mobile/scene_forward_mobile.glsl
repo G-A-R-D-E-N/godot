@@ -14,7 +14,7 @@
 #define SHADER_SPACE_FAR 0.0
 
 #ifdef SHADOW_PASS
-#define IN_SHADOW_PASS true
+#define IN_SHADOW_PASS (!sc_back_depth_pass())
 #else
 #define IN_SHADOW_PASS false
 #endif
@@ -643,8 +643,14 @@ void vertex_shader(in vec3 vertex,
 	gl_Position = projection_matrix * vec4(vertex_interp, 1.0);
 #endif // OVERRIDE_POSITION
 
-#if defined(Z_CLIP_SCALE_USED) && !defined(SHADOW_PASS)
+#ifdef Z_CLIP_SCALE_USED
+#ifdef SHADOW_PASS
+	if (sc_back_depth_pass()) {
+		gl_Position.z = mix(gl_Position.w, gl_Position.z, z_clip_scale);
+	}
+#else
 	gl_Position.z = mix(gl_Position.w, gl_Position.z, z_clip_scale);
+#endif
 #endif
 
 #ifdef MODE_RENDER_DEPTH
@@ -827,7 +833,7 @@ void main() {
 #define SHADER_SPACE_FAR 0.0
 
 #ifdef SHADOW_PASS
-#define IN_SHADOW_PASS true
+#define IN_SHADOW_PASS (!sc_back_depth_pass())
 #else
 #define IN_SHADOW_PASS false
 #endif
@@ -846,7 +852,7 @@ void main() {
 
 /* Varyings */
 
-#if defined(TEXTURE_STREAMING) && !defined(MODE_RENDER_DEPTH) && (defined(UV_USED) || defined(STREAMING_UV_USED))
+#if defined(TEXTURE_STREAMING) && !defined(MODE_RENDER_DEPTH) && (defined(UV_USED) || defined(STREAMING_LOD_USED))
 // When texture streaming is enabled subgroupElect is needed to properly handle texture feedback.
 #extension GL_KHR_shader_subgroup_basic : enable
 
@@ -889,8 +895,11 @@ layout(location = 2) in vec4 color_interp;
 layout(location = 3) in vec2 uv_interp;
 #endif
 
-#if defined(TEXTURE_STREAMING) || defined(STREAMING_UV_USED)
-vec2 streaming_uv;
+// Provides the streaming_lod helpers
+#include "../scene_forward_streaming_inc.glsl"
+
+#ifdef STREAMING_LOD_USED
+float streaming_lod = 32.0; // Defaults to value past the coursest quality.
 #endif
 
 #if defined(UV2_USED) || defined(USE_LIGHTMAP)
@@ -1004,6 +1013,10 @@ layout(location = 0) out vec4 frag_color;
 #if !defined(MODE_RENDER_DEPTH) && (defined(INDIRECT_DIFFUSE_WEIGHT_USED) || defined(INDIRECT_SPECULAR_WEIGHT_USED) || defined(INDIRECT_COAT_USED) || defined(DECAL_COVERAGE_USED))
 #define DECAL_COVERAGE_TRACKED
 float decal_coverage;
+#endif
+
+#if defined(DIRECT_DIFFUSE_WEIGHT_USED) && !(defined(USE_VERTEX_LIGHTING) && defined(LIGHT_CODE_USED))
+#define DIRECT_DIFFUSE_WEIGHTED
 #endif
 
 #if !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED) // && !defined(USE_VERTEX_LIGHTING)
@@ -1154,6 +1167,18 @@ void main() {
 	vec3 indirect_coat_weight_highp = vec3(0.0);
 	float indirect_coat_roughness_highp = 0.0;
 #endif
+#if defined(INDIRECT_COAT_NORMAL_USED)
+	vec3 indirect_coat_normal_highp = vec3(0.0);
+#endif
+#if defined(DIRECT_DIFFUSE_WEIGHT_USED)
+	vec3 direct_diffuse_weight_highp = vec3(1.0);
+#endif
+#if defined(EMISSION_BOUNCE_WEIGHT_USED)
+	float emission_bounce_weight = 1.0;
+#endif
+#if defined(TEMPORAL_REACTIVE_USED)
+	float temporal_reactive = 0.0;
+#endif
 #ifdef TEMPORAL_METADATA_USED
 	float temporal_mask = 0.0;
 	float temporal_id = 0.0;
@@ -1208,6 +1233,7 @@ void main() {
 	vec2 screen_uv = gl_FragCoord.xy * scene_data.screen_pixel_size;
 
 	float sss_strength_highp = 0.0;
+	vec3 sss_radius_highp = vec3(0.0);
 
 #ifdef ALPHA_SCISSOR_USED
 	float alpha_scissor_threshold_highp = 1.0;
@@ -1342,6 +1368,13 @@ void main() {
 #ifdef NORMAL_USED
 	hvec3 geo_normal = normalize(normal);
 #endif // NORMAL_USED
+#ifdef INDIRECT_COAT_NORMAL_USED
+	bool cc_custom = dot(indirect_coat_normal_highp, indirect_coat_normal_highp) > 0.0;
+	hvec3 cc_normal = cc_custom ? hvec3(normalize(indirect_coat_normal_highp)) : geo_normal;
+#define CLEARCOAT_NORMAL cc_normal
+#else
+#define CLEARCOAT_NORMAL geo_normal
+#endif
 
 #ifdef LIGHT_TRANSMITTANCE_USED
 #ifdef SSS_MODE_SKIN
@@ -1367,31 +1400,26 @@ void main() {
 #endif // MODE_RENDER_MATERIAL
 #endif // ALPHA_SCISSOR_USED
 
-#if defined(TEXTURE_STREAMING) && !defined(MODE_RENDER_DEPTH) && (defined(UV_USED) || defined(STREAMING_UV_USED))
+#if defined(TEXTURE_STREAMING) && !defined(MODE_RENDER_DEPTH) && (defined(UV_USED) || defined(STREAMING_LOD_USED))
 	if (sc_material_feedback()) {
 		// Instance has materials which require feedback.
-#if !defined(STREAMING_UV_USED)
-		vec2 streaming_uv = uv_interp;
+#if !defined(STREAMING_LOD_USED)
+		vec2 uv_ddx = dFdx(uv_interp);
+		vec2 uv_ddy = dFdy(uv_interp);
 #endif
-		vec2 uv_dx = dFdx(streaming_uv);
-		vec2 uv_dy = dFdy(streaming_uv);
 
 		if (!gl_HelperInvocation) {
+#if defined(STREAMING_LOD_USED)
+			// The shader supplied the level itself.
+			float footprint_sq = streaming_footprint_sq_from_lod(streaming_lod);
+#else
 			// Calculate the mip level needed for the current fragment based on UV derivatives.
-			float px_sq = dot(uv_dx, uv_dx);
-			float py_sq = dot(uv_dy, uv_dy);
-			float min_sq = min(px_sq, py_sq);
-			float max_sq = max(px_sq, py_sq);
+			float footprint_sq = streaming_footprint_sq(uv_ddx, uv_ddy);
+#endif
 
-			// Anisotropic filtering allows using the mip level of the minor axis (min_sq),
-			// but limited by the max anisotropy (usually 16x).
-			// If the anisotropy ratio exceeds 16, we are forced to use a lower res mip.
-			const float MAX_ANISOTROPY = 16.0;
-			float lod_sq = max(min_sq, max_sq / (MAX_ANISOTROPY * MAX_ANISOTROPY));
-
-			// Bitwise NOT inverts the ordering so that smaller lod_sq (higher quality)
+			// Bitwise NOT inverts the ordering so that smaller footprint_sq (higher quality)
 			// maps to larger uint values, allowing atomicMax with a 0-cleared buffer.
-			uint required_mip = ~floatBitsToUint(lod_sq);
+			uint required_mip = ~floatBitsToUint(footprint_sq);
 
 			// Reduce atomic contention using subgroup operations.
 			// Find maximum inverted mip level across all invocations in the subgroup, then only
@@ -1714,12 +1742,12 @@ void main() {
 	hvec3 cc_specular_light = hvec3(0.0);
 	hvec3 cc_ref_vec = hvec3(0.0);
 #ifdef INDIRECT_COAT_USED
-	cc_ref_vec = mix(reflect(-view, geo_normal), geo_normal, CLEARCOAT_IBL_BEND);
+	cc_ref_vec = mix(reflect(-view, CLEARCOAT_NORMAL), CLEARCOAT_NORMAL, CLEARCOAT_IBL_BEND);
 #endif
 
 	if (sc_scene_use_reflection_cubemap()) {
-		cc_ref_vec = reflect(-view, geo_normal);
-		cc_ref_vec = mix(cc_ref_vec, geo_normal, CLEARCOAT_IBL_BEND);
+		cc_ref_vec = reflect(-view, CLEARCOAT_NORMAL);
+		cc_ref_vec = mix(cc_ref_vec, CLEARCOAT_NORMAL, CLEARCOAT_IBL_BEND);
 
 		hvec3 cc_radiance_ref_vec = hvec3(scene_data.radiance_inverse_xform * vec3(cc_ref_vec));
 		float roughness_lod = sqrt(CLEARCOAT_IBL_LOD_ROUGHNESS) * MAX_ROUGHNESS_LOD;
@@ -1860,7 +1888,7 @@ void main() {
 								rim, rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-								clearcoat, clearcoat_roughness, geo_normal,
+								clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif
 #ifdef LIGHT_ANISOTROPY_USED
 								binormal, tangent, anisotropy,
@@ -1972,7 +2000,19 @@ void main() {
 	specular_occlusion = mix(specular_occlusion, cos_b * (half(1.0) - ao), roughness);
 	indirect_specular_light *= specular_occlusion;
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+#ifdef INDIRECT_COAT_NORMAL_USED
+	if (cc_custom) {
+		half cc_roughness = max(half(indirect_coat_roughness_highp), half(0.001));
+		half cc_cos_b = max(dot(reflect(-view, cc_normal), bent_normal_vector), half(0.0));
+		half cc_specular_occlusion = clamp((ao - (half(1.0) - cc_cos_b)) / cc_roughness, half(0.0), half(1.0));
+		cc_specular_occlusion = mix(cc_specular_occlusion, cc_cos_b * (half(1.0) - ao), cc_roughness);
+		cc_specular_light *= cc_specular_occlusion;
+	} else {
+		cc_specular_light *= specular_occlusion;
+	}
+#else
 	cc_specular_light *= specular_occlusion;
+#endif
 #endif
 #else // BENT_NORMAL_MAP_USED
 	half specular_occlusion = (ambient_light.r * half(0.3) + ambient_light.g * half(0.59) + ambient_light.b * half(0.11)) * half(2.0); // Luminance of ambient light.
@@ -2037,7 +2077,7 @@ void main() {
 #if defined(INDIRECT_COAT_USED)
 		indirect_specular_light += cc_specular_light * hvec3(indirect_coat_weight_highp * (1.0 - decal_coverage));
 #elif defined(LIGHT_CLEARCOAT_USED)
-		half geo_NdotV = max(dot(geo_normal, view), half(0.0001)); // We want to use geometric normal, not normal_map
+		half geo_NdotV = max(dot(CLEARCOAT_NORMAL, view), half(0.0001));
 		// The clearcoat layer assumes an IOR of 1.5 (4% reflectance).
 		// Attenuate underlying diffuse/specular by clearcoat fresnel (ONLY fresnel, hence we don't just invert the BRDF below).
 		half NdotV5 = SchlickFresnel(geo_NdotV);
@@ -2291,7 +2331,7 @@ void main() {
 					rim, rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-					clearcoat, clearcoat_roughness, geo_normal,
+					clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_CLEARCOAT_USED
 #ifdef LIGHT_ANISOTROPY_USED
 					binormal, tangent, anisotropy,
@@ -2327,7 +2367,7 @@ void main() {
 				rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-				clearcoat, clearcoat_roughness, geo_normal,
+				clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_CLEARCOAT_USED
 #ifdef LIGHT_ANISOTROPY_USED
 				binormal, tangent, anisotropy,
@@ -2359,7 +2399,7 @@ void main() {
 				rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-				clearcoat, clearcoat_roughness, geo_normal,
+				clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_CLEARCOAT_USED
 #ifdef LIGHT_ANISOTROPY_USED
 				binormal, tangent, anisotropy,
@@ -2391,7 +2431,7 @@ void main() {
 				rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-				clearcoat, clearcoat_roughness, geo_normal,
+				clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_CLEARCOAT_USED
 #ifdef LIGHT_ANISOTROPY_USED
 				binormal, tangent, anisotropy,
@@ -2446,14 +2486,20 @@ void main() {
 #else // MODE_RENDER_DEPTH
 
 	// multiply by albedo
+#ifdef DIRECT_DIFFUSE_WEIGHTED
+	diffuse_light *= hvec3(direct_diffuse_weight_highp);
+#else
 	diffuse_light *= albedo; // ambient must be multiplied by albedo at the end
+#endif
 
 	// apply direct light AO
 	diffuse_light *= ao;
 	direct_specular_light *= ao;
 
 	// apply metallic
+#ifndef DIRECT_DIFFUSE_WEIGHTED
 	diffuse_light *= half(1.0) - metallic;
+#endif
 #ifndef INDIRECT_DIFFUSE_WEIGHT_USED
 	ambient_light *= half(1.0) - metallic;
 #endif

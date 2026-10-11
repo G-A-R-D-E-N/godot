@@ -144,6 +144,7 @@ private:
 			VOLUMETRIC_FOG_PROCESS_SHADER_FILTER,
 			VOLUMETRIC_FOG_PROCESS_SHADER_FOG,
 			VOLUMETRIC_FOG_PROCESS_SHADER_COPY,
+			VOLUMETRIC_FOG_PROCESS_SHADER_TEMPORAL,
 			VOLUMETRIC_FOG_PROCESS_SHADER_MAX,
 		};
 
@@ -183,7 +184,8 @@ private:
 			float temporal_blend;
 
 			float sky_border_size[2];
-			float pad[2];
+			uint32_t temporal_clamp;
+			uint32_t debug_history_clamp;
 
 			float cam_rotation[12];
 			float to_prev_view[16];
@@ -316,12 +318,15 @@ public:
 		RID density_map;
 		RID light_map;
 		RID emissive_map;
+		RID history_clamp_map;
+		RID history_clamp_view;
 
 		RID fog_uniform_set;
 		RID copy_uniform_set;
 
 		struct {
 			RID process_uniform_set_density;
+			RID process_uniform_set_density2;
 			RID process_uniform_set;
 			RID process_uniform_set2;
 		} gi_dependent_sets;
@@ -361,6 +366,9 @@ public:
 		RID area_light_atlas;
 		RID directional_shadow_depth;
 		RID directional_light_buffer;
+		bool reset_history = false;
+		bool debug_history_clamp = false;
+		float exposure_normalization = 1.0;
 
 		// Objects related to our render buffer
 		Ref<VolumetricFog> vfog;

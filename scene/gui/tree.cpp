@@ -2454,6 +2454,9 @@ int Tree::draw_item(const Point2i &p_pos, const Point2 &p_draw_ofs, const Size2 
 			}
 
 			int text_width = item_width - theme_cache.inner_item_margin_left - theme_cache.inner_item_margin_right;
+			if (p_item->cells[i].mode == TreeItem::CELL_MODE_CHECK) {
+				text_width -= theme_cache.checked->get_width() + theme_cache.check_h_separation;
+			}
 			if (p_item->cells[i].icon.is_valid()) {
 				text_width -= _get_cell_icon_size(p_item->cells[i]).x + theme_cache.icon_h_separation;
 			}
@@ -3861,6 +3864,7 @@ void Tree::_go_down() {
 	if (!selected_item) {
 		if (root) {
 			next = hide_root ? root->get_next_visible() : root;
+			selected_col = 0;
 		}
 	} else {
 		next = selected_item->get_next_visible();

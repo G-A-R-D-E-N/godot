@@ -81,6 +81,7 @@ void SceneShaderForwardMobile::ShaderData::set_code(const String &p_code) {
 	uses_transmittance = false;
 	uses_time = false;
 	writes_modelview_or_projection = false;
+	writes_depth = false;
 	uses_world_coordinates = false;
 	uses_particle_trails = false;
 
@@ -150,6 +151,7 @@ void SceneShaderForwardMobile::ShaderData::set_code(const String &p_code) {
 	actions.write_flag_pointers["MODELVIEW_MATRIX"] = &writes_modelview_or_projection;
 	actions.write_flag_pointers["PROJECTION_MATRIX"] = &writes_modelview_or_projection;
 	actions.write_flag_pointers["VERTEX"] = &uses_vertex;
+	actions.write_flag_pointers["DEPTH"] = &writes_depth;
 	actions.write_flag_pointers["TANGENT"] = &writes_tangent;
 	actions.write_flag_pointers["BINORMAL"] = &writes_tangent;
 
@@ -169,8 +171,11 @@ void SceneShaderForwardMobile::ShaderData::set_code(const String &p_code) {
 
 	actions.uniforms = &uniforms;
 
-	MutexLock lock(SceneShaderForwardMobile::singleton_mutex);
-	Error err = SceneShaderForwardMobile::singleton->compiler.compile(RSE::SHADER_SPATIAL, code, &actions, path, gen_code);
+	Error err = OK;
+	{
+		MutexLock lock(SceneShaderForwardMobile::singleton_mutex);
+		err = SceneShaderForwardMobile::singleton->compiler.compile(RSE::SHADER_SPATIAL, code, &actions, path, gen_code);
+	}
 
 	if (err != OK) {
 		if (version.is_valid()) {
@@ -197,6 +202,7 @@ void SceneShaderForwardMobile::ShaderData::set_code(const String &p_code) {
 	uses_screen_texture_mipmaps = gen_code.uses_screen_texture_mipmaps;
 	uses_screen_texture = gen_code.uses_screen_texture;
 	uses_depth_texture = gen_code.uses_depth_texture;
+	uses_back_depth_texture = gen_code.uses_back_depth_texture;
 	uses_normal_texture = gen_code.uses_normal_roughness_texture;
 	uses_normal |= uses_normal_map;
 	uses_normal |= uses_bent_normal_map;
@@ -257,7 +263,7 @@ bool SceneShaderForwardMobile::ShaderData::is_animated() const {
 }
 
 bool SceneShaderForwardMobile::ShaderData::casts_shadows() const {
-	bool has_read_screen_alpha = uses_screen_texture || uses_depth_texture || uses_normal_texture;
+	bool has_read_screen_alpha = uses_screen_texture || uses_depth_texture || uses_back_depth_texture || uses_normal_texture;
 	bool has_base_alpha = (uses_alpha && (!uses_alpha_clip || uses_alpha_antialiasing)) || has_read_screen_alpha;
 	bool has_alpha = has_base_alpha || uses_blend_alpha;
 
@@ -266,7 +272,6 @@ bool SceneShaderForwardMobile::ShaderData::casts_shadows() const {
 
 RenderingServerTypes::ShaderNativeSourceCode SceneShaderForwardMobile::ShaderData::get_native_source_code() const {
 	if (version.is_valid()) {
-		MutexLock lock(SceneShaderForwardMobile::singleton_mutex);
 		return SceneShaderForwardMobile::singleton->shader.version_get_native_source_code(version);
 	} else {
 		return RenderingServerTypes::ShaderNativeSourceCode();
@@ -275,7 +280,6 @@ RenderingServerTypes::ShaderNativeSourceCode SceneShaderForwardMobile::ShaderDat
 
 Pair<ShaderRD *, RID> SceneShaderForwardMobile::ShaderData::get_native_shader_and_version() const {
 	if (version.is_valid()) {
-		MutexLock lock(SceneShaderForwardMobile::singleton_mutex);
 		return { &SceneShaderForwardMobile::singleton->shader, version };
 	} else {
 		return {};
@@ -423,6 +427,13 @@ void SceneShaderForwardMobile::ShaderData::_create_pipeline(PipelineKey p_pipeli
 		}
 	}
 
+	if (p_pipeline_key.back_depth) {
+		depth_stencil_state.enable_depth_test = true;
+		depth_stencil_state.enable_depth_write = true;
+		depth_stencil_state.depth_compare_operator = RD::COMPARE_OP_GREATER_OR_EQUAL;
+		depth_stencil_state.enable_stencil = false;
+	}
+
 	// Convert the specialization from the key to pipeline specialization constants.
 	Vector<RD::PipelineSpecializationConstant> specialization_constants;
 	RD::PipelineSpecializationConstant sc;
@@ -480,7 +491,6 @@ void SceneShaderForwardMobile::ShaderData::_clear_vertex_input_mask_cache() {
 
 RID SceneShaderForwardMobile::ShaderData::get_shader_variant(ShaderVersion p_shader_version, bool p_ubershader) const {
 	if (version.is_valid()) {
-		MutexLock lock(SceneShaderForwardMobile::singleton_mutex);
 		ERR_FAIL_NULL_V(SceneShaderForwardMobile::singleton, RID());
 		return SceneShaderForwardMobile::singleton->shader.version_get_shader(version, p_shader_version + (SceneShaderForwardMobile::singleton->use_fp16 ? SHADER_VERSION_MAX * 2 : 0) + (p_ubershader ? SHADER_VERSION_MAX : 0));
 	} else {
@@ -506,7 +516,6 @@ uint64_t SceneShaderForwardMobile::ShaderData::get_vertex_input_mask(ShaderVersi
 
 bool SceneShaderForwardMobile::ShaderData::is_valid() const {
 	if (version.is_valid()) {
-		MutexLock lock(SceneShaderForwardMobile::singleton_mutex);
 		ERR_FAIL_NULL_V(SceneShaderForwardMobile::singleton, false);
 		return SceneShaderForwardMobile::singleton->shader.version_is_valid(version);
 	} else {
@@ -524,7 +533,6 @@ SceneShaderForwardMobile::ShaderData::~ShaderData() {
 	pipeline_hash_map.clear_pipelines();
 
 	if (version.is_valid()) {
-		MutexLock lock(SceneShaderForwardMobile::singleton_mutex);
 		ERR_FAIL_NULL(SceneShaderForwardMobile::singleton);
 		SceneShaderForwardMobile::singleton->shader.version_free(version);
 	}
@@ -659,7 +667,7 @@ void SceneShaderForwardMobile::init(const String p_defines) {
 		actions.renames["BINORMAL"] = "binormal_highp";
 		actions.renames["POSITION"] = "position";
 		actions.renames["UV"] = "uv_interp";
-		actions.renames["STREAMING_UV"] = "streaming_uv";
+		actions.renames["STREAMING_LOD"] = "streaming_lod";
 		actions.renames["UV2"] = "uv2_interp";
 		actions.renames["COLOR"] = "color_highp";
 		actions.renames["POINT_SIZE"] = "point_size";
@@ -706,6 +714,7 @@ void SceneShaderForwardMobile::init(const String p_defines) {
 		actions.renames["SSS_TRANSMITTANCE_COLOR"] = "transmittance_color_highp";
 		actions.renames["SSS_TRANSMITTANCE_DEPTH"] = "transmittance_depth_highp";
 		actions.renames["SSS_TRANSMITTANCE_BOOST"] = "transmittance_boost_highp";
+		actions.renames["SSS_RADIUS"] = "sss_radius_highp";
 		actions.renames["BACKLIGHT"] = "backlight_highp";
 		actions.renames["AO"] = "ao_highp";
 		actions.renames["AO_LIGHT_AFFECT"] = "ao_light_affect_highp";
@@ -721,6 +730,10 @@ void SceneShaderForwardMobile::init(const String p_defines) {
 		actions.renames["INDIRECT_SPECULAR_WEIGHT"] = "indirect_specular_weight_highp";
 		actions.renames["INDIRECT_COAT_WEIGHT"] = "indirect_coat_weight_highp";
 		actions.renames["INDIRECT_COAT_ROUGHNESS"] = "indirect_coat_roughness_highp";
+		actions.renames["INDIRECT_COAT_NORMAL"] = "indirect_coat_normal_highp";
+		actions.renames["DIRECT_DIFFUSE_WEIGHT"] = "direct_diffuse_weight_highp";
+		actions.renames["EMISSION_BOUNCE_WEIGHT"] = "emission_bounce_weight";
+		actions.renames["TEMPORAL_REACTIVE"] = "temporal_reactive";
 		actions.renames["DECAL_COVERAGE"] = "decal_coverage";
 		actions.renames["TEMPORAL_MASK"] = "temporal_mask";
 		actions.renames["TEMPORAL_ID"] = "temporal_id";
@@ -769,7 +782,6 @@ void SceneShaderForwardMobile::init(const String p_defines) {
 		actions.usage_defines["AO"] = "#define AO_USED\n";
 		actions.usage_defines["AO_LIGHT_AFFECT"] = "#define AO_USED\n";
 		actions.usage_defines["UV"] = "#define UV_USED\n";
-		actions.usage_defines["STREAMING_UV"] = "#define STREAMING_UV_USED\n";
 		actions.usage_defines["UV2"] = "#define UV2_USED\n";
 		actions.usage_defines["BONE_INDICES"] = "#define BONES_USED\n";
 		actions.usage_defines["BONE_WEIGHTS"] = "#define WEIGHTS_USED\n";
@@ -807,6 +819,10 @@ void SceneShaderForwardMobile::init(const String p_defines) {
 		actions.usage_defines["INDIRECT_SPECULAR_WEIGHT"] = "#define INDIRECT_SPECULAR_WEIGHT_USED\n";
 		actions.usage_defines["INDIRECT_COAT_WEIGHT"] = "#define INDIRECT_COAT_USED\n#define LIGHT_CLEARCOAT_USED\n";
 		actions.usage_defines["INDIRECT_COAT_ROUGHNESS"] = "@INDIRECT_COAT_WEIGHT";
+		actions.usage_defines["INDIRECT_COAT_NORMAL"] = "#define INDIRECT_COAT_NORMAL_USED\n#define NORMAL_USED\n";
+		actions.usage_defines["DIRECT_DIFFUSE_WEIGHT"] = "#define DIRECT_DIFFUSE_WEIGHT_USED\n";
+		actions.usage_defines["EMISSION_BOUNCE_WEIGHT"] = "#define EMISSION_BOUNCE_WEIGHT_USED\n";
+		actions.usage_defines["TEMPORAL_REACTIVE"] = "#define TEMPORAL_REACTIVE_USED\n";
 		actions.usage_defines["DECAL_COVERAGE"] = "#define DECAL_COVERAGE_USED\n";
 		actions.usage_defines["TEMPORAL_MASK"] = "#define TEMPORAL_METADATA_USED\n";
 		actions.usage_defines["TEMPORAL_ID"] = "@TEMPORAL_MASK";
@@ -818,6 +834,8 @@ void SceneShaderForwardMobile::init(const String p_defines) {
 
 		actions.usage_defines["DISCARD"] = "#define DISCARD_USED\n";
 		actions.usage_defines["DEPTH"] = "#define DEPTH_USED\n";
+
+		actions.usage_defines["STREAMING_LOD"] = "#define STREAMING_LOD_USED\n";
 
 		actions.render_mode_defines["skip_vertex_transform"] = "#define SKIP_TRANSFORM_USED\n";
 		actions.render_mode_defines["world_vertex_coords"] = "#define VERTEX_WORLD_COORDS_USED\n";

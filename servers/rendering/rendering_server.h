@@ -339,6 +339,7 @@ public:
 	virtual void light_directional_set_shadow_mode(RID p_light, RSE::LightDirectionalShadowMode p_mode) = 0;
 	virtual void light_directional_set_blend_splits(RID p_light, bool p_enable) = 0;
 	virtual void light_directional_set_sky_mode(RID p_light, RSE::LightDirectionalSkyMode p_mode) = 0;
+	virtual void light_directional_set_cloud_shadow(RID p_light, RID p_texture, float p_scale, const Vector2 &p_offset, float p_altitude, float p_strength) = 0;
 
 	virtual void light_area_set_size(RID p_light, const Vector2 &p_size) = 0;
 	virtual void light_area_set_normalize_energy(RID p_light, bool p_enabled) = 0;
@@ -701,6 +702,8 @@ public:
 
 	virtual void environment_set_fog(RID p_env, bool p_enable, const Color &p_light_color, float p_light_energy, float p_sun_scatter, float p_density, float p_height, float p_height_density, float p_aerial_perspective, float p_sky_affect, RSE::EnvironmentFogMode p_mode = RSE::EnvironmentFogMode::ENV_FOG_MODE_EXPONENTIAL) = 0;
 	virtual void environment_set_fog_depth(RID p_env, float p_curve, float p_begin, float p_end) = 0;
+	virtual void environment_set_aerial_perspective(RID p_env, bool p_enable, RID p_texture, float p_max_distance) = 0;
+	virtual void environment_set_night_vision(RID p_env, bool p_enable, float p_mesopic_min, float p_mesopic_max, float p_blue_shift, const Vector2 &p_blue_shift_chromaticity, float p_desaturation, float p_acuity_radius, float p_highlight_range) = 0;
 
 	virtual void environment_set_volumetric_fog(RID p_env, bool p_enable, float p_density, const Color &p_albedo, const Color &p_emission, float p_emission_energy, float p_anisotropy, float p_length, float p_detail_spread, float p_gi_inject, bool p_temporal_reprojection, float p_temporal_reprojection_amount, float p_ambient_inject, float p_sky_affect) = 0;
 	virtual void environment_set_volumetric_fog_volume_size(int p_size, int p_depth) = 0;

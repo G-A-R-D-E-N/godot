@@ -486,12 +486,20 @@ struct MultiviewData {
 	highp mat4 projection_matrix_view[MAX_VIEWS];
 	highp mat4 inv_projection_matrix_view[MAX_VIEWS];
 	highp vec4 eye_offset[MAX_VIEWS];
+	highp uint view_index;
+	highp uint pad0;
+	highp uint pad1;
+	highp uint pad2;
 };
 
 layout(std140) uniform MultiviewDataBlock { // ubo:9
 	MultiviewData data;
 }
 multiview_data_block;
+
+#ifdef EMULATE_MULTIVIEW
+#define ViewIndex (multiview_data_block.data.view_index)
+#endif
 
 #ifdef RENDER_MOTION_VECTORS
 layout(std140) uniform PrevMultiviewDataBlock { // ubo:14
@@ -1269,12 +1277,20 @@ struct MultiviewData {
 	highp mat4 projection_matrix_view[MAX_VIEWS];
 	highp mat4 inv_projection_matrix_view[MAX_VIEWS];
 	highp vec4 eye_offset[MAX_VIEWS];
+	highp uint view_index;
+	highp uint pad0;
+	highp uint pad1;
+	highp uint pad2;
 };
 
 layout(std140) uniform MultiviewDataBlock { // ubo:9
 	MultiviewData data;
 }
 multiview_data_block;
+
+#ifdef EMULATE_MULTIVIEW
+#define ViewIndex (multiview_data_block.data.view_index)
+#endif
 #endif
 
 uniform highp mat4 world_transform;
@@ -1558,6 +1574,10 @@ layout(location = 0) out vec4 motion_vectors;
 #if !defined(MODE_RENDER_DEPTH) && (defined(INDIRECT_DIFFUSE_WEIGHT_USED) || defined(INDIRECT_SPECULAR_WEIGHT_USED) || defined(INDIRECT_COAT_USED) || defined(DECAL_COVERAGE_USED))
 #define DECAL_COVERAGE_TRACKED
 float decal_coverage;
+#endif
+
+#if defined(DIRECT_DIFFUSE_WEIGHT_USED) && !(defined(USE_VERTEX_LIGHTING) && defined(LIGHT_CODE_USED))
+#define DIRECT_DIFFUSE_WEIGHTED
 #endif
 
 #ifndef RENDER_MOTION_VECTORS
@@ -2136,10 +2156,8 @@ void reflection_process(samplerCube reflection_map,
 	if (exterior) {
 		reflection.rgb = mix(skybox, reflection.rgb, blend);
 	}
-	reflection.rgb *= intensity;
-	reflection.a = blend;
-	reflection.rgb *= blend;
-
+	reflection.a = blend * intensity;
+	reflection.rgb *= reflection.a;
 	reflection_accum += reflection;
 
 #ifndef USE_LIGHTMAP
@@ -2152,8 +2170,8 @@ void reflection_process(samplerCube reflection_map,
 			ambient_out.rgb = mix(ambient, ambient_out.rgb, blend);
 		}
 
-		ambient_out.a = blend;
-		ambient_out.rgb *= blend;
+		ambient_out.a = blend * intensity;
+		ambient_out.rgb *= ambient_out.a;
 		ambient_accum += ambient_out;
 	} else if (ref_ambient_mode == REFLECTION_AMBIENT_COLOR) {
 		vec4 ambient_out;
@@ -2162,8 +2180,8 @@ void reflection_process(samplerCube reflection_map,
 			ambient_out.rgb = mix(ambient, ambient_out.rgb, blend);
 		}
 
-		ambient_out.a = blend;
-		ambient_out.rgb *= blend;
+		ambient_out.a = blend * intensity;
+		ambient_out.rgb *= ambient_out.a;
 		ambient_accum += ambient_out;
 	}
 #endif // USE_LIGHTMAP
@@ -2286,6 +2304,18 @@ void main() {
 	vec3 indirect_coat_weight = vec3(0.0);
 	float indirect_coat_roughness = 0.0;
 #endif
+#if defined(INDIRECT_COAT_NORMAL_USED)
+	vec3 indirect_coat_normal = vec3(0.0);
+#endif
+#if defined(DIRECT_DIFFUSE_WEIGHT_USED)
+	vec3 direct_diffuse_weight = vec3(1.0);
+#endif
+#if defined(EMISSION_BOUNCE_WEIGHT_USED)
+	float emission_bounce_weight = 1.0;
+#endif
+#if defined(TEMPORAL_REACTIVE_USED)
+	float temporal_reactive = 0.0;
+#endif
 #ifdef TEMPORAL_METADATA_USED
 	float temporal_mask = 0.0;
 	float temporal_id = 0.0;
@@ -2317,10 +2347,6 @@ void main() {
 	vec2 uv = uv_interp;
 #endif
 
-#ifdef STREAMING_UV_USED
-	vec2 streaming_uv = vec2(0.0);
-#endif
-
 #if defined(UV2_USED) || defined(USE_LIGHTMAP)
 	vec2 uv2 = uv2_interp;
 #endif
@@ -2344,6 +2370,12 @@ void main() {
 	vec2 screen_uv = gl_FragCoord.xy * scene_data_block.data.screen_pixel_size;
 
 	float sss_strength = 0.0;
+	vec3 sss_radius = vec3(0.0);
+
+#ifdef STREAMING_LOD_USED
+	// Not used, but needed so shaders that write STREAMING_LOD still compile.
+	float streaming_lod = 0.0;
+#endif
 
 #ifdef ALPHA_SCISSOR_USED
 	float alpha_scissor_threshold = 1.0;
@@ -2388,6 +2420,13 @@ void main() {
 #ifdef NORMAL_USED
 	vec3 geo_normal = normalize(normal);
 #endif // NORMAL_USED
+#ifdef INDIRECT_COAT_NORMAL_USED
+	bool cc_custom = dot(indirect_coat_normal, indirect_coat_normal) > 0.0;
+	vec3 cc_normal = cc_custom ? normalize(indirect_coat_normal) : geo_normal;
+#define CLEARCOAT_NORMAL cc_normal
+#else
+#define CLEARCOAT_NORMAL geo_normal
+#endif
 
 #ifndef USE_SHADOW_TO_OPACITY
 
@@ -2592,7 +2631,7 @@ void main() {
 		specular_light = textureLod(radiance_map, ref_vec, sqrt(roughness) * RADIANCE_MAX_LOD).rgb;
 		specular_light = srgb_to_linear(specular_light);
 		specular_light *= horizon * horizon;
-		specular_light *= scene_data_block.data.ambient_light_color_energy.a;
+		specular_light *= scene_data_block.data.ambient_light_color_energy.a * scene_data_block.data.IBL_exposure_normalization;
 	}
 #endif
 	if (scene_data_block.data.use_reflection_color) {
@@ -2621,7 +2660,7 @@ void main() {
 #endif // SECOND_REFLECTION_PROBE
 
 		if (reflection_accum.a > 0.0) {
-			specular_light = reflection_accum.rgb / reflection_accum.a;
+			specular_light = mix(specular_light, reflection_accum.rgb / reflection_accum.a, reflection_accum.a);
 		}
 	}
 #endif // DISABLE_REFLECTION_PROBE
@@ -2634,11 +2673,11 @@ void main() {
 	vec3 cc_specular_light = vec3(0.0);
 #ifdef USE_RADIANCE_MAP
 	if (scene_data_block.data.use_reflection_cubemap) {
-		vec3 cc_ref_vec = mix(reflect(-view, geo_normal), geo_normal, indirect_coat_roughness * indirect_coat_roughness);
-		float cc_horizon = min(1.0 + dot(cc_ref_vec, geo_normal), 1.0);
+		vec3 cc_ref_vec = mix(reflect(-view, CLEARCOAT_NORMAL), CLEARCOAT_NORMAL, indirect_coat_roughness * indirect_coat_roughness);
+		float cc_horizon = min(1.0 + dot(cc_ref_vec, CLEARCOAT_NORMAL), 1.0);
 		cc_ref_vec = mat3(scene_data_block.data.radiance_inverse_xform) * cc_ref_vec;
 		cc_specular_light = srgb_to_linear(textureLod(radiance_map, cc_ref_vec, sqrt(indirect_coat_roughness) * RADIANCE_MAX_LOD).rgb);
-		cc_specular_light *= cc_horizon * cc_horizon * scene_data_block.data.ambient_light_color_energy.a;
+		cc_specular_light *= cc_horizon * cc_horizon * scene_data_block.data.ambient_light_color_energy.a * scene_data_block.data.IBL_exposure_normalization;
 	}
 #endif
 	if (scene_data_block.data.use_reflection_color) {
@@ -2649,14 +2688,14 @@ void main() {
 		vec4 cc_reflection_accum = vec4(0.0);
 		vec4 cc_ambient_accum = vec4(0.0);
 
-		reflection_process(refprobe1_texture, geo_normal, vertex_interp, refprobe1_local_matrix,
+		reflection_process(refprobe1_texture, CLEARCOAT_NORMAL, vertex_interp, refprobe1_local_matrix,
 				refprobe1_use_box_project, refprobe1_box_extents, refprobe1_box_offset,
 				refprobe1_exterior, refprobe1_intensity, refprobe1_blend_distance, refprobe1_ambient_mode, refprobe1_ambient_color,
 				indirect_coat_roughness, ambient_light, cc_specular_light, cc_reflection_accum, cc_ambient_accum);
 
 #ifdef SECOND_REFLECTION_PROBE
 
-		reflection_process(refprobe2_texture, geo_normal, vertex_interp, refprobe2_local_matrix,
+		reflection_process(refprobe2_texture, CLEARCOAT_NORMAL, vertex_interp, refprobe2_local_matrix,
 				refprobe2_use_box_project, refprobe2_box_extents, refprobe2_box_offset,
 				refprobe2_exterior, refprobe2_intensity, refprobe2_blend_distance, refprobe2_ambient_mode, refprobe2_ambient_color,
 				indirect_coat_roughness, ambient_light, cc_specular_light, cc_reflection_accum, cc_ambient_accum);
@@ -2664,7 +2703,7 @@ void main() {
 #endif
 
 		if (cc_reflection_accum.a > 0.0) {
-			cc_specular_light = cc_reflection_accum.rgb / cc_reflection_accum.a;
+			cc_specular_light = mix(cc_specular_light, cc_reflection_accum.rgb / cc_reflection_accum.a, cc_reflection_accum.a);
 		}
 	}
 #endif
@@ -2680,13 +2719,13 @@ void main() {
 			vec3 ambient_dir = mat3(scene_data_block.data.radiance_inverse_xform) * indirect_normal;
 			vec3 cubemap_ambient = textureLod(radiance_map, ambient_dir, RADIANCE_MAX_LOD).rgb;
 			cubemap_ambient = srgb_to_linear(cubemap_ambient);
-			ambient_light = mix(ambient_light, cubemap_ambient * scene_data_block.data.ambient_light_color_energy.a, scene_data_block.data.ambient_color_sky_mix);
+			ambient_light = mix(ambient_light, cubemap_ambient * scene_data_block.data.ambient_light_color_energy.a * scene_data_block.data.IBL_exposure_normalization, scene_data_block.data.ambient_color_sky_mix);
 		}
 #endif // USE_RADIANCE_MAP
 
 #ifndef DISABLE_REFLECTION_PROBE
 		if (ambient_accum.a > 0.0) {
-			ambient_light = mix(ambient_light, (ambient_accum.rgb / ambient_accum.a) * scene_data_block.data.ambient_light_color_energy.a, scene_data_block.data.ambient_color_sky_mix);
+			ambient_light = mix(ambient_light, (ambient_accum.rgb / ambient_accum.a) * scene_data_block.data.ambient_light_color_energy.a, ambient_accum.a);
 		}
 #endif // DISABLE_REFLECTION_PROBE
 	}
@@ -2822,7 +2861,19 @@ void main() {
 	specular_occlusion = mix(specular_occlusion, cos_b * (1.0 - ao), roughness);
 	specular_light *= specular_occlusion;
 #if defined(INDIRECT_COAT_USED)
+#ifdef INDIRECT_COAT_NORMAL_USED
+	if (cc_custom) {
+		float cc_cos_b = max(dot(reflect(-view, cc_normal), bent_normal_vector), 0.0);
+		float cc_roughness = max(indirect_coat_roughness, 0.001);
+		float cc_specular_occlusion = clamp((ao - (1.0 - cc_cos_b)) / cc_roughness, 0.0, 1.0);
+		cc_specular_occlusion = mix(cc_specular_occlusion, cc_cos_b * (1.0 - ao), cc_roughness);
+		cc_specular_light *= cc_specular_occlusion;
+	} else {
+		cc_specular_light *= specular_occlusion;
+	}
+#else
 	cc_specular_light *= specular_occlusion;
+#endif
 #endif
 #else // BENT_NORMAL_MAP_USED
 	float specular_occlusion = (ambient_light.r * 0.3 + ambient_light.g * 0.59 + ambient_light.b * 0.11) * 2.0; // Luminance of ambient light.
@@ -2901,7 +2952,7 @@ void main() {
 				rim, rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-				clearcoat, clearcoat_roughness, geo_normal,
+				clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_CLEARCOAT_USED
 #ifdef LIGHT_ANISOTROPY_USED
 				binormal,
@@ -2927,7 +2978,7 @@ void main() {
 				rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-				clearcoat, clearcoat_roughness, geo_normal,
+				clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_CLEARCOAT_USED
 #ifdef LIGHT_ANISOTROPY_USED
 				binormal, tangent, anisotropy,
@@ -2951,7 +3002,7 @@ void main() {
 				rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-				clearcoat, clearcoat_roughness, geo_normal,
+				clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_CLEARCOAT_USED
 #ifdef LIGHT_ANISOTROPY_USED
 				tangent,
@@ -2976,7 +3027,7 @@ void main() {
 				rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-				clearcoat, clearcoat_roughness, geo_normal,
+				clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_CLEARCOAT_USED
 #ifdef LIGHT_ANISOTROPY_USED
 				tangent,
@@ -3047,12 +3098,18 @@ void main() {
 	frag_color = vec4(albedo, alpha);
 #else
 
+#ifdef DIRECT_DIFFUSE_WEIGHTED
+	diffuse_light *= direct_diffuse_weight;
+#else
 	diffuse_light *= albedo;
+#endif
 
 	diffuse_light *= ao;
 	specular_light *= ao;
 
+#ifndef DIRECT_DIFFUSE_WEIGHTED
 	diffuse_light *= 1.0 - metallic;
+#endif
 #ifndef INDIRECT_DIFFUSE_WEIGHT_USED
 	ambient_light *= 1.0 - metallic;
 #endif
@@ -3248,7 +3305,7 @@ void main() {
 				rim, rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-				clearcoat, clearcoat_roughness, geo_normal,
+				clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_CLEARCOAT_USED
 #ifdef LIGHT_ANISOTROPY_USED
 				binormal,
@@ -3284,7 +3341,7 @@ void main() {
 			rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-			clearcoat, clearcoat_roughness, geo_normal,
+			clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_CLEARCOAT_USED
 #ifdef LIGHT_ANISOTROPY_USED
 			binormal, tangent, anisotropy,
@@ -3314,7 +3371,7 @@ void main() {
 			rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-			clearcoat, clearcoat_roughness, geo_normal,
+			clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_RIM_USED
 #ifdef LIGHT_ANISOTROPY_USED
 			tangent,
@@ -3329,10 +3386,16 @@ void main() {
 
 #endif // ADDITIVE_SPOT
 
+#ifdef DIRECT_DIFFUSE_WEIGHTED
+	diffuse_light *= direct_diffuse_weight;
+#else
 	diffuse_light *= albedo;
+#endif
 	diffuse_light *= ao;
 	specular_light *= ao;
+#ifndef DIRECT_DIFFUSE_WEIGHTED
 	diffuse_light *= 1.0 - metallic;
+#endif
 	vec3 additive_light_color = diffuse_light + specular_light;
 
 #ifndef FOG_DISABLED

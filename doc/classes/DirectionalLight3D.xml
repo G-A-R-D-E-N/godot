@@ -12,6 +12,21 @@
 		<link title="Faking global illumination">$DOCS_URL/tutorials/3d/global_illumination/faking_global_illumination.html</link>
 	</tutorials>
 	<members>
+		<member name="cloud_shadow_altitude" type="float" setter="set_cloud_shadow_altitude" getter="get_cloud_shadow_altitude" default="2000.0">
+			The height of the cloud layer above world Y = 0, in meters. Only what lies below the layer is shadowed: the shadow fades in over the first 10 meters under it, and surfaces, fog and a camera above the layer get the full light.
+		</member>
+		<member name="cloud_shadow_offset" type="Vector2" setter="set_cloud_shadow_offset" getter="get_cloud_shadow_offset" default="Vector2(0, 0)">
+			Added to the texture coordinates of [member cloud_shadow_texture], in tiles. Animate it to move the clouds with the wind.
+		</member>
+		<member name="cloud_shadow_scale" type="float" setter="set_cloud_shadow_scale" getter="get_cloud_shadow_scale" default="1000.0">
+			The size of one tile of [member cloud_shadow_texture] on the cloud layer, in meters.
+		</member>
+		<member name="cloud_shadow_strength" type="float" setter="set_cloud_shadow_strength" getter="get_cloud_shadow_strength" default="1.0">
+			How much [member cloud_shadow_texture] darkens the light. At [code]0.0[/code], the cloud shadow is off.
+		</member>
+		<member name="cloud_shadow_texture" type="Texture2D" setter="set_cloud_shadow_texture" getter="get_cloud_shadow_texture">
+			A repeating texture whose red channel is the transmittance [code]T0[/code] of the cloud layer for light coming straight down ([code]1.0[/code] for clear sky). For a point [code]p[/code] in the world and the direction [code]L[/code] towards the light, the texture is read where the ray from [code]p[/code] towards the light crosses the cloud layer at [member cloud_shadow_altitude], at [code]uv = xz / cloud_shadow_scale + cloud_shadow_offset[/code], with [code]L.y[/code] limited to at least [code]0.05[/code]. The light is multiplied by [code]mix(1.0, pow(T0, 1.0 / max(L.y, 0.05)), cloud_shadow_strength)[/code]: its direct diffuse and specular light on surfaces, its volumetric fog light, and its fog sun scatter. The fog sun scatter, on surfaces and on the sky, uses the value above the camera. When the light is below the horizon, the cloud shadow is off. Only supported in the Forward+ renderer; it does not affect global illumination or vertex lighting.
+		</member>
 		<member name="directional_shadow_blend_splits" type="bool" setter="set_blend_splits" getter="is_blend_splits_enabled" default="false">
 			If [code]true[/code], shadow detail is sacrificed in exchange for smoother transitions between splits. Enabling shadow blend splitting also has a moderate performance cost. This is ignored when [member directional_shadow_mode] is [constant SHADOW_ORTHOGONAL].
 		</member>

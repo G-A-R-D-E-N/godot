@@ -848,7 +848,8 @@ void MaterialData::update_textures(const HashMap<StringName, Variant> &p_paramet
 
 		if (p_texture_uniforms[i].hint == ShaderLanguage::ShaderNode::Uniform::HINT_SCREEN_TEXTURE ||
 				p_texture_uniforms[i].hint == ShaderLanguage::ShaderNode::Uniform::HINT_NORMAL_ROUGHNESS_TEXTURE ||
-				p_texture_uniforms[i].hint == ShaderLanguage::ShaderNode::Uniform::HINT_DEPTH_TEXTURE) {
+				p_texture_uniforms[i].hint == ShaderLanguage::ShaderNode::Uniform::HINT_DEPTH_TEXTURE ||
+				p_texture_uniforms[i].hint == ShaderLanguage::ShaderNode::Uniform::HINT_BACK_DEPTH_TEXTURE) {
 			continue;
 		}
 
@@ -1273,6 +1274,7 @@ MaterialStorage::MaterialStorage() {
 		actions.renames["BINORMAL"] = "binormal";
 		actions.renames["POSITION"] = "position";
 		actions.renames["UV"] = "uv_interp";
+		actions.renames["STREAMING_LOD"] = "streaming_lod";
 		actions.renames["UV2"] = "uv2_interp";
 		actions.renames["COLOR"] = "color_interp";
 		actions.renames["POINT_SIZE"] = "point_size";
@@ -1319,6 +1321,7 @@ MaterialStorage::MaterialStorage() {
 		actions.renames["SSS_TRANSMITTANCE_COLOR"] = "transmittance_color";
 		actions.renames["SSS_TRANSMITTANCE_DEPTH"] = "transmittance_depth";
 		actions.renames["SSS_TRANSMITTANCE_BOOST"] = "transmittance_boost";
+		actions.renames["SSS_RADIUS"] = "sss_radius";
 		actions.renames["BACKLIGHT"] = "backlight";
 		actions.renames["AO"] = "ao";
 		actions.renames["AO_LIGHT_AFFECT"] = "ao_light_affect";
@@ -1334,10 +1337,13 @@ MaterialStorage::MaterialStorage() {
 		actions.renames["INDIRECT_SPECULAR_WEIGHT"] = "indirect_specular_weight";
 		actions.renames["INDIRECT_COAT_WEIGHT"] = "indirect_coat_weight";
 		actions.renames["INDIRECT_COAT_ROUGHNESS"] = "indirect_coat_roughness";
+		actions.renames["INDIRECT_COAT_NORMAL"] = "indirect_coat_normal";
+		actions.renames["DIRECT_DIFFUSE_WEIGHT"] = "direct_diffuse_weight";
+		actions.renames["EMISSION_BOUNCE_WEIGHT"] = "emission_bounce_weight";
+		actions.renames["TEMPORAL_REACTIVE"] = "temporal_reactive";
 		actions.renames["DECAL_COVERAGE"] = "decal_coverage";
 		actions.renames["TEMPORAL_MASK"] = "temporal_mask";
 		actions.renames["TEMPORAL_ID"] = "temporal_id";
-		actions.renames["STREAMING_UV"] = "streaming_uv";
 		actions.renames["BONE_INDICES"] = "bone_attrib";
 		actions.renames["BONE_WEIGHTS"] = "weight_attrib";
 		actions.renames["CUSTOM0"] = "custom0_attrib";
@@ -1383,7 +1389,7 @@ MaterialStorage::MaterialStorage() {
 		actions.usage_defines["AO"] = "#define AO_USED\n";
 		actions.usage_defines["AO_LIGHT_AFFECT"] = "#define AO_USED\n";
 		actions.usage_defines["UV"] = "#define UV_USED\n";
-		actions.usage_defines["STREAMING_UV"] = "#define STREAMING_UV_USED\n";
+		actions.usage_defines["STREAMING_LOD"] = "#define STREAMING_LOD_USED\n";
 		actions.usage_defines["UV2"] = "#define UV2_USED\n";
 		actions.usage_defines["BONE_INDICES"] = "#define BONES_USED\n";
 		actions.usage_defines["BONE_WEIGHTS"] = "#define WEIGHTS_USED\n";
@@ -1421,6 +1427,10 @@ MaterialStorage::MaterialStorage() {
 		actions.usage_defines["INDIRECT_SPECULAR_WEIGHT"] = "#define INDIRECT_SPECULAR_WEIGHT_USED\n";
 		actions.usage_defines["INDIRECT_COAT_WEIGHT"] = "#define INDIRECT_COAT_USED\n#define LIGHT_CLEARCOAT_USED\n";
 		actions.usage_defines["INDIRECT_COAT_ROUGHNESS"] = "@INDIRECT_COAT_WEIGHT";
+		actions.usage_defines["INDIRECT_COAT_NORMAL"] = "#define INDIRECT_COAT_NORMAL_USED\n#define NORMAL_USED\n";
+		actions.usage_defines["DIRECT_DIFFUSE_WEIGHT"] = "#define DIRECT_DIFFUSE_WEIGHT_USED\n";
+		actions.usage_defines["EMISSION_BOUNCE_WEIGHT"] = "#define EMISSION_BOUNCE_WEIGHT_USED\n";
+		actions.usage_defines["TEMPORAL_REACTIVE"] = "#define TEMPORAL_REACTIVE_USED\n";
 		actions.usage_defines["DECAL_COVERAGE"] = "#define DECAL_COVERAGE_USED\n";
 		actions.usage_defines["TEMPORAL_MASK"] = "#define TEMPORAL_METADATA_USED\n";
 		actions.usage_defines["TEMPORAL_ID"] = "@TEMPORAL_MASK";
@@ -3003,6 +3013,7 @@ void SceneShaderData::set_code(const String &p_code) {
 	uses_transmittance = false;
 	uses_screen_texture = false;
 	uses_screen_texture_mipmaps = false;
+	screen_texture_filter = ShaderLanguage::FILTER_DEFAULT;
 	uses_depth_texture = false;
 	uses_normal_texture = false;
 	uses_bent_normal_texture = false;
@@ -3163,6 +3174,7 @@ void SceneShaderData::set_code(const String &p_code) {
 
 	uses_screen_texture = gen_code.uses_screen_texture;
 	uses_screen_texture_mipmaps = gen_code.uses_screen_texture_mipmaps;
+	screen_texture_filter = gen_code.screen_texture_filter;
 	uses_depth_texture = gen_code.uses_depth_texture;
 	uses_normal_texture = gen_code.uses_normal_roughness_texture;
 	uses_vertex_time = gen_code.uses_vertex_time;

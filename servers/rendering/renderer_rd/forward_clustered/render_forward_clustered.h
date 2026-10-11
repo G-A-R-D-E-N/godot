@@ -50,6 +50,8 @@
 
 #define RB_TEX_SPECULAR SNAME("specular")
 #define RB_TEX_SPECULAR_MSAA SNAME("specular_msaa")
+#define RB_TEX_SSS_RADIUS SNAME("sss_radius")
+#define RB_TEX_SSS_RADIUS_MSAA SNAME("sss_radius_msaa")
 #define RB_TEX_NORMAL_ROUGHNESS SNAME("normal_roughness")
 #define RB_TEX_NORMAL_ROUGHNESS_MSAA SNAME("normal_roughness_msaa")
 #define RB_TEX_VOXEL_GI SNAME("voxel_gi")
@@ -102,17 +104,18 @@ public:
 
 	public:
 		ClusterBuilderRD *cluster_builder = nullptr;
-		int history_reset_serial = 0;
 
 		struct SSEffectsData {
 			Projection ssil_last_frame_projections[RendererSceneRender::MAX_RENDER_VIEWS];
 			Transform3D ssil_last_frame_transform;
+			Transform3D ssil_last_frame_camera;
 
 			Projection ssr_last_frame_projections[RendererSceneRender::MAX_RENDER_VIEWS];
 			Transform3D ssr_last_frame_transform;
 
 			RendererRD::SSEffects::SSILRenderBuffers ssil;
 			RendererRD::SSEffects::SSAORenderBuffers ssao;
+			RendererRD::SSEffects::GTAORenderBuffers gtao;
 			RendererRD::SSEffects::SSRRenderBuffers ssr;
 			RendererRD::SSEffects::SSCSRenderBuffers sscs;
 		} ss_effects_data;
@@ -126,10 +129,13 @@ public:
 		RID render_sdfgi_uniform_set;
 
 		void ensure_specular();
+		void ensure_sss_radius();
 		bool has_specular() const { return render_buffers->has_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_SPECULAR); }
 		RID get_specular() const { return render_buffers->get_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_SPECULAR); }
 		RID get_specular(uint32_t p_layer) { return render_buffers->get_texture_slice(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_SPECULAR, p_layer, 0); }
 		RID get_specular_msaa(uint32_t p_layer) { return render_buffers->get_texture_slice(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_SPECULAR_MSAA, p_layer, 0); }
+		RID get_sss_radius(uint32_t p_layer) { return render_buffers->get_texture_slice(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_SSS_RADIUS, p_layer, 0); }
+		RID get_sss_radius_msaa(uint32_t p_layer) { return render_buffers->get_texture_slice(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_SSS_RADIUS_MSAA, p_layer, 0); }
 
 		void ensure_normal_roughness_texture();
 		bool has_normal_roughness() const { return render_buffers->has_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_NORMAL_ROUGHNESS); }
@@ -153,7 +159,7 @@ public:
 #endif
 
 		RID get_color_only_fb();
-		RID get_color_pass_fb(uint32_t p_color_pass_flags);
+		RID get_color_pass_fb(uint32_t p_color_pass_flags, uint32_t *r_color_attachments = nullptr);
 		RID get_depth_fb(DepthFrameBufferType p_type = DEPTH_FB);
 		RID get_specular_only_fb();
 		RID get_velocity_only_fb();
@@ -177,8 +183,9 @@ private:
 	uint64_t lightmap_texture_array_version = 0xFFFFFFFF;
 
 	void _update_render_base_uniform_set();
+	void _render_back_depth_pass(const RenderDataRD *p_render_data, bool p_reverse_cull, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, const SceneShaderForwardClustered::ShaderSpecialization &p_base_specialization);
 	RID _setup_sdfgi_render_pass_uniform_set(RID p_albedo_texture, RID p_emission_texture, RID p_emission_aniso_texture, RID p_geom_facing_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index);
-	RID _setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas = false);
+	RID _setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas = false, bool p_bind_back_depth = true);
 
 	struct BestFitNormal {
 		BestFitNormalShaderRD shader;
@@ -208,6 +215,7 @@ private:
 		PASS_MODE_DEPTH_NORMAL_ROUGHNESS_VOXEL_GI,
 		PASS_MODE_DEPTH_MATERIAL,
 		PASS_MODE_SDF,
+		PASS_MODE_BACK_DEPTH,
 		PASS_MODE_MAX
 	};
 
@@ -222,6 +230,9 @@ private:
 		COLOR_PASS_FLAG_SEPARATE_SPECULAR = 1 << 1,
 		COLOR_PASS_FLAG_MULTIVIEW = 1 << 2,
 		COLOR_PASS_FLAG_MOTION_VECTORS = 1 << 3,
+		COLOR_PASS_FLAG_BOUNCE_SOURCE = 1 << 4,
+		COLOR_PASS_FLAG_REFLECTION_SOURCE = 1 << 5,
+		COLOR_PASS_FLAG_SSS_RADIUS = 1 << 6,
 	};
 
 	struct GeometryInstanceSurfaceDataCache;
@@ -308,6 +319,9 @@ private:
 		SCREEN_SPACE_EFFECTS_FLAGS_USE_SSR = (1 << 2),
 		SCREEN_SPACE_EFFECTS_FLAGS_RESOLVE_SSR = (1 << 3),
 		SCREEN_SPACE_EFFECTS_FLAGS_USE_SSCS = (1 << 4),
+		SCREEN_SPACE_EFFECTS_FLAGS_USE_BENT_NORMALS = (1 << 5),
+		SCREEN_SPACE_EFFECTS_FLAGS_STOCHASTIC_SSR = (1 << 6),
+		SCREEN_SPACE_EFFECTS_FLAGS_LIGHTING_SOURCES = (1 << 7),
 	};
 
 	struct SceneState {
@@ -321,7 +335,7 @@ private:
 			uint32_t ss_effects_flags;
 			float ssao_light_affect;
 			float ssao_ao_affect;
-			uint32_t pad1;
+			float ss_exposure;
 
 			float sdf_to_bounds[16];
 
@@ -334,7 +348,11 @@ private:
 			uint32_t volumetric_fog_enabled;
 			float volumetric_fog_inv_length;
 			float volumetric_fog_detail_spread;
-			uint32_t volumetric_fog_pad;
+			uint32_t aerial_perspective_enabled;
+
+			float aerial_perspective_inv_distance;
+			float aerial_perspective_exposure;
+			uint32_t aerial_perspective_pad[2];
 		};
 
 		struct PushConstantUbershader {
@@ -440,7 +458,9 @@ private:
 		bool used_screen_texture = false;
 		bool used_normal_texture = false;
 		bool used_depth_texture = false;
+		bool used_back_depth_texture = false;
 		bool used_sss = false;
+		bool used_sss_radius = false;
 		bool used_lightmap = false;
 		bool used_opaque_stencil = false;
 
@@ -529,6 +549,8 @@ private:
 			FLAG_USES_PARTICLE_TRAILS = 65536,
 			FLAG_USES_MOTION_VECTOR = 131072,
 			FLAG_USES_STENCIL = 262144,
+			FLAG_USES_BACK_DEPTH_TEXTURE = 524288,
+			FLAG_USES_SSS_RADIUS = 1048576,
 		};
 
 		union {
@@ -658,6 +680,7 @@ private:
 		bool uses_opaque = false;
 		bool uses_transparent = false;
 		bool uses_depth = false;
+		bool uses_back_depth = false;
 		bool can_use_lightmap = false;
 	};
 
@@ -679,6 +702,8 @@ private:
 				uint32_t use_32_bit_shadows : 1;
 				uint32_t use_shadow_cubemaps : 1;
 				uint32_t use_shadow_dual_paraboloid : 1;
+				uint32_t used_source_combos : 6;
+				uint32_t use_sss_radius : 1;
 			};
 		};
 	};
@@ -792,7 +817,7 @@ private:
 	/* Volumetric fog */
 	RID shadow_sampler;
 
-	void _update_volumetric_fog(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const Projection &p_cam_projection, const Transform3D &p_cam_transform, const Transform3D &p_prev_cam_inv_transform, RID p_shadow_atlas, int p_directional_light_count, bool p_use_directional_shadows, int p_positional_light_count, int p_voxel_gi_count, const PagedArray<RID> &p_fog_volumes);
+	void _update_volumetric_fog(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, RID p_camera_attributes, const Projection &p_cam_projection, const Transform3D &p_cam_transform, const Transform3D &p_prev_cam_inv_transform, RID p_shadow_atlas, int p_directional_light_count, bool p_use_directional_shadows, int p_positional_light_count, int p_voxel_gi_count, const PagedArray<RID> &p_fog_volumes);
 
 	/* Render shadows */
 
@@ -803,13 +828,17 @@ private:
 	void _render_shadow_end();
 
 	/* Render Scene */
-	void _process_ssao(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_buffers, const Projection *p_projections);
-	void _process_ssil(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_buffers, const Projection *p_projections, const Transform3D &p_transform);
-	void _process_ssr(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_slices, const Projection *p_projections, const Vector3 *p_eye_offsets, const Transform3D &p_transform);
-	void _process_sscs(Ref<RenderSceneBuffersRD> p_render_buffers, const Projection *p_projections, const Transform3D &p_transform, const LocalVector<int> &p_contact_shadows, const RenderShadowData *p_render_shadows, float p_taa_frame_count);
+	bool _ssao_uses_gtao(const Projection &p_projection) const;
+	RID _get_aerial_perspective_texture(RID p_environment) const;
+	void _process_ssao(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_buffers, const Projection *p_projections, float p_taa_frame_count);
+	float _get_screen_space_exposure(const RenderDataRD *p_render_data, RID &r_exposure_texture);
+	void _process_ssil(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_buffers, const Projection *p_projections, const Transform3D &p_transform, float p_exposure, RID p_exposure_texture);
+	void _process_ssr(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_slices, const Projection *p_projections, const Vector3 *p_eye_offsets, const Transform3D &p_transform, float p_exposure, RID p_exposure_texture);
+	void _select_local_contact_shadows(RenderDataRD *p_render_data);
+	void _process_sscs(Ref<RenderSceneBuffersRD> p_render_buffers, const Projection *p_projections, const Transform3D &p_transform, const LocalVector<int> &p_contact_shadows, const LocalVector<RID> &p_local_contact_shadows, const RenderShadowData *p_render_shadows, float p_taa_frame_count);
 	void _copy_framebuffer_to_ss_effects(Ref<RenderSceneBuffersRD> p_render_buffers, bool p_use_ssil, bool p_use_ssr);
 	void _pre_opaque_render(RenderDataRD *p_render_data, bool p_use_ssao, bool p_use_ssil, bool p_use_ssr, bool p_use_sscs, bool p_use_gi, const RID *p_normal_roughness_slices, RID p_voxel_gi_buffer);
-	void _process_sss(Ref<RenderSceneBuffersRD> p_render_buffers, const Projection &p_camera);
+	void _process_sss(Ref<RenderSceneBuffersRD> p_render_buffers, const Projection &p_camera, uint32_t p_taa_frame, bool p_sss_radius_written);
 
 	/* Debug */
 	void _debug_draw_cluster(Ref<RenderSceneBuffersRD> p_render_buffers);

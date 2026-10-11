@@ -328,6 +328,7 @@ struct SceneShaderData : public ShaderData {
 	bool uses_transmittance;
 	bool uses_screen_texture;
 	bool uses_screen_texture_mipmaps;
+	ShaderLanguage::TextureFilter screen_texture_filter;
 	bool uses_depth_texture;
 	bool uses_normal_texture;
 	bool uses_bent_normal_texture;

@@ -49,6 +49,7 @@ public:
 	//bool use_taa = false;
 	//bool use_debanding = false;
 	uint32_t view_count = 1;
+	bool emulate_multiview = false;
 	bool apply_environment_effects_in_post = false;
 	bool apply_canvas_bg_exposure = false;
 
@@ -81,6 +82,9 @@ public:
 	FBDEF internal3d; // buffers used to either render 3D (scaled/post) or to resolve MSAA into
 
 	FBDEF backbuffer3d; // our back buffer
+	int backbuffer3d_mipmap_count = 1;
+	int backbuffer3d_unused_mipmap_frames = 0;
+	static constexpr int BACKBUFFER_MIPMAP_RELEASE_FRAMES = 120;
 
 	// Buffers for our glow implementation
 	struct GLOW {
@@ -92,10 +96,11 @@ private:
 	void _clear_msaa3d_buffers();
 	void _clear_intermediate_buffers();
 	void _clear_back_buffers();
+	void _release_backbuffer_color();
 	void _clear_glow_buffers();
 
 	void _rt_attach_textures(GLuint p_color, GLuint p_depth, GLsizei p_samples, uint32_t p_view_count, bool p_depth_has_stencil);
-	GLuint _rt_get_cached_fbo(GLuint p_color, GLuint p_depth, GLsizei p_samples, uint32_t p_view_count);
+	GLuint _rt_get_cached_fbo(GLuint p_color, GLuint p_depth, GLsizei p_samples, uint32_t p_view_count, bool p_depth_has_stencil);
 
 public:
 	RenderSceneBuffersGLES3();
@@ -112,10 +117,14 @@ public:
 
 	void free_render_buffer_data();
 
-	void check_backbuffer(bool p_need_color, bool p_need_depth); // Check if we need to initialize our backbuffer.
+	void check_backbuffer(bool p_need_color, bool p_need_depth, bool p_need_mipmaps = false);
+	void generate_backbuffer_mipmaps();
+	void update_backbuffer_mipmap_use(bool p_used);
 	void check_glow_buffers(); // Check if we need to initialize our glow buffers.
 
-	GLuint get_render_fbo();
+	GLuint get_render_fbo(int p_view = -1);
+	void attach_backbuffer_layer(uint32_t p_view);
+
 	GLuint get_msaa3d_fbo() {
 		_check_render_buffers();
 		return msaa3d.fbo;
@@ -147,6 +156,7 @@ public:
 	GLuint get_backbuffer_fbo() const { return backbuffer3d.fbo; }
 	GLuint get_backbuffer() const { return backbuffer3d.color; }
 	GLuint get_backbuffer_depth() const { return backbuffer3d.depth; }
+	int get_backbuffer_mipmap_count() const { return backbuffer3d_mipmap_count; }
 
 	const GLES3::Glow::Level *get_glow_buffers() const { return &glow.levels[0]; }
 

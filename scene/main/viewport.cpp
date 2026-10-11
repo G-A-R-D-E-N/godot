@@ -614,14 +614,16 @@ void Viewport::_notification(int p_what) {
 #endif // _3D_DISABLED
 
 			add_to_group("_viewports");
-#if !defined(PHYSICS_2D_DISABLED) || !defined(PHYSICS_3D_DISABLED)
-			if (get_tree()->is_debugging_collisions_hint()) {
 #ifndef PHYSICS_2D_DISABLED
+			if (PhysicsServer2D::get_singleton()->debug_is_enabled()) {
 				PhysicsServer2D::get_singleton()->space_set_debug_contacts(find_world_2d()->get_space(), get_tree()->get_collision_debug_contact_count());
 				contact_2d_debug = RenderingServer::get_singleton()->canvas_item_create();
 				RenderingServer::get_singleton()->canvas_item_set_parent(contact_2d_debug, current_canvas);
+				set_physics_process_internal(true);
+			}
 #endif // PHYSICS_2D_DISABLED
 #ifndef PHYSICS_3D_DISABLED
+			if (PhysicsServer3D::get_singleton()->debug_is_enabled()) {
 				PhysicsServer3D::get_singleton()->space_set_debug_contacts(find_world_3d()->get_space(), get_tree()->get_collision_debug_contact_count());
 				contact_3d_debug_multimesh = RenderingServer::get_singleton()->multimesh_create();
 				RenderingServer::get_singleton()->multimesh_allocate_data(contact_3d_debug_multimesh, get_tree()->get_collision_debug_contact_count(), RSE::MULTIMESH_TRANSFORM_3D, false);
@@ -631,10 +633,9 @@ void Viewport::_notification(int p_what) {
 				RenderingServer::get_singleton()->instance_set_base(contact_3d_debug_instance, contact_3d_debug_multimesh);
 				RenderingServer::get_singleton()->instance_set_scenario(contact_3d_debug_instance, find_world_3d()->get_scenario());
 				RenderingServer::get_singleton()->instance_geometry_set_flag(contact_3d_debug_instance, RSE::INSTANCE_FLAG_DRAW_NEXT_FRAME_IF_VISIBLE, true);
-#endif // PHYSICS_3D_DISABLED
 				set_physics_process_internal(true);
 			}
-#endif // !defined(PHYSICS_2D_DISABLED) || !defined(PHYSICS_3D_DISABLED)
+#endif // PHYSICS_3D_DISABLED
 			_update_texture_filter_changed(false);
 			_update_texture_repeat_changed(false);
 		} break;
@@ -720,7 +721,7 @@ void Viewport::_notification(int p_what) {
 			}
 
 #ifndef PHYSICS_2D_DISABLED
-			if (get_tree()->is_debugging_collisions_hint() && contact_2d_debug.is_valid()) {
+			if (PhysicsServer2D::get_singleton()->debug_is_enabled() && contact_2d_debug.is_valid()) {
 				RenderingServer::get_singleton()->canvas_item_clear(contact_2d_debug);
 				RenderingServer::get_singleton()->canvas_item_set_draw_index(contact_2d_debug, 0xFFFFF); //very high index
 
@@ -734,7 +735,7 @@ void Viewport::_notification(int p_what) {
 			}
 #endif // PHYSICS_2D_DISABLED
 #ifndef PHYSICS_3D_DISABLED
-			if (get_tree()->is_debugging_collisions_hint() && contact_3d_debug_multimesh.is_valid()) {
+			if (PhysicsServer3D::get_singleton()->debug_is_enabled() && contact_3d_debug_multimesh.is_valid()) {
 				Vector<Vector3> points = PhysicsServer3D::get_singleton()->space_get_contacts(find_world_3d()->get_space());
 				int point_count = PhysicsServer3D::get_singleton()->space_get_contact_count(find_world_3d()->get_space());
 
@@ -1504,7 +1505,7 @@ Vector2 Viewport::get_mouse_position() const {
 		// Rely on the most recent mouse coordinate from an InputEventMouse in push_input.
 		// In this case get_screen_transform is not applicable, because it is ambiguous.
 		return gui.last_mouse_pos;
-	} else if (DisplayServer::get_singleton()->has_feature(DisplayServerEnums::FEATURE_MOUSE)) {
+	} else if (DisplayServer::get_singleton()->has_feature(DisplayServerEnums::FEATURE_MOUSE) && !DisplayServer::get_singleton()->has_feature(DisplayServerEnums::FEATURE_EMBEDDED)) {
 		Transform2D xform = get_screen_transform_internal(true);
 		if (xform.determinant() == 0) {
 			// Screen transform can be non-invertible when the Window is minimized.
@@ -4474,7 +4475,7 @@ bool Viewport::get_canvas_cull_mask_bit(uint32_t p_layer) const {
 	return (canvas_cull_mask & (1 << p_layer));
 }
 
-#ifdef TOOLS_ENABLED
+#ifdef DEBUG_ENABLED
 bool Viewport::is_visible_subviewport() const {
 	if (!is_sub_viewport()) {
 		return true;
@@ -4482,7 +4483,7 @@ bool Viewport::is_visible_subviewport() const {
 	SubViewportContainer *container = Object::cast_to<SubViewportContainer>(get_parent());
 	return container && container->is_visible_in_tree();
 }
-#endif // TOOLS_ENABLED
+#endif // DEBUG_ENABLED
 
 void Viewport::_update_audio_listener_2d() {
 	if (AudioServer::get_singleton()) {
@@ -5413,7 +5414,7 @@ void Viewport::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_debanding"), "set_use_debanding", "is_using_debanding");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_occlusion_culling"), "set_use_occlusion_culling", "is_using_occlusion_culling");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "mesh_lod_threshold", PROPERTY_HINT_RANGE, "0,1024,0.1"), "set_mesh_lod_threshold", "get_mesh_lod_threshold");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "debug_draw", PROPERTY_HINT_ENUM, "Disabled,Unshaded,Lighting,Overdraw,Wireframe,Normal Buffer,VoxelGI Albedo,VoxelGI Lighting,VoxelGI Emission,Shadow Atlas,Directional Shadow Map,Scene Luminance,SSAO,SSIL,Directional Shadow Splits,Decal Atlas,SDFGI Cascades,SDFGI Probes,VoxelGI/SDFGI Buffer,Disable Mesh LOD,OmniLight3D Cluster,SpotLight3D Cluster,Decal Cluster,ReflectionProbe Cluster,Occlusion Culling Buffer,Motion Vectors,Internal Buffer,AreaLight3D Cluster,AreaLight3D Atlas"), "set_debug_draw", "get_debug_draw");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "debug_draw", PROPERTY_HINT_ENUM, "Disabled,Unshaded,Lighting,Overdraw,Wireframe,Normal Buffer,VoxelGI Albedo,VoxelGI Lighting,VoxelGI Emission,Shadow Atlas,Directional Shadow Map,Scene Luminance,SSAO,SSIL,Directional Shadow Splits,Decal Atlas,SDFGI Cascades,SDFGI Probes,VoxelGI/SDFGI Buffer,Disable Mesh LOD,OmniLight3D Cluster,SpotLight3D Cluster,Decal Cluster,ReflectionProbe Cluster,Occlusion Culling Buffer,Motion Vectors,Internal Buffer,AreaLight3D Cluster,AreaLight3D Atlas,Contact Shadows,Bent Normals,Direct Diffuse,Direct Specular,Indirect Diffuse,Indirect Specular,Emission,Fog Transmittance,Fog Inscatter,SSR Confidence,Bounce Source,Reflection Source,Persistent AO,Fallback Source Specular,Fallback Source Diffuse,Rejected History,Fog History Clamp,Linear Depth,SSR Hit Distance"), "set_debug_draw", "get_debug_draw");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_hdr_2d"), "set_use_hdr_2d", "is_using_hdr_2d");
 
 #ifndef _3D_DISABLED
@@ -5543,6 +5544,25 @@ void Viewport::_bind_methods() {
 	BIND_ENUM_CONSTANT(DEBUG_DRAW_INTERNAL_BUFFER);
 	BIND_ENUM_CONSTANT(DEBUG_DRAW_CLUSTER_AREA_LIGHTS);
 	BIND_ENUM_CONSTANT(DEBUG_DRAW_AREA_LIGHT_ATLAS);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_CONTACT_SHADOWS);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_BENT_NORMALS);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_DIRECT_DIFFUSE);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_DIRECT_SPECULAR);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_INDIRECT_DIFFUSE);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_INDIRECT_SPECULAR);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_EMISSION);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_FOG_TRANSMITTANCE);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_FOG_INSCATTER);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_SSR_CONFIDENCE);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_BOUNCE_SOURCE);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_REFLECTION_SOURCE);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_PERSISTENT_AO);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_FALLBACK_SOURCE_SPECULAR);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_REJECTED_HISTORY);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_FOG_HISTORY_CLAMP);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_LINEAR_DEPTH);
+	BIND_ENUM_CONSTANT(DEBUG_DRAW_SSR_HIT_DISTANCE);
 
 	BIND_ENUM_CONSTANT(DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_NEAREST);
 	BIND_ENUM_CONSTANT(DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_LINEAR);

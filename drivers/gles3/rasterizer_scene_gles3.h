@@ -261,6 +261,7 @@ private:
 			FLAG_USES_NORMAL_TEXTURE = 8192,
 			FLAG_USES_DOUBLE_SIDED_SHADOWS = 16384,
 			FLAG_USES_STENCIL = 32768,
+			FLAG_USES_SCREEN_TEXTURE_MIPMAPS = 65536,
 		};
 
 		union {
@@ -467,6 +468,10 @@ private:
 			float projection_matrix_view[RendererSceneRender::MAX_RENDER_VIEWS][16];
 			float inv_projection_matrix_view[RendererSceneRender::MAX_RENDER_VIEWS][16];
 			float eye_offset[RendererSceneRender::MAX_RENDER_VIEWS][4];
+			// Current view being rendered. Used when emulating multiview by
+			// rendering once per view (when the GPU doesn't support multiview).
+			uint32_t view_index = 0;
+			uint32_t pad[3];
 		};
 		static_assert(sizeof(MultiviewUBO) % 16 == 0, "Multiview UBO size must be a multiple of 16 bytes");
 		static_assert(sizeof(MultiviewUBO) < 16384, "MultiviewUBO size must be 16384 bytes or smaller");
@@ -645,6 +650,8 @@ private:
 
 		bool texscreen_copied = false;
 		bool used_screen_texture = false;
+		bool used_screen_texture_mipmaps = false;
+		bool screen_texture_has_mipmaps = false;
 		bool used_normal_texture = false;
 		bool used_depth_texture = false;
 		bool used_opaque_stencil = false;
@@ -757,6 +764,9 @@ private:
 	void _render_shadows(const RenderDataGLES3 *p_render_data, const Size2i &p_viewport_size = Size2i(1, 1));
 	void _render_shadow_pass(RID p_light, RID p_shadow_atlas, int p_pass, const PagedArray<RenderGeometryInstance *> &p_instances, float p_lod_distance_multiplier = 0, float p_screen_mesh_lod_threshold = 0.0, RenderingServerTypes::RenderInfo *p_render_info = nullptr, const Size2i &p_viewport_size = Size2i(1, 1), const Transform3D &p_main_cam_transform = Transform3D());
 	void _render_post_processing(const RenderDataGLES3 *p_render_data);
+
+	GLuint screen_texture_samplers[4] = {};
+	GLuint _get_screen_texture_sampler(ShaderLanguage::TextureFilter p_filter);
 
 	template <PassMode p_pass_mode>
 	_FORCE_INLINE_ void _render_list_template(RenderListParameters *p_params, const RenderDataGLES3 *p_render_data, uint32_t p_from_element, uint32_t p_to_element, bool p_alpha_pass = false);
