@@ -34,6 +34,7 @@
 #include "servers/rendering/renderer_rd/shaders/effects/gtao.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/screen_space_contact_shadows.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/screen_space_contact_shadows_combine.glsl.gen.h"
+#include "servers/rendering/renderer_rd/shaders/effects/screen_space_gi.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/screen_space_reflection.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/screen_space_reflection_downsample.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/screen_space_reflection_filter.glsl.gen.h"
@@ -54,6 +55,9 @@
 #define RB_SCOPE_SSLF SNAME("rb_sslf")
 #define RB_SCOPE_SSDS SNAME("rb_ssds")
 #define RB_SCOPE_SSIL SNAME("rb_ssil")
+#define RB_SCOPE_SSGI SNAME("rb_ssgi")
+#define RB_SSGI_FAST_0 SNAME("ssgi_fast_0")
+#define RB_SSGI_FAST_1 SNAME("ssgi_fast_1")
 #define RB_SCOPE_SSAO SNAME("rb_ssao")
 #define RB_SCOPE_SSR SNAME("rb_ssr")
 #define RB_SCOPE_SSCS SNAME("rb_sscs")
@@ -135,6 +139,13 @@ public:
 		int buffer_height;
 		int half_buffer_width;
 		int half_buffer_height;
+
+		bool traced = false;
+		bool traced_half_size = true;
+		uint32_t rays = 1;
+		uint32_t mipmaps = 1;
+		Size2i trace_size;
+		uint32_t history_index = 0;
 	};
 
 	struct SSILSettings {
@@ -152,6 +163,25 @@ public:
 	void ssil_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, SSILRenderBuffers &p_ssil_buffers, const SSILSettings &p_settings);
 	void screen_space_indirect_lighting(Ref<RenderSceneBuffersRD> p_render_buffers, SSILRenderBuffers &p_ssil_buffers, uint32_t p_view, RID p_normal_buffer, const Projection &p_projection, const Projection &p_last_projection, const SSILSettings &p_settings);
 	void ssil_store_previous_depth(Ref<RenderSceneBuffersRD> p_render_buffers);
+
+	struct SSGISettings {
+		float max_distance = 5.0;
+		float exposure = 1.0;
+		RID exposure_texture;
+		const Projection *projections = nullptr;
+		const Projection *reprojections = nullptr;
+		const Projection *prev_projections = nullptr;
+		const Vector3 *eye_offsets = nullptr;
+		Transform3D cur_to_prev;
+		uint32_t frame = 0;
+		bool history_valid = false;
+		uint32_t debug_mode = 0;
+	};
+
+	bool ssil_traced_available(Ref<RenderSceneBuffersRD> p_render_buffers) const;
+	void ssgi_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, SSILRenderBuffers &p_ssil_buffers);
+	void screen_space_gi(Ref<RenderSceneBuffersRD> p_render_buffers, SSILRenderBuffers &p_ssil_buffers, const RID *p_normal_roughness_slices, RendererRD::CopyEffects &p_copy_effects, const SSGISettings &p_settings);
+	RID ssil_get_output(Ref<RenderSceneBuffersRD> p_render_buffers, const SSILRenderBuffers &p_ssil_buffers, int p_view = -1) const;
 
 	/* SSAO */
 	void ssao_set_quality(RSE::EnvironmentSSAOQuality p_quality, bool p_half_size, float p_adaptive_target, int p_blur_passes, float p_fadeout_from, float p_fadeout_to);
@@ -696,6 +726,55 @@ private:
 	} ssr;
 
 	void screen_space_reflection_stochastic(Ref<RenderSceneBuffersRD> p_render_buffers, SSRRenderBuffers &p_ssr_buffers, const RID *p_normal_roughness_slices, int p_max_steps, float p_fade_in, float p_fade_out, float p_tolerance, const Projection *p_projections, float p_exposure, RID p_exposure_texture, const SSRTemporalData &p_temporal);
+
+	static uint32_t _depth_pyramid_mipmaps(const Size2i &p_size);
+	void _build_depth_pyramid(Ref<RenderSceneBuffersRD> p_render_buffers, const StringName &p_context, const Size2i &p_size, uint32_t p_mipmaps, bool p_half_size, const RID *p_normal_roughness_slices, RendererRD::CopyEffects &p_copy_effects, const char *p_label);
+	void _update_scene_data_ubo(RID &r_ubo, uint32_t p_view_count, const Projection *p_projections, const Projection *p_reprojections, const Vector3 *p_eye_offsets, const Projection *p_prev_projections, const Transform3D &p_cur_to_prev);
+
+	struct ScreenSpaceGITracePushConstant {
+		int32_t screen_size[2];
+		int32_t mipmaps;
+		int32_t num_steps;
+		float max_distance;
+		float thickness;
+		uint32_t orthogonal;
+		uint32_t view_index;
+		uint32_t frame;
+		int32_t rays;
+		uint32_t validate_source;
+		float source_mip;
+	};
+
+	struct ScreenSpaceGIResolvePushConstant {
+		int32_t screen_size[2];
+		int32_t trace_size[2];
+		int32_t rays;
+		uint32_t frame;
+		uint32_t temporal;
+		uint32_t history_valid;
+		uint32_t orthogonal;
+		uint32_t view_index;
+		float exposure;
+		float firefly_luminance;
+		int32_t history_frames;
+		uint32_t debug_mode;
+		int32_t pad[2];
+	};
+
+	enum ScreenSpaceGIMode {
+		SCREEN_SPACE_GI_TRACE,
+		SCREEN_SPACE_GI_RESOLVE,
+		SCREEN_SPACE_GI_TEMPORAL,
+		SCREEN_SPACE_GI_FAST,
+		SCREEN_SPACE_GI_MAX
+	};
+
+	struct ScreenSpaceGI {
+		ScreenSpaceGiShaderRD shader;
+		RID shader_version;
+		PipelineDeferredRD pipelines[SCREEN_SPACE_GI_MAX];
+		RID ubo;
+	} ssgi;
 
 	/* Screen Space Shadows */
 

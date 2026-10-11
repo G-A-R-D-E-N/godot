@@ -1693,6 +1693,19 @@ void RenderForwardClustered::_process_ssil(Ref<RenderSceneBuffersRD> p_render_bu
 	}
 }
 
+static void _advance_view_history(uint32_t p_view_count, const Projection *p_projections, const Transform3D &p_transform, Projection *r_history, const Transform3D &p_last_transform, Projection *r_reprojections, Projection *r_last_projections) {
+	for (uint32_t v = 0; v < p_view_count; v++) {
+		Projection correction;
+		correction.set_depth_correction(true);
+
+		Projection projection = correction * p_projections[v];
+
+		r_reprojections[v] = r_history[v] * Projection(p_last_transform.affine_inverse()) * Projection(p_transform) * projection.inverse();
+		r_last_projections[v] = r_history[v];
+		r_history[v] = projection;
+	}
+}
+
 void RenderForwardClustered::_process_ssr(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_slices, const Projection *p_projections, const Vector3 *p_eye_offsets, const Transform3D &p_transform, float p_exposure, RID p_exposure_texture) {
 	ERR_FAIL_NULL(ss_effects);
 	ERR_FAIL_COND(p_render_buffers.is_null());
@@ -1706,18 +1719,7 @@ void RenderForwardClustered::_process_ssr(Ref<RenderSceneBuffersRD> p_render_buf
 
 	Projection reprojections[RendererSceneRender::MAX_RENDER_VIEWS];
 	Projection last_projections[RendererSceneRender::MAX_RENDER_VIEWS];
-
-	for (uint32_t v = 0; v < p_render_buffers->get_view_count(); v++) {
-		Projection correction;
-		correction.set_depth_correction(true);
-
-		Projection projection = correction * p_projections[v];
-
-		reprojections[v] = rb_data->ss_effects_data.ssr_last_frame_projections[v] * Projection(rb_data->ss_effects_data.ssr_last_frame_transform.affine_inverse()) * Projection(p_transform) * projection.inverse();
-		last_projections[v] = rb_data->ss_effects_data.ssr_last_frame_projections[v];
-
-		rb_data->ss_effects_data.ssr_last_frame_projections[v] = projection;
-	}
+	_advance_view_history(p_render_buffers->get_view_count(), p_projections, p_transform, rb_data->ss_effects_data.ssr_last_frame_projections, rb_data->ss_effects_data.ssr_last_frame_transform, reprojections, last_projections);
 
 	RendererRD::SSEffects::SSRTemporalData temporal;
 	temporal.prev_projections = last_projections;
@@ -1729,6 +1731,41 @@ void RenderForwardClustered::_process_ssr(Ref<RenderSceneBuffersRD> p_render_buf
 	rb_data->ss_effects_data.ssr_last_frame_transform = p_transform;
 
 	ss_effects->screen_space_reflection(p_render_buffers, rb_data->ss_effects_data.ssr, p_normal_slices, environment_get_ssr_max_steps(p_environment), environment_get_ssr_fade_in(p_environment), environment_get_ssr_fade_out(p_environment), environment_get_ssr_depth_tolerance(p_environment), p_projections, reprojections, p_eye_offsets, *copy_effects, p_exposure, p_exposure_texture, temporal);
+}
+
+void RenderForwardClustered::_process_ssgi(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_slices, const Projection *p_projections, const Vector3 *p_eye_offsets, const Transform3D &p_transform, float p_exposure, RID p_exposure_texture) {
+	ERR_FAIL_NULL(ss_effects);
+	ERR_FAIL_COND(p_render_buffers.is_null());
+	ERR_FAIL_COND(p_environment.is_null());
+
+	Ref<RenderBufferDataForwardClustered> rb_data = p_render_buffers->get_custom_data(RB_SCOPE_FORWARD_CLUSTERED);
+	ERR_FAIL_COND(rb_data.is_null());
+
+	RENDER_TIMESTAMP("Process SSGI");
+
+	const bool was_traced = rb_data->ss_effects_data.ssil.traced;
+	ss_effects->ssgi_allocate_buffers(p_render_buffers, rb_data->ss_effects_data.ssil);
+
+	Projection reprojections[RendererSceneRender::MAX_RENDER_VIEWS];
+	Projection last_projections[RendererSceneRender::MAX_RENDER_VIEWS];
+	_advance_view_history(p_render_buffers->get_view_count(), p_projections, p_transform, rb_data->ss_effects_data.ssgi_last_frame_projections, rb_data->ss_effects_data.ssgi_last_frame_transform, reprojections, last_projections);
+
+	RendererRD::SSEffects::SSGISettings settings;
+	settings.max_distance = environment_get_ssil_radius(p_environment);
+	settings.exposure = p_exposure;
+	settings.exposure_texture = p_exposure_texture;
+	settings.projections = p_projections;
+	settings.reprojections = reprojections;
+	settings.prev_projections = last_projections;
+	settings.eye_offsets = p_eye_offsets;
+	settings.cur_to_prev = rb_data->ss_effects_data.ssgi_last_frame_transform.affine_inverse() * p_transform;
+	settings.frame = uint32_t(RSG::rasterizer->get_frame_number() & 1023);
+	settings.history_valid = was_traced && rb_data->ss_effects_data.ssgi_history && !p_render_buffers->get_history_discard();
+	settings.debug_mode = get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SSGI_TERMINATION ? 1 : (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SSGI_CONFIDENCE ? 2 : 0);
+	rb_data->ss_effects_data.ssgi_last_frame_transform = p_transform;
+	rb_data->ss_effects_data.ssgi_history = settings.debug_mode == 0 && GLOBAL_GET_CACHED(bool, "rendering/environment/ssil/traced/temporal");
+
+	ss_effects->screen_space_gi(p_render_buffers, rb_data->ss_effects_data.ssil, p_normal_slices, *copy_effects, settings);
 }
 
 void RenderForwardClustered::_select_local_contact_shadows(RenderDataRD *p_render_data) {
@@ -1969,10 +2006,15 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 		RID ss_exposure_texture;
 		const float ss_exposure = _get_screen_space_exposure(p_render_data, ss_exposure_texture);
 
-		if (p_use_ssao || p_use_ssil) {
+		const bool use_ssgi = p_use_ssil && ss_effects->ssil_traced_available(rb);
+		const bool use_gather_ssil = p_use_ssil && !use_ssgi;
+		if (!use_ssgi && rb_data->ss_effects_data.ssgi_history) {
+			rb_data->ss_effects_data.ssgi_history = false;
+		}
+		if (p_use_ssao || use_gather_ssil) {
 			RENDER_TIMESTAMP("Prepare Depth for SSAO/SSIL");
 			// Convert our depth buffer data to linear data in
-			if (p_use_ssil || !_ssao_uses_gtao(p_render_data->scene_data->view_projection[0])) {
+			if (use_gather_ssil || !_ssao_uses_gtao(p_render_data->scene_data->view_projection[0])) {
 				for (uint32_t v = 0; v < rb->get_view_count(); v++) {
 					ss_effects->downsample_depth(rb, v, p_render_data->scene_data->view_projection[v]);
 				}
@@ -1982,9 +2024,13 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 				_process_ssao(rb, p_render_data->environment, p_normal_roughness_slices, p_render_data->scene_data->view_projection, p_render_data->scene_data->taa_frame_count);
 			}
 
-			if (p_use_ssil) {
+			if (use_gather_ssil) {
 				_process_ssil(rb, p_render_data->environment, p_normal_roughness_slices, p_render_data->scene_data->view_projection, p_render_data->scene_data->cam_transform, ss_exposure, ss_exposure_texture);
 			}
+		}
+
+		if (use_ssgi) {
+			_process_ssgi(rb, p_render_data->environment, p_normal_roughness_slices, p_render_data->scene_data->view_projection, p_render_data->scene_data->view_eye_offset, p_render_data->scene_data->cam_transform, ss_exposure, ss_exposure_texture);
 		}
 
 		if (p_use_sscs) {
@@ -3013,10 +3059,11 @@ void RenderForwardClustered::_render_buffers_debug_draw(const RenderDataRD *p_re
 		copy_effects->copy_to_fb_rect(final, texture_storage->render_target_get_rd_framebuffer(render_target), Rect2(Vector2(), rtsize), false, true);
 	}
 
-	if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SSIL && rb->has_texture(RB_SCOPE_SSIL, RB_FINAL)) {
-		RID final = rb->get_texture_slice(RB_SCOPE_SSIL, RB_FINAL, 0, 0);
+	const bool ssil_debug = get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SSIL || get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SSGI_TERMINATION || get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SSGI_CONFIDENCE;
+	RID ssil_final = (ssil_debug && rb_data.is_valid() && ss_effects) ? ss_effects->ssil_get_output(rb, rb_data->ss_effects_data.ssil, 0) : RID();
+	if (ssil_final.is_valid()) {
 		Size2i rtsize = texture_storage->render_target_get_size(render_target);
-		copy_effects->copy_to_fb_rect(final, texture_storage->render_target_get_rd_framebuffer(render_target), Rect2(Vector2(), rtsize), false, false);
+		copy_effects->copy_to_fb_rect(ssil_final, texture_storage->render_target_get_rd_framebuffer(render_target), Rect2(Vector2(), rtsize), false, false);
 	}
 
 	if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_CONTACT_SHADOWS && ss_effects && rb->has_texture(RB_SCOPE_SSCS, RB_SSCS)) {
@@ -4186,7 +4233,7 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		RD::Uniform u;
 		u.binding = 34;
 		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
-		RID ssil = rb.is_valid() && rb->has_texture(RB_SCOPE_SSIL, RB_FINAL) ? rb->get_texture(RB_SCOPE_SSIL, RB_FINAL) : RID();
+		RID ssil = (rb.is_valid() && rb_data.is_valid() && ss_effects) ? ss_effects->ssil_get_output(rb, rb_data->ss_effects_data.ssil) : RID();
 		RID texture = ssil.is_valid() ? ssil : texture_storage->texture_rd_get_default(is_multiview ? RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_BLACK : RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
 		u.append_id(texture);
 		uniforms.push_back(u);

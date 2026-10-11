@@ -3042,6 +3042,9 @@
 		<member name="rendering/environment/ssil/adaptive_target" type="float" setter="" getter="" default="0.5">
 			Quality target to use when [member rendering/environment/ssil/quality] is set to [code]Ultra[/code]. A value of [code]0.0[/code] provides a quality and speed similar to [code]Medium[/code] while a value of [code]1.0[/code] provides much higher quality than any of the other settings at the cost of performance. When using the adaptive target, the performance cost scales with the complexity of the scene.
 		</member>
+		<member name="rendering/environment/ssil/backend" type="int" setter="" getter="" default="0">
+			Screen-space indirect lighting backend. [b]Gather[/b] is the original SSIL. [b]Traced[/b] traces cosine-distributed rays through the depth buffer (SSGI), reads the previous frame's bounce source and leaves rays that do not find a valid hit to the fallback ambient light. Traced needs [member rendering/environment/screen_space_lighting/legacy_last_frame_source] off and no MSAA; otherwise Gather is used. The trace distance is [member Environment.ssil_radius].
+		</member>
 		<member name="rendering/environment/ssil/blur_passes" type="int" setter="" getter="" default="4">
 			Number of blur passes to use when computing screen-space indirect lighting. A higher number will result in a smoother look, but will be slower to compute and will have less high-frequency detail.
 		</member>
@@ -3056,6 +3059,27 @@
 		</member>
 		<member name="rendering/environment/ssil/quality" type="int" setter="" getter="" default="2">
 			Sets the quality of the screen-space indirect lighting effect. Higher values take more samples and so will result in better quality, at the cost of performance. Setting to [code]Ultra[/code] will use the [member rendering/environment/ssil/adaptive_target] setting.
+		</member>
+		<member name="rendering/environment/ssil/traced/firefly_luminance" type="float" setter="" getter="" default="32.0">
+			Largest luminance, at the display exposure, of a single traced hit sample before it is scaled down. Limits fireflies from small bright surfaces.
+		</member>
+		<member name="rendering/environment/ssil/traced/half_size" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], the traced backend traces at half resolution and resolves at full resolution.
+		</member>
+		<member name="rendering/environment/ssil/traced/history_frames" type="int" setter="" getter="" default="32">
+			Maximum number of frames the traced backend accumulates.
+		</member>
+		<member name="rendering/environment/ssil/traced/max_steps" type="int" setter="" getter="" default="48">
+			Maximum hierarchical depth steps per traced ray. A ray that runs out of steps counts as unknown and uses the fallback.
+		</member>
+		<member name="rendering/environment/ssil/traced/rays_per_pixel" type="int" setter="" getter="" default="1">
+			Rays traced per trace pixel each frame by the traced backend.
+		</member>
+		<member name="rendering/environment/ssil/traced/temporal" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], the traced backend accumulates its result over frames with history rejection on disocclusion. Reset by [member rendering/anti_aliasing/quality/history_reset_serial].
+		</member>
+		<member name="rendering/environment/ssil/traced/thickness" type="float" setter="" getter="" default="0.5">
+			Assumed thickness in meters of surfaces in the depth buffer for the traced backend. A ray passing further behind a surface than this does not hit it.
 		</member>
 		<member name="rendering/environment/subsurface_scattering/subsurface_scattering_depth_scale" type="float" setter="" getter="" default="0.01">
 			Scales the depth over which the subsurface scattering effect is applied. A high value may allow light to scatter into a part of the mesh or another mesh that is close in screen space but far in depth. See also [member rendering/environment/subsurface_scattering/subsurface_scattering_scale].

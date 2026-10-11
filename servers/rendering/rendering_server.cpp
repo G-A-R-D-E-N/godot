@@ -3041,6 +3041,8 @@ void RenderingServer::_bind_methods() {
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_FOG_HISTORY_CLAMP);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_LINEAR_DEPTH);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SSR_HIT_DISTANCE);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SSGI_TERMINATION);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SSGI_CONFIDENCE);
 
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_VRS_DISABLED);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_VRS_TEXTURE);
@@ -3792,6 +3794,14 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/blur_passes", PROPERTY_HINT_RANGE, "0,6"), 4);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssil/fadeout_from", PROPERTY_HINT_RANGE, "0.0,512,0.1,or_greater"), 50.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssil/fadeout_to", PROPERTY_HINT_RANGE, "64,65536,0.1,or_greater"), 300.0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/backend", PROPERTY_HINT_ENUM, "Gather,Traced"), 0);
+	GLOBAL_DEF("rendering/environment/ssil/traced/half_size", true);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/traced/rays_per_pixel", PROPERTY_HINT_RANGE, "1,4,1"), 1);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/traced/max_steps", PROPERTY_HINT_RANGE, "8,256,1"), 48);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssil/traced/thickness", PROPERTY_HINT_RANGE, "0.01,4.0,0.01,suffix:m"), 0.5);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssil/traced/firefly_luminance", PROPERTY_HINT_RANGE, "1.0,1024.0,0.1,or_greater"), 32.0);
+	GLOBAL_DEF("rendering/environment/ssil/traced/temporal", true);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/traced/history_frames", PROPERTY_HINT_RANGE, "1,255,1"), 32);
 
 	GLOBAL_DEF("rendering/environment/screen_space_lighting/legacy_last_frame_source", true);
 	GLOBAL_DEF("rendering/environment/screen_space_lighting/temporal_validation", false);

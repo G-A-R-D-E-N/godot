@@ -3560,7 +3560,12 @@ void fragment_shader(in SceneData scene_data) {
 #endif
 
 #ifdef MODE_BOUNCE_SOURCE
-	bounce_source = vec4(diffuse_light + output_emission * emission_bounce_weight, 1.0);
+#ifdef DEPTH_USED
+	float bounce_depth = gl_FragDepth;
+#else
+	float bounce_depth = gl_FragCoord.z;
+#endif
+	bounce_source = vec4(diffuse_light + output_emission * emission_bounce_weight, (bounce_depth * projection_matrix[3][3] - projection_matrix[3][2]) / (bounce_depth * projection_matrix[2][3] - projection_matrix[2][2]));
 #endif
 #ifdef MODE_REFLECTION_SOURCE
 #ifdef DEPTH_USED

@@ -4675,7 +4675,9 @@ void Node3DEditorViewport::_menu_option(int p_option) {
 		case VIEW_DISPLAY_DEBUG_REJECTED_HISTORY:
 		case VIEW_DISPLAY_DEBUG_FOG_HISTORY_CLAMP:
 		case VIEW_DISPLAY_LINEAR_DEPTH:
-		case VIEW_DISPLAY_DEBUG_SSR_HIT_DISTANCE: {
+		case VIEW_DISPLAY_DEBUG_SSR_HIT_DISTANCE:
+		case VIEW_DISPLAY_DEBUG_SSGI_TERMINATION:
+		case VIEW_DISPLAY_DEBUG_SSGI_CONFIDENCE: {
 			static const int display_options[] = {
 				VIEW_DISPLAY_NORMAL,
 				VIEW_DISPLAY_WIREFRAME,
@@ -4725,6 +4727,8 @@ void Node3DEditorViewport::_menu_option(int p_option) {
 				VIEW_DISPLAY_DEBUG_FOG_HISTORY_CLAMP,
 				VIEW_DISPLAY_LINEAR_DEPTH,
 				VIEW_DISPLAY_DEBUG_SSR_HIT_DISTANCE,
+				VIEW_DISPLAY_DEBUG_SSGI_TERMINATION,
+				VIEW_DISPLAY_DEBUG_SSGI_CONFIDENCE,
 				VIEW_MAX
 			};
 			static const Viewport::DebugDraw debug_draw_modes[] = {
@@ -4776,6 +4780,8 @@ void Node3DEditorViewport::_menu_option(int p_option) {
 				Viewport::DEBUG_DRAW_FOG_HISTORY_CLAMP,
 				Viewport::DEBUG_DRAW_LINEAR_DEPTH,
 				Viewport::DEBUG_DRAW_SSR_HIT_DISTANCE,
+				Viewport::DEBUG_DRAW_SSGI_TERMINATION,
+				Viewport::DEBUG_DRAW_SSGI_CONFIDENCE,
 			};
 
 			for (int idx = 0; display_options[idx] != VIEW_MAX; idx++) {
@@ -7114,6 +7120,10 @@ Node3DEditorViewport::Node3DEditorViewport(Node3DEditor *p_spatial_editor, int p
 			TTRC("Displays the radiance SSR samples in the next frame: the opaque image without the SSR term and without fog. Requires SSR to be enabled in Environment."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("SSR Hit Distance"), VIEW_DISPLAY_DEBUG_SSR_HIT_DISTANCE, SupportedRenderingMethods::FORWARD_PLUS,
 			TTRC("Displays the distance to the stochastic screen-space reflection hits as d / (d + 2) for d in meters (black = no hit). Requires SSR in Environment with the Stochastic backend in the project settings."));
+		_add_advanced_debug_draw_mode_item(display_submenu, TTRC("SSGI Termination"), VIEW_DISPLAY_DEBUG_SSGI_TERMINATION, SupportedRenderingMethods::FORWARD_PLUS,
+				TTRC("Displays how each traced screen-space GI ray ended: green = valid hit, blue = left the screen, grey = no hit within the trace distance, yellow = out of steps, red = rejected. Requires SSIL in Environment with the Traced backend in the project settings."));
+		_add_advanced_debug_draw_mode_item(display_submenu, TTRC("SSGI Confidence"), VIEW_DISPLAY_DEBUG_SSGI_CONFIDENCE, SupportedRenderingMethods::FORWARD_PLUS,
+				TTRC("Displays the traced screen-space GI confidence: white = screen-space result used fully, black = fallback ambient light used. Requires SSIL in Environment with the Traced backend in the project settings."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Persistent AO"), VIEW_DISPLAY_DEBUG_PERSISTENT_AO, SupportedRenderingMethods::FORWARD_PLUS,
 			TTRC("Displays the material ambient occlusion each surface writes (the AO built-in, including decals), before screen-space AO."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Fallback Source (Specular)"), VIEW_DISPLAY_DEBUG_FALLBACK_SOURCE_SPECULAR, SupportedRenderingMethods::FORWARD_PLUS,
