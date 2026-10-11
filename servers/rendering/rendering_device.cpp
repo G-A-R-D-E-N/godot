@@ -8955,7 +8955,7 @@ void RenderingDevice::_save_pipeline_cache(void *p_data) {
 	}
 	if (!written || dir->rename(temp_path, self->pipeline_cache_file_path) != OK) {
 		dir->remove(temp_path);
-		WARN_PRINT(vformat("Couldn't save the pipeline cache to '%s'. The previous file is kept.", self->pipeline_cache_file_path));
+		WARN_PRINT(vformat("Couldn't save the pipeline cache to '%s'. The previous file is kept if the write failed; on Windows it may be lost if the rename failed.", self->pipeline_cache_file_path));
 		return;
 	}
 	print_verbose(vformat("Updated PSO cache (%.1f MiB)", cache_blob.size() / (1024.0f * 1024.0f)));
