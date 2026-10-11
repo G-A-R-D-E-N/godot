@@ -486,12 +486,20 @@ struct MultiviewData {
 	highp mat4 projection_matrix_view[MAX_VIEWS];
 	highp mat4 inv_projection_matrix_view[MAX_VIEWS];
 	highp vec4 eye_offset[MAX_VIEWS];
+	highp uint view_index;
+	highp uint pad0;
+	highp uint pad1;
+	highp uint pad2;
 };
 
 layout(std140) uniform MultiviewDataBlock { // ubo:9
 	MultiviewData data;
 }
 multiview_data_block;
+
+#ifdef EMULATE_MULTIVIEW
+#define ViewIndex (multiview_data_block.data.view_index)
+#endif
 
 #ifdef RENDER_MOTION_VECTORS
 layout(std140) uniform PrevMultiviewDataBlock { // ubo:14
@@ -1269,12 +1277,20 @@ struct MultiviewData {
 	highp mat4 projection_matrix_view[MAX_VIEWS];
 	highp mat4 inv_projection_matrix_view[MAX_VIEWS];
 	highp vec4 eye_offset[MAX_VIEWS];
+	highp uint view_index;
+	highp uint pad0;
+	highp uint pad1;
+	highp uint pad2;
 };
 
 layout(std140) uniform MultiviewDataBlock { // ubo:9
 	MultiviewData data;
 }
 multiview_data_block;
+
+#ifdef EMULATE_MULTIVIEW
+#define ViewIndex (multiview_data_block.data.view_index)
+#endif
 #endif
 
 uniform highp mat4 world_transform;
@@ -2136,10 +2152,8 @@ void reflection_process(samplerCube reflection_map,
 	if (exterior) {
 		reflection.rgb = mix(skybox, reflection.rgb, blend);
 	}
-	reflection.rgb *= intensity;
-	reflection.a = blend;
-	reflection.rgb *= blend;
-
+	reflection.a = blend * intensity;
+	reflection.rgb *= reflection.a;
 	reflection_accum += reflection;
 
 #ifndef USE_LIGHTMAP
@@ -2152,8 +2166,8 @@ void reflection_process(samplerCube reflection_map,
 			ambient_out.rgb = mix(ambient, ambient_out.rgb, blend);
 		}
 
-		ambient_out.a = blend;
-		ambient_out.rgb *= blend;
+		ambient_out.a = blend * intensity;
+		ambient_out.rgb *= ambient_out.a;
 		ambient_accum += ambient_out;
 	} else if (ref_ambient_mode == REFLECTION_AMBIENT_COLOR) {
 		vec4 ambient_out;
@@ -2162,8 +2176,8 @@ void reflection_process(samplerCube reflection_map,
 			ambient_out.rgb = mix(ambient, ambient_out.rgb, blend);
 		}
 
-		ambient_out.a = blend;
-		ambient_out.rgb *= blend;
+		ambient_out.a = blend * intensity;
+		ambient_out.rgb *= ambient_out.a;
 		ambient_accum += ambient_out;
 	}
 #endif // USE_LIGHTMAP
@@ -2317,10 +2331,6 @@ void main() {
 	vec2 uv = uv_interp;
 #endif
 
-#ifdef STREAMING_UV_USED
-	vec2 streaming_uv = vec2(0.0);
-#endif
-
 #if defined(UV2_USED) || defined(USE_LIGHTMAP)
 	vec2 uv2 = uv2_interp;
 #endif
@@ -2344,6 +2354,11 @@ void main() {
 	vec2 screen_uv = gl_FragCoord.xy * scene_data_block.data.screen_pixel_size;
 
 	float sss_strength = 0.0;
+
+#ifdef STREAMING_LOD_USED
+	// Not used, but needed so shaders that write STREAMING_LOD still compile.
+	float streaming_lod = 0.0;
+#endif
 
 #ifdef ALPHA_SCISSOR_USED
 	float alpha_scissor_threshold = 1.0;
@@ -2621,7 +2636,7 @@ void main() {
 #endif // SECOND_REFLECTION_PROBE
 
 		if (reflection_accum.a > 0.0) {
-			specular_light = reflection_accum.rgb / reflection_accum.a;
+			specular_light = mix(specular_light, reflection_accum.rgb / reflection_accum.a, reflection_accum.a);
 		}
 	}
 #endif // DISABLE_REFLECTION_PROBE
@@ -2664,7 +2679,7 @@ void main() {
 #endif
 
 		if (cc_reflection_accum.a > 0.0) {
-			cc_specular_light = cc_reflection_accum.rgb / cc_reflection_accum.a;
+			cc_specular_light = mix(cc_specular_light, cc_reflection_accum.rgb / cc_reflection_accum.a, cc_reflection_accum.a);
 		}
 	}
 #endif
@@ -2686,7 +2701,7 @@ void main() {
 
 #ifndef DISABLE_REFLECTION_PROBE
 		if (ambient_accum.a > 0.0) {
-			ambient_light = mix(ambient_light, (ambient_accum.rgb / ambient_accum.a) * scene_data_block.data.ambient_light_color_energy.a, scene_data_block.data.ambient_color_sky_mix);
+			ambient_light = mix(ambient_light, (ambient_accum.rgb / ambient_accum.a) * scene_data_block.data.ambient_light_color_energy.a, ambient_accum.a);
 		}
 #endif // DISABLE_REFLECTION_PROBE
 	}
