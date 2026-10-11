@@ -87,8 +87,10 @@ public:
 		bool uses_fragment_time = false;
 		bool uses_vertex_time = false;
 		bool uses_screen_texture_mipmaps = false;
+		ShaderLanguage::TextureFilter screen_texture_filter = ShaderLanguage::TextureFilter::FILTER_DEFAULT;
 		bool uses_screen_texture = false;
 		bool uses_depth_texture = false;
+		bool uses_back_depth_texture = false;
 		bool uses_normal_roughness_texture = false;
 	};
 

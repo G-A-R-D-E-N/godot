@@ -32,6 +32,8 @@
 
 TEST_FORCE_LINK(test_shader_preprocessor)
 
+#include "core/os/os.h"
+#include "servers/rendering/shader_language.h"
 #include "servers/rendering/shader_preprocessor.h"
 
 #include <cctype>
@@ -325,6 +327,50 @@ TEST_CASE("[ShaderPreprocessor] Invalid concatenations") {
 	CHECK_NE(preprocessor.preprocess("#define X(y)   ##  ", filename, result), Error::OK);
 	CHECK_NE(preprocessor.preprocess("#define X(y) y ##  ", filename, result), Error::OK);
 	CHECK_NE(preprocessor.preprocess("#define X(y) ## y", filename, result), Error::OK);
+}
+
+TEST_CASE("[ShaderLanguage] Combined screen texture filter keeps every requested capability") {
+	using SL = ShaderLanguage;
+
+	CHECK(SL::combine_texture_filters(SL::FILTER_DEFAULT, SL::FILTER_DEFAULT) == SL::FILTER_DEFAULT);
+	CHECK(SL::combine_texture_filters(SL::FILTER_DEFAULT, SL::FILTER_NEAREST) == SL::FILTER_NEAREST);
+	CHECK(SL::combine_texture_filters(SL::FILTER_LINEAR, SL::FILTER_DEFAULT) == SL::FILTER_LINEAR);
+	CHECK(SL::combine_texture_filters(SL::FILTER_LINEAR, SL::FILTER_NEAREST_MIPMAP) == SL::FILTER_LINEAR_MIPMAP);
+	CHECK(SL::combine_texture_filters(SL::FILTER_NEAREST_MIPMAP, SL::FILTER_LINEAR) == SL::FILTER_LINEAR_MIPMAP);
+	CHECK(SL::combine_texture_filters(SL::FILTER_NEAREST, SL::FILTER_NEAREST_MIPMAP) == SL::FILTER_NEAREST_MIPMAP);
+	CHECK(SL::combine_texture_filters(SL::FILTER_LINEAR, SL::FILTER_NEAREST_MIPMAP_ANISOTROPIC) == SL::FILTER_LINEAR_MIPMAP_ANISOTROPIC);
+	CHECK(SL::combine_texture_filters(SL::FILTER_LINEAR_MIPMAP, SL::FILTER_NEAREST_MIPMAP_ANISOTROPIC) == SL::FILTER_LINEAR_MIPMAP_ANISOTROPIC);
+	CHECK(SL::combine_texture_filters(SL::FILTER_LINEAR_MIPMAP, SL::FILTER_LINEAR_MIPMAP) == SL::FILTER_LINEAR_MIPMAP);
+}
+
+TEST_CASE("[ShaderPreprocessor] Renderer feature macros are defined only where the renderer implements them") {
+	const String previous_method = OS::get_singleton()->get_current_rendering_method();
+	const OS::RenderingSource previous_source = OS::get_singleton()->get_current_rendering_method_source();
+
+	auto defined = [](const String &p_method, const String &p_macro) {
+		OS::get_singleton()->set_current_rendering_method(p_method, OS::RENDERING_SOURCE_DEFAULT);
+		String result;
+		ShaderPreprocessor preprocessor;
+		CHECK_EQ(preprocessor.preprocess("#ifdef " + p_macro + "\nfound\n#else\nabsent\n#endif\n", "somefile.gdshader", result), Error::OK);
+		return result.contains("found");
+	};
+
+	for (const char *macro : { "SSS_RADIUS_AVAILABLE", "SPECULAR_OCCLUSION_COMBINED_AVAILABLE", "EMISSION_BOUNCE_WEIGHT_AVAILABLE", "TEMPORAL_REACTIVE_AVAILABLE" }) {
+		CHECK_MESSAGE(defined("forward_plus", macro), macro);
+		CHECK_FALSE_MESSAGE(defined("mobile", macro), macro);
+		CHECK_FALSE_MESSAGE(defined("gl_compatibility", macro), macro);
+	}
+
+	CHECK(defined("forward_plus", "BACK_DEPTH_AVAILABLE"));
+	CHECK(defined("mobile", "BACK_DEPTH_AVAILABLE"));
+	CHECK_FALSE(defined("gl_compatibility", "BACK_DEPTH_AVAILABLE"));
+
+	for (const char *method : { "forward_plus", "mobile", "gl_compatibility" }) {
+		CHECK_MESSAGE(defined(method, "INDIRECT_COAT_NORMAL_AVAILABLE"), method);
+		CHECK_MESSAGE(defined(method, "DIRECT_DIFFUSE_WEIGHT_AVAILABLE"), method);
+	}
+
+	OS::get_singleton()->set_current_rendering_method(previous_method, previous_source);
 }
 
 } // namespace TestShaderPreprocessor

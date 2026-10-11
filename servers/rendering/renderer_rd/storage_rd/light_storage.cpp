@@ -436,6 +436,71 @@ RSE::LightDirectionalSkyMode LightStorage::light_directional_get_sky_mode(RID p_
 	return light->directional_sky_mode;
 }
 
+void LightStorage::light_directional_set_cloud_shadow(RID p_light, RID p_texture, float p_scale, const Vector2 &p_offset, float p_altitude, float p_strength) {
+	Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL(light);
+
+	light->cloud_shadow_texture = p_texture;
+	light->cloud_shadow_scale = MAX(p_scale, 0.001f);
+	light->cloud_shadow_offset = p_offset;
+	light->cloud_shadow_altitude = p_altitude;
+	light->cloud_shadow_strength = CLAMP(p_strength, 0.0f, 1.0f);
+}
+
+RID LightStorage::light_directional_get_cloud_shadow_texture(RID p_light) const {
+	const Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL_V(light, RID());
+
+	if (light->cloud_shadow_texture.is_null() || light->cloud_shadow_strength <= 0.0f) {
+		return RID();
+	}
+	return TextureStorage::get_singleton()->texture_get_rd_texture(light->cloud_shadow_texture);
+}
+
+float LightStorage::_get_cloud_shadow(const Light *p_light, const Transform3D &p_light_transform, const Transform3D &p_camera_transform, float *r_u, float *r_v, float *r_exponent, float *r_plane) const {
+	Vector3 to_light = p_light_transform.basis.xform(Vector3(0, 0, 1)).normalized();
+	real_t height = MAX(to_light.y, (real_t)0.05);
+	real_t slope_x = to_light.x / height;
+	real_t slope_z = to_light.z / height;
+	real_t inv_scale = 1.0 / p_light->cloud_shadow_scale;
+	const Basis &basis = p_camera_transform.basis;
+	const Vector3 &origin = p_camera_transform.origin;
+
+	Vector3 u = (basis.rows[0] - basis.rows[1] * slope_x) * inv_scale;
+	Vector3 v = (basis.rows[2] - basis.rows[1] * slope_z) * inv_scale;
+	real_t u_origin = (origin.x + (p_light->cloud_shadow_altitude - origin.y) * slope_x) * inv_scale + p_light->cloud_shadow_offset.x;
+	real_t v_origin = (origin.z + (p_light->cloud_shadow_altitude - origin.y) * slope_z) * inv_scale + p_light->cloud_shadow_offset.y;
+
+	r_u[0] = u.x;
+	r_u[1] = u.y;
+	r_u[2] = u.z;
+	r_u[3] = u_origin - Math::floor(u_origin);
+	r_v[0] = v.x;
+	r_v[1] = v.y;
+	r_v[2] = v.z;
+	r_v[3] = v_origin - Math::floor(v_origin);
+	*r_exponent = 1.0 / height;
+
+	real_t inv_fade = 1.0 / CLOUD_SHADOW_FADE_METERS;
+	r_plane[0] = basis.rows[1].x * inv_fade;
+	r_plane[1] = basis.rows[1].y * inv_fade;
+	r_plane[2] = basis.rows[1].z * inv_fade;
+	r_plane[3] = (origin.y - p_light->cloud_shadow_altitude) * inv_fade;
+
+	return p_light->cloud_shadow_texture.is_valid() && to_light.y > 0.0 ? p_light->cloud_shadow_strength : 0.0f;
+}
+
+float LightStorage::light_instance_get_cloud_shadow(RID p_light_instance, const Transform3D &p_camera_transform, float *r_u, float *r_v, float *r_exponent) const {
+	const LightInstance *light_instance = light_instance_owner.get_or_null(p_light_instance);
+	ERR_FAIL_NULL_V(light_instance, 0.0f);
+	const Light *light = light_owner.get_or_null(light_instance->light);
+	ERR_FAIL_NULL_V(light, 0.0f);
+
+	float plane[4];
+	float strength = _get_cloud_shadow(light, light_instance->transform, p_camera_transform, r_u, r_v, r_exponent, plane);
+	return strength * CLAMP(-plane[3], 0.0f, 1.0f);
+}
+
 RSE::LightDirectionalShadowMode LightStorage::light_directional_get_shadow_mode(RID p_light) {
 	const Light *light = light_owner.get_or_null(p_light);
 	ERR_FAIL_NULL_V(light, RSE::LIGHT_DIRECTIONAL_SHADOW_ORTHOGONAL);
@@ -738,9 +803,12 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 	omni_light_count = 0;
 	spot_light_count = 0;
 	area_light_count = 0;
-	uint32_t directional_contact_shadows_count = 0;
 
 	r_directional_light_soft_shadows = false;
+
+	for (RID &cloud_shadow_texture : directional_cloud_shadow_textures) {
+		cloud_shadow_texture = RID();
+	}
 
 	for (int i = 0; i < (int)p_lights.size(); i++) {
 		LightInstance *light_instance = light_instance_owner.get_or_null(p_lights[i]);
@@ -797,9 +865,16 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 				light_data.shadow_opacity = (p_using_shadows && light->shadow)
 						? light->param[RSE::LIGHT_PARAM_SHADOW_OPACITY]
 						: 0.0;
-				light_data.sscs_index = (light->shadow && light->allow_contact_shadows)
-						? directional_contact_shadows_count++
-						: 0xffffffff;
+				light_data.sscs_index = 0xffffffff;
+				for (uint32_t j = 0; j < p_render_data->contact_shadows.size(); j++) {
+					if (p_render_data->render_shadows[p_render_data->contact_shadows[j]].light == p_lights[i]) {
+						light_data.sscs_index = j;
+						break;
+					}
+				}
+
+				directional_cloud_shadow_textures[r_directional_light_count] = light_directional_get_cloud_shadow_texture(light_instance->light);
+				light_data.cloud_shadow_strength = _get_cloud_shadow(light, light_transform, p_camera_transform, light_data.cloud_shadow_u, light_data.cloud_shadow_v, &light_data.cloud_shadow_exponent, light_data.cloud_shadow_plane);
 
 				float angular_diameter = light->param[RSE::LIGHT_PARAM_SIZE];
 				if (angular_diameter > 0.0) {
@@ -879,6 +954,12 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 					float fade_start = light->param[RSE::LIGHT_PARAM_SHADOW_FADE_START];
 					light_data.fade_from = -light_data.shadow_split_offsets[limit] * MIN(fade_start, 0.999); //using 1.0 would break smoothstep
 					light_data.fade_to = -light_data.shadow_split_offsets[limit];
+					if (p_render_data->reflection_probe.is_valid()) {
+						float shadow_max = light->param[RSE::LIGHT_PARAM_SHADOW_MAX_DISTANCE];
+						float fade_end = shadow_max > 0.0 ? MAX(light_data.shadow_split_offsets[limit], shadow_max) : light_data.shadow_split_offsets[limit] * 2.0;
+						light_data.fade_from = -fade_end * MIN(fade_start, 0.999);
+						light_data.fade_to = -fade_end;
+					}
 				}
 
 				r_directional_light_count++;
@@ -1119,6 +1200,14 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 			}
 		}
 		light_data.mask = light->cull_mask;
+
+		light_data.sscs_index = 0xffffffff;
+		for (uint32_t j = 0; j < p_render_data->local_contact_shadows.size(); j++) {
+			if (p_render_data->local_contact_shadows[j] == light_instance->self) {
+				light_data.sscs_index = p_render_data->contact_shadows.size() + j;
+				break;
+			}
+		}
 
 		light_data.atlas_rect[0] = 0;
 		light_data.atlas_rect[1] = 0;
@@ -1659,7 +1748,7 @@ bool LightStorage::reflection_probe_has_atlas_index(RID p_instance) {
 		return false;
 	}
 
-	return rpi->atlas_index >= 0;
+	return rpi->render_index >= 0;
 }
 
 void LightStorage::reflection_probe_release_atlas_index(RID p_instance) {
@@ -1671,8 +1760,12 @@ void LightStorage::reflection_probe_release_atlas_index(RID p_instance) {
 	}
 	ReflectionAtlas *atlas = reflection_atlas_owner.get_or_null(rpi->atlas);
 	ERR_FAIL_NULL(atlas);
-	ERR_FAIL_INDEX(rpi->atlas_index, atlas->reflections.size());
-	atlas->reflections.write[rpi->atlas_index].owner = RID();
+	const int indices[2] = { rpi->atlas_index, rpi->render_index };
+	for (const int index : indices) {
+		if (index >= 0 && index < atlas->reflections.size() && atlas->reflections[index].owner == p_instance) {
+			atlas->reflections.write[index].owner = RID();
+		}
+	}
 
 	// TODO investigate if this is enough? shouldn't we be freeing our textures and framebuffers?
 
@@ -1684,6 +1777,7 @@ void LightStorage::reflection_probe_release_atlas_index(RID p_instance) {
 	}
 
 	rpi->atlas_index = -1;
+	rpi->render_index = -1;
 	rpi->atlas = RID();
 }
 
@@ -1710,7 +1804,31 @@ bool LightStorage::reflection_probe_instance_has_reflection(RID p_instance) {
 	ReflectionProbeInstance *rpi = reflection_probe_instance_owner.get_or_null(p_instance);
 	ERR_FAIL_NULL_V(rpi, false);
 
-	return rpi->atlas.is_valid();
+	return rpi->atlas.is_valid() && rpi->atlas_index >= 0;
+}
+
+int LightStorage::_reflection_atlas_find_slot(ReflectionAtlas *p_reflection_atlas) {
+	const uint64_t frame = RSG::rasterizer->get_frame_number();
+	int lru = -1;
+	uint64_t lru_pass = 0;
+	for (int i = 0; i < p_reflection_atlas->reflections.size(); i++) {
+		if (i == p_reflection_atlas->staging_index) {
+			continue;
+		}
+		const ReflectionProbeInstance *owner = reflection_probe_instance_owner.get_or_null(p_reflection_atlas->reflections[i].owner);
+		if (!owner) {
+			return i;
+		}
+		// Must not evict a capture in flight or one that a view sampled last frame.
+		if (!owner->rendering && owner->last_pass + 1 < frame && (lru < 0 || owner->last_pass < lru_pass)) {
+			lru = i;
+			lru_pass = owner->last_pass;
+		}
+	}
+	if (lru >= 0) {
+		reflection_probe_release_atlas_index(p_reflection_atlas->reflections[lru].owner);
+	}
+	return lru;
 }
 
 bool LightStorage::reflection_probe_instance_begin_render(RID p_instance, RID p_reflection_atlas) {
@@ -1762,7 +1880,7 @@ bool LightStorage::reflection_probe_instance_begin_render(RID p_instance, RID p_
 		bool use_storage = !copy_effects->get_raster_effects().has_flag(CopyEffects::RASTER_EFFECT_OCTMAP);
 		{
 			RD::TextureFormat tf;
-			tf.array_layers = atlas->count;
+			tf.array_layers = atlas->count + 1;
 			tf.format = get_reflection_probe_color_format();
 			tf.texture_type = RD::TEXTURE_TYPE_2D_ARRAY;
 			tf.mipmaps = mipmaps;
@@ -1789,8 +1907,9 @@ bool LightStorage::reflection_probe_instance_begin_render(RID p_instance, RID p_
 			tf.usage_bits = get_reflection_probe_depth_usage_bits();
 			atlas->depth_buffer = RD::get_singleton()->texture_create(tf, RD::TextureView());
 		}
-		atlas->reflections.resize(atlas->count);
-		for (int i = 0; i < atlas->count; i++) {
+		atlas->reflections.resize(atlas->count + 1);
+		atlas->staging_index = atlas->count;
+		for (int i = 0; i < atlas->reflections.size(); i++) {
 			atlas->reflections.write[i].data.update_reflection_data(atlas->reflection_texture_size, mipmaps, false, atlas->reflection, i, update_always, RendererSceneRenderRD::get_singleton()->get_sky()->roughness_layers, RendererSceneRenderRD::get_singleton()->_render_buffers_get_preferred_color_format(), atlas->uv_border_size);
 		}
 
@@ -1807,36 +1926,30 @@ bool LightStorage::reflection_probe_instance_begin_render(RID p_instance, RID p_
 		atlas->update_always = update_always;
 	}
 
-	if (rpi->atlas_index == -1) {
-		for (int i = 0; i < atlas->reflections.size(); i++) {
-			if (atlas->reflections[i].owner.is_null()) {
-				rpi->atlas_index = i;
-				break;
-			}
-		}
-		//find the one used last
-		if (rpi->atlas_index == -1) {
-			//everything is in use, find the one least used via LRU
-			uint64_t pass_min = 0;
+	if (rpi->render_index >= 0 && rpi->render_index != rpi->atlas_index && rpi->render_index < atlas->reflections.size() && atlas->reflections[rpi->render_index].owner == p_instance) {
+		atlas->reflections.write[rpi->render_index].owner = RID();
+	}
+	rpi->render_index = -1;
 
-			for (int i = 0; i < atlas->reflections.size(); i++) {
-				ReflectionProbeInstance *rpi2 = reflection_probe_instance_owner.get_or_null(atlas->reflections[i].owner);
-				if (rpi2->last_pass < pass_min) {
-					pass_min = rpi2->last_pass;
-					rpi->atlas_index = i;
-				}
-			}
-		}
+	int render_index = rpi->atlas_index;
+	if (render_index < 0) {
+		render_index = _reflection_atlas_find_slot(atlas);
+	} else if (!update_always) {
+		render_index = atlas->staging_index;
+	}
+	const RID slot_owner = render_index >= 0 ? atlas->reflections[render_index].owner : RID();
+	if (render_index < 0 || (slot_owner.is_valid() && slot_owner != p_instance)) {
+		RD::get_singleton()->draw_command_end_label();
+		return false;
 	}
 
-	if (rpi->atlas_index != -1) { // should we fail if this is still -1 ?
-		atlas->reflections.write[rpi->atlas_index].owner = p_instance;
-	}
-
+	atlas->reflections.write[render_index].owner = p_instance;
+	rpi->render_index = render_index;
 	rpi->atlas = p_reflection_atlas;
 	rpi->rendering = true;
 	rpi->dirty = false;
 	rpi->processing_layer = 1;
+	rpi->last_pass = RSG::rasterizer->get_frame_number();
 
 	RD::get_singleton()->draw_command_end_label();
 
@@ -1852,9 +1965,10 @@ bool LightStorage::reflection_probe_instance_end_render(RID p_instance, RID p_re
 
 	ReflectionProbeInstance *rpi = reflection_probe_instance_owner.get_or_null(p_instance);
 	ERR_FAIL_NULL_V(rpi, false);
+	ERR_FAIL_INDEX_V(rpi->render_index, atlas->reflections.size(), false);
 
 	RD::get_singleton()->draw_command_begin_label("Convert reflection probe to octahedral");
-	copy_effects->copy_cubemap_to_octmap(atlas->color_buffer, atlas->reflections.write[rpi->atlas_index].data.layers[0].mipmaps[0].framebuffer, atlas->uv_border_size);
+	copy_effects->copy_cubemap_to_octmap(atlas->color_buffer, atlas->reflections.write[rpi->render_index].data.layers[0].mipmaps[0].framebuffer, atlas->uv_border_size);
 	RD::get_singleton()->draw_command_end_label();
 
 	return true;
@@ -1873,30 +1987,37 @@ bool LightStorage::reflection_probe_instance_postprocess_step(RID p_instance) {
 	ERR_FAIL_COND_V(!rpi->rendering, false);
 
 	ReflectionAtlas *atlas = reflection_atlas_owner.get_or_null(rpi->atlas);
-	if (!atlas || rpi->atlas_index == -1) {
+	if (!atlas || rpi->render_index == -1) {
 		// Does not belong to an atlas anymore, cancel (was removed from atlas or atlas changed while rendering).
 		rpi->rendering = false;
 		return false;
 	}
 
+	SkyRD::ReflectionData &data = atlas->reflections.write[rpi->render_index].data;
 	if (LightStorage::get_singleton()->reflection_probe_get_update_mode(rpi->probe) == RSE::REFLECTION_PROBE_UPDATE_ALWAYS) {
 		// Using real time reflections, all roughness is done in one step
-		atlas->reflections.write[rpi->atlas_index].data.create_reflection_fast_filter(false);
-		rpi->rendering = false;
-		rpi->processing_layer = 1;
-		return true;
+		data.create_reflection_fast_filter(false);
+	} else {
+		const int mip_count = (int)data.layers[0].mipmaps.size();
+		if (rpi->processing_layer < mip_count) {
+			data.create_reflection_importance_sample(false, rpi->processing_layer, RendererSceneRenderRD::get_singleton()->get_sky()->sky_ggx_samples_quality);
+			rpi->processing_layer++;
+		}
+		if (rpi->processing_layer < mip_count) {
+			return false;
+		}
 	}
 
-	atlas->reflections.write[rpi->atlas_index].data.create_reflection_importance_sample(false, rpi->processing_layer, RendererSceneRenderRD::get_singleton()->get_sky()->sky_ggx_samples_quality);
-
-	rpi->processing_layer++;
-	if (rpi->processing_layer == (int)atlas->reflections[rpi->atlas_index].data.layers[0].mipmaps.size()) {
-		rpi->rendering = false;
-		rpi->processing_layer = 1;
-		return true;
+	if (rpi->atlas_index >= 0 && rpi->atlas_index != rpi->render_index) {
+		atlas->reflections.write[rpi->atlas_index].owner = RID();
+		atlas->staging_index = rpi->atlas_index;
 	}
-
-	return false;
+	rpi->atlas_index = rpi->render_index;
+	rpi->render_index = -1;
+	rpi->rendering = false;
+	rpi->processing_layer = 1;
+	rpi->last_pass = RSG::rasterizer->get_frame_number();
+	return true;
 }
 
 uint32_t LightStorage::reflection_probe_instance_get_resolution(RID p_instance) {
@@ -1915,7 +2036,7 @@ RID LightStorage::reflection_probe_instance_get_framebuffer(RID p_instance, int 
 
 	ReflectionAtlas *atlas = reflection_atlas_owner.get_or_null(rpi->atlas);
 	ERR_FAIL_NULL_V(atlas, RID());
-	ERR_FAIL_COND_V_MSG(rpi->atlas_index < 0, RID(), "Reflection probe atlas index invalid. Maximum amount of reflection probes in use (" + itos(atlas->count) + ") may have been exceeded, reflections will not display properly. Consider increasing Rendering > Reflections > Reflection Atlas > Reflection Count in the Project Settings.");
+	ERR_FAIL_COND_V_MSG(rpi->render_index < 0, RID(), "Reflection probe atlas index invalid. Maximum amount of reflection probes in use (" + itos(atlas->count) + ") may have been exceeded, reflections will not display properly. Consider increasing Rendering > Reflections > Reflection Atlas > Reflection Count in the Project Settings.");
 
 	return atlas->color_fbs[p_index];
 }

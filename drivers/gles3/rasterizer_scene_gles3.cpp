@@ -231,6 +231,31 @@ void RasterizerSceneGLES3::_geometry_instance_dependency_deleted(const RID &p_de
 	static_cast<GeometryInstanceGLES3 *>(p_tracker->userdata)->data->dirty_dependencies = true;
 }
 
+static bool _screen_texture_filter_uses_mipmaps(ShaderLanguage::TextureFilter p_filter) {
+	return p_filter >= ShaderLanguage::FILTER_NEAREST_MIPMAP && p_filter <= ShaderLanguage::FILTER_LINEAR_MIPMAP_ANISOTROPIC;
+}
+
+GLuint RasterizerSceneGLES3::_get_screen_texture_sampler(ShaderLanguage::TextureFilter p_filter) {
+	if (p_filter == ShaderLanguage::FILTER_DEFAULT) {
+		return 0;
+	}
+
+	bool linear = p_filter == ShaderLanguage::FILTER_LINEAR || p_filter == ShaderLanguage::FILTER_LINEAR_MIPMAP || p_filter == ShaderLanguage::FILTER_LINEAR_MIPMAP_ANISOTROPIC;
+	bool mipmaps = _screen_texture_filter_uses_mipmaps(p_filter) && scene_state.screen_texture_has_mipmaps;
+	int index = (mipmaps ? 2 : 0) + (linear ? 1 : 0);
+
+	GLuint &sampler = screen_texture_samplers[index];
+	if (sampler == 0) {
+		static const GLenum min_filters[4] = { GL_NEAREST, GL_LINEAR, GL_NEAREST_MIPMAP_NEAREST, GL_LINEAR_MIPMAP_LINEAR };
+		glGenSamplers(1, &sampler);
+		glSamplerParameteri(sampler, GL_TEXTURE_MIN_FILTER, min_filters[index]);
+		glSamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER, linear ? GL_LINEAR : GL_NEAREST);
+		glSamplerParameteri(sampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glSamplerParameteri(sampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	}
+	return sampler;
+}
+
 void RasterizerSceneGLES3::_geometry_instance_add_surface_with_material(GeometryInstanceGLES3 *ginstance, uint32_t p_surface, GLES3::SceneMaterialData *p_material, uint32_t p_material_id, uint32_t p_shader_id, RID p_mesh) {
 	GLES3::MeshStorage *mesh_storage = GLES3::MeshStorage::get_singleton();
 
@@ -243,6 +268,9 @@ void RasterizerSceneGLES3::_geometry_instance_add_surface_with_material(Geometry
 
 	if (p_material->shader_data->uses_screen_texture) {
 		flags |= GeometryInstanceSurface::FLAG_USES_SCREEN_TEXTURE;
+		if (_screen_texture_filter_uses_mipmaps(p_material->shader_data->screen_texture_filter)) {
+			flags |= GeometryInstanceSurface::FLAG_USES_SCREEN_TEXTURE_MIPMAPS;
+		}
 	}
 
 	if (p_material->shader_data->uses_depth_texture) {
@@ -1309,6 +1337,7 @@ void RasterizerSceneGLES3::_fill_render_list(RenderListType p_render_list, const
 
 	if (p_render_list == RENDER_LIST_OPAQUE) {
 		scene_state.used_screen_texture = false;
+		scene_state.used_screen_texture_mipmaps = false;
 		scene_state.used_normal_texture = false;
 		scene_state.used_depth_texture = false;
 		scene_state.used_opaque_stencil = false;
@@ -1517,6 +1546,9 @@ void RasterizerSceneGLES3::_fill_render_list(RenderListType p_render_list, const
 				if (surf->flags & GeometryInstanceSurface::FLAG_USES_SCREEN_TEXTURE) {
 					scene_state.used_screen_texture = true;
 				}
+				if (surf->flags & GeometryInstanceSurface::FLAG_USES_SCREEN_TEXTURE_MIPMAPS) {
+					scene_state.used_screen_texture_mipmaps = true;
+				}
 				if (surf->flags & GeometryInstanceSurface::FLAG_USES_NORMAL_TEXTURE) {
 					scene_state.used_normal_texture = true;
 				}
@@ -1633,6 +1665,7 @@ void RasterizerSceneGLES3::_setup_environment(const RenderDataGLES3 *p_render_da
 		RSE::EnvironmentAmbientSource ambient_src = environment_get_ambient_source(p_render_data->environment);
 
 		float bg_energy_multiplier = environment_get_bg_energy_multiplier(p_render_data->environment);
+		float exposure_normalization = use_physical_light_units && p_render_data->camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes) : 1.0f;
 
 		scene_state.data.ambient_light_color_energy[3] = bg_energy_multiplier;
 
@@ -1649,7 +1682,7 @@ void RasterizerSceneGLES3::_setup_environment(const RenderDataGLES3 *p_render_da
 			scene_state.data.use_ambient_light = true;
 			scene_state.data.use_ambient_cubemap = false;
 		} else {
-			float energy = environment_get_ambient_light_energy(p_render_data->environment);
+			float energy = environment_get_ambient_light_energy(p_render_data->environment) * exposure_normalization;
 			Color color = environment_get_ambient_light(p_render_data->environment);
 			color = color.srgb_to_linear();
 			scene_state.data.ambient_light_color_energy[0] = color.r * energy;
@@ -1685,7 +1718,7 @@ void RasterizerSceneGLES3::_setup_environment(const RenderDataGLES3 *p_render_da
 		scene_state.data.fog_aerial_perspective = environment_get_fog_aerial_perspective(p_render_data->environment);
 
 		Color fog_color = environment_get_fog_light_color(p_render_data->environment).srgb_to_linear();
-		float fog_energy = environment_get_fog_light_energy(p_render_data->environment);
+		float fog_energy = environment_get_fog_light_energy(p_render_data->environment) * exposure_normalization;
 
 		scene_state.data.fog_light_color[0] = fog_color.r * fog_energy;
 		scene_state.data.fog_light_color[1] = fog_color.g * fog_energy;
@@ -1698,21 +1731,19 @@ void RasterizerSceneGLES3::_setup_environment(const RenderDataGLES3 *p_render_da
 
 	if (p_render_data->camera_attributes.is_valid()) {
 		scene_state.data.emissive_exposure_normalization = RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes);
-		scene_state.data.IBL_exposure_normalization = 1.0;
-		if (is_environment(p_render_data->environment)) {
-			RID sky_rid = environment_get_sky(p_render_data->environment);
-			if (sky_rid.is_valid()) {
-				float current_exposure = RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes) * environment_get_bg_intensity(p_render_data->environment);
-				scene_state.data.IBL_exposure_normalization = current_exposure / MAX(0.001, sky_get_baked_exposure(sky_rid));
-			}
-		}
 	} else if (scene_state.data.emissive_exposure_normalization > 0.0) {
 		// This branch is triggered when using render_material().
 		// Emissive is set outside the function, so don't set it.
-		// IBL isn't used don't set it.
 	} else {
 		scene_state.data.emissive_exposure_normalization = 1.0;
-		scene_state.data.IBL_exposure_normalization = 1.0;
+	}
+
+	scene_state.data.IBL_exposure_normalization = 1.0;
+	RID sky_rid = is_environment(p_render_data->environment) ? environment_get_sky(p_render_data->environment) : RID();
+	if (sky_rid.is_valid() && (use_physical_light_units || p_render_data->camera_attributes.is_valid())) {
+		float camera_exposure = p_render_data->camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes) : 1.0f;
+		float current_exposure = camera_exposure * environment_get_bg_intensity(p_render_data->environment);
+		scene_state.data.IBL_exposure_normalization = current_exposure / MAX(use_physical_light_units ? 1e-6f : 0.001f, sky_get_baked_exposure(sky_rid));
 	}
 
 	_update_scene_ubo(scene_state.ubo_buffer, SCENE_DATA_UNIFORM_LOCATION, sizeof(SceneState::UBO), &scene_state.data, "Scene state UBO");
@@ -2948,8 +2979,11 @@ void RasterizerSceneGLES3::render_scene(const Ref<RenderSceneBuffers> &p_render_
 			_draw_sky(render_data.environment, projection, transform, sky_energy_multiplier, render_data.luminance_multiplier, p_camera_data->view_count > 1, flip_y, apply_environment_effects_in_post);
 		}
 
+		scene_state.screen_texture_has_mipmaps = false;
+		bool screen_texture_mipmaps = scene_state.used_screen_texture && scene_state.used_screen_texture_mipmaps;
+		rb->update_backbuffer_mipmap_use(screen_texture_mipmaps);
 		if (scene_state.used_screen_texture || scene_state.used_depth_texture) {
-			rb->check_backbuffer(scene_state.used_screen_texture, scene_state.used_depth_texture);
+			rb->check_backbuffer(scene_state.used_screen_texture, scene_state.used_depth_texture, screen_texture_mipmaps);
 			Size2i size = rb->get_internal_size();
 			GLuint backbuffer_fbo = rb->get_backbuffer_fbo();
 			GLuint backbuffer = rb->get_backbuffer();
@@ -2977,11 +3011,16 @@ void RasterizerSceneGLES3::render_scene(const Ref<RenderSceneBuffers> &p_render_
 					glActiveTexture(GL_TEXTURE0 + config->max_texture_image_units - 7);
 					glBindTexture(GL_TEXTURE_2D, backbuffer_depth);
 				}
-			}
 
-			// Bound framebuffer may have changed, so change it back
-			glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+				if (screen_texture_mipmaps && rb->get_backbuffer_mipmap_count() > 1) {
+					scene_state.screen_texture_has_mipmaps = true;
+					rb->generate_backbuffer_mipmaps();
+				}
+			}
 		}
+
+		// Bound framebuffer may have changed, so change it back
+		glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 
 		RENDER_TIMESTAMP("Render 3D Transparent Pass");
 		scene_state.enable_gl_blend(true);
@@ -3253,6 +3292,7 @@ void RasterizerSceneGLES3::_render_list_template(RenderListParameters *p_params,
 
 	GLES3::SceneMaterialData *prev_material_data = nullptr;
 	GLES3::SceneShaderData *prev_shader = nullptr;
+	GLuint prev_screen_sampler = 0;
 	GeometryInstanceGLES3 *prev_inst = nullptr;
 	SceneShaderGLES3::ShaderVariant prev_variant = SceneShaderGLES3::ShaderVariant::MODE_COLOR;
 	SceneShaderGLES3::ShaderVariant shader_variant = SceneShaderGLES3::MODE_COLOR; // Assigned to silence wrong -Wmaybe-initialized
@@ -3603,6 +3643,14 @@ void RasterizerSceneGLES3::_render_list_template(RenderListParameters *p_params,
 			if (prev_material_data != material_data) {
 				material_data->bind_uniforms();
 				prev_material_data = material_data;
+
+				if constexpr (p_pass_mode == PASS_MODE_COLOR_TRANSPARENT) {
+					GLuint screen_sampler = (surf->flags & GeometryInstanceSurface::FLAG_USES_SCREEN_TEXTURE) ? _get_screen_texture_sampler(shader->screen_texture_filter) : 0;
+					if (screen_sampler != prev_screen_sampler) {
+						glBindSampler(config->max_texture_image_units - 6, screen_sampler);
+						prev_screen_sampler = screen_sampler;
+					}
+				}
 			}
 
 			SceneShaderGLES3::ShaderVariant instance_variant = shader_variant;
@@ -4149,6 +4197,10 @@ void RasterizerSceneGLES3::_render_list_template(RenderListParameters *p_params,
 				scene_state.enable_gl_blend(false);
 			}
 		}
+	}
+
+	if (prev_screen_sampler != 0) {
+		glBindSampler(config->max_texture_image_units - 6, 0);
 	}
 
 	// Make the actual redraw request
@@ -4892,6 +4944,12 @@ RasterizerSceneGLES3::~RasterizerSceneGLES3() {
 	}
 	if (ltc.lut2_texture.is_valid()) {
 		RS::get_singleton()->free_rid(ltc.lut2_texture);
+	}
+
+	for (GLuint sampler : screen_texture_samplers) {
+		if (sampler != 0) {
+			glDeleteSamplers(1, &sampler);
+		}
 	}
 
 	GLES3::Utilities::get_singleton()->buffer_free_data(scene_state.directional_light_buffer);

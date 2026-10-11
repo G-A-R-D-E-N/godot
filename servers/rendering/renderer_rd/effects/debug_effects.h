@@ -31,6 +31,7 @@
 #pragma once
 
 #include "servers/rendering/renderer_rd/pipeline_cache_rd.h"
+#include "servers/rendering/renderer_rd/shaders/effects/linear_depth.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/motion_vectors.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/shadow_frustum.glsl.gen.h"
 
@@ -81,6 +82,19 @@ private:
 		MotionVectorsPushConstant push_constant;
 	} motion_vectors;
 
+	struct LinearDepthPushConstant {
+		float inv_projection[16];
+		float z_near;
+		float z_far;
+		float pad[2];
+	};
+
+	struct {
+		LinearDepthShaderRD shader;
+		RID shader_version;
+		PipelineCacheRD pipeline;
+	} linear_depth;
+
 	void _create_frustum_arrays();
 
 protected:
@@ -90,6 +104,7 @@ public:
 
 	void draw_shadow_frustum(RID p_light, const Projection &p_cam_projection, const Transform3D &p_cam_transform, RID p_dest_fb, const Rect2 p_rect);
 	void draw_motion_vectors(RID p_velocity, RID p_depth, RID p_dest_fb, const Projection &p_current_projection, const Transform3D &p_current_transform, const Projection &p_previous_projection, const Transform3D &p_previous_transform, Size2i p_resolution);
+	void draw_linear_depth(RID p_depth, RID p_dest_fb, const Projection &p_projection, float p_z_near, float p_z_far);
 };
 
 } // namespace RendererRD

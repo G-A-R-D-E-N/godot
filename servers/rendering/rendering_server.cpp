@@ -2548,6 +2548,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("light_directional_set_shadow_mode", "light", "mode"), &RenderingServer::light_directional_set_shadow_mode);
 	ClassDB::bind_method(D_METHOD("light_directional_set_blend_splits", "light", "enable"), &RenderingServer::light_directional_set_blend_splits);
 	ClassDB::bind_method(D_METHOD("light_directional_set_sky_mode", "light", "mode"), &RenderingServer::light_directional_set_sky_mode);
+	ClassDB::bind_method(D_METHOD("light_directional_set_cloud_shadow", "light", "texture", "scale", "offset", "altitude", "strength"), &RenderingServer::light_directional_set_cloud_shadow);
 
 	ClassDB::bind_method(D_METHOD("light_area_set_size", "light", "size"), &RenderingServer::light_area_set_size);
 	ClassDB::bind_method(D_METHOD("light_area_set_normalize_energy", "light", "enable"), &RenderingServer::light_area_set_normalize_energy);
@@ -3021,6 +3022,25 @@ void RenderingServer::_bind_methods() {
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_OCCLUDERS);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_MOTION_VECTORS);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_INTERNAL_BUFFER);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_CONTACT_SHADOWS);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_BENT_NORMALS);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_DIRECT_DIFFUSE);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_DIRECT_SPECULAR);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_INDIRECT_DIFFUSE);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_INDIRECT_SPECULAR);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_EMISSION);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_FOG_TRANSMITTANCE);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_FOG_INSCATTER);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SSR_CONFIDENCE);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_BOUNCE_SOURCE);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_REFLECTION_SOURCE);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_PERSISTENT_AO);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_SPECULAR);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_REJECTED_HISTORY);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_FOG_HISTORY_CLAMP);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_LINEAR_DEPTH);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SSR_HIT_DISTANCE);
 
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_VRS_DISABLED);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_VRS_TEXTURE);
@@ -3091,6 +3111,8 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("environment_set_ssao", "env", "enable", "radius", "intensity", "power", "detail", "horizon", "sharpness", "light_affect", "ao_channel_affect"), &RenderingServer::environment_set_ssao);
 	ClassDB::bind_method(D_METHOD("environment_set_fog", "env", "enable", "light_color", "light_energy", "sun_scatter", "density", "height", "height_density", "aerial_perspective", "sky_affect", "fog_mode"), &RenderingServer::environment_set_fog, DEFVAL(RSE::ENV_FOG_MODE_EXPONENTIAL));
 	ClassDB::bind_method(D_METHOD("environment_set_fog_depth", "env", "curve", "begin", "end"), &RenderingServer::environment_set_fog_depth);
+	ClassDB::bind_method(D_METHOD("environment_set_aerial_perspective", "env", "enable", "texture", "max_distance"), &RenderingServer::environment_set_aerial_perspective);
+	ClassDB::bind_method(D_METHOD("environment_set_night_vision", "env", "enable", "mesopic_min", "mesopic_max", "blue_shift", "blue_shift_chromaticity", "desaturation", "acuity_radius", "highlight_range"), &RenderingServer::environment_set_night_vision);
 	ClassDB::bind_method(D_METHOD("environment_set_sdfgi", "env", "enable", "cascades", "min_cell_size", "y_scale", "use_occlusion", "bounce_feedback", "read_sky", "energy", "normal_bias", "probe_bias"), &RenderingServer::environment_set_sdfgi);
 	ClassDB::bind_method(D_METHOD("environment_set_volumetric_fog", "env", "enable", "density", "albedo", "emission", "emission_energy", "anisotropy", "length", "detail_spread", "gi_inject", "temporal_reprojection", "temporal_reprojection_amount", "ambient_inject", "sky_affect"), &RenderingServer::environment_set_volumetric_fog);
 
@@ -3691,6 +3713,10 @@ void RenderingServer::init() {
 	GLOBAL_DEF("rendering/lights_and_shadows/contact_shadow/enabled", false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/contact_shadow/shadow_length", PROPERTY_HINT_ENUM, "Short (Fast),Medium (Average),Long (Slow)"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/lights_and_shadows/contact_shadow/surface_thickness", PROPERTY_HINT_RANGE, "0.001,0.1,0.001"), 0.01);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/contact_shadow/max_local_lights", PROPERTY_HINT_RANGE, "0,16,1"), 4);
+	GLOBAL_DEF("rendering/lights_and_shadows/contact_shadow/ray_completion_confidence", false);
+	GLOBAL_DEF("rendering/lights_and_shadows/contact_shadow/receiver_plane_rejection", false);
+	GLOBAL_DEF("rendering/lights_and_shadows/directional_shadow/soft_shadow_thin_casters", false);
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/directional_shadow/size", PROPERTY_HINT_RANGE, "256,16384"), 4096);
 	GLOBAL_DEF("rendering/lights_and_shadows/directional_shadow/size.mobile", 2048);
@@ -3752,6 +3778,13 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssao/blur_passes", PROPERTY_HINT_RANGE, "0,6"), 2);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssao/fadeout_from", PROPERTY_HINT_RANGE, "0.0,512,0.1,or_greater"), 50.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssao/fadeout_to", PROPERTY_HINT_RANGE, "64,65536,0.1,or_greater"), 300.0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssao/backend", PROPERTY_HINT_ENUM, "ASSAO,GTAO"), 0);
+
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/gtao/slices", PROPERTY_HINT_RANGE, "1,16,1"), 3);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/gtao/steps", PROPERTY_HINT_RANGE, "1,16,1"), 3);
+	GLOBAL_DEF("rendering/environment/gtao/half_size", true);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/gtao/denoise_passes", PROPERTY_HINT_RANGE, "0,4,1"), 2);
+	GLOBAL_DEF("rendering/environment/gtao/bent_normals", false);
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/quality", PROPERTY_HINT_ENUM, "Very Low (Fast),Low (Fast),Medium (Average),High (Slow),Ultra (Custom)"), 2);
 	GLOBAL_DEF("rendering/environment/ssil/half_size", true);
@@ -3759,6 +3792,9 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/blur_passes", PROPERTY_HINT_RANGE, "0,6"), 4);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssil/fadeout_from", PROPERTY_HINT_RANGE, "0.0,512,0.1,or_greater"), 50.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssil/fadeout_to", PROPERTY_HINT_RANGE, "64,65536,0.1,or_greater"), 300.0);
+
+	GLOBAL_DEF("rendering/environment/screen_space_lighting/legacy_last_frame_source", true);
+	GLOBAL_DEF("rendering/environment/screen_space_lighting/temporal_validation", false);
 
 	// Move the project setting definitions here so they are available when we init the rendering internals.
 	GLOBAL_DEF_BASIC("rendering/viewport/hdr_2d", false);
@@ -3811,6 +3847,10 @@ void RenderingServer::init() {
 	GLOBAL_DEF("rendering/environment/glow/upscale_mode.mobile", 0);
 
 	GLOBAL_DEF("rendering/environment/screen_space_reflection/half_size", true);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/screen_space_reflection/backend", PROPERTY_HINT_ENUM, "Mirror,Stochastic"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/screen_space_reflection/stochastic/rays_per_pixel", PROPERTY_HINT_RANGE, "1,4,1"), 1);
+	GLOBAL_DEF("rendering/environment/screen_space_reflection/stochastic/temporal", true);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/screen_space_reflection/stochastic/roughness_cutoff", PROPERTY_HINT_RANGE, "0.1,1.0,0.01"), 0.8);
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/subsurface_scattering/subsurface_scattering_quality", PROPERTY_HINT_ENUM, "Disabled (Fastest),Low (Fast),Medium (Average),High (Slow)"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/subsurface_scattering/subsurface_scattering_scale", PROPERTY_HINT_RANGE, "0.001,1,0.001"), 0.05);
@@ -3830,6 +3870,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/volumetric_fog/volume_size", PROPERTY_HINT_RANGE, "16,512,1"), 64);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/volumetric_fog/volume_depth", PROPERTY_HINT_RANGE, "16,512,1"), 64);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/volumetric_fog/use_filter", PROPERTY_HINT_ENUM, "No (Faster),Yes (Higher Quality)"), 1);
+	GLOBAL_DEF("rendering/environment/volumetric_fog/use_temporal_clamp", false);
 
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/limits/spatial_indexer/update_iterations_per_frame", PROPERTY_HINT_RANGE, "0,1024,1"), 10);
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/limits/spatial_indexer/threaded_cull_minimum_instances", PROPERTY_HINT_RANGE, "32,65536,1"), 1000);

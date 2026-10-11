@@ -32,6 +32,7 @@
 
 #ifdef GLES3_ENABLED
 
+#include "drivers/gles3/effects/copy_effects.h"
 #include "drivers/gles3/storage/config.h"
 #include "drivers/gles3/storage/texture_storage.h"
 #include "drivers/gles3/storage/utilities.h"
@@ -473,7 +474,7 @@ void RenderSceneBuffersGLES3::_clear_intermediate_buffers() {
 	}
 }
 
-void RenderSceneBuffersGLES3::check_backbuffer(bool p_need_color, bool p_need_depth) {
+void RenderSceneBuffersGLES3::check_backbuffer(bool p_need_color, bool p_need_depth, bool p_need_mipmaps) {
 	GLES3::TextureStorage *texture_storage = GLES3::TextureStorage::get_singleton();
 
 	// Setup our back buffer
@@ -519,6 +520,29 @@ void RenderSceneBuffersGLES3::check_backbuffer(bool p_need_color, bool p_need_de
 		}
 	}
 
+	if (backbuffer3d.color != 0 && p_need_mipmaps && !use_array && backbuffer3d_mipmap_count == 1) {
+		glBindTexture(texture_target, backbuffer3d.color);
+
+		int mipmap_count = 1;
+		for (int32_t max_dimension = MAX(internal_size.x, internal_size.y); max_dimension > 1; max_dimension >>= 1) {
+			mipmap_count++;
+		}
+
+		Size2i level_size = internal_size;
+		uint32_t total_size = internal_size.x * internal_size.y * view_count * color_format_size;
+		for (int level = 1; level < mipmap_count; level++) {
+			level_size = Size2i(level_size.x >> 1, level_size.y >> 1).maxi(1);
+			glTexImage2D(texture_target, level, color_internal_format, level_size.x, level_size.y, 0, color_format, color_type, nullptr);
+			total_size += level_size.x * level_size.y * view_count * color_format_size;
+		}
+
+		glTexParameteri(texture_target, GL_TEXTURE_BASE_LEVEL, 0);
+		glTexParameteri(texture_target, GL_TEXTURE_MAX_LEVEL, mipmap_count - 1);
+
+		GLES3::Utilities::get_singleton()->texture_resize_data(backbuffer3d.color, total_size);
+		backbuffer3d_mipmap_count = mipmap_count;
+	}
+
 	if (backbuffer3d.depth == 0 && p_need_depth) {
 		glGenTextures(1, &backbuffer3d.depth);
 		glBindTexture(texture_target, backbuffer3d.depth);
@@ -559,7 +583,47 @@ void RenderSceneBuffersGLES3::check_backbuffer(bool p_need_color, bool p_need_de
 	glBindFramebuffer(GL_FRAMEBUFFER, GLES3::TextureStorage::system_fbo);
 }
 
+void RenderSceneBuffersGLES3::generate_backbuffer_mipmaps() {
+	if (backbuffer3d.color == 0 || backbuffer3d_mipmap_count <= 1) {
+		return;
+	}
+
+	GLES3::CopyEffects::get_singleton()->bilinear_blur(backbuffer3d.color, backbuffer3d_mipmap_count, Rect2i(Point2i(), internal_size));
+}
+
+void RenderSceneBuffersGLES3::update_backbuffer_mipmap_use(bool p_used) {
+	if (backbuffer3d_mipmap_count <= 1 || p_used) {
+		backbuffer3d_unused_mipmap_frames = 0;
+		return;
+	}
+
+	if (++backbuffer3d_unused_mipmap_frames >= BACKBUFFER_MIPMAP_RELEASE_FRAMES) {
+		_release_backbuffer_color();
+	}
+}
+
+void RenderSceneBuffersGLES3::_release_backbuffer_color() {
+	backbuffer3d_mipmap_count = 1;
+	backbuffer3d_unused_mipmap_frames = 0;
+
+	if (backbuffer3d.color == 0) {
+		return;
+	}
+
+	if (backbuffer3d.fbo) {
+		glBindFramebuffer(GL_FRAMEBUFFER, backbuffer3d.fbo);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+		glBindFramebuffer(GL_FRAMEBUFFER, GLES3::TextureStorage::system_fbo);
+	}
+
+	GLES3::Utilities::get_singleton()->texture_free_data(backbuffer3d.color);
+	backbuffer3d.color = 0;
+}
+
 void RenderSceneBuffersGLES3::_clear_back_buffers() {
+	backbuffer3d_mipmap_count = 1;
+	backbuffer3d_unused_mipmap_frames = 0;
+
 	if (backbuffer3d.fbo) {
 		glDeleteFramebuffers(1, &backbuffer3d.fbo);
 		backbuffer3d.fbo = 0;

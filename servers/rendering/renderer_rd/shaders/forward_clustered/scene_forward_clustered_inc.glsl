@@ -158,6 +158,10 @@ bool sc_dithered_instance_fade() {
 	return ((sc_packed_1() >> 8) & 1U) != 0;
 }
 
+uint sc_debug_lighting_component() {
+	return (sc_packed_1() >> 9) & 15U;
+}
+
 float sc_luminance_multiplier() {
 	// Not used in clustered renderer but we share some code with the mobile renderer that requires this.
 	return 1.0;
@@ -206,6 +210,9 @@ layout(set = 0, binding = 2) uniform sampler shadow_sampler;
 #define SCREEN_SPACE_EFFECTS_FLAGS_USE_SSR (1 << 2)
 #define SCREEN_SPACE_EFFECTS_FLAGS_RESOLVE_SSR (1 << 3)
 #define SCREEN_SPACE_EFFECTS_FLAGS_USE_SSCS (1 << 4)
+#define SCREEN_SPACE_EFFECTS_FLAGS_USE_BENT_NORMALS (1 << 5)
+#define SCREEN_SPACE_EFFECTS_FLAGS_STOCHASTIC_SSR (1 << 6)
+#define SCREEN_SPACE_EFFECTS_FLAGS_LIGHTING_SOURCES (1 << 7)
 
 layout(set = 0, binding = 3, std430) restrict readonly buffer OmniLights {
 	LightData data[];
@@ -339,7 +346,7 @@ struct ImplementationData {
 	uint ss_effects_flags;
 	float ssao_light_affect;
 	float ssao_ao_affect;
-	uint pad1;
+	float ss_exposure;
 
 	mat4 sdf_to_bounds;
 
@@ -352,7 +359,12 @@ struct ImplementationData {
 	bool volumetric_fog_enabled;
 	float volumetric_fog_inv_length;
 	float volumetric_fog_detail_spread;
-	uint volumetric_fog_pad;
+	bool aerial_perspective_enabled;
+
+	float aerial_perspective_inv_distance;
+	float aerial_perspective_exposure;
+	uint aerial_perspective_pad0;
+	uint aerial_perspective_pad1;
 };
 
 layout(set = 1, binding = 1, std140) uniform ImplementationDataBlock {
@@ -438,6 +450,7 @@ layout(r32ui, set = 1, binding = 27) uniform restrict uimage3D geom_facing_grid;
 #define depth_buffer shadow_atlas
 #define color_buffer shadow_atlas
 #define normal_roughness_buffer shadow_atlas
+#define back_depth_buffer shadow_atlas
 
 #define multiviewSampler sampler2D
 #else
@@ -489,12 +502,24 @@ layout(set = 1, binding = 34) uniform texture2DArray ssil_buffer;
 layout(set = 1, binding = 35) uniform texture2DArray ssr_buffer;
 layout(set = 1, binding = 36) uniform texture2DArray ssr_mip_level_buffer;
 layout(set = 1, binding = 37) uniform texture2DArray sscs_buffer;
+layout(set = 1, binding = 39) uniform texture2DArray gtao_bent_normal_buffer;
 #else
 layout(set = 1, binding = 34) uniform texture2D ssil_buffer;
 layout(set = 1, binding = 35) uniform texture2D ssr_buffer;
 layout(set = 1, binding = 36) uniform texture2D ssr_mip_level_buffer;
 layout(set = 1, binding = 37) uniform texture2DArray sscs_buffer;
+layout(set = 1, binding = 39) uniform texture2D gtao_bent_normal_buffer;
 #endif // USE_MULTIVIEW
+layout(set = 1, binding = 40) uniform texture2D ss_exposure_texture;
+
+layout(set = 1, binding = 41) uniform texture2D cloud_shadow_textures[MAX_DIRECTIONAL_LIGHT_DATA_STRUCTS];
+layout(set = 1, binding = 42) uniform texture3D aerial_perspective_texture;
+
+#ifdef USE_MULTIVIEW
+layout(set = 1, binding = 44) uniform texture2DArray back_depth_buffer;
+#else
+layout(set = 1, binding = 44) uniform texture2D back_depth_buffer;
+#endif
 
 #endif
 

@@ -141,6 +141,7 @@ public:
 				uint32_t luminance_multiplier : 1;
 				uint32_t material_feedback : 1;
 				uint32_t dithered_instance_fade : 1;
+				uint32_t back_depth_pass : 1;
 			};
 		};
 	};
@@ -209,6 +210,7 @@ public:
 			uint32_t render_pass = 0;
 			uint32_t wireframe = false;
 			uint32_t ubershader = false;
+			uint32_t back_depth = false;
 
 			uint32_t hash() const {
 				uint32_t h = hash_murmur3_one_32(vertex_format_id);
@@ -222,6 +224,7 @@ public:
 				h = hash_murmur3_one_32(render_pass, h);
 				h = hash_murmur3_one_32(wireframe, h);
 				h = hash_murmur3_one_32(ubershader, h);
+				h = hash_murmur3_one_32(back_depth, h);
 				return hash_fmix32(h);
 			}
 		};
@@ -272,12 +275,14 @@ public:
 		bool uses_transmittance = false;
 		bool uses_screen_texture = false;
 		bool uses_depth_texture = false;
+		bool uses_back_depth_texture = false;
 		bool uses_normal_texture = false;
 		bool uses_screen_texture_mipmaps = false;
 		bool uses_time = false;
 		bool uses_vertex_time = false;
 		bool uses_fragment_time = false;
 		bool writes_modelview_or_projection = false;
+		bool writes_depth = false;
 		bool uses_world_coordinates = false;
 
 		bool stencil_enabled = false;
@@ -289,7 +294,7 @@ public:
 		uint32_t index = 0;
 
 		_FORCE_INLINE_ bool uses_alpha_pass() const {
-			bool has_read_screen_alpha = uses_screen_texture || uses_depth_texture || uses_normal_texture;
+			bool has_read_screen_alpha = uses_screen_texture || uses_depth_texture || uses_back_depth_texture || uses_normal_texture;
 			bool has_base_alpha = (uses_alpha && (!uses_alpha_clip || uses_alpha_antialiasing));
 			bool has_blend_alpha = uses_blend_alpha;
 			bool has_alpha = has_base_alpha || has_blend_alpha;
@@ -306,7 +311,7 @@ public:
 
 		_FORCE_INLINE_ bool uses_shared_shadow_material() const {
 			bool backface_culling = cull_mode == RSE::CULL_MODE_BACK;
-			return !uses_particle_trails && !writes_modelview_or_projection && !uses_vertex && !uses_discard && !uses_depth_prepass_alpha && !uses_alpha_clip && !uses_alpha_antialiasing && !uses_point_size && !uses_world_coordinates && !wireframe && !stencil_enabled && backface_culling;
+			return !uses_particle_trails && !writes_modelview_or_projection && !writes_depth && !uses_vertex && !uses_discard && !uses_depth_prepass_alpha && !uses_alpha_clip && !uses_alpha_antialiasing && !uses_point_size && !uses_world_coordinates && !wireframe && !stencil_enabled && backface_culling;
 		}
 
 		virtual void set_code(const String &p_Code);

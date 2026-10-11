@@ -13,10 +13,12 @@ layout(set = 0, binding = 3) uniform sampler2D source_normal_roughness_half;
 layout(set = 0, binding = 4) uniform sampler2D source_color;
 layout(set = 0, binding = 5) uniform sampler2D source_mip_level;
 layout(rgba16f, set = 0, binding = 6) uniform restrict writeonly image2D output_color;
+layout(set = 0, binding = 7) uniform sampler2D source_exposure;
 
 layout(push_constant, std430) uniform Params {
 	ivec2 screen_size;
-	ivec2 pad;
+	float exposure;
+	int pad;
 }
 params;
 
@@ -38,6 +40,7 @@ void get_sample(float depth, vec3 normal, float roughness, ivec2 pixel_pos, out 
 	// Invert the tone mapping we applied in the main trace pass.
 	const vec3 rec709_luminance_weights = vec3(0.2126, 0.7152, 0.0722);
 	color.rgb /= 1.0 - dot(color.rgb, rec709_luminance_weights);
+	color.rgb /= params.exposure / max(texelFetch(source_exposure, ivec2(0, 0), 0).r, 1e-6);
 
 	const float DEPTH_FACTOR = 2048.0;
 	const float NORMAL_FACTOR = 32.0;

@@ -183,6 +183,13 @@ private:
 	bool blend_splits;
 	ShadowMode shadow_mode;
 	SkyMode sky_mode = SKY_MODE_LIGHT_AND_SKY;
+	Ref<Texture2D> cloud_shadow_texture;
+	real_t cloud_shadow_scale = 1000.0;
+	Vector2 cloud_shadow_offset;
+	real_t cloud_shadow_altitude = 2000.0;
+	real_t cloud_shadow_strength = 1.0;
+
+	void _update_cloud_shadow();
 
 protected:
 	static void _bind_methods();
@@ -197,6 +204,21 @@ public:
 
 	void set_sky_mode(SkyMode p_mode);
 	SkyMode get_sky_mode() const;
+
+	void set_cloud_shadow_texture(const Ref<Texture2D> &p_texture);
+	Ref<Texture2D> get_cloud_shadow_texture() const;
+
+	void set_cloud_shadow_scale(real_t p_scale);
+	real_t get_cloud_shadow_scale() const;
+
+	void set_cloud_shadow_offset(const Vector2 &p_offset);
+	Vector2 get_cloud_shadow_offset() const;
+
+	void set_cloud_shadow_altitude(real_t p_altitude);
+	real_t get_cloud_shadow_altitude() const;
+
+	void set_cloud_shadow_strength(real_t p_strength);
+	real_t get_cloud_shadow_strength() const;
 
 	DirectionalLight3D();
 };

@@ -68,7 +68,7 @@ layout(rgba16f, set = 0, binding = 9) uniform restrict readonly image3D source_m
 layout(rgba16f, set = 0, binding = 10) uniform restrict writeonly image3D dest_map;
 #endif
 
-#ifdef MODE_FILTER
+#if defined(MODE_FILTER) || defined(MODE_TEMPORAL)
 layout(rgba16f, set = 0, binding = 9) uniform restrict readonly image3D source_map;
 layout(rgba16f, set = 0, binding = 10) uniform restrict writeonly image3D dest_map;
 #endif
@@ -185,7 +185,8 @@ layout(set = 0, binding = 15, std140) uniform Params {
 	float temporal_blend;
 
 	vec2 sky_border_size;
-	vec2 pad;
+	bool temporal_clamp;
+	bool debug_history_clamp;
 
 	mat3x4 cam_rotation;
 	mat4 to_prev_view;
@@ -210,6 +211,7 @@ layout(set = 0, binding = 19) buffer emissive_only_map_buffer {
 layout(r32ui, set = 0, binding = 17) uniform uimage3D density_only_map;
 layout(r32ui, set = 0, binding = 18) uniform uimage3D light_only_map;
 layout(r32ui, set = 0, binding = 19) uniform uimage3D emissive_only_map;
+layout(r32ui, set = 0, binding = 22) uniform restrict uimage2D history_clamp_map;
 #endif
 
 #ifdef USE_RADIANCE_OCTMAP_ARRAY
@@ -220,6 +222,11 @@ layout(set = 0, binding = 20) uniform texture2D sky_texture;
 #endif // MODE_COPY
 
 layout(set = 0, binding = 21) uniform texture2D area_light_atlas;
+
+#ifdef MODE_DENSITY
+layout(set = 2, binding = 0) uniform texture2D cloud_shadow_textures[MAX_DIRECTIONAL_LIGHT_DATA_STRUCTS];
+layout(set = 2, binding = 1) uniform sampler cloud_shadow_sampler;
+#endif
 
 float get_depth_at_pos(float cell_depth_size, int z) {
 	float d = float(z) * cell_depth_size + cell_depth_size * 0.5; //center of voxels
@@ -434,6 +441,11 @@ void main() {
 					shadow = mix(shadow, 1.0, smoothstep(directional_lights.data[i].fade_from, directional_lights.data[i].fade_to, view_pos.z)); //done with negative values for performance
 
 					shadow_attenuation = mix(vec3(1.0 - directional_lights.data[i].shadow_opacity), vec3(1.0), shadow);
+				}
+
+				if (directional_lights.data[i].cloud_shadow_strength > 0.0) {
+					vec2 cloud_uv = vec2(dot(directional_lights.data[i].cloud_shadow_u.xyz, view_pos), dot(directional_lights.data[i].cloud_shadow_v.xyz, view_pos)) + vec2(directional_lights.data[i].cloud_shadow_u.w, directional_lights.data[i].cloud_shadow_v.w);
+					shadow_attenuation *= mix(1.0, pow(textureLod(sampler2D(cloud_shadow_textures[i], cloud_shadow_sampler), cloud_uv, 0.0).r, directional_lights.data[i].cloud_shadow_exponent), directional_lights.data[i].cloud_shadow_strength * clamp(-dot(directional_lights.data[i].cloud_shadow_plane, vec4(view_pos, 1.0)), 0.0, 1.0));
 				}
 
 				total_light += shadow_attenuation * directional_lights.data[i].color * directional_lights.data[i].energy * henyey_greenstein(dot(safe_normalize(view_pos), safe_normalize(directional_lights.data[i].direction)), params.phase_g) * directional_lights.data[i].volumetric_fog_energy;
@@ -806,7 +818,7 @@ void main() {
 	if (is_final_density_invalid) {
 		final_density = is_reprojected_density_invalid ? vec4(0.0) : reprojected_density;
 	} else if (!is_reprojected_density_invalid) {
-		final_density = mix(final_density, reprojected_density, reproject_amount);
+		final_density = mix(final_density, reprojected_density, params.temporal_clamp ? 0.0 : reproject_amount);
 	}
 	final_density = clamp(final_density, vec4(0.0), vec4(65504.0));
 
@@ -877,6 +889,58 @@ void main() {
 	imageStore(dest_map, pos, accum);
 
 #endif
+
+#ifdef MODE_TEMPORAL
+	ivec3 pos = ivec3(gl_GlobalInvocationID.xyz);
+	if (any(greaterThanEqual(pos, params.fog_volume_size))) {
+		return;
+	}
+
+	vec4 current = imageLoad(source_map, pos);
+	vec4 neighborhood_min = current;
+	vec4 neighborhood_max = current;
+	for (int z = -1; z <= 1; z++) {
+		for (int y = -1; y <= 1; y++) {
+			for (int x = -1; x <= 1; x++) {
+				vec4 neighbor = imageLoad(source_map, clamp(pos + ivec3(x, y, z), ivec3(0), params.fog_volume_size - ivec3(1)));
+				neighborhood_min = min(neighborhood_min, neighbor);
+				neighborhood_max = max(neighborhood_max, neighbor);
+			}
+		}
+	}
+
+	vec3 fog_unit_pos = vec3(pos) * fog_cell_size + fog_cell_size * 0.5;
+	fog_unit_pos.z = pow(fog_unit_pos.z, params.detail_spread);
+	vec3 view_pos = vec3((fog_unit_pos.xy * 2.0 - 1.0) * mix(params.fog_frustum_size_begin, params.fog_frustum_size_end, vec2(fog_unit_pos.z)), -params.fog_frustum_end * fog_unit_pos.z);
+	view_pos.y = -view_pos.y;
+
+	vec3 prev_view = (params.to_prev_view * vec4(view_pos, 1.0)).xyz;
+	prev_view.y = -prev_view.y;
+	prev_view.z /= -params.fog_frustum_end;
+	prev_view.xy /= mix(params.fog_frustum_size_begin, params.fog_frustum_size_end, vec2(prev_view.z));
+	prev_view.xy = prev_view.xy * 0.5 + 0.5;
+	prev_view.z = pow(prev_view.z, 1.0 / params.detail_spread);
+
+	vec4 result = current;
+	if (all(greaterThan(prev_view, vec3(0.0))) && all(lessThan(prev_view, vec3(1.0)))) {
+		vec4 history = textureLod(sampler3D(prev_density_texture, linear_sampler), prev_view, 0.0);
+		if (!any(isnan(history)) && !any(isinf(history))) {
+			result = mix(current, clamp(history, neighborhood_min, neighborhood_max), params.temporal_blend);
+#ifndef NO_IMAGE_ATOMICS
+			if (params.debug_history_clamp) {
+				vec4 moved = abs(history - clamp(history, neighborhood_min, neighborhood_max));
+				vec4 reference = max(history, current);
+				const vec3 luminance = vec3(0.2126, 0.7152, 0.0722);
+				float amount = max(dot(moved.rgb, luminance) / max(dot(reference.rgb, luminance), 1e-4), moved.a / max(reference.a, 1e-4));
+				imageAtomicMax(history_clamp_map, pos.xy, floatBitsToUint(clamp(amount, 0.0, 1.0)));
+			}
+#endif
+		}
+	}
+
+	imageStore(dest_map, pos, result);
+#endif
+
 #ifdef MODE_COPY
 	ivec3 pos = ivec3(gl_GlobalInvocationID.xyz);
 	if (any(greaterThanEqual(pos, params.fog_volume_size))) {

@@ -188,6 +188,7 @@ public:
 		TK_HINT_SCREEN_TEXTURE,
 		TK_HINT_NORMAL_ROUGHNESS_TEXTURE,
 		TK_HINT_DEPTH_TEXTURE,
+		TK_HINT_BACK_DEPTH_TEXTURE,
 		TK_HINT_BLIT_SOURCE0,
 		TK_HINT_BLIT_SOURCE1,
 		TK_HINT_BLIT_SOURCE2,
@@ -347,6 +348,14 @@ public:
 		FILTER_LINEAR_MIPMAP_ANISOTROPIC,
 		FILTER_DEFAULT,
 	};
+
+	static constexpr TextureFilter combine_texture_filters(TextureFilter p_a, TextureFilter p_b) {
+		if (p_a == FILTER_DEFAULT || p_b == FILTER_DEFAULT) {
+			return p_a == FILTER_DEFAULT ? p_b : p_a;
+		}
+		const int level = (int(p_a) >> 1) > (int(p_b) >> 1) ? (int(p_a) >> 1) : (int(p_b) >> 1);
+		return TextureFilter(level * 2 + ((int(p_a) | int(p_b)) & 1));
+	}
 
 	enum TextureRepeat {
 		REPEAT_DISABLE,
@@ -692,6 +701,7 @@ public:
 				HINT_BLIT_SOURCE3,
 				HINT_NORMAL_ROUGHNESS_TEXTURE,
 				HINT_DEPTH_TEXTURE,
+				HINT_BACK_DEPTH_TEXTURE,
 				HINT_MAX
 			};
 

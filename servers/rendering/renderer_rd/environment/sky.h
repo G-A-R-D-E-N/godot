@@ -65,6 +65,7 @@ public:
 		float size;
 		uint32_t enabled;
 		uint32_t pad[3];
+		float cloud_shadow[4];
 	};
 
 private:
@@ -135,6 +136,7 @@ private:
 	};
 
 	void _render_sky(RD::DrawListID p_list, float p_time, RID p_fb, PipelineCacheRD *p_pipeline, RID p_uniform_set, RID p_texture_set, const Projection &p_projection, const Basis &p_orientation, const Vector3 &p_position, float p_luminance_multiplier, float p_brightness_modifier, float p_border_size = 0.0);
+	void _update_scene_uniform_set();
 
 public:
 	struct SkySceneState {
@@ -173,6 +175,7 @@ public:
 		uint32_t max_directional_lights;
 		uint32_t last_frame_directional_light_count;
 		RID directional_light_buffer;
+		RID cloud_shadow_textures[RendererSceneRender::MAX_DIRECTIONAL_LIGHTS];
 		RID uniform_set;
 		RID uniform_buffer;
 		RID fog_uniform_set;
@@ -244,7 +247,7 @@ public:
 	struct SkyMaterialData : public RendererRD::MaterialStorage::MaterialData {
 		SkyShaderData *shader_data = nullptr;
 		RID uniform_set;
-		bool uniform_set_updated;
+		uint64_t uniform_set_version = 0;
 
 		virtual void set_render_priority(int p_priority) {}
 		virtual void set_next_pass(RID p_pass) {}
@@ -286,6 +289,8 @@ public:
 
 		// State to track when radiance octmap needs updating.
 		SkyMaterialData *prev_material_data = nullptr;
+		uint64_t prev_material_version = 0;
+		LocalVector<SkyDirectionalLightData> prev_lights;
 		Vector3 prev_position;
 		float prev_time;
 		float prev_fog_aerial_perspective = 0.0;

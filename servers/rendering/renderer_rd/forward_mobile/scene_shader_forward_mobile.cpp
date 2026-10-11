@@ -81,6 +81,7 @@ void SceneShaderForwardMobile::ShaderData::set_code(const String &p_code) {
 	uses_transmittance = false;
 	uses_time = false;
 	writes_modelview_or_projection = false;
+	writes_depth = false;
 	uses_world_coordinates = false;
 	uses_particle_trails = false;
 
@@ -150,6 +151,7 @@ void SceneShaderForwardMobile::ShaderData::set_code(const String &p_code) {
 	actions.write_flag_pointers["MODELVIEW_MATRIX"] = &writes_modelview_or_projection;
 	actions.write_flag_pointers["PROJECTION_MATRIX"] = &writes_modelview_or_projection;
 	actions.write_flag_pointers["VERTEX"] = &uses_vertex;
+	actions.write_flag_pointers["DEPTH"] = &writes_depth;
 	actions.write_flag_pointers["TANGENT"] = &writes_tangent;
 	actions.write_flag_pointers["BINORMAL"] = &writes_tangent;
 
@@ -200,6 +202,7 @@ void SceneShaderForwardMobile::ShaderData::set_code(const String &p_code) {
 	uses_screen_texture_mipmaps = gen_code.uses_screen_texture_mipmaps;
 	uses_screen_texture = gen_code.uses_screen_texture;
 	uses_depth_texture = gen_code.uses_depth_texture;
+	uses_back_depth_texture = gen_code.uses_back_depth_texture;
 	uses_normal_texture = gen_code.uses_normal_roughness_texture;
 	uses_normal |= uses_normal_map;
 	uses_normal |= uses_bent_normal_map;
@@ -260,7 +263,7 @@ bool SceneShaderForwardMobile::ShaderData::is_animated() const {
 }
 
 bool SceneShaderForwardMobile::ShaderData::casts_shadows() const {
-	bool has_read_screen_alpha = uses_screen_texture || uses_depth_texture || uses_normal_texture;
+	bool has_read_screen_alpha = uses_screen_texture || uses_depth_texture || uses_back_depth_texture || uses_normal_texture;
 	bool has_base_alpha = (uses_alpha && (!uses_alpha_clip || uses_alpha_antialiasing)) || has_read_screen_alpha;
 	bool has_alpha = has_base_alpha || uses_blend_alpha;
 
@@ -422,6 +425,13 @@ void SceneShaderForwardMobile::ShaderData::_create_pipeline(PipelineKey p_pipeli
 		} else {
 			// Unknown pipeline version.
 		}
+	}
+
+	if (p_pipeline_key.back_depth) {
+		depth_stencil_state.enable_depth_test = true;
+		depth_stencil_state.enable_depth_write = true;
+		depth_stencil_state.depth_compare_operator = RD::COMPARE_OP_GREATER_OR_EQUAL;
+		depth_stencil_state.enable_stencil = false;
 	}
 
 	// Convert the specialization from the key to pipeline specialization constants.
@@ -704,6 +714,7 @@ void SceneShaderForwardMobile::init(const String p_defines) {
 		actions.renames["SSS_TRANSMITTANCE_COLOR"] = "transmittance_color_highp";
 		actions.renames["SSS_TRANSMITTANCE_DEPTH"] = "transmittance_depth_highp";
 		actions.renames["SSS_TRANSMITTANCE_BOOST"] = "transmittance_boost_highp";
+		actions.renames["SSS_RADIUS"] = "sss_radius_highp";
 		actions.renames["BACKLIGHT"] = "backlight_highp";
 		actions.renames["AO"] = "ao_highp";
 		actions.renames["AO_LIGHT_AFFECT"] = "ao_light_affect_highp";
@@ -719,6 +730,10 @@ void SceneShaderForwardMobile::init(const String p_defines) {
 		actions.renames["INDIRECT_SPECULAR_WEIGHT"] = "indirect_specular_weight_highp";
 		actions.renames["INDIRECT_COAT_WEIGHT"] = "indirect_coat_weight_highp";
 		actions.renames["INDIRECT_COAT_ROUGHNESS"] = "indirect_coat_roughness_highp";
+		actions.renames["INDIRECT_COAT_NORMAL"] = "indirect_coat_normal_highp";
+		actions.renames["DIRECT_DIFFUSE_WEIGHT"] = "direct_diffuse_weight_highp";
+		actions.renames["EMISSION_BOUNCE_WEIGHT"] = "emission_bounce_weight";
+		actions.renames["TEMPORAL_REACTIVE"] = "temporal_reactive";
 		actions.renames["DECAL_COVERAGE"] = "decal_coverage";
 		actions.renames["TEMPORAL_MASK"] = "temporal_mask";
 		actions.renames["TEMPORAL_ID"] = "temporal_id";
@@ -804,6 +819,10 @@ void SceneShaderForwardMobile::init(const String p_defines) {
 		actions.usage_defines["INDIRECT_SPECULAR_WEIGHT"] = "#define INDIRECT_SPECULAR_WEIGHT_USED\n";
 		actions.usage_defines["INDIRECT_COAT_WEIGHT"] = "#define INDIRECT_COAT_USED\n#define LIGHT_CLEARCOAT_USED\n";
 		actions.usage_defines["INDIRECT_COAT_ROUGHNESS"] = "@INDIRECT_COAT_WEIGHT";
+		actions.usage_defines["INDIRECT_COAT_NORMAL"] = "#define INDIRECT_COAT_NORMAL_USED\n#define NORMAL_USED\n";
+		actions.usage_defines["DIRECT_DIFFUSE_WEIGHT"] = "#define DIRECT_DIFFUSE_WEIGHT_USED\n";
+		actions.usage_defines["EMISSION_BOUNCE_WEIGHT"] = "#define EMISSION_BOUNCE_WEIGHT_USED\n";
+		actions.usage_defines["TEMPORAL_REACTIVE"] = "#define TEMPORAL_REACTIVE_USED\n";
 		actions.usage_defines["DECAL_COVERAGE"] = "#define DECAL_COVERAGE_USED\n";
 		actions.usage_defines["TEMPORAL_MASK"] = "#define TEMPORAL_METADATA_USED\n";
 		actions.usage_defines["TEMPORAL_ID"] = "@TEMPORAL_MASK";

@@ -33,6 +33,7 @@
 #include "servers/rendering/renderer_rd/pipeline_cache_rd.h"
 #include "servers/rendering/renderer_rd/shaders/effects/tonemap.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/tonemap_mobile.glsl.gen.h"
+#include "servers/rendering/storage/environment_storage.h"
 
 namespace RendererRD {
 
@@ -75,6 +76,8 @@ private:
 		TONEMAP_FLAG_USE_FXAA = (1 << 4),
 		TONEMAP_FLAG_USE_8_BIT_DEBANDING = (1 << 5),
 		TONEMAP_FLAG_CONVERT_TO_SRGB = (1 << 6),
+		TONEMAP_FLAG_USE_NIGHT_VISION = (1 << 7),
+		TONEMAP_FLAG_HIGHLIGHT_RANGE_SHIFT = 16,
 	};
 
 	enum FlagsMobile {
@@ -122,6 +125,11 @@ private:
 		float luminance_multiplier; //  4 - 96
 
 		float tonemapper_params[4]; //  16 - 112
+
+		float night_vision_log_min; // offset 112
+		float night_vision_inv_range; // offset 116
+		uint32_t night_vision_chromaticity; // offset 120
+		uint32_t night_vision_strength_acuity; // offset 124, size 128
 	};
 
 	struct TonemapPushConstantMobile {
@@ -138,7 +146,13 @@ private:
 
 		float tonemapper_params[4]; //  16 - 64
 		float output_max_value; //  4 - 68
-		float pad[3]; //  12 - 80
+		float night_vision_log_min; // offset 68
+		float night_vision_inv_range; // offset 72
+		uint32_t night_vision_chromaticity; // offset 76
+
+		uint32_t night_vision_strength_acuity; // offset 80
+		float night_vision_highlight_range; // offset 84
+		float pad[2]; // offset 88, size 96
 	};
 
 	/* tonemap actually writes to a framebuffer, which is
@@ -207,6 +221,9 @@ public:
 		bool bilinear_filtering = true;
 
 		bool convert_to_srgb = false;
+
+		RendererEnvironmentStorage::NightVision night_vision;
+		float night_vision_exposure_normalization = 1.0;
 	};
 
 	void tonemapper(RID p_source_color, RID p_dst_framebuffer, const TonemapSettings &p_settings);

@@ -31,12 +31,15 @@
 #pragma once
 
 #include "servers/rendering/renderer_rd/pipeline_deferred_rd.h"
+#include "servers/rendering/renderer_rd/shaders/effects/gtao.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/screen_space_contact_shadows.glsl.gen.h"
+#include "servers/rendering/renderer_rd/shaders/effects/screen_space_contact_shadows_combine.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/screen_space_reflection.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/screen_space_reflection_downsample.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/screen_space_reflection_filter.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/screen_space_reflection_hiz.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/screen_space_reflection_resolve.glsl.gen.h"
+#include "servers/rendering/renderer_rd/shaders/effects/screen_space_reflection_stochastic.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/ss_effects_downsample.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/ssao.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/ssao_blur.glsl.gen.h"
@@ -54,8 +57,13 @@
 #define RB_SCOPE_SSAO SNAME("rb_ssao")
 #define RB_SCOPE_SSR SNAME("rb_ssr")
 #define RB_SCOPE_SSCS SNAME("rb_sscs")
+#define RB_SCOPE_GTAO SNAME("rb_gtao")
+#define RB_SCOPE_BOUNCE_SOURCE SNAME("rb_bounce_source")
+#define RB_SCOPE_REFLECTION_SOURCE SNAME("rb_reflection_source")
 
 #define RB_LINEAR_DEPTH SNAME("linear_depth")
+#define RB_LINEAR_DEPTH_PREVIOUS SNAME("linear_depth_previous")
+#define RB_SOURCE SNAME("source")
 #define RB_FINAL SNAME("final")
 #define RB_LAST_FRAME SNAME("last_frame")
 #define RB_DEINTERLEAVED SNAME("deinterleaved")
@@ -68,8 +76,24 @@
 #define RB_HIZ SNAME("hiz")
 #define RB_SSR SNAME("ssr")
 #define RB_MIP_LEVEL SNAME("mip_level")
+#define RB_SSR_RAY_RADIANCE SNAME("ray_radiance")
+#define RB_SSR_RAY_HIT SNAME("ray_hit")
+#define RB_SSR_HIT_DISTANCE SNAME("hit_distance")
+#define RB_SSR_RESOLVED SNAME("resolved")
+#define RB_SSR_RESOLVED_INFO SNAME("resolved_info")
+#define RB_SSR_OUTPUT_0 SNAME("output_0")
+#define RB_SSR_OUTPUT_1 SNAME("output_1")
+#define RB_SSR_HISTORY_LENGTH_0 SNAME("history_length_0")
+#define RB_SSR_HISTORY_LENGTH_1 SNAME("history_length_1")
 
 #define RB_SSCS SNAME("sscs")
+#define RB_SSCS_COMBINED SNAME("sscs_combined")
+
+#define RB_GTAO_DEPTH SNAME("working_depth")
+#define RB_GTAO_NORMAL SNAME("working_normal")
+#define RB_GTAO_TERM SNAME("ao_term")
+#define RB_GTAO_TERM_PONG SNAME("ao_term_pong")
+#define RB_GTAO_BENT_NORMAL SNAME("bent_normal")
 
 class RenderSceneBuffersRD;
 
@@ -92,6 +116,12 @@ public:
 	void allocate_last_frame_buffer(Ref<RenderSceneBuffersRD> p_render_buffers, bool p_use_ssil, bool p_use_ssr);
 	void copy_internal_texture_to_last_frame(Ref<RenderSceneBuffersRD> p_render_buffers, CopyEffects &p_copy_effects);
 
+	static constexpr RD::DataFormat LIGHTING_SOURCE_FORMAT = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
+	static constexpr uint32_t LIGHTING_SOURCE_USAGE_BITS = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
+	void allocate_lighting_sources(Ref<RenderSceneBuffersRD> p_render_buffers, bool p_bounce, bool p_reflection);
+	void clear_lighting_sources(Ref<RenderSceneBuffersRD> p_render_buffers);
+	void build_lighting_source_mipmaps(Ref<RenderSceneBuffersRD> p_render_buffers, CopyEffects &p_copy_effects);
+
 	/* SS Downsampler */
 
 	void downsample_depth(Ref<RenderSceneBuffersRD> p_render_buffers, uint32_t p_view, const Projection &p_projection);
@@ -112,12 +142,16 @@ public:
 		float intensity = 2.0;
 		float sharpness = 0.98;
 		float normal_rejection = 1.0;
+		float exposure = 1.0;
+		RID exposure_texture;
+		Vector2 depth_ndc;
 
 		Size2i full_screen_size;
 	};
 
 	void ssil_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, SSILRenderBuffers &p_ssil_buffers, const SSILSettings &p_settings);
 	void screen_space_indirect_lighting(Ref<RenderSceneBuffersRD> p_render_buffers, SSILRenderBuffers &p_ssil_buffers, uint32_t p_view, RID p_normal_buffer, const Projection &p_projection, const Projection &p_last_projection, const SSILSettings &p_settings);
+	void ssil_store_previous_depth(Ref<RenderSceneBuffersRD> p_render_buffers);
 
 	/* SSAO */
 	void ssao_set_quality(RSE::EnvironmentSSAOQuality p_quality, bool p_half_size, float p_adaptive_target, int p_blur_passes, float p_fadeout_from, float p_fadeout_to);
@@ -144,6 +178,30 @@ public:
 	void ssao_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, SSAORenderBuffers &p_ssao_buffers, const SSAOSettings &p_settings);
 	void generate_ssao(Ref<RenderSceneBuffersRD> p_render_buffers, SSAORenderBuffers &p_ssao_buffers, uint32_t p_view, RID p_normal_buffer, const Projection &p_projection, const SSAOSettings &p_settings);
 
+	struct GTAORenderBuffers {
+		bool half_size = false;
+		bool bent_normals = false;
+		Size2i work_size;
+	};
+
+	struct GTAOSettings {
+		float radius = 1.0;
+		float intensity = 2.0;
+		float power = 1.5;
+		int slices = 3;
+		int steps = 3;
+		int denoise_passes = 2;
+		bool half_size = true;
+		bool bent_normals = false;
+		uint32_t noise_index = 0;
+
+		Size2i full_screen_size;
+	};
+
+	static constexpr int GTAO_DEPTH_MIPMAPS = 5;
+	bool gtao_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, GTAORenderBuffers &p_gtao_buffers, const GTAOSettings &p_settings);
+	void generate_gtao(Ref<RenderSceneBuffersRD> p_render_buffers, GTAORenderBuffers &p_gtao_buffers, uint32_t p_view, RID p_normal_buffer, const Projection &p_projection, const GTAOSettings &p_settings);
+
 	/* Screen Space Reflection */
 	void ssr_set_half_size(bool p_half_size);
 
@@ -151,17 +209,30 @@ public:
 		Size2i size;
 		uint32_t mipmaps = 1;
 		bool half_size = false;
+		bool stochastic = false;
+		uint32_t rays = 1;
+		uint32_t history_index = 0;
+	};
+
+	struct SSRTemporalData {
+		const Projection *prev_projections = nullptr;
+		Transform3D cur_to_prev;
+		uint32_t frame = 0;
+		bool validate_source = false;
+		bool history_valid = false;
+		bool write_hit_distance = false;
 	};
 
 	void ssr_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, SSRRenderBuffers &p_ssr_buffers, const RD::DataFormat p_color_format);
-	void screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffers, SSRRenderBuffers &p_ssr_buffers, const RID *p_normal_roughness_slices, int p_max_steps, float p_fade_in, float p_fade_out, float p_tolerance, const Projection *p_projections, const Projection *p_reprojections, const Vector3 *p_eye_offsets, RendererRD::CopyEffects &p_copy_effects);
+	void screen_space_reflection(Ref<RenderSceneBuffersRD> p_render_buffers, SSRRenderBuffers &p_ssr_buffers, const RID *p_normal_roughness_slices, int p_max_steps, float p_fade_in, float p_fade_out, float p_tolerance, const Projection *p_projections, const Projection *p_reprojections, const Vector3 *p_eye_offsets, RendererRD::CopyEffects &p_copy_effects, float p_exposure, RID p_exposure_texture, const SSRTemporalData &p_temporal);
+	RID ssr_get_output(Ref<RenderSceneBuffersRD> p_render_buffers, const SSRRenderBuffers &p_ssr_buffers) const;
 
 	/* subsurface scattering */
 	void sss_set_quality(RSE::SubSurfaceScatteringQuality p_quality);
 	RSE::SubSurfaceScatteringQuality sss_get_quality() const;
 	void sss_set_scale(float p_scale, float p_depth_scale);
 
-	void sub_surface_scattering(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_diffuse, RID p_depth, const Projection &p_camera, const Size2i &p_screen_size);
+	void sub_surface_scattering(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_diffuse, RID p_depth, RID p_radius, const Projection &p_camera, const Size2i &p_screen_size, uint32_t p_taa_frame);
 
 	/* Screen Space Shadows */
 	struct SSCSRenderBuffers {
@@ -172,10 +243,13 @@ public:
 	struct SSCSSettings {
 		RSE::ScreenSpaceContactShadowsLength quality = RSE::SCREEN_SPACE_CONTACT_SHADOWS_LENGTH_MEDIUM;
 		float surface_thickness = 0.01f;
+		bool ray_confidence = true;
+		bool plane_rejection = true;
 	};
 
 	void sscs_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, SSCSRenderBuffers &p_sscs_buffers, uint32_t p_contact_shadow_count);
-	void screen_space_contact_shadows(Ref<RenderSceneBuffersRD> p_render_buffers, SSCSRenderBuffers &p_sscs_buffers, const SSCSSettings &p_settings, const Projection *p_projections, Vector3 p_light_direction, uint32_t p_light_index, float p_blur, float p_taa_frame_count);
+	void screen_space_contact_shadows(Ref<RenderSceneBuffersRD> p_render_buffers, SSCSRenderBuffers &p_sscs_buffers, const SSCSSettings &p_settings, const Projection *p_projections, const Vector4 &p_light_vector, uint32_t p_light_index, float p_blur, float p_taa_frame_count);
+	RID sscs_combine_for_debug(Ref<RenderSceneBuffersRD> p_render_buffers, const SSCSRenderBuffers &p_sscs_buffers);
 
 private:
 	/* Settings */
@@ -256,8 +330,13 @@ private:
 		SSIL_INTERLEAVE,
 		SSIL_INTERLEAVE_SMART,
 		SSIL_INTERLEAVE_HALF,
+		SSIL_GATHER_VALIDATE,
+		SSIL_GATHER_BASE_VALIDATE,
+		SSIL_GATHER_ADAPTIVE_VALIDATE,
 		SSIL_MAX
 	};
+
+	static constexpr int SSIL_VALIDATE_VARIANT = 3;
 
 	struct SSILGatherPushConstant {
 		int32_t screen_size[2];
@@ -270,14 +349,14 @@ private:
 		float NDC_to_view_mul[2];
 		float NDC_to_view_add[2];
 
-		float pad2[2];
+		float depth_ndc[2];
 		float z_near;
 		float z_far;
 
 		float radius;
 		float intensity;
 		int size_multiplier;
-		int pad;
+		float exposure;
 
 		float fade_out_mul;
 		float fade_out_add;
@@ -434,6 +513,60 @@ private:
 
 	void gather_ssao(RD::ComputeListID p_compute_list, const RID *p_ao_slices, const SSAOSettings &p_settings, bool p_adaptive_base_pass, RID p_gather_uniform_set, RID p_importance_map_uniform_set);
 
+	enum GTAOMode {
+		GTAO_PREFILTER,
+		GTAO_PREFILTER_HALF,
+		GTAO_MAIN,
+		GTAO_MAIN_BENT,
+		GTAO_DENOISE,
+		GTAO_DENOISE_BENT,
+		GTAO_RESOLVE,
+		GTAO_RESOLVE_HALF,
+		GTAO_RESOLVE_BENT,
+		GTAO_RESOLVE_HALF_BENT,
+		GTAO_MAX
+	};
+
+	struct GTAOPushConstant {
+		int32_t viewport_size[2];
+		float viewport_pixel_size[2];
+
+		float depth_unpack_consts[2];
+		float camera_tan_half_fov[2];
+
+		float ndc_to_view_mul[2];
+		float ndc_to_view_add[2];
+
+		float ndc_to_view_mul_x_pixel_size[2];
+		float effect_radius;
+		float effect_falloff_range;
+
+		float radius_multiplier;
+		float pad0;
+		float final_value_power;
+		float denoise_blur_beta;
+
+		float sample_distribution_power;
+		float thin_occluder_compensation;
+		float depth_mip_sampling_offset;
+		int32_t noise_index;
+
+		float slice_count;
+		float steps_per_slice;
+		int32_t full_size[2];
+
+		float full_pixel_size[2];
+		uint32_t final_apply;
+		uint32_t pad1;
+	};
+
+	struct GTAO {
+		GtaoShaderRD shader;
+		RID shader_version;
+		PipelineDeferredRD pipelines[GTAO_MAX];
+		RID point_sampler;
+	} gtao;
+
 	/* Screen Space Reflection */
 
 	enum ScreenSpaceReflectionDownsampleMode {
@@ -467,6 +600,8 @@ private:
 		float inv_projection[2][16];
 		float reprojection[2][16];
 		float eye_offset[2][4];
+		float prev_inv_projection[2][16];
+		float cur_to_prev[16];
 	};
 
 	struct ScreenSpaceReflectionPushConstant {
@@ -478,7 +613,46 @@ private:
 		float depth_tolerance;
 		int32_t orthogonal;
 		uint32_t view_index;
-		int32_t pad[3];
+		float exposure;
+		int32_t pad[2];
+	};
+
+	struct ScreenSpaceReflectionTracePushConstant {
+		int32_t screen_size[2];
+		int32_t mipmaps;
+		int32_t num_steps;
+		float distance_fade;
+		float curve_fade_in;
+		float depth_tolerance;
+		int32_t orthogonal;
+		uint32_t view_index;
+		uint32_t frame;
+		int32_t rays;
+		float roughness_cutoff;
+		uint32_t validate_source;
+		float source_mip;
+		int32_t pad[2];
+	};
+
+	struct ScreenSpaceReflectionResolvePushConstantStochastic {
+		int32_t screen_size[2];
+		int32_t trace_size[2];
+		int32_t rays;
+		uint32_t frame;
+		float roughness_cutoff;
+		uint32_t temporal;
+		uint32_t history_valid;
+		uint32_t orthogonal;
+		uint32_t view_index;
+		float exposure;
+	};
+
+	enum ScreenSpaceReflectionStochasticMode {
+		SCREEN_SPACE_REFLECTION_STOCHASTIC_TRACE,
+		SCREEN_SPACE_REFLECTION_STOCHASTIC_RESOLVE,
+		SCREEN_SPACE_REFLECTION_STOCHASTIC_RESOLVE_HIT_DISTANCE,
+		SCREEN_SPACE_REFLECTION_STOCHASTIC_TEMPORAL,
+		SCREEN_SPACE_REFLECTION_STOCHASTIC_MAX
 	};
 
 	struct ScreenSpaceReflectionFilterPushConstant {
@@ -489,7 +663,8 @@ private:
 
 	struct ScreenSpaceReflectionResolvePushConstant {
 		int32_t screen_size[2];
-		int32_t pad[2];
+		float exposure;
+		int32_t pad;
 	};
 
 	struct ScreenSpaceReflection {
@@ -504,6 +679,7 @@ private:
 		ScreenSpaceReflectionShaderRD ssr_shader;
 		RID ssr_shader_version;
 		PipelineDeferredRD ssr_pipeline;
+		PipelineDeferredRD ssr_validate_pipeline;
 		RID ubo;
 
 		ScreenSpaceReflectionFilterShaderRD filter_shader;
@@ -513,7 +689,13 @@ private:
 		ScreenSpaceReflectionResolveShaderRD resolve_shader;
 		RID resolve_shader_version;
 		PipelineDeferredRD resolve_pipeline;
+
+		ScreenSpaceReflectionStochasticShaderRD stochastic_shader;
+		RID stochastic_shader_version;
+		PipelineDeferredRD stochastic_pipelines[SCREEN_SPACE_REFLECTION_STOCHASTIC_MAX];
 	} ssr;
+
+	void screen_space_reflection_stochastic(Ref<RenderSceneBuffersRD> p_render_buffers, SSRRenderBuffers &p_ssr_buffers, const RID *p_normal_roughness_slices, int p_max_steps, float p_fade_in, float p_fade_out, float p_tolerance, const Projection *p_projections, float p_exposure, RID p_exposure_texture, const SSRTemporalData &p_temporal);
 
 	/* Screen Space Shadows */
 
@@ -530,6 +712,9 @@ private:
 		PipelineDeferredRD sscs_pipelines[SCREEN_SPACE_CONTACT_SHADOWS_MAX];
 		RID border_sampler;
 
+		ScreenSpaceContactShadowsCombineShaderRD combine_shader;
+		RID combine_shader_version;
+		PipelineDeferredRD combine_pipeline;
 	} sscs;
 
 	struct ScreenSpaceContactShadowsPushConstant {
@@ -539,6 +724,15 @@ private:
 		float surface_thickness;
 		float blur;
 		float taa_frame_count;
+		uint32_t ray_confidence;
+		uint32_t plane_rejection;
+		uint32_t pad[3];
+	};
+
+	struct ScreenSpaceContactShadowsCombinePushConstant {
+		int32_t screen_size[2];
+		uint32_t layer_count;
+		uint32_t layer_stride;
 	};
 
 	/* Subsurface scattering */
@@ -561,7 +755,9 @@ private:
 		float scale;
 
 		float depth_scale;
-		uint32_t pad[3];
+		float unit_uv_x;
+		float unit_uv_y;
+		uint32_t frame;
 	};
 
 	struct SubSurfaceScattering {

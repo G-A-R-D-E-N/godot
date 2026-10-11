@@ -48,6 +48,14 @@ public:
 		SHADER_GROUP_ADVANCED,
 		SHADER_GROUP_MULTIVIEW,
 		SHADER_GROUP_ADVANCED_MULTIVIEW,
+		SHADER_GROUP_BOUNCE_SOURCE,
+		SHADER_GROUP_REFLECTION_SOURCE,
+		SHADER_GROUP_BOUNCE_AND_REFLECTION_SOURCES,
+		SHADER_GROUP_BOUNCE_SOURCE_MULTIVIEW,
+		SHADER_GROUP_REFLECTION_SOURCE_MULTIVIEW,
+		SHADER_GROUP_BOUNCE_AND_REFLECTION_SOURCES_MULTIVIEW,
+		SHADER_GROUP_SSS_RADIUS,
+		SHADER_GROUP_SSS_RADIUS_MULTIVIEW,
 	};
 
 	// Not an enum because these values are constants that are processed as numbers
@@ -71,7 +79,10 @@ public:
 		SHADER_COLOR_PASS_FLAG_LIGHTMAP = 1 << 2,
 		SHADER_COLOR_PASS_FLAG_MULTIVIEW = 1 << 3,
 		SHADER_COLOR_PASS_FLAG_MOTION_VECTORS = 1 << 4,
-		SHADER_COLOR_PASS_FLAG_COUNT = 1 << 5
+		SHADER_COLOR_PASS_FLAG_BOUNCE_SOURCE = 1 << 5,
+		SHADER_COLOR_PASS_FLAG_REFLECTION_SOURCE = 1 << 6,
+		SHADER_COLOR_PASS_FLAG_SSS_RADIUS = 1 << 7,
+		SHADER_COLOR_PASS_FLAG_COUNT = 1 << 8
 	};
 
 	enum PipelineVersion {
@@ -84,6 +95,8 @@ public:
 		PIPELINE_VERSION_DEPTH_PASS_MULTIVIEW,
 		PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_MULTIVIEW,
 		PIPELINE_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_MULTIVIEW,
+		PIPELINE_VERSION_BACK_DEPTH,
+		PIPELINE_VERSION_BACK_DEPTH_MULTIVIEW,
 		PIPELINE_VERSION_COLOR_PASS,
 		PIPELINE_VERSION_MAX
 	};
@@ -94,7 +107,10 @@ public:
 		PIPELINE_COLOR_PASS_FLAG_LIGHTMAP = 1 << 2,
 		PIPELINE_COLOR_PASS_FLAG_MULTIVIEW = 1 << 3,
 		PIPELINE_COLOR_PASS_FLAG_MOTION_VECTORS = 1 << 4,
-		PIPELINE_COLOR_PASS_FLAG_OPTIONS = 5,
+		PIPELINE_COLOR_PASS_FLAG_BOUNCE_SOURCE = 1 << 5,
+		PIPELINE_COLOR_PASS_FLAG_REFLECTION_SOURCE = 1 << 6,
+		PIPELINE_COLOR_PASS_FLAG_SSS_RADIUS = 1 << 7, // Requires SEPARATE_SPECULAR.
+		PIPELINE_COLOR_PASS_FLAG_OPTIONS = 8,
 		PIPELINE_COLOR_PASS_FLAG_COMBINATIONS = 1 << PIPELINE_COLOR_PASS_FLAG_OPTIONS,
 	};
 
@@ -131,6 +147,7 @@ public:
 				uint32_t use_lightmap_specular : 1;
 				uint32_t material_feedback : 1;
 				uint32_t dithered_instance_fade : 1;
+				uint32_t debug_lighting_component : 4;
 			};
 		};
 
@@ -261,14 +278,17 @@ public:
 		bool uses_vertex = false;
 		bool uses_position = false;
 		bool uses_sss = false;
+		bool uses_sss_radius = false;
 		bool uses_transmittance = false;
 		bool uses_screen_texture = false;
 		bool uses_depth_texture = false;
+		bool uses_back_depth_texture = false;
 		bool uses_normal_texture = false;
 		bool uses_time = false;
 		bool uses_vertex_time = false;
 		bool uses_fragment_time = false;
 		bool writes_modelview_or_projection = false;
+		bool writes_depth = false;
 		bool uses_world_coordinates = false;
 		bool uses_screen_texture_mipmaps = false;
 		bool uses_z_clip_scale = false;
@@ -283,7 +303,7 @@ public:
 		uint32_t index = 0;
 
 		_FORCE_INLINE_ bool uses_alpha_pass() const {
-			bool has_read_screen_alpha = uses_screen_texture || uses_depth_texture || uses_normal_texture;
+			bool has_read_screen_alpha = uses_screen_texture || uses_depth_texture || uses_back_depth_texture || uses_normal_texture;
 			bool has_base_alpha = (uses_alpha && (!uses_alpha_clip || uses_alpha_antialiasing)) || has_read_screen_alpha;
 			bool has_blend_alpha = uses_blend_alpha;
 			bool has_alpha = has_base_alpha || has_blend_alpha;
@@ -300,7 +320,7 @@ public:
 
 		_FORCE_INLINE_ bool uses_shared_shadow_material() const {
 			bool backface_culling = cull_mode == RSE::CULL_MODE_BACK;
-			return !uses_particle_trails && !writes_modelview_or_projection && !uses_vertex && !uses_position && !uses_discard && !uses_depth_prepass_alpha && !uses_alpha_clip && !uses_alpha_antialiasing && backface_culling && !uses_point_size && !uses_world_coordinates && !wireframe && !uses_z_clip_scale && !stencil_enabled;
+			return !uses_particle_trails && !writes_modelview_or_projection && !writes_depth && !uses_vertex && !uses_position && !uses_discard && !uses_depth_prepass_alpha && !uses_alpha_clip && !uses_alpha_antialiasing && backface_culling && !uses_point_size && !uses_world_coordinates && !wireframe && !uses_z_clip_scale && !stencil_enabled;
 		}
 
 		virtual void set_code(const String &p_Code);
@@ -388,8 +408,11 @@ public:
 	void set_default_specialization(const ShaderSpecialization &p_specialization);
 	void enable_multiview_shader_group();
 	void enable_advanced_shader_group(bool p_needs_multiview = false);
+	void enable_lighting_sources_shader_group(bool p_bounce, bool p_reflection, bool p_needs_multiview);
+	void enable_sss_radius_shader_group(bool p_needs_multiview);
 	bool is_multiview_shader_group_enabled() const;
 	bool is_advanced_shader_group_enabled(bool p_multiview) const;
+	bool is_sss_radius_shader_group_enabled(bool p_multiview) const;
 	uint32_t get_pipeline_compilations(RSE::PipelineSource p_source);
 	RID get_default_shader_rd(bool p_is_multiview = false);
 };

@@ -2980,11 +2980,49 @@
 		<member name="rendering/environment/glow/upscale_mode.mobile" type="int" setter="" getter="" default="0">
 			Lower-end override for [member rendering/environment/glow/upscale_mode] on mobile devices, due to performance concerns or driver support.
 		</member>
+		<member name="rendering/environment/gtao/bent_normals" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], the GTAO backend also computes a bent normal per pixel. Materials without their own bent normal map then use it for cone-based specular occlusion. Only used when [member rendering/environment/ssao/backend] is [code]GTAO[/code].
+		</member>
+		<member name="rendering/environment/gtao/denoise_passes" type="int" setter="" getter="" default="2">
+			Number of edge-aware denoise passes applied to the GTAO term. [code]0[/code] disables the blur but still resolves the term. Only used when [member rendering/environment/ssao/backend] is [code]GTAO[/code].
+		</member>
+		<member name="rendering/environment/gtao/half_size" type="bool" setter="" getter="" default="true" keywords="resolution">
+			If [code]true[/code], GTAO is computed at half resolution from its own depth pyramid and upsampled with depth and normal aware weights. Only used when [member rendering/environment/ssao/backend] is [code]GTAO[/code].
+		</member>
+		<member name="rendering/environment/gtao/slices" type="int" setter="" getter="" default="3">
+			Number of horizon slices per pixel used by GTAO. Only used when [member rendering/environment/ssao/backend] is [code]GTAO[/code].
+		</member>
+		<member name="rendering/environment/gtao/steps" type="int" setter="" getter="" default="3">
+			Number of depth samples per slice side used by GTAO. Only used when [member rendering/environment/ssao/backend] is [code]GTAO[/code].
+		</member>
+		<member name="rendering/environment/screen_space_lighting/legacy_last_frame_source" type="bool" setter="" getter="" default="true">
+			If [code]false[/code], screen-space indirect lighting samples a bounce source written by the opaque pass (direct diffuse light plus emission weighted by [code]EMISSION_BOUNCE_WEIGHT[/code]) and screen-space reflections sample a reflection source (the opaque radiance without the screen-space reflection term and without fog). Both effects compress samples relative to the exposure the tonemapper uses, so their strength does not depend on the scale of the stored HDR values. Both reproject their samples with the camera and reject a sample when the previous frame held a different surface there (the reflection source stores the linear view depth in its alpha, SSIL keeps the previous frame's depth mipmaps), so moving objects and newly exposed surfaces leave no trail; a rejected sample counts as a miss. If [code]true[/code], both effects sample a copy of the previous final frame and compress the stored values directly, as in earlier versions; the previous frame feeds their own output and fog back into the next frame.
+			[b]Note:[/b] Only used by the Forward+ rendering method. Viewports with MSAA always sample the previous final frame, with the exposure-relative compression unless this setting is enabled.
+		</member>
+		<member name="rendering/environment/screen_space_lighting/temporal_validation" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], screen-space indirect lighting and screen-space reflections compare each sample of the previous frame's bounce or reflection source against the previous frame's depth and treat a mismatch (a moved object or a newly exposed surface) as a miss, so the probe, sky or ambient fallback keeps that share. Static scenes are unaffected. Only used when [member rendering/environment/screen_space_lighting/legacy_last_frame_source] is [code]false[/code].
+		</member>
+		<member name="rendering/environment/screen_space_reflection/backend" type="int" setter="" getter="" default="0">
+			The screen-space reflection backend. [code]Mirror[/code] traces one mirror ray per pixel and blurs the result by roughness; it fades out between roughness 0.6 and 0.7. [code]Stochastic[/code] traces rays sampled from the GGX distribution of visible normals, reuses the hits of neighboring pixels weighted by the BRDF over the sampling probability, and accumulates the result over frames with hit-point reprojection; it reflects up to [member rendering/environment/screen_space_reflection/stochastic/roughness_cutoff]. Both write radiance with a confidence that replaces the reflection probe or sky reflection where the confidence is high.
+			[b]Note:[/b] Only used by the Forward+ rendering method. The trace resolution follows [member rendering/environment/screen_space_reflection/half_size].
+		</member>
 		<member name="rendering/environment/screen_space_reflection/half_size" type="bool" setter="" getter="" default="true" keywords="resolution">
 			If [code]true[/code], screen-space reflections will be rendered at half size and then upscaled before being added to the scene. This is faster but may look pixelated or cause flickering. If [code]false[/code], screen-space reflections will be rendered at full size.
 		</member>
+		<member name="rendering/environment/screen_space_reflection/stochastic/rays_per_pixel" type="int" setter="" getter="" default="1">
+			Rays traced per traced pixel by the stochastic screen-space reflection backend. Pixels rougher than 0.35 trace on alternating pixels each frame.
+		</member>
+		<member name="rendering/environment/screen_space_reflection/stochastic/roughness_cutoff" type="float" setter="" getter="" default="0.8">
+			Roughness from which the stochastic screen-space reflection backend traces no rays and leaves the reflection to the probe or sky. The confidence fades out over the 0.1 below the cutoff.
+		</member>
+		<member name="rendering/environment/screen_space_reflection/stochastic/temporal" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], the stochastic screen-space reflection backend accumulates its result over frames. The history follows the reflected hit point, is clamped to the local variance of the current rays and is reset by [member rendering/anti_aliasing/quality/history_reset_serial] and exposure changes.
+		</member>
 		<member name="rendering/environment/ssao/adaptive_target" type="float" setter="" getter="" default="0.5">
 			Quality target to use when [member rendering/environment/ssao/quality] is set to [code]Ultra[/code]. A value of [code]0.0[/code] provides a quality and speed similar to [code]Medium[/code] while a value of [code]1.0[/code] provides much higher quality than any of the other settings at the cost of performance.
+		</member>
+		<member name="rendering/environment/ssao/backend" type="int" setter="" getter="" default="0">
+			Selects the screen-space ambient occlusion implementation. [code]ASSAO[/code] is the default adaptive SSAO. [code]GTAO[/code] uses ground-truth ambient occlusion (Intel XeGTAO) with the settings in [code]rendering/environment/gtao[/code]; [member Environment.ssao_radius] is its world-space radius, and [member Environment.ssao_intensity] and [member Environment.ssao_power] scale its final power. Orthographic cameras always use ASSAO.
 		</member>
 		<member name="rendering/environment/ssao/blur_passes" type="int" setter="" getter="" default="2">
 			Number of blur passes to use when computing screen-space ambient occlusion. A higher number will result in a smoother look, but will be slower to compute and will have less high-frequency detail.
@@ -3033,6 +3071,9 @@
 		</member>
 		<member name="rendering/environment/volumetric_fog/use_filter" type="int" setter="" getter="" default="1">
 			Enables filtering of the volumetric fog effect prior to integration. This substantially blurs the fog which reduces fine details but also smooths out harsh edges and aliasing artifacts. Disable when more detail is required.
+		</member>
+		<member name="rendering/environment/volumetric_fog/use_temporal_clamp" type="bool" setter="" getter="" default="false">
+			If [code]true[/code] and [member Environment.volumetric_fog_temporal_reprojection_enabled] is [code]true[/code], the reprojected fog from previous frames is clamped to the range of the current frame's neighboring froxels before blending. This removes the trails that moving lights leave in the fog, while fog lit by static lights keeps its temporal smoothing. If [code]false[/code], the previous frames are blended in unclamped.
 		</member>
 		<member name="rendering/environment/volumetric_fog/volume_depth" type="int" setter="" getter="" default="64">
 			Number of slices to use along the depth of the froxel buffer for volumetric fog. A lower number will be more efficient but may result in artifacts appearing during camera movement. See also [member Environment.volumetric_fog_length].
@@ -3194,6 +3235,15 @@
 			[b]Note:[/b] Screen-space contact shadows are only supported in the Forward+ renderer, not Mobile or Compatibility.
 			[b]Note:[/b] Screen-space contact shadows only affect [DirectionalLight3D] nodes that have shadows enabled. The [DirectionalLight3D] node must also have [member Light3D.shadow_contact_shadows_allow] set to [code]true[/code].
 		</member>
+		<member name="rendering/lights_and_shadows/contact_shadow/max_local_lights" type="int" setter="" getter="" default="4">
+			Maximum number of [OmniLight3D] and [SpotLight3D] nodes that receive screen-space contact shadows per viewport. Lights with [member Light3D.shadow_contact_shadows_allow] enabled are ranked by their energy divided by their squared distance to the camera, closest and brightest first. A light without a shadow map uses the contact shadow as its only visibility. Set to [code]0[/code] to restrict contact shadows to [DirectionalLight3D].
+		</member>
+		<member name="rendering/lights_and_shadows/contact_shadow/ray_completion_confidence" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], each contact shadow ray is weighted by the fraction of its length that could be tested on screen, so rays that leave the screen fade out and hand the pixel back to the shadow map instead of ending abruptly at the screen edge.
+		</member>
+		<member name="rendering/lights_and_shadows/contact_shadow/receiver_plane_rejection" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], contact shadow samples that lie on or behind the receiver's own surface plane (reconstructed from the depth buffer and extrapolated along the ray) cannot occlude it. This removes the self-shadowing streaks flat ground shows at grazing light angles, while objects standing on the surface keep their contact shadows.
+		</member>
 		<member name="rendering/lights_and_shadows/contact_shadow/shadow_length" type="int" setter="" getter="" default="1">
 			Controls the maximum distance contact shadows can be cast from their caster. Higher settings sample further along the shadow ray, at a moderate performance cost. Note that the effective maximum distance depends on the distance between the camera and object, as well as the 3D rendering resolution (determined by the viewport resolution multiplied by [member rendering/scaling_3d/scale]).
 		</member>
@@ -3216,6 +3266,10 @@
 		</member>
 		<member name="rendering/lights_and_shadows/directional_shadow/soft_shadow_filter_quality.mobile" type="int" setter="" getter="" default="0">
 			Lower-end override for [member rendering/lights_and_shadows/directional_shadow/soft_shadow_filter_quality] on mobile devices, due to performance concerns or driver support.
+		</member>
+		<member name="rendering/lights_and_shadows/directional_shadow/soft_shadow_thin_casters" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], shadows of [DirectionalLight3D]s with a [member Light3D.light_angular_distance] above [code]0.0[/code] use a blocker search and filter that follow the receiver's slope and widen the search where it finds no blocker, so casters thinner than the penumbra (railings, poles, foliage) keep a shadow at a distance. If [code]false[/code], the previous percentage-closer soft shadows are used.
+			[b]Note:[/b] Only used by the Forward+ rendering method.
 		</member>
 		<member name="rendering/lights_and_shadows/multi_bounce_occlusion/enabled" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], approximates local multi-bounce global illumination in ambient occlusion by integrating albedo information.

@@ -767,6 +767,82 @@
 			Draws the atlas used by [AreaLight3D] nodes in the upper left quadrant of the [Viewport].
 			[b]Note:[/b] Only supported when using the Forward+ or Mobile rendering method.
 		</constant>
+		<constant name="DEBUG_DRAW_CONTACT_SHADOWS" value="29" enum="DebugDraw">
+			Draws the screen-space contact shadow visibility of all lights combined (the darkest value per pixel). White means no contact shadow.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method, with [member ProjectSettings.rendering/lights_and_shadows/contact_shadow/enabled].
+		</constant>
+		<constant name="DEBUG_DRAW_BENT_NORMALS" value="30" enum="DebugDraw">
+			Draws the view-space bent normals computed by the GTAO backend of screen-space ambient occlusion.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method, with [member ProjectSettings.rendering/environment/ssao/backend] set to GTAO and [member ProjectSettings.rendering/environment/gtao/bent_normals] enabled.
+		</constant>
+		<constant name="DEBUG_DRAW_DIRECT_DIFFUSE" value="31" enum="DebugDraw">
+			Draws only the diffuse light from lights, after the material weight and direct-light ambient occlusion.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_DIRECT_SPECULAR" value="32" enum="DebugDraw">
+			Draws only the specular light from lights.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_INDIRECT_DIFFUSE" value="33" enum="DebugDraw">
+			Draws only the ambient diffuse light, including screen-space indirect lighting and GI, after the material weight.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_INDIRECT_SPECULAR" value="34" enum="DebugDraw">
+			Draws only the reflected light from the sky, reflection probes, GI and screen-space reflections, after the material weight.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_EMISSION" value="35" enum="DebugDraw">
+			Draws only the emission of materials. The direct diffuse, direct specular, indirect diffuse, indirect specular and emission views add up to the image before fog.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_FOG_TRANSMITTANCE" value="36" enum="DebugDraw">
+			Draws the fraction of each opaque surface's light that passes through depth and volumetric fog (white = no fog).
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_FOG_INSCATTER" value="37" enum="DebugDraw">
+			Draws the light that depth and volumetric fog add in front of each opaque surface. The image equals the image before fog times the transmittance plus the inscatter.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_SSR_CONFIDENCE" value="38" enum="DebugDraw">
+			Draws the confidence of the screen-space reflection hit at each pixel (the alpha of the screen-space reflection buffer).
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_BOUNCE_SOURCE" value="39" enum="DebugDraw">
+			Draws the bounce source that screen-space indirect lighting samples in the next frame: direct diffuse light plus emission weighted by [code]EMISSION_BOUNCE_WEIGHT[/code], before fog.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method, without MSAA, with [member ProjectSettings.rendering/environment/screen_space_lighting/legacy_last_frame_source] disabled.
+		</constant>
+		<constant name="DEBUG_DRAW_REFLECTION_SOURCE" value="40" enum="DebugDraw">
+			Draws the reflection source that screen-space reflections sample in the next frame: the opaque image without the screen-space reflection term and without fog.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method, without MSAA, with [member ProjectSettings.rendering/environment/screen_space_lighting/legacy_last_frame_source] disabled.
+		</constant>
+		<constant name="DEBUG_DRAW_PERSISTENT_AO" value="41" enum="DebugDraw">
+			Draws the ambient occlusion each surface writes itself (the [code]AO[/code] built-in, after decals), before screen-space ambient occlusion is applied. Drawn without tonemapping or exposure, on a black background.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_FALLBACK_SOURCE_SPECULAR" value="42" enum="DebugDraw">
+			Colors each surface by the providers of its indirect specular light, weighted by how much each one replaced the previous ones: blue for the sky or environment reflection, orange for VoxelGI or SDFGI, green for reflection probes, magenta for screen-space reflections and black for none. The handover from screen-space reflections to the fallback shows as a gradient. Drawn without tonemapping or exposure, on a black background.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE" value="43" enum="DebugDraw">
+			Colors each surface by the providers of its indirect diffuse light: blue for the ambient light or sky, orange for VoxelGI or SDFGI, cyan for lightmaps, green for reflection probe ambient and black for none. Magenta is the share of screen-space indirect lighting in the final indirect diffuse light. Drawn without tonemapping or exposure, on a black background.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_REJECTED_HISTORY" value="44" enum="DebugDraw">
+			Draws where the temporal resolver discarded or limited its history this frame, over the dimmed scene luminance. With TAA: white on a frame that resets the history, blue where the reprojection leaves the screen, magenta where [code]TEMPORAL_ID[/code] changed (Garden TAA), red for velocity disocclusion and green where neighborhood clipping moved the history strongly. With FSR2: white on a reset frame, blue off screen, red for its depth-based disocclusion and green for its dilated reactive mask.
+			[b]Note:[/b] Only supported when using the Forward+ rendering method with TAA or FSR2.
+		</constant>
+		<constant name="DEBUG_DRAW_FOG_HISTORY_CLAMP" value="45" enum="DebugDraw">
+			Draws, for each froxel column of the volumetric fog, the largest change the temporal clamp made to the reprojected history this frame, relative to the history (white = the history was replaced entirely).
+			[b]Note:[/b] Only supported when using the Forward+ rendering method, with volumetric fog temporal reprojection and [member ProjectSettings.rendering/environment/volumetric_fog/use_temporal_clamp] enabled.
+		</constant>
+		<constant name="DEBUG_DRAW_LINEAR_DEPTH" value="46" enum="DebugDraw">
+			Draws the view-space depth stored in the depth buffer on a logarithmic scale between the camera's near and far planes: [code]1 - log(depth / near) / log(far / near)[/code], so the near plane is white and the far plane, including the sky, is black. Works with perspective, orthogonal and frustum cameras; with multiple views, the first view is drawn.
+			[b]Note:[/b] Only supported when using the Forward+ or Mobile rendering methods.
+		</constant>
+		<constant name="DEBUG_DRAW_SSR_HIT_DISTANCE" value="47" enum="DebugDraw">
+			Draws the distance from each surface to its stochastic screen-space reflection hits, mapped as [code]d / (d + 2)[/code] for [code]d[/code] in meters (black = no hit, gray = 2 m).
+			[b]Note:[/b] Only supported when using the Forward+ rendering method, with [member ProjectSettings.rendering/environment/screen_space_reflection/backend] set to Stochastic.
+		</constant>
 		<constant name="DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_NEAREST" value="0" enum="DefaultCanvasItemTextureFilter">
 			The texture filter reads from the nearest pixel only. This makes the texture look pixelated from up close, and grainy from a distance (due to mipmaps not being sampled).
 		</constant>

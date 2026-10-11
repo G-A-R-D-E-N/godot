@@ -913,6 +913,113 @@ void Environment::_update_fog_depth() {
 			fog_depth_end);
 }
 
+void Environment::set_aerial_perspective_enabled(bool p_enabled) {
+	aerial_perspective_enabled = p_enabled;
+	_update_aerial_perspective();
+}
+
+bool Environment::is_aerial_perspective_enabled() const {
+	return aerial_perspective_enabled;
+}
+
+void Environment::set_aerial_perspective_texture(const Ref<Texture3D> &p_texture) {
+	aerial_perspective_texture = p_texture;
+	_update_aerial_perspective();
+}
+
+Ref<Texture3D> Environment::get_aerial_perspective_texture() const {
+	return aerial_perspective_texture;
+}
+
+void Environment::set_aerial_perspective_max_distance(float p_distance) {
+	aerial_perspective_max_distance = p_distance;
+	_update_aerial_perspective();
+}
+
+float Environment::get_aerial_perspective_max_distance() const {
+	return aerial_perspective_max_distance;
+}
+
+void Environment::_update_aerial_perspective() {
+	RS::get_singleton()->environment_set_aerial_perspective(environment, aerial_perspective_enabled, aerial_perspective_texture.is_valid() ? aerial_perspective_texture->get_rid() : RID(), aerial_perspective_max_distance);
+}
+
+void Environment::set_night_vision_enabled(bool p_enabled) {
+	night_vision_enabled = p_enabled;
+	_update_night_vision();
+}
+
+bool Environment::is_night_vision_enabled() const {
+	return night_vision_enabled;
+}
+
+void Environment::set_night_vision_mesopic_min(float p_luminance) {
+	night_vision_mesopic_min = p_luminance;
+	_update_night_vision();
+}
+
+float Environment::get_night_vision_mesopic_min() const {
+	return night_vision_mesopic_min;
+}
+
+void Environment::set_night_vision_mesopic_max(float p_luminance) {
+	night_vision_mesopic_max = p_luminance;
+	_update_night_vision();
+}
+
+float Environment::get_night_vision_mesopic_max() const {
+	return night_vision_mesopic_max;
+}
+
+void Environment::set_night_vision_blue_shift(float p_amount) {
+	night_vision_blue_shift = p_amount;
+	_update_night_vision();
+}
+
+float Environment::get_night_vision_blue_shift() const {
+	return night_vision_blue_shift;
+}
+
+void Environment::set_night_vision_blue_shift_chromaticity(const Vector2 &p_chromaticity) {
+	night_vision_blue_shift_chromaticity = p_chromaticity;
+	_update_night_vision();
+}
+
+Vector2 Environment::get_night_vision_blue_shift_chromaticity() const {
+	return night_vision_blue_shift_chromaticity;
+}
+
+void Environment::set_night_vision_desaturation(float p_amount) {
+	night_vision_desaturation = p_amount;
+	_update_night_vision();
+}
+
+float Environment::get_night_vision_desaturation() const {
+	return night_vision_desaturation;
+}
+
+void Environment::set_night_vision_acuity_radius(float p_radius) {
+	night_vision_acuity_radius = p_radius;
+	_update_night_vision();
+}
+
+float Environment::get_night_vision_acuity_radius() const {
+	return night_vision_acuity_radius;
+}
+
+void Environment::set_night_vision_highlight_range(float p_range) {
+	night_vision_highlight_range = p_range;
+	_update_night_vision();
+}
+
+float Environment::get_night_vision_highlight_range() const {
+	return night_vision_highlight_range;
+}
+
+void Environment::_update_night_vision() {
+	RS::get_singleton()->environment_set_night_vision(environment, night_vision_enabled, night_vision_mesopic_min, night_vision_mesopic_max, night_vision_blue_shift, night_vision_blue_shift_chromaticity, night_vision_desaturation, night_vision_acuity_radius, night_vision_highlight_range);
+}
+
 // Volumetric Fog
 
 void Environment::_update_volumetric_fog() {
@@ -1532,6 +1639,18 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "fog_depth_begin", PROPERTY_HINT_RANGE, "0,4000,0.1,or_greater,or_less,suffix:m"), "set_fog_depth_begin", "get_fog_depth_begin");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "fog_depth_end", PROPERTY_HINT_RANGE, "0,4000,0.1,or_greater,or_less,suffix:m"), "set_fog_depth_end", "get_fog_depth_end");
 
+	ClassDB::bind_method(D_METHOD("set_aerial_perspective_enabled", "enabled"), &Environment::set_aerial_perspective_enabled);
+	ClassDB::bind_method(D_METHOD("is_aerial_perspective_enabled"), &Environment::is_aerial_perspective_enabled);
+	ClassDB::bind_method(D_METHOD("set_aerial_perspective_texture", "texture"), &Environment::set_aerial_perspective_texture);
+	ClassDB::bind_method(D_METHOD("get_aerial_perspective_texture"), &Environment::get_aerial_perspective_texture);
+	ClassDB::bind_method(D_METHOD("set_aerial_perspective_max_distance", "distance"), &Environment::set_aerial_perspective_max_distance);
+	ClassDB::bind_method(D_METHOD("get_aerial_perspective_max_distance"), &Environment::get_aerial_perspective_max_distance);
+
+	ADD_GROUP("Aerial Perspective", "aerial_perspective_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "aerial_perspective_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_aerial_perspective_enabled", "is_aerial_perspective_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "aerial_perspective_texture", PROPERTY_HINT_RESOURCE_TYPE, "Texture3D"), "set_aerial_perspective_texture", "get_aerial_perspective_texture");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "aerial_perspective_max_distance", PROPERTY_HINT_RANGE, "1,100000,1,or_greater,exp,suffix:m"), "set_aerial_perspective_max_distance", "get_aerial_perspective_max_distance");
+
 	ClassDB::bind_method(D_METHOD("set_volumetric_fog_enabled", "enabled"), &Environment::set_volumetric_fog_enabled);
 	ClassDB::bind_method(D_METHOD("is_volumetric_fog_enabled"), &Environment::is_volumetric_fog_enabled);
 	ClassDB::bind_method(D_METHOD("set_volumetric_fog_emission", "color"), &Environment::set_volumetric_fog_emission);
@@ -1594,6 +1713,33 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "adjustment_contrast", PROPERTY_HINT_RANGE, "0.75,1.25,0.005,or_less,or_greater"), "set_adjustment_contrast", "get_adjustment_contrast");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "adjustment_saturation", PROPERTY_HINT_RANGE, "0.0,2.0,0.01,or_less,or_greater"), "set_adjustment_saturation", "get_adjustment_saturation");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "adjustment_color_correction", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D,Texture3D"), "set_adjustment_color_correction", "get_adjustment_color_correction");
+
+	ClassDB::bind_method(D_METHOD("set_night_vision_enabled", "enabled"), &Environment::set_night_vision_enabled);
+	ClassDB::bind_method(D_METHOD("is_night_vision_enabled"), &Environment::is_night_vision_enabled);
+	ClassDB::bind_method(D_METHOD("set_night_vision_mesopic_min", "luminance"), &Environment::set_night_vision_mesopic_min);
+	ClassDB::bind_method(D_METHOD("get_night_vision_mesopic_min"), &Environment::get_night_vision_mesopic_min);
+	ClassDB::bind_method(D_METHOD("set_night_vision_mesopic_max", "luminance"), &Environment::set_night_vision_mesopic_max);
+	ClassDB::bind_method(D_METHOD("get_night_vision_mesopic_max"), &Environment::get_night_vision_mesopic_max);
+	ClassDB::bind_method(D_METHOD("set_night_vision_blue_shift", "amount"), &Environment::set_night_vision_blue_shift);
+	ClassDB::bind_method(D_METHOD("get_night_vision_blue_shift"), &Environment::get_night_vision_blue_shift);
+	ClassDB::bind_method(D_METHOD("set_night_vision_blue_shift_chromaticity", "chromaticity"), &Environment::set_night_vision_blue_shift_chromaticity);
+	ClassDB::bind_method(D_METHOD("get_night_vision_blue_shift_chromaticity"), &Environment::get_night_vision_blue_shift_chromaticity);
+	ClassDB::bind_method(D_METHOD("set_night_vision_desaturation", "amount"), &Environment::set_night_vision_desaturation);
+	ClassDB::bind_method(D_METHOD("get_night_vision_desaturation"), &Environment::get_night_vision_desaturation);
+	ClassDB::bind_method(D_METHOD("set_night_vision_acuity_radius", "radius"), &Environment::set_night_vision_acuity_radius);
+	ClassDB::bind_method(D_METHOD("get_night_vision_acuity_radius"), &Environment::get_night_vision_acuity_radius);
+	ClassDB::bind_method(D_METHOD("set_night_vision_highlight_range", "range"), &Environment::set_night_vision_highlight_range);
+	ClassDB::bind_method(D_METHOD("get_night_vision_highlight_range"), &Environment::get_night_vision_highlight_range);
+
+	ADD_GROUP("Night Vision", "night_vision_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "night_vision_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_night_vision_enabled", "is_night_vision_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "night_vision_mesopic_min", PROPERTY_HINT_RANGE, "0.00001,1,0.00001,or_greater,exp,suffix:nt"), "set_night_vision_mesopic_min", "get_night_vision_mesopic_min");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "night_vision_mesopic_max", PROPERTY_HINT_RANGE, "0.001,100,0.001,or_greater,exp,suffix:nt"), "set_night_vision_mesopic_max", "get_night_vision_mesopic_max");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "night_vision_blue_shift", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_night_vision_blue_shift", "get_night_vision_blue_shift");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "night_vision_blue_shift_chromaticity"), "set_night_vision_blue_shift_chromaticity", "get_night_vision_blue_shift_chromaticity");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "night_vision_desaturation", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_night_vision_desaturation", "get_night_vision_desaturation");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "night_vision_acuity_radius", PROPERTY_HINT_RANGE, "0,8,0.01,or_greater,suffix:px"), "set_night_vision_acuity_radius", "get_night_vision_acuity_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "night_vision_highlight_range", PROPERTY_HINT_RANGE, "0,16,0.01,or_greater"), "set_night_vision_highlight_range", "get_night_vision_highlight_range");
 
 	// Constants
 

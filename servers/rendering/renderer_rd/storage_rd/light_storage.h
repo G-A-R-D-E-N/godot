@@ -83,6 +83,11 @@ private:
 		RID area_texture;
 		uint64_t version = 0;
 		bool allow_contact_shadows = true;
+		RID cloud_shadow_texture;
+		float cloud_shadow_scale = 1000.0;
+		Vector2 cloud_shadow_offset;
+		float cloud_shadow_altitude = 2000.0;
+		float cloud_shadow_strength = 0.0;
 
 		Dependency dependency;
 	};
@@ -155,7 +160,8 @@ private:
 		float specular_amount;
 		float shadow_opacity;
 
-		float pad[2];
+		uint32_t sscs_index;
+		float pad;
 		float atlas_rect[4]; // in omni, used for atlas uv, in spot, used for projector uv
 		float shadow_matrix[16];
 		float shadow_bias;
@@ -224,11 +230,21 @@ private:
 		float uv_scale2[2];
 		float uv_scale3[2];
 		float uv_scale4[2];
+		float cloud_shadow_u[4];
+		float cloud_shadow_v[4];
+		float cloud_shadow_strength;
+		float cloud_shadow_exponent;
+		float cloud_shadow_pad[2];
+		float cloud_shadow_plane[4];
 	};
 
 	uint32_t max_directional_lights;
 	DirectionalLightData *directional_lights = nullptr;
 	RID directional_light_buffer;
+	RID directional_cloud_shadow_textures[RendererSceneRender::MAX_DIRECTIONAL_LIGHTS];
+
+	static constexpr real_t CLOUD_SHADOW_FADE_METERS = 10.0;
+	float _get_cloud_shadow(const Light *p_light, const Transform3D &p_light_transform, const Transform3D &p_camera_transform, float *r_u, float *r_v, float *r_exponent, float *r_plane) const;
 
 	/* REFLECTION PROBE */
 
@@ -262,6 +278,7 @@ private:
 		int reflection_texture_size = 0;
 		float uv_border_size = 0.0;
 		bool update_always = false;
+		int staging_index = -1; // Invariant: no probe samples this layer.
 
 		RID reflection;
 		RID color_buffer;
@@ -285,12 +302,14 @@ private:
 	mutable RID_Owner<ReflectionAtlas> reflection_atlas_owner;
 
 	void _reflection_atlas_clear(ReflectionAtlas *p_reflection_atlas);
+	int _reflection_atlas_find_slot(ReflectionAtlas *p_reflection_atlas);
 
 	/* REFLECTION PROBE INSTANCE */
 
 	struct ReflectionProbeInstance {
 		RID probe;
-		int atlas_index = -1;
+		int atlas_index = -1; // Invariant: -1 or a layer holding one complete capture of this probe.
+		int render_index = -1;
 		RID atlas;
 
 		bool dirty = true;
@@ -526,6 +545,10 @@ public:
 	virtual bool light_directional_get_blend_splits(RID p_light) const override;
 	virtual void light_directional_set_sky_mode(RID p_light, RSE::LightDirectionalSkyMode p_mode) override;
 	virtual RSE::LightDirectionalSkyMode light_directional_get_sky_mode(RID p_light) const override;
+	virtual void light_directional_set_cloud_shadow(RID p_light, RID p_texture, float p_scale, const Vector2 &p_offset, float p_altitude, float p_strength) override;
+	RID light_directional_get_cloud_shadow_texture(RID p_light) const;
+	float light_instance_get_cloud_shadow(RID p_light_instance, const Transform3D &p_camera_transform, float *r_u, float *r_v, float *r_exponent) const;
+	const RID *get_directional_cloud_shadow_textures() const { return directional_cloud_shadow_textures; }
 
 	virtual RSE::LightDirectionalShadowMode light_directional_get_shadow_mode(RID p_light) override;
 	virtual RSE::LightOmniShadowMode light_omni_get_shadow_mode(RID p_light) override;
