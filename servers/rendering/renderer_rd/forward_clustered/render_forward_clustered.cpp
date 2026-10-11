@@ -5063,12 +5063,10 @@ static RD::FramebufferFormatID _get_color_framebuffer_format_for_pipeline(RD::Da
 		attachment.usage_flags = RendererRD::SSEffects::LIGHTING_SOURCE_USAGE_BITS;
 		attachments.push_back(p_bounce_source ? attachment : unused_attachment);
 		attachments.push_back(p_reflection_source ? attachment : unused_attachment);
-	}
 
-	if (p_velocity) {
 		attachment.format = RD::DATA_FORMAT_R8_UNORM;
 		attachment.usage_flags = RenderSceneBuffersRD::get_reactive_usage_bits(multisampling);
-		attachments.push_back(attachment);
+		attachments.push_back(p_velocity ? attachment : unused_attachment);
 	}
 
 	if (p_specular) {
