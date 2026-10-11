@@ -129,6 +129,7 @@ public:
 		RID render_sdfgi_uniform_set;
 
 		void ensure_specular();
+		void ensure_sss_radius();
 		bool has_specular() const { return render_buffers->has_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_SPECULAR); }
 		RID get_specular() const { return render_buffers->get_texture(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_SPECULAR); }
 		RID get_specular(uint32_t p_layer) { return render_buffers->get_texture_slice(RB_SCOPE_FORWARD_CLUSTERED, RB_TEX_SPECULAR, p_layer, 0); }
@@ -231,6 +232,7 @@ private:
 		COLOR_PASS_FLAG_MOTION_VECTORS = 1 << 3,
 		COLOR_PASS_FLAG_BOUNCE_SOURCE = 1 << 4,
 		COLOR_PASS_FLAG_REFLECTION_SOURCE = 1 << 5,
+		COLOR_PASS_FLAG_SSS_RADIUS = 1 << 6,
 	};
 
 	struct GeometryInstanceSurfaceDataCache;
@@ -458,6 +460,7 @@ private:
 		bool used_depth_texture = false;
 		bool used_back_depth_texture = false;
 		bool used_sss = false;
+		bool used_sss_radius = false;
 		bool used_lightmap = false;
 		bool used_opaque_stencil = false;
 
@@ -547,6 +550,7 @@ private:
 			FLAG_USES_MOTION_VECTOR = 131072,
 			FLAG_USES_STENCIL = 262144,
 			FLAG_USES_BACK_DEPTH_TEXTURE = 524288,
+			FLAG_USES_SSS_RADIUS = 1048576,
 		};
 
 		union {
@@ -699,6 +703,7 @@ private:
 				uint32_t use_shadow_cubemaps : 1;
 				uint32_t use_shadow_dual_paraboloid : 1;
 				uint32_t used_source_combos : 6;
+				uint32_t use_sss_radius : 1;
 			};
 		};
 	};
@@ -833,7 +838,7 @@ private:
 	void _process_sscs(Ref<RenderSceneBuffersRD> p_render_buffers, const Projection *p_projections, const Transform3D &p_transform, const LocalVector<int> &p_contact_shadows, const LocalVector<RID> &p_local_contact_shadows, const RenderShadowData *p_render_shadows, float p_taa_frame_count);
 	void _copy_framebuffer_to_ss_effects(Ref<RenderSceneBuffersRD> p_render_buffers, bool p_use_ssil, bool p_use_ssr);
 	void _pre_opaque_render(RenderDataRD *p_render_data, bool p_use_ssao, bool p_use_ssil, bool p_use_ssr, bool p_use_sscs, bool p_use_gi, const RID *p_normal_roughness_slices, RID p_voxel_gi_buffer);
-	void _process_sss(Ref<RenderSceneBuffersRD> p_render_buffers, const Projection &p_camera, uint32_t p_taa_frame);
+	void _process_sss(Ref<RenderSceneBuffersRD> p_render_buffers, const Projection &p_camera, uint32_t p_taa_frame, bool p_sss_radius_written);
 
 	/* Debug */
 	void _debug_draw_cluster(Ref<RenderSceneBuffersRD> p_render_buffers);

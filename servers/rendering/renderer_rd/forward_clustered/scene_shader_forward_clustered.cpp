@@ -77,6 +77,7 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 	uses_vertex = false;
 	uses_position = false;
 	uses_sss = false;
+	uses_sss_radius = false;
 	uses_transmittance = false;
 	uses_time = false;
 	writes_modelview_or_projection = false;
@@ -131,7 +132,7 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 	actions.render_mode_flags["depth_prepass_alpha"] = &uses_depth_prepass_alpha;
 
 	actions.usage_flag_pointers["SSS_STRENGTH"] = &uses_sss;
-	actions.usage_flag_pointers["SSS_RADIUS"] = &uses_sss;
+	actions.usage_flag_pointers["SSS_RADIUS"] = &uses_sss_radius;
 	actions.usage_flag_pointers["SSS_TRANSMITTANCE_DEPTH"] = &uses_transmittance;
 
 	actions.usage_flag_pointers["DISCARD"] = &uses_discard;
@@ -192,6 +193,7 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 		version = SceneShaderForwardClustered::singleton->shader.version_create(false);
 	}
 
+	uses_sss = uses_sss || uses_sss_radius;
 	depth_draw = DepthDraw(depth_drawi);
 	if (depth_test_disabledi) {
 		depth_test = DEPTH_TEST_DISABLED;
@@ -333,6 +335,10 @@ uint16_t SceneShaderForwardClustered::ShaderData::_get_shader_version(PipelineVe
 
 			if (p_color_pass_flags & PIPELINE_COLOR_PASS_FLAG_REFLECTION_SOURCE) {
 				shader_flags |= SHADER_COLOR_PASS_FLAG_REFLECTION_SOURCE;
+			}
+
+			if (p_color_pass_flags & PIPELINE_COLOR_PASS_FLAG_SSS_RADIUS) {
+				shader_flags |= SHADER_COLOR_PASS_FLAG_SSS_RADIUS;
 			}
 
 			return ShaderVersion::SHADER_VERSION_COLOR_PASS * 2 + shader_flags;
@@ -687,6 +693,7 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 			"\n#define MOTION_VECTORS\n", // SHADER_COLOR_PASS_FLAG_MOTION_VECTORS
 			"\n#define MODE_BOUNCE_SOURCE\n",
 			"\n#define MODE_REFLECTION_SOURCE\n",
+			"\n#define SSS_RADIUS_OUTPUT\n",
 		};
 
 		for (int i = 0; i < SHADER_COLOR_PASS_FLAG_COUNT; i++) {
@@ -713,12 +720,21 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 				group = ShaderGroup(SHADER_GROUP_BOUNCE_SOURCE + sources - 1 + (multiview_group ? 3 : 0));
 			}
 
+			if (i & SHADER_COLOR_PASS_FLAG_SSS_RADIUS) {
+				group = multiview_group ? SHADER_GROUP_SSS_RADIUS_MULTIVIEW : SHADER_GROUP_SSS_RADIUS;
+			}
+
 			shader_versions.push_back(ShaderRD::VariantDefine(group, version, false));
 		}
 
 		Vector<uint64_t> dynamic_buffers;
 		dynamic_buffers.push_back(ShaderRD::DynamicBuffer::encode(RenderForwardClustered::RENDER_PASS_UNIFORM_SET, 2));
 		shader.initialize(shader_versions, p_defines, Vector<RD::PipelineImmutableSampler>(), dynamic_buffers);
+		for (int i = 0; i < SHADER_COLOR_PASS_FLAG_COUNT; i++) {
+			if ((i & SHADER_COLOR_PASS_FLAG_SSS_RADIUS) && !(i & SHADER_COLOR_PASS_FLAG_SEPARATE_SPECULAR)) {
+				shader.set_variant_enabled(ShaderVersion::SHADER_VERSION_COLOR_PASS * 2 + i, false);
+			}
+		}
 
 		if (RendererCompositorRD::get_singleton()->is_xr_enabled()) {
 			shader.enable_group(SHADER_GROUP_MULTIVIEW);
@@ -1104,6 +1120,13 @@ void SceneShaderForwardClustered::enable_lighting_sources_shader_group(bool p_bo
 	shader.enable_group(group);
 }
 
+void SceneShaderForwardClustered::enable_sss_radius_shader_group(bool p_needs_multiview) {
+	if (p_needs_multiview || RendererCompositorRD::get_singleton()->is_xr_enabled()) {
+		shader.enable_group(SHADER_GROUP_SSS_RADIUS_MULTIVIEW);
+	}
+	shader.enable_group(SHADER_GROUP_SSS_RADIUS);
+}
+
 bool SceneShaderForwardClustered::is_multiview_shader_group_enabled() const {
 	return shader.is_group_enabled(SHADER_GROUP_MULTIVIEW);
 }
@@ -1114,6 +1137,10 @@ bool SceneShaderForwardClustered::is_advanced_shader_group_enabled(bool p_multiv
 	} else {
 		return shader.is_group_enabled(SHADER_GROUP_ADVANCED);
 	}
+}
+
+bool SceneShaderForwardClustered::is_sss_radius_shader_group_enabled(bool p_multiview) const {
+	return shader.is_group_enabled(p_multiview ? SHADER_GROUP_SSS_RADIUS_MULTIVIEW : SHADER_GROUP_SSS_RADIUS);
 }
 
 uint32_t SceneShaderForwardClustered::get_pipeline_compilations(RSE::PipelineSource p_source) {

@@ -54,6 +54,8 @@ public:
 		SHADER_GROUP_BOUNCE_SOURCE_MULTIVIEW,
 		SHADER_GROUP_REFLECTION_SOURCE_MULTIVIEW,
 		SHADER_GROUP_BOUNCE_AND_REFLECTION_SOURCES_MULTIVIEW,
+		SHADER_GROUP_SSS_RADIUS,
+		SHADER_GROUP_SSS_RADIUS_MULTIVIEW,
 	};
 
 	// Not an enum because these values are constants that are processed as numbers
@@ -79,7 +81,8 @@ public:
 		SHADER_COLOR_PASS_FLAG_MOTION_VECTORS = 1 << 4,
 		SHADER_COLOR_PASS_FLAG_BOUNCE_SOURCE = 1 << 5,
 		SHADER_COLOR_PASS_FLAG_REFLECTION_SOURCE = 1 << 6,
-		SHADER_COLOR_PASS_FLAG_COUNT = 1 << 7
+		SHADER_COLOR_PASS_FLAG_SSS_RADIUS = 1 << 7,
+		SHADER_COLOR_PASS_FLAG_COUNT = 1 << 8
 	};
 
 	enum PipelineVersion {
@@ -106,7 +109,8 @@ public:
 		PIPELINE_COLOR_PASS_FLAG_MOTION_VECTORS = 1 << 4,
 		PIPELINE_COLOR_PASS_FLAG_BOUNCE_SOURCE = 1 << 5,
 		PIPELINE_COLOR_PASS_FLAG_REFLECTION_SOURCE = 1 << 6,
-		PIPELINE_COLOR_PASS_FLAG_OPTIONS = 7,
+		PIPELINE_COLOR_PASS_FLAG_SSS_RADIUS = 1 << 7, // Requires SEPARATE_SPECULAR.
+		PIPELINE_COLOR_PASS_FLAG_OPTIONS = 8,
 		PIPELINE_COLOR_PASS_FLAG_COMBINATIONS = 1 << PIPELINE_COLOR_PASS_FLAG_OPTIONS,
 	};
 
@@ -274,6 +278,7 @@ public:
 		bool uses_vertex = false;
 		bool uses_position = false;
 		bool uses_sss = false;
+		bool uses_sss_radius = false;
 		bool uses_transmittance = false;
 		bool uses_screen_texture = false;
 		bool uses_depth_texture = false;
@@ -404,8 +409,10 @@ public:
 	void enable_multiview_shader_group();
 	void enable_advanced_shader_group(bool p_needs_multiview = false);
 	void enable_lighting_sources_shader_group(bool p_bounce, bool p_reflection, bool p_needs_multiview);
+	void enable_sss_radius_shader_group(bool p_needs_multiview);
 	bool is_multiview_shader_group_enabled() const;
 	bool is_advanced_shader_group_enabled(bool p_multiview) const;
+	bool is_sss_radius_shader_group_enabled(bool p_multiview) const;
 	uint32_t get_pipeline_compilations(RSE::PipelineSource p_source);
 	RID get_default_shader_rd(bool p_is_multiview = false);
 };

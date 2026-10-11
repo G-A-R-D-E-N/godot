@@ -1036,7 +1036,9 @@ layout(location = 1) out uvec2 voxel_gi_buffer;
 
 layout(location = 0) out vec4 diffuse_buffer; //diffuse (rgb) and roughness
 layout(location = 1) out vec4 specular_buffer; //specular and SSS (subsurface scatter)
+#ifdef SSS_RADIUS_OUTPUT
 layout(location = 6) out vec4 sss_radius_buffer;
+#endif
 #else
 
 layout(location = 0) out vec4 frag_color;
@@ -3574,7 +3576,9 @@ void fragment_shader(in SceneData scene_data) {
 #ifdef MODE_UNSHADED
 	diffuse_buffer = vec4(albedo.rgb, 0.0);
 	specular_buffer = vec4(vec3(0.0), clamp(temporal_reactive, 0.0, 1.0) * (1.0 - scene_data.pass_alpha_multiplier));
+#ifdef SSS_RADIUS_OUTPUT
 	sss_radius_buffer = vec4(0.0);
+#endif
 
 #else
 
@@ -3586,7 +3590,9 @@ void fragment_shader(in SceneData scene_data) {
 #endif
 	diffuse_buffer = vec4(diffuse_emission + diffuse_light + ambient_light, sss_strength);
 	specular_buffer = vec4(direct_specular_light + indirect_specular_light + specular_emission, clamp(temporal_reactive, 0.0, 1.0) * (1.0 - scene_data.pass_alpha_multiplier));
+#ifdef SSS_RADIUS_OUTPUT
 	sss_radius_buffer = vec4(max(sss_radius, vec3(0.0)), 0.0);
+#endif
 #endif
 
 #ifndef FOG_DISABLED
