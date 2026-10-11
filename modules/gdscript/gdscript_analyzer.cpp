@@ -2053,7 +2053,7 @@ void GDScriptAnalyzer::resolve_function_body(GDScriptParser::FunctionNode *p_fun
 		p_function->return_type_constraint = p_function->body->suite_type;
 	} else if (p_function->return_type_constraint.is_hard_type() && (p_function->return_type_constraint.kind != GDScriptParser::DataType::BUILTIN || p_function->return_type_constraint.builtin_type != Variant::NIL)) {
 		if (!p_function->body->has_return && (p_is_lambda || p_function->identifier->name != GDScriptLanguage::get_singleton()->strings._init)) {
-			push_error(R"(Not all code paths return a value.)", p_function);
+			push_error(R"(Not all code paths return a value.)", p_function->return_type ? static_cast<GDScriptParser::Node *>(p_function->return_type) : static_cast<GDScriptParser::Node *>(p_function));
 		}
 	}
 
@@ -5903,8 +5903,7 @@ GDScriptParser::DataType GDScriptAnalyzer::type_from_property(const PropertyInfo
 	if (p_property.type == Variant::OBJECT) {
 		const StringName &class_name = p_property.class_name.is_empty() ? Object::get_class_static() : p_property.class_name;
 		if (ScriptServer::is_global_class(class_name)) {
-			result = make_global_class_meta_type(class_name, p_source);
-			result.is_meta_type = false;
+			result = type_from_metatype(make_global_class_meta_type(class_name, p_source));
 		} else if (class_exists(class_name)) {
 			result.kind = GDScriptParser::DataType::NATIVE;
 			result.native_type = class_name;
