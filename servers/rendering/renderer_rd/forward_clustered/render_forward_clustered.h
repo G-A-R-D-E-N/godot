@@ -698,8 +698,7 @@ private:
 				uint32_t use_32_bit_shadows : 1;
 				uint32_t use_shadow_cubemaps : 1;
 				uint32_t use_shadow_dual_paraboloid : 1;
-				uint32_t use_bounce_source : 1;
-				uint32_t use_reflection_source : 1;
+				uint32_t used_source_combos : 6;
 			};
 		};
 	};

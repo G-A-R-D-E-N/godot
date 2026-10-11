@@ -2243,9 +2243,8 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		if (using_bounce_source || using_reflection_source) {
 			color_pass_flags |= (using_bounce_source ? COLOR_PASS_FLAG_BOUNCE_SOURCE : 0) | (using_reflection_source ? COLOR_PASS_FLAG_REFLECTION_SOURCE : 0);
 			scene_shader.enable_lighting_sources_shader_group(using_bounce_source, using_reflection_source, p_render_data->scene_data->view_count > 1);
-			global_pipeline_data_required.use_bounce_source = global_pipeline_data_required.use_bounce_source || using_bounce_source;
-			global_pipeline_data_required.use_reflection_source = global_pipeline_data_required.use_reflection_source || using_reflection_source;
-			scene_shader.enable_lighting_sources_shader_group(global_pipeline_data_required.use_bounce_source, global_pipeline_data_required.use_reflection_source, global_pipeline_data_required.use_multiview);
+			const uint32_t source_combo = (using_bounce_source ? 1 : 0) | (using_reflection_source ? 2 : 0);
+			global_pipeline_data_required.used_source_combos |= 1u << (source_combo - 1 + (p_render_data->scene_data->view_count > 1 ? 3 : 0));
 		}
 
 		color_framebuffer = rb_data->get_color_pass_fb(color_pass_flags);
@@ -5252,11 +5251,11 @@ void RenderForwardClustered::_mesh_compile_pipelines_for_surface(const SurfacePi
 				// Generate all the possible variants used during the advanced color passes.
 				const uint32_t separate_specular_iterations = p_global.use_separate_specular ? 2 : 1;
 				const uint32_t motion_vectors_iterations = p_global.use_motion_vectors ? 2 : 1;
-				const uint32_t source_flags = alpha ? 0 : ((p_global.use_bounce_source ? SceneShaderForwardClustered::PIPELINE_COLOR_PASS_FLAG_BOUNCE_SOURCE : 0) | (p_global.use_reflection_source ? SceneShaderForwardClustered::PIPELINE_COLOR_PASS_FLAG_REFLECTION_SOURCE : 0));
+				const uint32_t source_combos = alpha ? 0 : ((p_global.used_source_combos >> (multiview ? 3 : 0)) & 7);
 				uint32_t base_color_pass_flags = pipeline_key.color_pass_flags;
 				for (uint32_t separate_specular = 0; separate_specular < separate_specular_iterations; separate_specular++) {
 					for (uint32_t motion_vectors = 0; motion_vectors < motion_vectors_iterations; motion_vectors++) {
-						if (!separate_specular && !motion_vectors && !source_flags) {
+						if (!separate_specular && !motion_vectors && !source_combos) {
 							// This case was already generated.
 							continue;
 						}
@@ -5271,12 +5270,19 @@ void RenderForwardClustered::_mesh_compile_pipelines_for_surface(const SurfacePi
 							pipeline_key.color_pass_flags |= SceneShaderForwardClustered::PIPELINE_COLOR_PASS_FLAG_MOTION_VECTORS;
 						}
 
+						const uint32_t iteration_color_pass_flags = pipeline_key.color_pass_flags;
 						pipeline_key.framebuffer_format_id = _get_color_framebuffer_format_for_pipeline(buffers_color_format, buffers_can_be_storage, RD::TextureSamples(p_global.texture_samples), separate_specular, motion_vectors, view_count);
 						_mesh_compile_pipeline_for_surface(p_surface.shader, p_surface.mesh_surface, true, p_surface.instanced, p_source, pipeline_key, r_pipeline_pairs);
 
-						if (source_flags) {
-							pipeline_key.color_pass_flags |= source_flags;
-							pipeline_key.framebuffer_format_id = _get_color_framebuffer_format_for_pipeline(buffers_color_format, buffers_can_be_storage, RD::TextureSamples(p_global.texture_samples), separate_specular, motion_vectors, view_count, p_global.use_bounce_source, p_global.use_reflection_source);
+						for (uint32_t source_combo = 1; source_combo < 4; source_combo++) {
+							if (!(source_combos & (1u << (source_combo - 1)))) {
+								continue;
+							}
+
+							const bool bounce_source = source_combo & 1;
+							const bool reflection_source = source_combo & 2;
+							pipeline_key.color_pass_flags = iteration_color_pass_flags | (bounce_source ? SceneShaderForwardClustered::PIPELINE_COLOR_PASS_FLAG_BOUNCE_SOURCE : 0) | (reflection_source ? SceneShaderForwardClustered::PIPELINE_COLOR_PASS_FLAG_REFLECTION_SOURCE : 0);
+							pipeline_key.framebuffer_format_id = _get_color_framebuffer_format_for_pipeline(buffers_color_format, buffers_can_be_storage, RD::TextureSamples(p_global.texture_samples), separate_specular, motion_vectors, view_count, bounce_source, reflection_source);
 							_mesh_compile_pipeline_for_surface(p_surface.shader, p_surface.mesh_surface, true, p_surface.instanced, p_source, pipeline_key, r_pipeline_pairs);
 						}
 					}
