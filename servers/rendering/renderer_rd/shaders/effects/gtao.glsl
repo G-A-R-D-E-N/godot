@@ -45,35 +45,21 @@ uint prefilter_normal(ivec2 p_pixel) {
 float prefilter_texel(ivec2 p_texel, out uint r_normal) {
 	ivec2 source_max = params.full_size - ivec2(1);
 #ifdef HALF_SIZE
-	ivec2 taps[4];
-	float depths[4];
-	int nearest = 0;
+	ivec2 footprint[4];
+	float footprint_depths[4];
 	for (int i = 0; i < 4; i++) {
-		taps[i] = min(p_texel * 2 + ivec2(i & 1, i >> 1), source_max);
-		depths[i] = prefilter_view_depth(taps[i]);
-		if (depths[i] < depths[nearest]) {
-			nearest = i;
+		footprint[i] = min(p_texel * 2 + ivec2(i % 2, i / 2), source_max);
+		footprint_depths[i] = prefilter_view_depth(footprint[i]);
+	}
+	float filtered_depth = XeGTAO_DepthMIPFilter(footprint_depths[0], footprint_depths[1], footprint_depths[2], footprint_depths[3], params.consts);
+	int closest = 0;
+	for (int i = 1; i < 4; i++) {
+		if (abs(footprint_depths[i] - filtered_depth) < abs(footprint_depths[closest] - filtered_depth)) {
+			closest = i;
 		}
 	}
-
-	float tolerance = max(depths[nearest] * 0.05, 1e-3);
-	int companions = 0;
-	int runner_up = -1;
-	for (int i = 0; i < 4; i++) {
-		if (i == nearest) {
-			continue;
-		}
-		if (abs(depths[i] - depths[nearest]) <= tolerance) {
-			companions++;
-		}
-		if (runner_up < 0 || depths[i] < depths[runner_up]) {
-			runner_up = i;
-		}
-	}
-
-	int chosen = companions == 0 ? runner_up : nearest;
-	r_normal = prefilter_normal(taps[chosen]);
-	return depths[chosen];
+	r_normal = prefilter_normal(footprint[closest]);
+	return filtered_depth;
 #else
 	ivec2 pixel = min(p_texel, source_max);
 	r_normal = prefilter_normal(pixel);
@@ -222,6 +208,7 @@ layout(set = 0, binding = 1) uniform sampler2D source_working_depth;
 layout(r32ui, set = 0, binding = 2) uniform restrict readonly uimage2D source_working_normal;
 layout(set = 0, binding = 3) uniform sampler2D source_depth;
 layout(rgba8, set = 0, binding = 4) uniform restrict readonly image2D source_normal;
+const float GTAO_UPSAMPLE_DEPTH_SIGMA = 0.02;
 #endif
 
 layout(r8, set = 1, binding = 0) uniform restrict writeonly image2D dest_ao;
@@ -264,7 +251,7 @@ void main() {
 			float bilinear = (x == 0 ? 1.0 - fraction.x : fraction.x) * (y == 0 ? 1.0 - fraction.y : fraction.y);
 			float tap_z = texelFetch(source_working_depth, tap, 0).x;
 			vec3 tap_normal = normalize(XeGTAO_R11G11B10_UNORM_to_FLOAT3(imageLoad(source_working_normal, tap).x) * 2.0 - 1.0);
-			float depth_weight = clamp(1.0 - abs(tap_z - reference_z) / max(reference_z * 0.05, 1e-3), 0.0, 1.0);
+			float depth_weight = exp(-abs(tap_z - reference_z) / max(reference_z * GTAO_UPSAMPLE_DEPTH_SIGMA, 1e-6));
 			float normal_weight = clamp(dot(tap_normal, reference_normal), 0.0, 1.0);
 			float weight = bilinear * depth_weight * normal_weight * normal_weight;
 			sum += resolve_term(tap) * weight;
