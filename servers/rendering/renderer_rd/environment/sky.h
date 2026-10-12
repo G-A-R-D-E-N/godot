@@ -376,19 +376,27 @@ public:
 		float border_size;
 		uint32_t size;
 		uint32_t lod;
+		uint32_t origin;
+		uint32_t extent;
+		uint32_t group_count;
 		uint32_t generation_low;
 		uint32_t generation_high;
-		uint32_t pad[3];
 	};
 
 	struct SkySH {
 		SkyShShaderRD shader;
 		RID shader_version;
-		PipelineDeferredRD pipeline;
+		PipelineDeferredRD tile_pipeline;
+		PipelineDeferredRD reduce_pipeline;
+		RID partial_buffer;
 	} sky_sh;
 
 	static inline const uint32_t SH_BUFFER_SIZE = 160;
-	static inline const uint32_t SH_SOURCE_MAX_SIZE = 64;
+	static inline const uint32_t SH_SOURCE_MAX_SIZE = 320;
+	static inline const uint32_t SH_TILE_WIDTH = 16;
+	static inline const uint32_t SH_TILE_HEIGHT = 8;
+	static inline const uint32_t SH_PARTIAL_STRIDE = 32;
+	static inline const uint32_t SH_PARTIAL_MAX_GROUPS = (SH_SOURCE_MAX_SIZE / SH_TILE_WIDTH) * (SH_SOURCE_MAX_SIZE / SH_TILE_HEIGHT);
 
 	struct SHSource {
 		RID texture;

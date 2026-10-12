@@ -522,6 +522,7 @@ layout(set = 1, binding = 43, std430) buffer restrict readonly SkySHBuffer {
 sky_sh;
 
 vec3 sky_sh_ambient(vec3 n) {
+	n /= max(length(n), 1e-6);
 	vec3 band0 = sky_sh.coefficients[0].rgb * 0.282095;
 	vec3 band1 = (sky_sh.coefficients[1].rgb * n.y + sky_sh.coefficients[2].rgb * n.z + sky_sh.coefficients[3].rgb * n.x) * 0.488603;
 	vec3 band2 = sky_sh.coefficients[4].rgb * (1.092548 * n.x * n.y);

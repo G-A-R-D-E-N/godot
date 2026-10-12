@@ -885,9 +885,10 @@ void SkyRD::init() {
 	}
 
 	{
-		sky_sh.shader.initialize({ "" });
+		sky_sh.shader.initialize({ "", "\n#define SH_REDUCE\n" });
 		sky_sh.shader_version = sky_sh.shader.version_create();
-		sky_sh.pipeline.create_compute_pipeline(sky_sh.shader.version_get_shader(sky_sh.shader_version, 0));
+		sky_sh.tile_pipeline.create_compute_pipeline(sky_sh.shader.version_get_shader(sky_sh.shader_version, 0));
+		sky_sh.reduce_pipeline.create_compute_pipeline(sky_sh.shader.version_get_shader(sky_sh.shader_version, 1));
 	}
 
 	// register our shader funds
@@ -1061,8 +1062,12 @@ SkyRD::~SkyRD() {
 	// cleanup anything created in init...
 	RendererRD::MaterialStorage *material_storage = RendererRD::MaterialStorage::get_singleton();
 
-	sky_sh.pipeline.free();
+	sky_sh.tile_pipeline.free();
+	sky_sh.reduce_pipeline.free();
 	sky_sh.shader.version_free(sky_sh.shader_version);
+	if (sky_sh.partial_buffer.is_valid()) {
+		RD::get_singleton()->free_rid(sky_sh.partial_buffer);
+	}
 
 	SkyMaterialData *md = static_cast<SkyMaterialData *>(material_storage->material_get_data(sky_shader.default_material, RendererRD::MaterialStorage::SHADER_TYPE_SKY));
 	sky_shader.shader.version_free(md->shader_data->version);
@@ -1787,27 +1792,50 @@ bool SkyRD::_sh_dispatch(Sky *p_sky, RID p_dest, uint64_t p_generation, bool p_w
 	RendererRD::MaterialStorage *material_storage = RendererRD::MaterialStorage::get_singleton();
 	ERR_FAIL_NULL_V(material_storage, false);
 
+	const uint32_t size = uint32_t(source.size.x);
+	const uint32_t origin = MIN(uint32_t(Math::ceil(p_sky->uv_border_size * float(size) - 0.5f)), size / 2);
+	const uint32_t extent = size - origin * 2;
+	const uint32_t groups_x = Math::division_round_up(extent, SH_TILE_WIDTH);
+	const uint32_t groups_y = Math::division_round_up(extent, SH_TILE_HEIGHT);
+	ERR_FAIL_COND_V(groups_x * groups_y > SH_PARTIAL_MAX_GROUPS, false);
+
+	if (sky_sh.partial_buffer.is_null()) {
+		sky_sh.partial_buffer = RD::get_singleton()->storage_buffer_create(SH_PARTIAL_MAX_GROUPS * SH_PARTIAL_STRIDE * sizeof(float));
+		RD::get_singleton()->set_resource_name(sky_sh.partial_buffer, "Sky SH Partial Sums");
+	}
+
 	RID sampler = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 	RD::Uniform u_source(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ sampler, source.texture }));
+	RD::Uniform u_partials(RD::UNIFORM_TYPE_STORAGE_BUFFER, 0, sky_sh.partial_buffer);
 	RD::Uniform u_dest(RD::UNIFORM_TYPE_STORAGE_BUFFER, 0, p_dest);
 
 	SkySHPushConstant push_constant = {};
 	push_constant.border_size = 1.0f - p_sky->uv_border_size * 2.0f;
-	push_constant.size = uint32_t(source.size.x);
+	push_constant.size = size;
 	push_constant.lod = source.lod;
+	push_constant.origin = origin;
+	push_constant.extent = extent;
+	push_constant.group_count = groups_x * groups_y;
 	push_constant.generation_low = uint32_t(p_generation & 0xFFFFFFFFu);
 	push_constant.generation_high = uint32_t(p_generation >> 32);
 
-	RID shader = sky_sh.shader.version_get_shader(sky_sh.shader_version, 0);
-	ERR_FAIL_COND_V(shader.is_null(), false);
+	RID tile_shader = sky_sh.shader.version_get_shader(sky_sh.shader_version, 0);
+	RID reduce_shader = sky_sh.shader.version_get_shader(sky_sh.shader_version, 1);
+	ERR_FAIL_COND_V(tile_shader.is_null() || reduce_shader.is_null(), false);
 
 	RENDER_TIMESTAMP("> Sky SH");
 	RD::get_singleton()->draw_command_begin_label("Sky SH");
 
 	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
-	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, sky_sh.pipeline.get_rid());
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_source), 0);
-	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 1, u_dest), 1);
+	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, sky_sh.tile_pipeline.get_rid());
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(tile_shader, 0, u_source), 0);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(tile_shader, 1, u_partials), 1);
+	RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(SkySHPushConstant));
+	RD::get_singleton()->compute_list_dispatch(compute_list, groups_x, groups_y, 1);
+	RD::get_singleton()->compute_list_add_barrier(compute_list);
+	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, sky_sh.reduce_pipeline.get_rid());
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(reduce_shader, 0, u_partials), 0);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(reduce_shader, 1, u_dest), 1);
 	RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(SkySHPushConstant));
 	RD::get_singleton()->compute_list_dispatch(compute_list, 1, 1, 1);
 	RD::get_singleton()->compute_list_end();
@@ -2231,7 +2259,9 @@ bool SkyRD::sky_is_sh_enabled(RID p_sky) const {
 
 RID SkyRD::sky_get_sh_buffer(RID p_sky) const {
 	Sky *sky = get_sky(p_sky);
-	ERR_FAIL_NULL_V(sky, RID());
+	if (!sky) {
+		return RID();
+	}
 
 	return sky->sh_enabled ? sky->sh_buffer : RID();
 }

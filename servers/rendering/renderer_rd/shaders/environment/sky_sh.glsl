@@ -5,17 +5,24 @@
 #VERSION_DEFINES
 
 #define GROUP_SIZE 128
+#define TILE_WIDTH 16
 #define SH_COEFFS 9
 #define CHANNELS 29
 #define WEIGHT_CHANNEL 27
 #define COUNT_CHANNEL 28
-#define SUBDIV 10
+#define PARTIAL_STRIDE 32
+#define SUBDIV 2
 
 #include "../oct_inc.glsl"
 
 layout(local_size_x = GROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
 
-layout(set = 0, binding = 0) uniform sampler2D source_octmap;
+#ifdef SH_REDUCE
+
+layout(set = 0, binding = 0, std430) restrict readonly buffer SkySHPartials {
+	float values[];
+}
+partials;
 
 layout(set = 1, binding = 0, std430) restrict writeonly buffer SkySH {
 	vec4 coefficients[SH_COEFFS];
@@ -23,19 +30,47 @@ layout(set = 1, binding = 0, std430) restrict writeonly buffer SkySH {
 }
 sh_out;
 
+#else
+
+layout(set = 0, binding = 0) uniform sampler2D source_octmap;
+
+layout(set = 1, binding = 0, std430) restrict writeonly buffer SkySHPartials {
+	float values[];
+}
+partials;
+
+#endif
+
 layout(push_constant, std430) uniform Params {
 	float border_size;
 	uint size;
 	uint lod;
+	uint origin;
+	uint extent;
+	uint group_count;
 	uint generation_low;
 	uint generation_high;
-	uint pad0;
-	uint pad1;
-	uint pad2;
 }
 params;
 
 shared float reduce_sums[CHANNELS][GROUP_SIZE];
+
+void reduce_group(uint tid) {
+	memoryBarrierShared();
+	barrier();
+
+	for (uint s = GROUP_SIZE / 2; s > 0; s >>= 1) {
+		if (tid < s) {
+			for (int k = 0; k < CHANNELS; k++) {
+				reduce_sums[k][tid] += reduce_sums[k][tid + s];
+			}
+		}
+		memoryBarrierShared();
+		barrier();
+	}
+}
+
+#ifndef SH_REDUCE
 
 void sh_basis(vec3 d, out float y[SH_COEFFS]) {
 	y[0] = 0.282095;
@@ -57,18 +92,16 @@ void main() {
 		acc[k] = 0.0;
 	}
 
+	uvec2 local = uvec2(tid % TILE_WIDTH, tid / TILE_WIDTH);
+	uvec2 offset = gl_WorkGroupID.xy * uvec2(TILE_WIDTH, GROUP_SIZE / TILE_WIDTH) + local;
+	uvec2 texel = uvec2(params.origin) + offset;
+
 	float inv_size = 1.0 / float(params.size);
 	float oct_scale = 2.0 / params.border_size;
-	float sample_area = (oct_scale * inv_size) * (oct_scale * inv_size) / float(SUBDIV * SUBDIV);
-	uint total = params.size * params.size;
+	vec2 center_e = ((vec2(texel) + 0.5) * inv_size - 0.5) * oct_scale;
 
-	for (uint i = tid; i < total; i += GROUP_SIZE) {
-		uvec2 texel = uvec2(i % params.size, i / params.size);
-		vec2 center_uv = (vec2(texel) + 0.5) * inv_size;
-		vec2 center_e = (center_uv - 0.5) * oct_scale;
-		if (abs(center_e.x) >= 1.0 || abs(center_e.y) >= 1.0) {
-			continue;
-		}
+	if (offset.x < params.extent && offset.y < params.extent && abs(center_e.x) < 1.0 && abs(center_e.y) < 1.0) {
+		float sample_area = (oct_scale * inv_size) * (oct_scale * inv_size) / float(SUBDIV * SUBDIV);
 
 		float basis_weight[SH_COEFFS];
 		for (int l = 0; l < SH_COEFFS; l++) {
@@ -78,8 +111,8 @@ void main() {
 
 		for (int sy = 0; sy < SUBDIV; sy++) {
 			for (int sx = 0; sx < SUBDIV; sx++) {
-				vec2 offset = (vec2(sx, sy) + 0.5) / float(SUBDIV) - 0.5;
-				vec2 uv = (vec2(texel) + 0.5 + offset) * inv_size;
+				vec2 sub_offset = (vec2(sx, sy) + 0.5) / float(SUBDIV) - 0.5;
+				vec2 uv = (vec2(texel) + 0.5 + sub_offset) * inv_size;
 				vec2 e = (uv - 0.5) * oct_scale;
 				vec3 d = oct_to_vec3_with_border(uv, params.border_size);
 
@@ -104,29 +137,48 @@ void main() {
 
 		for (int l = 0; l < SH_COEFFS; l++) {
 			vec3 term = c * basis_weight[l];
-			acc[l * 3 + 0] += term.r;
-			acc[l * 3 + 1] += term.g;
-			acc[l * 3 + 2] += term.b;
+			acc[l * 3 + 0] = term.r;
+			acc[l * 3 + 1] = term.g;
+			acc[l * 3 + 2] = term.b;
 		}
-		acc[WEIGHT_CHANNEL] += texel_weight;
-		acc[COUNT_CHANNEL] += 1.0;
+		acc[WEIGHT_CHANNEL] = texel_weight;
+		acc[COUNT_CHANNEL] = 1.0;
 	}
 
 	for (int k = 0; k < CHANNELS; k++) {
 		reduce_sums[k][tid] = acc[k];
 	}
-	memoryBarrierShared();
-	barrier();
+	reduce_group(tid);
 
-	for (uint s = GROUP_SIZE / 2; s > 0; s >>= 1) {
-		if (tid < s) {
-			for (int k = 0; k < CHANNELS; k++) {
-				reduce_sums[k][tid] += reduce_sums[k][tid + s];
-			}
+	if (tid == 0) {
+		uint groups_x = (params.extent + TILE_WIDTH - 1) / TILE_WIDTH;
+		uint group = gl_WorkGroupID.y * groups_x + gl_WorkGroupID.x;
+		for (int k = 0; k < CHANNELS; k++) {
+			partials.values[group * PARTIAL_STRIDE + uint(k)] = reduce_sums[k][0];
 		}
-		memoryBarrierShared();
-		barrier();
 	}
+}
+
+#else
+
+void main() {
+	uint tid = gl_LocalInvocationIndex;
+
+	float acc[CHANNELS];
+	for (int k = 0; k < CHANNELS; k++) {
+		acc[k] = 0.0;
+	}
+
+	for (uint g = tid; g < params.group_count; g += GROUP_SIZE) {
+		for (int k = 0; k < CHANNELS; k++) {
+			acc[k] += partials.values[g * PARTIAL_STRIDE + uint(k)];
+		}
+	}
+
+	for (int k = 0; k < CHANNELS; k++) {
+		reduce_sums[k][tid] = acc[k];
+	}
+	reduce_group(tid);
 
 	if (tid == 0) {
 		float weight_sum = reduce_sums[WEIGHT_CHANNEL][0];
@@ -137,3 +189,5 @@ void main() {
 		sh_out.meta = uvec4(params.generation_low, params.generation_high, weight_sum > 0.0 ? 1u : 0u, uint(reduce_sums[COUNT_CHANNEL][0]));
 	}
 }
+
+#endif
