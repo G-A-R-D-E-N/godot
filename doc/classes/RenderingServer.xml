@@ -63,6 +63,14 @@
 				Sets the parameters to use with the auto-exposure effect. These parameters take on the same meaning as their counterparts in [CameraAttributes] and [CameraAttributesPractical].
 			</description>
 		</method>
+		<method name="camera_attributes_set_auto_exposure_highlight_limit">
+			<return type="void" />
+			<param index="0" name="camera_attributes" type="RID" />
+			<param index="1" name="limit" type="float" />
+			<description>
+				Sets the auto-exposure highlight limit, in EV above the previous frame's adapted luminance. [code]0.0[/code] disables the limit. This has the same meaning as [member CameraAttributes.auto_exposure_highlight_limit].
+			</description>
+		</method>
 		<method name="camera_attributes_set_dof_blur">
 			<return type="void" />
 			<param index="0" name="camera_attributes" type="RID" />

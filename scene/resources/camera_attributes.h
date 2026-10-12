@@ -52,6 +52,7 @@ protected:
 	float auto_exposure_max = 64.0;
 	float auto_exposure_speed = 0.5;
 	float auto_exposure_scale = 0.4;
+	float auto_exposure_highlight_limit = 0.0;
 	virtual void _update_auto_exposure() {}
 
 public:
@@ -69,6 +70,8 @@ public:
 	float get_auto_exposure_speed() const;
 	void set_auto_exposure_scale(float p_auto_exposure_scale);
 	float get_auto_exposure_scale() const;
+	void set_auto_exposure_highlight_limit(float p_limit);
+	float get_auto_exposure_highlight_limit() const;
 
 	CameraAttributes();
 	~CameraAttributes();

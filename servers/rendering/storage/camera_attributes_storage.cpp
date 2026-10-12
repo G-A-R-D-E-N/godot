@@ -183,6 +183,18 @@ float RendererCameraAttributes::camera_attributes_get_auto_exposure_scale(RID p_
 	return cam_attributes->auto_exposure_scale;
 }
 
+void RendererCameraAttributes::camera_attributes_set_auto_exposure_highlight_limit(RID p_camera_attributes, float p_limit) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL(cam_attributes);
+	cam_attributes->auto_exposure_highlight_limit = MAX(p_limit, 0.0f);
+}
+
+float RendererCameraAttributes::camera_attributes_get_auto_exposure_highlight_limit(RID p_camera_attributes) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL_V(cam_attributes, 0.0);
+	return cam_attributes->auto_exposure_highlight_limit;
+}
+
 uint64_t RendererCameraAttributes::camera_attributes_get_auto_exposure_version(RID p_camera_attributes) {
 	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
 	ERR_FAIL_NULL_V(cam_attributes, 0);

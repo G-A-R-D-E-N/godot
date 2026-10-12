@@ -15,6 +15,11 @@
 		<member name="auto_exposure_enabled" type="bool" setter="set_auto_exposure_enabled" getter="is_auto_exposure_enabled" default="false">
 			If [code]true[/code], enables the tonemapping auto exposure mode of the scene renderer. If [code]true[/code], the renderer will automatically determine the exposure setting to adapt to the scene's illumination and the observed light.
 			[b]Note:[/b] Auto-exposure is only supported in the Forward+ rendering method, not Mobile or Compatibility.
+			The metered value is the exact arithmetic mean, over every pixel of the rendered frame, of the largest colour channel of each pixel. Use [member auto_exposure_highlight_limit] to stop very small, very bright pixels from dominating that mean.
+		</member>
+		<member name="auto_exposure_highlight_limit" type="float" setter="set_auto_exposure_highlight_limit" getter="get_auto_exposure_highlight_limit" default="0.0">
+			Limits how much a single pixel can raise the metered scene luminance, in EV above the current adapted average. Before averaging, each pixel's luminance is clamped to the previous frame's adapted luminance multiplied by [code]2^auto_exposure_highlight_limit[/code]. This keeps small specular glints or point-like light sources from darkening the whole image, while large bright areas such as lamps or windows still lower the exposure up to the limit. A value of [code]0.0[/code] disables the limit, which is the stock behaviour. The range is [code]0.0[/code] to [code]16.0[/code].
+			The limit is not applied on the first frame or on the frame where the adapted luminance is reset, because there is no previous average to compare against.
 		</member>
 		<member name="auto_exposure_scale" type="float" setter="set_auto_exposure_scale" getter="get_auto_exposure_scale" default="0.4">
 			The scale of the auto exposure effect. Affects the intensity of auto exposure.
