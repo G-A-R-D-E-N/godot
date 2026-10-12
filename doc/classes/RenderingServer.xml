@@ -68,7 +68,7 @@
 			<param index="0" name="camera_attributes" type="RID" />
 			<param index="1" name="limit" type="float" />
 			<description>
-				Sets the auto-exposure highlight limit, in EV above the previous frame's adapted luminance. [code]0.0[/code] disables the limit. This has the same meaning as [member CameraAttributes.auto_exposure_highlight_limit].
+				Sets the auto-exposure highlight limit, in EV above the previous frame's adapted average. [code]0.0[/code] disables the limit. Each pixel is capped at that average times [code]2^limit[/code]. A bright area keeps a bounded effect only while its share of the frame times [code]2^limit[/code] stays below [code]1[/code] (below 6.25 % of the frame at 4 EV); above that the exposure moves toward the unlimited mean. The limit is not applied on the first frame or after a reset. This has the same meaning as [member CameraAttributes.auto_exposure_highlight_limit].
 			</description>
 		</method>
 		<method name="camera_attributes_set_dof_blur">
