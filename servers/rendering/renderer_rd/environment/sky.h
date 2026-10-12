@@ -328,6 +328,8 @@ public:
 		LocalVector<uint64_t> published_layer_generations;
 
 		bool sh_enabled = false;
+		bool sh_requested = false;
+		int sh_ambient_users = 0;
 		bool sh_initial_pending = false;
 		bool working_sh_ready = false;
 		RID sh_buffer;
@@ -423,6 +425,7 @@ public:
 	void _create_radiance_textures(Sky *p_sky, RD::TextureFormat p_format);
 	bool _publish_if_due(Sky *p_sky, uint64_t p_frame);
 	void _sh_create_buffers(Sky *p_sky);
+	void _sh_apply_enabled(Sky *p_sky);
 	bool _sh_get_source(Sky *p_sky, bool p_working, SHSource &r_source) const;
 	bool _sh_dispatch(Sky *p_sky, RID p_dest, uint64_t p_generation, bool p_working);
 	void _sh_after_cycle(Sky *p_sky);
@@ -449,6 +452,7 @@ public:
 	void sky_set_radiance_update_policy(RID p_sky, RSE::SkyRadianceUpdatePolicy p_policy);
 	void sky_request_radiance_update(RID p_sky);
 	void sky_set_sh_enabled(RID p_sky, bool p_enabled);
+	void sky_add_ambient_sh_users(RID p_sky, int p_delta);
 	bool sky_is_sh_enabled(RID p_sky) const;
 	RID sky_get_sh_buffer(RID p_sky) const;
 	Dictionary sky_debug_get_sh(RID p_sky) const;

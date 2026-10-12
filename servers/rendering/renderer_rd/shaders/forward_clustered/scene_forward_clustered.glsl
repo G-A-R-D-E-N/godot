@@ -1949,6 +1949,9 @@ void fragment_shader(in SceneData scene_data) {
 			vec2 ambient_uv = vec3_to_oct_with_border(ambient_dir, vec2(scene_data_block.data.radiance_border_size, 1.0 - scene_data_block.data.radiance_border_size * 2.0));
 			vec3 cubemap_ambient = textureLod(sampler2D(radiance_octmap, DEFAULT_SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP), ambient_uv, roughness_lod).rgb;
 #endif //USE_RADIANCE_OCTMAP_ARRAY
+			if (bool(scene_data.flags & SCENE_DATA_FLAGS_USE_AMBIENT_SKY_SH) && sky_sh.meta.z == 1u) {
+				cubemap_ambient = sky_sh_ambient(ambient_dir);
+			}
 			cubemap_ambient *= scene_data.IBL_exposure_normalization;
 			ambient_light = mix(ambient_light, cubemap_ambient * scene_data.ambient_light_color_energy.a, scene_data.ambient_color_sky_mix);
 		}

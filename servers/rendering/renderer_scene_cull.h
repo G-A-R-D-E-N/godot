@@ -1240,6 +1240,7 @@ public:
 	PASS3(environment_set_bg_energy, RID, float, float)
 	PASS2(environment_set_canvas_max_layer, RID, int)
 	PASS6(environment_set_ambient_light, RID, const Color &, RSE::EnvironmentAmbientSource, float, float, RSE::EnvironmentReflectionSource)
+	PASS2(environment_set_ambient_sky_sh, RID, bool)
 	PASS2(environment_set_camera_feed_id, RID, int)
 
 	PASS1RC(RSE::EnvironmentBG, environment_get_background, RID)

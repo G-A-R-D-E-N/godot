@@ -2192,17 +2192,33 @@ void SkyRD::sky_set_sh_enabled(RID p_sky, bool p_enabled) {
 	Sky *sky = get_sky(p_sky);
 	ERR_FAIL_NULL(sky);
 
-	if (sky->sh_enabled == p_enabled) {
+	sky->sh_requested = p_enabled;
+	_sh_apply_enabled(sky);
+}
+
+void SkyRD::sky_add_ambient_sh_users(RID p_sky, int p_delta) {
+	Sky *sky = get_sky(p_sky);
+	if (!sky) {
 		return;
 	}
-	sky->sh_enabled = p_enabled;
 
-	if (p_enabled) {
-		sky->sh_initial_pending = true;
-		_sh_create_buffers(sky);
+	sky->sh_ambient_users = MAX(0, sky->sh_ambient_users + p_delta);
+	_sh_apply_enabled(sky);
+}
+
+void SkyRD::_sh_apply_enabled(Sky *p_sky) {
+	bool enabled = p_sky->sh_requested || p_sky->sh_ambient_users > 0;
+	if (p_sky->sh_enabled == enabled) {
+		return;
+	}
+	p_sky->sh_enabled = enabled;
+
+	if (enabled) {
+		p_sky->sh_initial_pending = true;
+		_sh_create_buffers(p_sky);
 	} else {
-		sky->sh_initial_pending = false;
-		sky->free_sh_buffers();
+		p_sky->sh_initial_pending = false;
+		p_sky->free_sh_buffers();
 	}
 }
 

@@ -875,6 +875,7 @@ public:
 	FUNC2(environment_set_canvas_max_layer, RID, int)
 	FUNC6(environment_set_ambient_light, RID, const Color &, RSE::EnvironmentAmbientSource, float, float, RSE::EnvironmentReflectionSource)
 
+	FUNC2(environment_set_ambient_sky_sh, RID, bool)
 	FUNC2(environment_set_camera_feed_id, RID, int)
 
 	FUNC6(environment_set_ssr, RID, bool, int, float, float, float)

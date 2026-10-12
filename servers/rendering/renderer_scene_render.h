@@ -45,6 +45,8 @@ private:
 	RendererEnvironmentStorage environment_storage;
 	RendererCompositorStorage compositor_storage;
 
+	void _environment_sync_ambient_sky_sh_user(RID p_env);
+
 public:
 	enum {
 		MAX_DIRECTIONAL_LIGHTS = 8,
@@ -89,6 +91,7 @@ public:
 	virtual void sky_set_radiance_update_policy(RID p_sky, RSE::SkyRadianceUpdatePolicy p_policy) {}
 	virtual void sky_request_radiance_update(RID p_sky) {}
 	virtual void sky_set_sh_enabled(RID p_sky, bool p_enabled) {}
+	virtual void sky_add_ambient_sh_users(RID p_sky, int p_delta) {}
 	virtual bool sky_is_sh_enabled(RID p_sky) const { return false; }
 	virtual RID sky_get_sh_buffer(RID p_sky) const { return RID(); }
 	virtual Dictionary sky_debug_get_sh(RID p_sky) const { return Dictionary(); }
@@ -131,6 +134,7 @@ public:
 	void environment_set_bg_energy(RID p_env, float p_multiplier, float p_exposure_value);
 	void environment_set_canvas_max_layer(RID p_env, int p_max_layer);
 	void environment_set_ambient_light(RID p_env, const Color &p_color, RSE::EnvironmentAmbientSource p_ambient = RSE::ENV_AMBIENT_SOURCE_BG, float p_energy = 1.0, float p_sky_contribution = 0.0, RSE::EnvironmentReflectionSource p_reflection_source = RSE::ENV_REFLECTION_SOURCE_BG);
+	void environment_set_ambient_sky_sh(RID p_env, bool p_enabled);
 	void environment_set_camera_feed_id(RID p_env, int p_camera_feed_id);
 
 	RSE::EnvironmentBG environment_get_background(RID p_env) const;
@@ -145,6 +149,7 @@ public:
 	Color environment_get_ambient_light(RID p_env) const;
 	float environment_get_ambient_light_energy(RID p_env) const;
 	float environment_get_ambient_sky_contribution(RID p_env) const;
+	bool environment_get_ambient_sky_sh(RID p_env) const;
 	RSE::EnvironmentReflectionSource environment_get_reflection_source(RID p_env) const;
 	int environment_get_camera_feed_id(RID p_env) const;
 

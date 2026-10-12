@@ -115,6 +115,18 @@ void RendererEnvironmentStorage::environment_set_ambient_light(RID p_env, const 
 	env->reflection_source = p_reflection_source;
 }
 
+void RendererEnvironmentStorage::environment_set_ambient_sky_sh(RID p_env, bool p_enabled) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->ambient_sky_sh = p_enabled;
+}
+
+void RendererEnvironmentStorage::environment_set_ambient_sky_sh_user(RID p_env, RID p_sky) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->ambient_sky_sh_user = p_sky;
+}
+
 RSE::EnvironmentBG RendererEnvironmentStorage::environment_get_background(RID p_env) const {
 	Environment *env = environment_owner.get_or_null(p_env);
 	ERR_FAIL_NULL_V(env, RSE::ENV_BG_CLEAR_COLOR);
@@ -185,6 +197,18 @@ float RendererEnvironmentStorage::environment_get_ambient_sky_contribution(RID p
 	Environment *env = environment_owner.get_or_null(p_env);
 	ERR_FAIL_NULL_V(env, 1.0);
 	return env->ambient_sky_contribution;
+}
+
+bool RendererEnvironmentStorage::environment_get_ambient_sky_sh(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, false);
+	return env->ambient_sky_sh;
+}
+
+RID RendererEnvironmentStorage::environment_get_ambient_sky_sh_user(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, RID());
+	return env->ambient_sky_sh_user;
 }
 
 RSE::EnvironmentReflectionSource RendererEnvironmentStorage::environment_get_reflection_source(RID p_env) const {

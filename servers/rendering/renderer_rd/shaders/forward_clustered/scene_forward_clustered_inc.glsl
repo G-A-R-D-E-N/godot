@@ -515,6 +515,23 @@ layout(set = 1, binding = 40) uniform texture2D ss_exposure_texture;
 layout(set = 1, binding = 41) uniform texture2D cloud_shadow_textures[MAX_DIRECTIONAL_LIGHT_DATA_STRUCTS];
 layout(set = 1, binding = 42) uniform texture3D aerial_perspective_texture;
 
+layout(set = 1, binding = 43, std430) buffer restrict readonly SkySHBuffer {
+	vec4 coefficients[9];
+	uvec4 meta;
+}
+sky_sh;
+
+vec3 sky_sh_ambient(vec3 n) {
+	vec3 band0 = sky_sh.coefficients[0].rgb * 0.282095;
+	vec3 band1 = (sky_sh.coefficients[1].rgb * n.y + sky_sh.coefficients[2].rgb * n.z + sky_sh.coefficients[3].rgb * n.x) * 0.488603;
+	vec3 band2 = sky_sh.coefficients[4].rgb * (1.092548 * n.x * n.y);
+	band2 += sky_sh.coefficients[5].rgb * (1.092548 * n.y * n.z);
+	band2 += sky_sh.coefficients[6].rgb * (0.315392 * (3.0 * n.z * n.z - 1.0));
+	band2 += sky_sh.coefficients[7].rgb * (1.092548 * n.x * n.z);
+	band2 += sky_sh.coefficients[8].rgb * (0.546274 * (n.x * n.x - n.y * n.y));
+	return max(band0 + band1 * (2.0 / 3.0) + band2 * 0.25, vec3(0.0));
+}
+
 #ifdef USE_MULTIVIEW
 layout(set = 1, binding = 44) uniform texture2DArray back_depth_buffer;
 #else

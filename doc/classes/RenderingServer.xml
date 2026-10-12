@@ -1331,6 +1331,16 @@
 				Sets the values to be used for ambient light rendering. See [Environment] for more details.
 			</description>
 		</method>
+		<method name="environment_set_ambient_sky_sh">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="enabled" type="bool" />
+			<description>
+				If [code]true[/code], the environment specified by the [param env] RID takes its sky ambient light from the diffuse spherical harmonics of its sky instead of the lowest level of the sky's radiance map. See [member Environment.ambient_light_sky_sh]. It is [code]false[/code] by default, and then nothing changes.
+				While the setting is on, the environment counts as one user of its sky and keeps the sky's spherical harmonics switched on (see [method sky_set_sh_enabled]). Each environment counts once for the sky it has at that moment, and the count drops when the setting is turned off, when the environment gets another sky or is freed. The spherical harmonics stay on while the count is above zero or while [method sky_set_sh_enabled] was called with [code]true[/code] for the sky.
+				Only the Forward+ renderer reads the setting. The Mobile and Compatibility renderers ignore it.
+			</description>
+		</method>
 		<method name="environment_set_background">
 			<return type="void" />
 			<param index="0" name="env" type="RID" />

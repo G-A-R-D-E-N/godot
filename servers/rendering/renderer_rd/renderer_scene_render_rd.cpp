@@ -103,6 +103,10 @@ void RendererSceneRenderRD::sky_set_sh_enabled(RID p_sky, bool p_enabled) {
 	sky.sky_set_sh_enabled(p_sky, p_enabled);
 }
 
+void RendererSceneRenderRD::sky_add_ambient_sh_users(RID p_sky, int p_delta) {
+	sky.sky_add_ambient_sh_users(p_sky, p_delta);
+}
+
 bool RendererSceneRenderRD::sky_is_sh_enabled(RID p_sky) const {
 	return sky.sky_is_sh_enabled(p_sky);
 }

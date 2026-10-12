@@ -109,6 +109,7 @@ private:
 	AmbientSource ambient_source = AMBIENT_SOURCE_BG;
 	float ambient_energy = 1.0;
 	float ambient_sky_contribution = 1.0;
+	bool ambient_sky_sh = false;
 	ReflectionSource reflection_source = REFLECTION_SOURCE_BG;
 	void _update_ambient_light();
 
@@ -281,6 +282,8 @@ public:
 	float get_ambient_light_energy() const;
 	void set_ambient_light_sky_contribution(float p_ratio);
 	float get_ambient_light_sky_contribution() const;
+	void set_ambient_light_sky_sh(bool p_enabled);
+	bool get_ambient_light_sky_sh() const;
 	void set_reflection_source(ReflectionSource p_source);
 	ReflectionSource get_reflection_source() const;
 
