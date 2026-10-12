@@ -6,6 +6,7 @@
 #define RAY_SCENE_LIGHT_SPOT 2u
 
 #define RAY_SCENE_MATERIAL_TWO_SIDED 1u
+#define RAY_SCENE_MATERIAL_SKIP 2u
 
 const vec3 luminance_weights = vec3(0.2126, 0.7152, 0.0722);
 
@@ -112,7 +113,7 @@ bool ray_scene_box(vec3 p_origin, vec3 p_inv_direction, vec3 p_min, vec3 p_max, 
 	return r_t_near <= t_far;
 }
 
-void ray_scene_trace_blas(uint p_root, uint p_instance, vec3 p_origin, vec3 p_direction, bool p_any, inout RaySceneHit r_hit) {
+void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, vec3 p_origin, vec3 p_direction, bool p_any, inout RaySceneHit r_hit) {
 	vec3 inv_direction = ray_scene_safe_inverse(p_direction);
 	uint stack[RAY_SCENE_BLAS_STACK_SIZE];
 	uint sp = 0;
@@ -146,6 +147,9 @@ void ray_scene_trace_blas(uint p_root, uint p_instance, vec3 p_origin, vec3 p_di
 				}
 				float t = dot(triangle.e2.xyz, q) * inv_det;
 				if (t > 0.0 && t < r_hit.t) {
+					if ((ray_scene_materials.data[p_material_offset + triangle.surface].flags & RAY_SCENE_MATERIAL_SKIP) != 0u) {
+						continue;
+					}
 					r_hit.t = t;
 					r_hit.instance = p_instance;
 					r_hit.triangle = triangle_index;
@@ -207,7 +211,7 @@ bool ray_scene_trace(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any,
 				vec4 origin = vec4(p_origin, 1.0);
 				vec3 local_origin = vec3(dot(instance.world_to_object[0], origin), dot(instance.world_to_object[1], origin), dot(instance.world_to_object[2], origin));
 				vec3 local_direction = vec3(dot(instance.world_to_object[0].xyz, p_direction), dot(instance.world_to_object[1].xyz, p_direction), dot(instance.world_to_object[2].xyz, p_direction));
-				ray_scene_trace_blas(instance.blas_root, node.left_first + i, local_origin, local_direction, p_any, r_hit);
+				ray_scene_trace_blas(instance.blas_root, instance.material_offset, node.left_first + i, local_origin, local_direction, p_any, r_hit);
 				if (p_any && r_hit.instance != RAY_SCENE_NO_HIT) {
 					return true;
 				}

@@ -431,7 +431,7 @@ void RayScene::_material_entry(RID p_material, Material &r_material) const {
 
 	Color albedo;
 	Color emission;
-	if (_param_color(material_storage->material_get_param(p_material, SNAME("gi_albedo")), albedo)) {
+	if (_param_color(material_storage->material_get_param(p_material, SNAME("gi_albedo")), albedo) && albedo.r >= 0.0f && albedo.g >= 0.0f && albedo.b >= 0.0f) {
 		_store_color(r_material.albedo, albedo, 1.0f);
 	} else if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("base_color")), albedo)) {
 		const float weight = _param_float(material_storage->material_get_declared_param(p_material, SNAME("base_weight")), 1.0f);
@@ -460,6 +460,9 @@ void RayScene::_material_entry(RID p_material, Material &r_material) const {
 
 	if (material_storage->material_get_cull_mode(p_material) == RSE::CULL_MODE_DISABLED) {
 		r_material.flags |= MATERIAL_FLAG_TWO_SIDED;
+	}
+	if (!material_storage->material_casts_shadows(p_material)) {
+		r_material.flags |= MATERIAL_FLAG_SKIP;
 	}
 }
 
