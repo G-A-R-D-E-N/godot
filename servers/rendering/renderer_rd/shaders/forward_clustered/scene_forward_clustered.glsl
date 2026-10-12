@@ -2390,7 +2390,6 @@ void fragment_shader(in SceneData scene_data) {
 		ao = min(ao, ssao);
 		ao_light_affect = mix(ao_light_affect, max(ao_light_affect, implementation_data.ssao_light_affect), implementation_data.ssao_ao_affect);
 	}
-	float specular_ao = mix(ao, ambient_ao, gi_specular_share);
 
 	{ // process reflections
 
@@ -2480,6 +2479,7 @@ void fragment_shader(in SceneData scene_data) {
 			indirect_specular_light = reflection_accum.rgb;
 		}
 		specular_source = specular_source * (1.0 - float(reflection_accum.a)) + vec4(0.0, 0.0, reflection_accum.a, 0.0);
+		gi_specular_share *= max(1.0 - reflection_accum.a, 0.0);
 
 #ifdef LIGHT_CLEARCOAT_USED
 		if (cc_reflection_accum.a > 0.0) {
@@ -2494,6 +2494,7 @@ void fragment_shader(in SceneData scene_data) {
 		ambient_source = ambient_source * (1.0 - float(ambient_accum.a)) + vec4(0.0, 0.0, ambient_accum.a, 0.0);
 #endif
 	}
+	float specular_ao = mix(ao, ambient_ao, gi_specular_share);
 
 	//finalize ambient light here
 	{
