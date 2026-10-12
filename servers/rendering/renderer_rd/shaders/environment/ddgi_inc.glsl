@@ -73,6 +73,10 @@ ivec2 ddgi_tile_origin(ivec3 p_slot, int p_size) {
 	return ivec2(p_slot.x + p_slot.y * ddgi.dims.x, p_slot.z) * (p_size + 2);
 }
 
+ivec3 ddgi_stats_texel(uint p_level, ivec3 p_slot) {
+	return ddgi_probe_texel(p_level + ddgi.level_count, p_slot);
+}
+
 uint ddgi_tag(uint p_level, ivec3 p_local) {
 	uvec3 g = uvec3(ddgi.levels[p_level].g_min + p_local) & uvec3(0x3FFu);
 	return g.x | (g.y << 10) | (g.z << 20);
@@ -128,6 +132,7 @@ vec3 ddgi_sample_level(uint p_level, vec3 p_position, vec3 p_normal, vec3 p_view
 			float delta = distance_to_biased - moments.x;
 			float chebyshev = variance / (variance + delta * delta);
 			weight *= chebyshev * chebyshev * chebyshev;
+			weight *= weight < 0.5 ? pow(weight, 7.0) * 128.0 : 1.0;
 		}
 
 		weight = max(1e-6, weight);

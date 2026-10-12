@@ -89,6 +89,9 @@ vec3 sky_radiance_in(vec3 p_direction) {
 #include "surfel_inc.glsl"
 
 #define SURFEL_RAYS 8u
+#define SURFEL_FOLLOW_RATIO 2.0
+#define SURFEL_FOLLOW_MEMORY 0.7
+#define SURFEL_FOLLOW_FLOOR 1e-5
 
 layout(set = 3, binding = 1, std430) restrict buffer Surfels {
 	Surfel data[];
@@ -116,6 +119,9 @@ layout(set = 3, binding = 5, std430) restrict readonly buffer Cells {
 surfel_cells;
 
 #include "surfel_gather_inc.glsl"
+
+vec3 origin_surfel_position = vec3(0.0);
+vec3 origin_surfel_normal = vec3(0.0, 1.0, 0.0);
 #endif
 
 vec4 shade_hit(vec3 p_origin, vec3 p_direction, RaySceneHit hit, uint p_seed) {
@@ -133,7 +139,18 @@ vec4 shade_hit(vec3 p_origin, vec3 p_direction, RaySceneHit hit, uint p_seed) {
 	float bias = 0.01 + hit.t * 0.001;
 	vec3 irradiance = ray_scene_direct_light(position, normal, bias, ddgi.max_distance, p_seed);
 	if (params.bounce_energy > 0.0) {
-		vec3 bounce = ddgi_sample_direction(position - ray_scene.camera_to_anchor, normal, -p_direction, normal, 0.0, hit.t * 0.5).rgb;
+		vec3 bounce = vec3(0.0);
+		float near_origin = 0.0;
+#ifdef MODE_SURFEL_TRACE
+		float spacing = ddgi.levels[0].spacing;
+		near_origin = (1.0 - smoothstep(spacing, spacing * 2.0, hit.t)) * (1.0 - smoothstep(spacing * 0.4, spacing, max(dot(position - origin_surfel_position, origin_surfel_normal), 0.0)));
+		if (near_origin > 0.0) {
+			bounce = near_origin * ddgi_sample_direction(origin_surfel_position - ray_scene.camera_to_anchor, origin_surfel_normal, origin_surfel_normal, normal, 0.0, DDGI_NO_VIEW_LIMIT).rgb;
+		}
+#endif
+		if (near_origin < 1.0) {
+			bounce += (1.0 - near_origin) * ddgi_sample_direction(position - ray_scene.camera_to_anchor, normal, -p_direction, normal, 0.0, hit.t * 0.5).rgb;
+		}
 #ifdef MODE_SURFEL_TRACE
 		SurfelLookup lookup = surfel_lookup(position, normal, SURFEL_INVALID);
 		bounce = mix(bounce, surfel_eval_irradiance(lookup.sh_r, lookup.sh_g, lookup.sh_b, normal), surfel_blend(lookup));
@@ -208,6 +225,8 @@ void main() {
 		float surfel_radius = surfels.data[index].radius;
 		float clip_length = surfel_radius * SURFEL_REACH;
 		vec3 origin = position + normal * (0.02 + surfel_radius * 0.1);
+		origin_surfel_position = position;
+		origin_surfel_normal = normal;
 		RaySceneHit hit;
 		refresh_clip = surfels.data[index].samples == 0u || ((surfel_hash(index) + surfel_data.frame) & 63u) == 0u;
 		if (refresh_clip) {
@@ -276,12 +295,31 @@ void main() {
 	vec4 sh_g = surfels.data[index].sh_g;
 	vec4 sh_b = surfels.data[index].sh_b;
 	uint samples = surfels.data[index].samples;
+	vec3 stored_state = surfels.data[index].short_mean;
+
+	vec4 probe_light = ddgi_sample(surfels.data[index].position - ray_scene.camera_to_anchor, normal, normal);
+	float probe_luma = dot(probe_light.rgb, luminance_weights);
 	vec3 sample_light = surfel_eval_irradiance(estimate_r, estimate_g, estimate_b, normal);
-	vec3 short_mean = samples == 0u ? sample_light : mix(surfels.data[index].short_mean, sample_light, 0.25);
-	float delta = dot(sample_light - short_mean, luminance_weights);
-	float variance = samples == 0u ? 0.0 : mix(surfels.data[index].variance, delta * delta, 0.25);
+	float sample_luma = dot(sample_light, luminance_weights);
 	float current = dot(surfel_eval_irradiance(sh_r, sh_g, sh_b, normal), luminance_weights);
-	if (samples > 4u && abs(dot(short_mean, luminance_weights) - current) > sqrt(variance) + 0.1 * current) {
+	float probe_reference = samples == 0u ? probe_luma : stored_state.y;
+	float smoothed_luma = mix(stored_state.x, sample_luma, 0.25);
+	if (samples != 0u && probe_light.a > 0.5) {
+		float probe_ratio = (probe_luma + SURFEL_FOLLOW_FLOOR) / (probe_reference + SURFEL_FOLLOW_FLOOR);
+		float sample_ratio = (smoothed_luma + SURFEL_FOLLOW_FLOOR) / (current + SURFEL_FOLLOW_FLOOR);
+		bool dropped = probe_ratio < 1.0 / SURFEL_FOLLOW_RATIO && sample_ratio < 1.0 / SURFEL_FOLLOW_RATIO;
+		bool risen = probe_ratio > SURFEL_FOLLOW_RATIO && sample_ratio > SURFEL_FOLLOW_RATIO;
+		probe_reference = mix(probe_luma, probe_reference, SURFEL_FOLLOW_MEMORY);
+		if (dropped || risen) {
+			samples = 0u;
+			probe_reference = probe_luma;
+		}
+	}
+
+	float short_luma = samples == 0u ? sample_luma : smoothed_luma;
+	float delta = sample_luma - short_luma;
+	float variance = samples == 0u ? 0.0 : mix(surfels.data[index].variance, delta * delta, 0.25);
+	if (samples > 4u && abs(short_luma - current) > sqrt(variance) + 0.1 * current) {
 		samples = 2u;
 	}
 
@@ -289,7 +327,7 @@ void main() {
 	surfels.data[index].sh_r = mix(sh_r, estimate_r, blend);
 	surfels.data[index].sh_g = mix(sh_g, estimate_g, blend);
 	surfels.data[index].sh_b = mix(sh_b, estimate_b, blend);
-	surfels.data[index].short_mean = short_mean;
+	surfels.data[index].short_mean = vec3(short_luma, probe_reference, 0.0);
 	surfels.data[index].variance = variance;
 	surfels.data[index].samples = min(samples + 1u, surfel_data.max_samples);
 }

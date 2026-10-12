@@ -2578,6 +2578,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			RD::get_singleton()->draw_list_end();
 			//start compute processes here, so they run at the same time as depth pre-pass
 			_post_prepass_render(p_render_data, using_sdfgi || using_voxelgi || using_ddgi);
+			RENDER_TIMESTAMP("Render Depth Pre-Pass");
 		}
 
 		RD::get_singleton()->draw_command_begin_label("Render Depth Pre-Pass");

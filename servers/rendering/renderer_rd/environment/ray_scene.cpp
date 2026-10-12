@@ -32,6 +32,7 @@
 
 #include "core/config/project_settings.h"
 #include "core/templates/hashfuncs.h"
+#include "core/templates/sort_array.h"
 #include "ddgi.h"
 #include "servers/rendering/renderer_geometry_instance.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
@@ -74,12 +75,20 @@ static void _grow(float *r_min, float *r_max, const float *p_min, const float *p
 	}
 }
 
-void RayScene::build_bvh(LocalVector<BuildPrimitive> &p_primitives, uint32_t p_max_leaf, LocalVector<Node> &r_nodes) {
+struct CentroidLess {
+	int axis = 0;
+	bool operator()(const RayScene::BuildPrimitive &p_a, const RayScene::BuildPrimitive &p_b) const {
+		return p_a.centroid[axis] < p_b.centroid[axis];
+	}
+};
+
+void RayScene::build_bvh(LocalVector<BuildPrimitive> &p_primitives, uint32_t p_max_leaf, uint32_t p_max_depth, LocalVector<Node> &r_nodes) {
 	constexpr int BINS = 12;
 	struct Task {
 		uint32_t node;
 		uint32_t start;
 		uint32_t count;
+		uint32_t depth;
 	};
 	struct Bin {
 		float bmin[3];
@@ -102,7 +111,7 @@ void RayScene::build_bvh(LocalVector<BuildPrimitive> &p_primitives, uint32_t p_m
 	r_nodes.reserve(total * 2);
 
 	LocalVector<Task> stack;
-	stack.push_back({ 0, 0, total });
+	stack.push_back({ 0, 0, total, 0 });
 	while (!stack.is_empty()) {
 		const Task task = stack[stack.size() - 1];
 		stack.resize(stack.size() - 1);
@@ -202,13 +211,28 @@ void RayScene::build_bvh(LocalVector<BuildPrimitive> &p_primitives, uint32_t p_m
 			}
 		}
 
+		const uint32_t child_depth = task.depth + 1;
+		const uint32_t child_count = MAX(mid - task.start, task.start + task.count - mid);
+		if (child_depth > p_max_depth || child_count > (uint64_t(p_max_leaf) << (p_max_depth - child_depth))) {
+			int axis = 0;
+			for (int k = 1; k < 3; k++) {
+				if (cmax[k] - cmin[k] > cmax[axis] - cmin[axis]) {
+					axis = k;
+				}
+			}
+			mid = task.start + task.count / 2;
+			SortArray<BuildPrimitive, CentroidLess> sorter;
+			sorter.compare.axis = axis;
+			sorter.nth_element(task.start, task.start + task.count, mid, p_primitives.ptr());
+		}
+
 		const uint32_t left = r_nodes.size();
 		r_nodes.push_back(Node());
 		r_nodes.push_back(Node());
 		r_nodes[task.node].left_first = left;
 		r_nodes[task.node].count = 0;
-		stack.push_back({ left, task.start, mid - task.start });
-		stack.push_back({ left + 1, mid, task.start + task.count - mid });
+		stack.push_back({ left, task.start, mid - task.start, child_depth });
+		stack.push_back({ left + 1, mid, task.start + task.count - mid, child_depth });
 	}
 }
 
@@ -283,7 +307,7 @@ void RayScene::mesh_cleared(RID p_mesh) {
 }
 
 void RayScene::_build_blas(MeshEntry &p_mesh) {
-	const uint32_t triangle_count = p_mesh.triangle_surface.size();
+	const uint32_t triangle_count = MIN(uint32_t(p_mesh.triangle_surface.size()), BLAS_LEAF_SIZE << BLAS_MAX_DEPTH);
 	LocalVector<BuildPrimitive> primitives;
 	primitives.resize(triangle_count);
 	for (uint32_t t = 0; t < triangle_count; t++) {
@@ -305,7 +329,7 @@ void RayScene::_build_blas(MeshEntry &p_mesh) {
 		}
 	}
 
-	build_bvh(primitives, BLAS_LEAF_SIZE, p_mesh.nodes);
+	build_bvh(primitives, BLAS_LEAF_SIZE, BLAS_MAX_DEPTH, p_mesh.nodes);
 
 	p_mesh.bvh_triangles.resize(triangle_count);
 	for (uint32_t i = 0; i < triangle_count; i++) {
@@ -361,7 +385,7 @@ void RayScene::_assemble(const LocalVector<RID> &p_meshes) {
 	}
 	if (blas_nodes.is_empty()) {
 		LocalVector<BuildPrimitive> no_primitives;
-		build_bvh(no_primitives, BLAS_LEAF_SIZE, blas_nodes);
+		build_bvh(no_primitives, BLAS_LEAF_SIZE, BLAS_MAX_DEPTH, blas_nodes);
 	}
 	if (triangles.is_empty()) {
 		triangles.push_back(Triangle());
@@ -438,9 +462,9 @@ void RayScene::_material_entry(RID p_material, Material &r_material) const {
 	}
 }
 
-void RayScene::_pack_light(RID p_light_instance, bool p_physical_units, float p_exposure) {
+void RayScene::_pack_light(RID p_light_instance, bool p_physical_units, float p_exposure, uint32_t p_limit, LocalVector<Light> &r_lights) const {
 	LightStorage *light_storage = LightStorage::get_singleton();
-	if (lights.size() >= MAX_LIGHTS || !light_storage->owns_light_instance(p_light_instance)) {
+	if (r_lights.size() >= p_limit || !light_storage->owns_light_instance(p_light_instance)) {
 		return;
 	}
 	const RID light = light_storage->light_instance_get_base_light(p_light_instance);
@@ -484,7 +508,43 @@ void RayScene::_pack_light(RID p_light_instance, bool p_physical_units, float p_
 	packed.inv_radius = 1.0f / MAX(0.001f, light_storage->light_get_param(light, RSE::LIGHT_PARAM_RANGE));
 	packed.cos_spot_angle = Math::cos(Math::deg_to_rad(light_storage->light_get_param(light, RSE::LIGHT_PARAM_SPOT_ANGLE)));
 	packed.inv_spot_attenuation = 1.0f / MAX(0.0001f, light_storage->light_get_param(light, RSE::LIGHT_PARAM_SPOT_ATTENUATION));
-	lights.push_back(packed);
+	r_lights.push_back(packed);
+}
+
+struct LightOrder {
+	bool operator()(const RayScene::Light &p_a, const RayScene::Light &p_b) const {
+		for (int k = 0; k < 3; k++) {
+			if (p_a.position[k] != p_b.position[k]) {
+				return p_a.position[k] < p_b.position[k];
+			}
+		}
+		return p_a.inv_radius < p_b.inv_radius;
+	}
+};
+
+struct LightNearer {
+	Vector3 camera;
+	static float score(const RayScene::Light &p_light, const Vector3 &p_camera) {
+		return Vector3(p_light.position[0], p_light.position[1], p_light.position[2]).distance_to(p_camera) - 1.0f / p_light.inv_radius;
+	}
+	bool operator()(const RayScene::Light &p_a, const RayScene::Light &p_b) const {
+		return score(p_a, camera) < score(p_b, camera);
+	}
+};
+
+void RayScene::_select_lights(const Vector3 &p_camera) {
+	if (lights.size() + local_lights.size() > MAX_LIGHTS) {
+		const uint32_t keep = MAX_LIGHTS - lights.size();
+		SortArray<Light, LightNearer> nearest;
+		nearest.compare.camera = p_camera;
+		nearest.nth_element(0, local_lights.size(), keep, local_lights.ptr());
+		local_lights.resize(keep);
+	}
+	SortArray<Light, LightOrder> ordered;
+	ordered.sort(local_lights.ptr(), local_lights.size());
+	for (const Light &light : local_lights) {
+		lights.push_back(light);
+	}
 }
 
 void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const Vector<RID> &p_directional_lights, RID p_camera_attributes, const Vector3 &p_camera_position) {
@@ -538,6 +598,9 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		if (!mesh || !mesh->built || !assembled_meshes.has(mesh_rid)) {
 			continue;
 		}
+		if (instances.size() >= (TLAS_LEAF_SIZE << TLAS_MAX_DEPTH)) {
+			break;
+		}
 
 		Transform3D transform = geometry->transform;
 		transform.origin -= anchor;
@@ -580,7 +643,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 
 	if (signature != instance_signature || anchor_moved || need_assembly || tlas_node_buffer.is_null()) {
 		instance_signature = signature;
-		build_bvh(primitives, TLAS_LEAF_SIZE, tlas_nodes);
+		build_bvh(primitives, TLAS_LEAF_SIZE, TLAS_MAX_DEPTH, tlas_nodes);
 		LocalVector<Instance> ordered;
 		ordered.resize(MAX(1u, instances.size()));
 		for (uint32_t i = 0; i < primitives.size(); i++) {
@@ -604,12 +667,14 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	const bool physical_units = RendererSceneRenderRD::get_singleton()->is_using_physical_light_units();
 	const float exposure = p_camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes) : 1.0f;
 	lights.clear();
+	local_lights.clear();
 	for (const RID &light_instance : p_directional_lights) {
-		_pack_light(light_instance, physical_units, exposure);
+		_pack_light(light_instance, physical_units, exposure, MAX_LIGHTS, lights);
 	}
 	for (uint32_t i = 0; i < p_lights.size(); i++) {
-		_pack_light(p_lights[i], physical_units, exposure);
+		_pack_light(p_lights[i], physical_units, exposure, MAX_CANDIDATE_LIGHTS, local_lights);
 	}
+	_select_lights(p_camera_position - anchor);
 	_ensure_buffer(light_buffer, light_capacity, MAX_LIGHTS, sizeof(Light), "Ray Scene Lights");
 	if (lights.size()) {
 		RD::get_singleton()->buffer_update(light_buffer, 0, lights.size() * sizeof(Light), lights.ptr());

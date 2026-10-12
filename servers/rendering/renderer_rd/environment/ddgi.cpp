@@ -91,12 +91,13 @@ void DDGI::Volume::allocate(const Settings &p_settings) {
 	tf.format = RD::DATA_FORMAT_R32G32B32A32_UINT;
 	tf.width = dims.x * dims.y;
 	tf.height = dims.z;
+	tf.array_layers = settings.level_count * 2;
 	probe_data = RD::get_singleton()->texture_create(tf, RD::TextureView());
 	RD::get_singleton()->set_resource_name(probe_data, "DDGI Probe Data");
 
 	RD::get_singleton()->texture_clear(irradiance, Color(0, 0, 0, 0), 0, 1, 0, settings.level_count);
 	RD::get_singleton()->texture_clear(distance, Color(0, 0, 0, 0), 0, 1, 0, settings.level_count);
-	RD::get_singleton()->texture_clear(probe_data, Color(0, 0, 0, 0), 0, 1, 0, settings.level_count);
+	RD::get_singleton()->texture_clear(probe_data, Color(0, 0, 0, 0), 0, 1, 0, settings.level_count * 2);
 
 	RD::TextureFormat ray_format;
 	ray_format.texture_type = RD::TEXTURE_TYPE_2D;
@@ -225,7 +226,7 @@ void DDGI::init(SkyRD *p_sky) {
 	trace_modes.push_back("\n#define MODE_PROBE_TRACE\n");
 	trace_modes.push_back("\n#define MODE_DEBUG_RAYS\n");
 	trace_modes.push_back("\n#define MODE_SURFEL_TRACE\n");
-	trace_shader.initialize(trace_modes, use_octmap_array ? "\n#define USE_RADIANCE_OCTMAP_ARRAY\n" : "");
+	trace_shader.initialize(trace_modes, vformat("\n#define RAY_SCENE_BLAS_STACK_SIZE %d\n#define RAY_SCENE_TLAS_STACK_SIZE %d\n", RayScene::BLAS_MAX_DEPTH, RayScene::TLAS_MAX_DEPTH) + (use_octmap_array ? "\n#define USE_RADIANCE_OCTMAP_ARRAY\n" : ""));
 	trace_shader_version = trace_shader.version_create();
 	for (int i = 0; i < TRACE_MODE_MAX; i++) {
 		trace_pipelines[i].create_compute_pipeline(trace_shader.version_get_shader(trace_shader_version, i));

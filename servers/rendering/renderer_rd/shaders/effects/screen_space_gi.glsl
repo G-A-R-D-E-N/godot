@@ -384,7 +384,7 @@ void main() {
 			vec3 world_position = view_to_world(pos + ray_dir * free_distance);
 			vec4 probe_light = ddgi_sample_radiance(world_position, view_to_world(normal), -normalize(world_position), view_to_world(ray_dir), DDGI_NO_VIEW_LIMIT);
 			if (probe_light.a > 0.0) {
-				radiance = vec4(probe_light.rgb * ddgi.energy, probe_light.a);
+				radiance = vec4(max(probe_light.rgb, vec3(0.0)) * ddgi.energy, probe_light.a);
 			}
 		}
 #endif
@@ -680,6 +680,7 @@ void main() {
 		vec4 previous = textureLod(history, history_uv, 0.0);
 		float previous_length = read_history_length(history_uv);
 		vec4 extent = max(2.0 * sqrt(max(moment2 - moment1 * moment1, vec4(0.0))), NOISE_SIGMAS * FAST_NOISE_SCALE * noise.xxxy);
+		extent = max(extent, vec4(0.5 * abs(moment1.rgb), 0.0));
 		vec4 clipped = clip_to_box(vec4(moment1.rgb - extent.rgb, max(moment1.a - extent.a, 0.0)), min(moment1 + extent, vec4(vec3(65504.0), 1.0)), previous);
 		float previous_luma = luminance(previous.rgb);
 		float clipped_luma = luminance(clipped.rgb);

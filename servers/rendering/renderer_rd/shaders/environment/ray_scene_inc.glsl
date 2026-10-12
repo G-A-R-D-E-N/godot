@@ -1,4 +1,3 @@
-#define RAY_SCENE_STACK_SIZE 32
 #define RAY_SCENE_LEAF_SIZE 4u
 #define RAY_SCENE_NO_HIT 0xFFFFFFFFu
 #define RAY_SCENE_EXACT_LIGHTS 4u
@@ -115,19 +114,16 @@ bool ray_scene_box(vec3 p_origin, vec3 p_inv_direction, vec3 p_min, vec3 p_max, 
 
 void ray_scene_trace_blas(uint p_root, uint p_instance, vec3 p_origin, vec3 p_direction, bool p_any, inout RaySceneHit r_hit) {
 	vec3 inv_direction = ray_scene_safe_inverse(p_direction);
-	uint stack[RAY_SCENE_STACK_SIZE];
-	float stack_t[RAY_SCENE_STACK_SIZE];
+	uint stack[RAY_SCENE_BLAS_STACK_SIZE];
 	uint sp = 0;
 
 	float t_near;
-	RaySceneNode root = ray_scene_blas_nodes.data[p_root];
-	if (!ray_scene_box(p_origin, inv_direction, root.bmin, root.bmax, r_hit.t, t_near)) {
+	RaySceneNode node = ray_scene_blas_nodes.data[p_root];
+	if (!ray_scene_box(p_origin, inv_direction, node.bmin, node.bmax, r_hit.t, t_near)) {
 		return;
 	}
 
-	uint node_index = p_root;
 	while (true) {
-		RaySceneNode node = ray_scene_blas_nodes.data[node_index];
 		if (node.count > 0u) {
 			for (uint i = 0u; i < min(node.count, RAY_SCENE_LEAF_SIZE); i++) {
 				uint triangle_index = node.left_first + i;
@@ -169,31 +165,19 @@ void ray_scene_trace_blas(uint p_root, uint p_instance, vec3 p_origin, vec3 p_di
 			bool hit_b = ray_scene_box(p_origin, inv_direction, b.bmin, b.bmax, r_hit.t, tb);
 			if (hit_a && hit_b) {
 				bool a_first = ta <= tb;
-				if (sp < RAY_SCENE_STACK_SIZE) {
-					stack[sp] = a_first ? left + 1u : left;
-					stack_t[sp] = a_first ? tb : ta;
-					sp++;
-				}
-				node_index = a_first ? left : left + 1u;
+				stack[sp++] = a_first ? left + 1u : left;
+				node = a_first ? a : b;
 				continue;
 			} else if (hit_a || hit_b) {
-				node_index = hit_a ? left : left + 1u;
+				node = hit_a ? a : b;
 				continue;
 			}
 		}
 
-		bool found = false;
-		while (sp > 0u) {
-			sp--;
-			if (stack_t[sp] < r_hit.t) {
-				node_index = stack[sp];
-				found = true;
-				break;
-			}
-		}
-		if (!found) {
+		if (sp == 0u) {
 			break;
 		}
+		node = ray_scene_blas_nodes.data[stack[--sp]];
 	}
 }
 
@@ -207,19 +191,16 @@ bool ray_scene_trace(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any,
 	}
 
 	vec3 inv_direction = ray_scene_safe_inverse(p_direction);
-	uint stack[RAY_SCENE_STACK_SIZE];
-	float stack_t[RAY_SCENE_STACK_SIZE];
+	uint stack[RAY_SCENE_TLAS_STACK_SIZE];
 	uint sp = 0;
 
 	float t_near;
-	RaySceneNode root = ray_scene_tlas_nodes.data[0u];
-	if (!ray_scene_box(p_origin, inv_direction, root.bmin, root.bmax, r_hit.t, t_near)) {
+	RaySceneNode node = ray_scene_tlas_nodes.data[0u];
+	if (!ray_scene_box(p_origin, inv_direction, node.bmin, node.bmax, r_hit.t, t_near)) {
 		return false;
 	}
 
-	uint node_index = 0u;
 	while (true) {
-		RaySceneNode node = ray_scene_tlas_nodes.data[node_index];
 		if (node.count > 0u) {
 			for (uint i = 0u; i < min(node.count, RAY_SCENE_LEAF_SIZE); i++) {
 				RaySceneInstance instance = ray_scene_instances.data[node.left_first + i];
@@ -241,31 +222,19 @@ bool ray_scene_trace(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any,
 			bool hit_b = ray_scene_box(p_origin, inv_direction, b.bmin, b.bmax, r_hit.t, tb);
 			if (hit_a && hit_b) {
 				bool a_first = ta <= tb;
-				if (sp < RAY_SCENE_STACK_SIZE) {
-					stack[sp] = a_first ? left + 1u : left;
-					stack_t[sp] = a_first ? tb : ta;
-					sp++;
-				}
-				node_index = a_first ? left : left + 1u;
+				stack[sp++] = a_first ? left + 1u : left;
+				node = a_first ? a : b;
 				continue;
 			} else if (hit_a || hit_b) {
-				node_index = hit_a ? left : left + 1u;
+				node = hit_a ? a : b;
 				continue;
 			}
 		}
 
-		bool found = false;
-		while (sp > 0u) {
-			sp--;
-			if (stack_t[sp] < r_hit.t) {
-				node_index = stack[sp];
-				found = true;
-				break;
-			}
-		}
-		if (!found) {
+		if (sp == 0u) {
 			break;
 		}
+		node = ray_scene_tlas_nodes.data[stack[--sp]];
 	}
 	return r_hit.instance != RAY_SCENE_NO_HIT;
 }

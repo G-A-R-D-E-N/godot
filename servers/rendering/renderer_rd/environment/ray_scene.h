@@ -47,7 +47,10 @@ class RayScene {
 public:
 	static constexpr uint32_t BLAS_LEAF_SIZE = 4;
 	static constexpr uint32_t TLAS_LEAF_SIZE = 1;
+	static constexpr uint32_t BLAS_MAX_DEPTH = 24;
+	static constexpr uint32_t TLAS_MAX_DEPTH = 24;
 	static constexpr uint32_t MAX_LIGHTS = 256;
+	static constexpr uint32_t MAX_CANDIDATE_LIGHTS = 16384;
 	static constexpr double ANCHOR_GRID = 64.0;
 
 	enum MaterialFlags {
@@ -109,7 +112,7 @@ public:
 		uint32_t index;
 	};
 
-	static void build_bvh(LocalVector<BuildPrimitive> &p_primitives, uint32_t p_max_leaf, LocalVector<Node> &r_nodes);
+	static void build_bvh(LocalVector<BuildPrimitive> &p_primitives, uint32_t p_max_leaf, uint32_t p_max_depth, LocalVector<Node> &r_nodes);
 
 private:
 	static RayScene *singleton;
@@ -140,6 +143,7 @@ private:
 	HashMap<RID, Material> material_cache;
 	float emission_scale = 1.0f;
 	LocalVector<Light> lights;
+	LocalVector<Light> local_lights;
 	LocalVector<Node> tlas_nodes;
 	uint64_t instance_signature = 0;
 	Vector3 anchor;
@@ -163,7 +167,8 @@ private:
 	void _build_blas(MeshEntry &p_mesh);
 	void _assemble(const LocalVector<RID> &p_meshes);
 	void _material_entry(RID p_material, Material &r_material) const;
-	void _pack_light(RID p_light_instance, bool p_physical_units, float p_exposure);
+	void _pack_light(RID p_light_instance, bool p_physical_units, float p_exposure, uint32_t p_limit, LocalVector<Light> &r_lights) const;
+	void _select_lights(const Vector3 &p_camera);
 	static void _ensure_buffer(RID &r_buffer, uint32_t &r_capacity, uint32_t p_count, uint32_t p_stride, const char *p_name);
 
 public:

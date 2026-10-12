@@ -45,6 +45,7 @@ struct ProbeRef {
 	ivec3 slot;
 	uint state;
 	uvec4 data;
+	uvec4 stats;
 };
 
 ProbeRef load_probe(uint p_list_index) {
@@ -54,12 +55,29 @@ ProbeRef load_probe(uint p_list_index) {
 	probe.local = ddgi_local_from_index(entry & 0x0FFFFFFFu);
 	probe.slot = ddgi_slot(probe.level, probe.local);
 	probe.data = imageLoad(probe_image, ddgi_probe_texel(probe.level, probe.slot));
+	probe.stats = imageLoad(probe_image, ddgi_stats_texel(probe.level, probe.slot));
 	probe.state = ddgi_state(probe.data, probe.level, probe.local);
 	return probe;
 }
 
 float probe_hysteresis(ProbeRef p_probe) {
 	return (p_probe.state == DDGI_STATE_ACTIVE || p_probe.state == DDGI_STATE_IDLE) ? ddgi.hysteresis : 0.0;
+}
+
+#define DDGI_SHIFT_DECAY 0.85
+#define DDGI_SHIFT_START 6.0
+#define DDGI_SHIFT_SCALE 2.0
+#define DDGI_SHIFT_NOISE_FLOOR 0.03
+#define DDGI_SHIFT_WARMUP 32u
+#define DDGI_LOG_EPSILON 1e-4
+
+float probe_shift_keep(ProbeRef p_probe) {
+	if ((p_probe.state != DDGI_STATE_ACTIVE && p_probe.state != DDGI_STATE_IDLE) || p_probe.stats.z < DDGI_SHIFT_WARMUP) {
+		return 1.0;
+	}
+	float sigma = max(unpackHalf2x16(p_probe.stats.y).y, DDGI_SHIFT_NOISE_FLOOR) * sqrt((1.0 - DDGI_SHIFT_DECAY) / (1.0 + DDGI_SHIFT_DECAY));
+	float excess = max(abs(unpackHalf2x16(p_probe.stats.y).x) / sigma - DDGI_SHIFT_START, 0.0) / DDGI_SHIFT_SCALE;
+	return 1.0 / (1.0 + excess * excess);
 }
 
 ivec2 border_source(ivec2 p_texel, int p_size) {
@@ -107,6 +125,7 @@ void main() {
 	uint list_index = gl_WorkGroupID.x;
 	ProbeRef probe = load_probe(list_index);
 	load_rays(list_index);
+	float keep = probe_shift_keep(probe);
 
 	ivec2 tile_origin = ddgi_tile_origin(probe.slot, DDGI_IRRADIANCE_SIZE);
 	ivec2 texel = ivec2(gl_LocalInvocationID.xy) - 1;
@@ -127,7 +146,7 @@ void main() {
 		vec4 previous = imageLoad(irradiance_image, ivec3(tile_origin + texel + 1, int(probe.level)));
 		float hysteresis = probe_hysteresis(probe);
 		float updates = hysteresis > 0.0 ? previous.a : 0.0;
-		hysteresis = min(hysteresis, updates / (updates + 1.0));
+		hysteresis = min(hysteresis * keep, updates / (updates + 1.0));
 		if (max3(abs(result - previous.rgb)) > DDGI_CHANGE_THRESHOLD * max(max3(previous.rgb), max3(result))) {
 			hysteresis *= 0.5;
 		}
@@ -149,6 +168,7 @@ void main() {
 	uint list_index = gl_WorkGroupID.x;
 	ProbeRef probe = load_probe(list_index);
 	load_rays(list_index);
+	float keep = probe_shift_keep(probe);
 
 	float spacing = ddgi.levels[probe.level].spacing;
 	float max_distance = min(spacing * 1.7320508 * 1.5, 255.0);
@@ -167,7 +187,7 @@ void main() {
 		}
 		vec2 result = weight_sum > 0.0 ? sum / weight_sum : vec2(max_distance, max_distance * max_distance);
 		vec2 previous = imageLoad(distance_image, ivec3(tile_origin + texel + 1, int(probe.level))).xy;
-		float hysteresis = probe_hysteresis(probe);
+		float hysteresis = probe_hysteresis(probe) * keep;
 		if (abs(result.x - previous.x) > DDGI_CHANGE_THRESHOLD * spacing) {
 			hysteresis *= 0.5;
 		}
@@ -200,8 +220,11 @@ void main() {
 	vec3 closest_front_direction = vec3(0.0);
 	vec3 closest_back_direction = vec3(0.0);
 	vec3 farthest_front_direction = vec3(0.0);
+	float log_sum = 0.0;
+	float log_square_sum = 0.0;
 	for (uint r = 0; r < ddgi.rays_per_probe; r++) {
-		float hit = imageLoad(ray_image, ivec2(r, list_index)).a;
+		vec4 ray = imageLoad(ray_image, ivec2(r, list_index));
+		float hit = ray.a;
 		vec3 direction = ddgi_ray_direction(r);
 		if (hit < 0.0) {
 			backfaces++;
@@ -210,6 +233,9 @@ void main() {
 				closest_back_direction = direction;
 			}
 		} else {
+			float value = log(max(dot(ray.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.0) + DDGI_LOG_EPSILON);
+			log_sum += value;
+			log_square_sum += value * value;
 			if (hit < closest_front) {
 				closest_front = hit;
 				closest_front_direction = direction;
@@ -234,6 +260,18 @@ void main() {
 		offset = moved;
 	}
 
+	float front_count = max(float(ddgi.rays_per_probe - backfaces), 1.0);
+	float log_mean = log_sum / front_count;
+	float log_variance = max(log_square_sum / front_count - log_mean * log_mean, 0.0);
+	float innovation = 0.0;
+	uint updates = probe.state == DDGI_STATE_NONE ? 0u : probe.stats.z;
+	if (probe.state == DDGI_STATE_ACTIVE || probe.state == DDGI_STATE_IDLE) {
+		float previous_mean = uintBitsToFloat(probe.stats.x);
+		if (updates >= DDGI_SHIFT_WARMUP) {
+			innovation = mix(log_mean - previous_mean, unpackHalf2x16(probe.stats.y).x, DDGI_SHIFT_DECAY);
+		}
+		log_mean = mix(log_mean, previous_mean, min(ddgi.hysteresis * probe_shift_keep(probe), float(updates) / (float(updates) + 1.0)));
+	}
 	uint state = DDGI_STATE_ACTIVE;
 	if (inside) {
 		state = DDGI_STATE_INSIDE;
@@ -241,6 +279,7 @@ void main() {
 		state = DDGI_STATE_IDLE;
 	}
 	imageStore(probe_image, ddgi_probe_texel(probe.level, probe.slot), uvec4(floatBitsToUint(offset), (state << 30) | ddgi_tag(probe.level, probe.local)));
+	imageStore(probe_image, ddgi_stats_texel(probe.level, probe.slot), uvec4(floatBitsToUint(log_mean), packHalf2x16(vec2(innovation, sqrt(log_variance / front_count))), min(updates + 1u, 255u), 0u));
 }
 
 #endif
