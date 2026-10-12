@@ -30,18 +30,19 @@
 
 #include "ray_scene.h"
 
-#include "ddgi.h"
-
 #include "core/config/project_settings.h"
 #include "core/templates/hashfuncs.h"
 #include "core/templates/sort_array.h"
 #include "servers/rendering/renderer_geometry_instance.h"
+#include "servers/rendering/renderer_rd/environment/ddgi.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/mesh_storage.h"
 #include "servers/rendering/rendering_server.h"
 #include "servers/rendering/rendering_server_globals.h"
+
+#include <cfloat>
 
 using namespace RendererRD;
 
