@@ -1356,6 +1356,7 @@ void fragment_shader(in SceneData scene_data) {
 	float ao = 1.0;
 	float ao_light_affect = 0.0;
 	vec2 surfel_coverage = vec2(0.0);
+	float gi_specular_share = 0.0;
 
 	float alpha_highp = float(instances.data[instance_index].flags >> INSTANCE_FLAGS_FADE_SHIFT) / float(255.0);
 	float dithered_fade_alpha = alpha_highp;
@@ -2369,6 +2370,7 @@ void fragment_shader(in SceneData scene_data) {
 		ambient_light = mix(ambient_light, buffer_ambient.rgb, buffer_ambient.a);
 		bounce_gi_light = buffer_ambient.rgb * buffer_ambient.a;
 		indirect_specular_light = mix(indirect_specular_light, buffer_reflection.rgb, buffer_reflection.a);
+		gi_specular_share = buffer_reflection.a;
 		ambient_source = mix(ambient_source, vec4(0.0, 1.0, 0.0, 0.0), buffer_ambient.a);
 		specular_source = mix(specular_source, vec4(0.0, 1.0, 0.0, 0.0), buffer_reflection.a);
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
@@ -2388,6 +2390,7 @@ void fragment_shader(in SceneData scene_data) {
 		ao = min(ao, ssao);
 		ao_light_affect = mix(ao_light_affect, max(ao_light_affect, implementation_data.ssao_light_affect), implementation_data.ssao_ao_affect);
 	}
+	float specular_ao = mix(ao, ambient_ao, gi_specular_share);
 
 	{ // process reflections
 
@@ -2530,18 +2533,18 @@ void fragment_shader(in SceneData scene_data) {
 		// Intersection between the spherical caps of the visibility and specular cone.
 		// Based on Christopher Oat and Pedro V. Sander's "Ambient aperture lighting":
 		// https://advances.realtimerendering.com/s2006/Chapter8-Ambient_Aperture_Lighting.pdf
-		float specular_occlusion = specular_occlusion_cone(ao, roughness, bent_normal_vector, reflect(-view, normal));
+		float specular_occlusion = specular_occlusion_cone(specular_ao, roughness, bent_normal_vector, reflect(-view, normal));
 		indirect_specular_light *= specular_occlusion;
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
 #ifdef INDIRECT_COAT_NORMAL_ACTIVE
-		cc_specular_light *= cc_custom ? specular_occlusion_cone(ao, indirect_coat_roughness, bent_normal_vector, reflect(-view, cc_normal)) : specular_occlusion;
+		cc_specular_light *= cc_custom ? specular_occlusion_cone(specular_ao, indirect_coat_roughness, bent_normal_vector, reflect(-view, cc_normal)) : specular_occlusion;
 #else
 		cc_specular_light *= specular_occlusion;
 #endif
 #endif
 #else // BENT_NORMAL_MAP_USED
 #ifdef SPECULAR_OCCLUSION_COMBINED
-		float specular_occlusion = specular_occlusion_lagarde(clamp(dot(normal, view), 0.0, 1.0), ao, roughness * roughness);
+		float specular_occlusion = specular_occlusion_lagarde(clamp(dot(normal, view), 0.0, 1.0), specular_ao, roughness * roughness);
 #else
 		float specular_occlusion = (ambient_light.r * 0.3 + ambient_light.g * 0.59 + ambient_light.b * 0.11) * 2.0; // Luminance of ambient light.
 		specular_occlusion = min(specular_occlusion * 4.0, 1.0); // This multiplication preserves speculars on bright areas.
@@ -2561,15 +2564,15 @@ void fragment_shader(in SceneData scene_data) {
 #else
 			vec3 occlusion_bent_normal = normalize(textureLod(sampler2D(gtao_bent_normal_buffer, SAMPLER_LINEAR_CLAMP), screen_uv, 0.0).xyz * 2.0 - 1.0);
 #endif
-			specular_occlusion = specular_occlusion_cone(ao, roughness, occlusion_bent_normal, reflect(-view, normal));
+			specular_occlusion = specular_occlusion_cone(specular_ao, roughness, occlusion_bent_normal, reflect(-view, normal));
 #ifdef INDIRECT_COAT_NORMAL_ACTIVE
-			cc_specular_occlusion = cc_custom ? specular_occlusion_cone(ao, indirect_coat_roughness, occlusion_bent_normal, reflect(-view, cc_normal)) : specular_occlusion;
+			cc_specular_occlusion = cc_custom ? specular_occlusion_cone(specular_ao, indirect_coat_roughness, occlusion_bent_normal, reflect(-view, cc_normal)) : specular_occlusion;
 #endif
 		}
 		indirect_specular_light *= specular_occlusion;
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
 #ifdef SPECULAR_OCCLUSION_COMBINED
-		cc_specular_light *= specular_occlusion_lagarde(clamp(dot(CLEARCOAT_NORMAL, view), 0.0, 1.0), ao, indirect_coat_roughness * indirect_coat_roughness);
+		cc_specular_light *= specular_occlusion_lagarde(clamp(dot(CLEARCOAT_NORMAL, view), 0.0, 1.0), specular_ao, indirect_coat_roughness * indirect_coat_roughness);
 #elif defined(INDIRECT_COAT_NORMAL_ACTIVE)
 		cc_specular_light *= cc_specular_occlusion;
 #else

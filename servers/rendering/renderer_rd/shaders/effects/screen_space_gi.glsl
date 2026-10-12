@@ -680,11 +680,12 @@ void main() {
 		vec4 previous = textureLod(history, history_uv, 0.0);
 		float previous_length = read_history_length(history_uv);
 		vec4 extent = max(2.0 * sqrt(max(moment2 - moment1 * moment1, vec4(0.0))), NOISE_SIGMAS * FAST_NOISE_SCALE * noise.xxxy);
+		vec4 tight = clip_to_box(vec4(moment1.rgb - extent.rgb, max(moment1.a - extent.a, 0.0)), min(moment1 + extent, vec4(vec3(65504.0), 1.0)), previous);
 		extent = max(extent, vec4(0.5 * abs(moment1.rgb), 0.0));
 		vec4 clipped = clip_to_box(vec4(moment1.rgb - extent.rgb, max(moment1.a - extent.a, 0.0)), min(moment1 + extent, vec4(vec3(65504.0), 1.0)), previous);
 		float previous_luma = luminance(previous.rgb);
-		float clipped_luma = luminance(clipped.rgb);
-		previous_length *= max(1.0 - abs(clipped_luma - previous_luma) / max(max(abs(clipped_luma), abs(previous_luma)), 1e-6), 0.0);
+		float tight_luma = luminance(tight.rgb);
+		previous_length *= max(1.0 - abs(tight_luma - previous_luma) / max(max(abs(tight_luma), abs(previous_luma)), 1e-6), 0.0);
 		float blend = max(1.0 / (previous_length + 1.0), 1.0 / float(max(params.history_frames, 1)));
 		blend = reactive ? 1.0 : blend;
 		result = mix(clipped, current, blend);

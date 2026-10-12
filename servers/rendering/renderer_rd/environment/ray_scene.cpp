@@ -435,13 +435,11 @@ void RayScene::_material_entry(RID p_material, Material &r_material) const {
 		_store_color(r_material.albedo, albedo, 1.0f);
 	} else if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("base_color")), albedo)) {
 		const float weight = _param_float(material_storage->material_get_declared_param(p_material, SNAME("base_weight")), 1.0f);
-		const float diffuse = weight * (1.0f - CLAMP(_param_float(material_storage->material_get_declared_param(p_material, SNAME("base_metalness")), 0.0f), 0.0f, 1.0f));
 		albedo = albedo.srgb_to_linear();
-		_store_color(r_material.albedo, albedo, diffuse);
+		_store_color(r_material.albedo, albedo, weight);
 	} else if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("albedo")), albedo)) {
-		const float diffuse = 1.0f - CLAMP(_param_float(material_storage->material_get_declared_param(p_material, SNAME("metallic")), 0.0f), 0.0f, 1.0f);
 		albedo = albedo.srgb_to_linear();
-		_store_color(r_material.albedo, albedo, diffuse);
+		_store_color(r_material.albedo, albedo, 1.0f);
 	}
 
 	if (_param_color(material_storage->material_get_param(p_material, SNAME("gi_emission")), emission)) {
