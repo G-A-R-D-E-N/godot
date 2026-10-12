@@ -88,6 +88,10 @@ public:
 	virtual PackedInt64Array sky_debug_get_layer_generations(RID p_sky) const { return PackedInt64Array(); }
 	virtual void sky_set_radiance_update_policy(RID p_sky, RSE::SkyRadianceUpdatePolicy p_policy) {}
 	virtual void sky_request_radiance_update(RID p_sky) {}
+	virtual void sky_set_sh_enabled(RID p_sky, bool p_enabled) {}
+	virtual bool sky_is_sh_enabled(RID p_sky) const { return false; }
+	virtual RID sky_get_sh_buffer(RID p_sky) const { return RID(); }
+	virtual Dictionary sky_debug_get_sh(RID p_sky) const { return Dictionary(); }
 
 	/* COMPOSITOR EFFECT API */
 

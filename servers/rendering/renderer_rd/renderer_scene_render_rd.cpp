@@ -99,6 +99,22 @@ void RendererSceneRenderRD::sky_request_radiance_update(RID p_sky) {
 	sky.sky_request_radiance_update(p_sky);
 }
 
+void RendererSceneRenderRD::sky_set_sh_enabled(RID p_sky, bool p_enabled) {
+	sky.sky_set_sh_enabled(p_sky, p_enabled);
+}
+
+bool RendererSceneRenderRD::sky_is_sh_enabled(RID p_sky) const {
+	return sky.sky_is_sh_enabled(p_sky);
+}
+
+RID RendererSceneRenderRD::sky_get_sh_buffer(RID p_sky) const {
+	return sky.sky_get_sh_buffer(p_sky);
+}
+
+Dictionary RendererSceneRenderRD::sky_debug_get_sh(RID p_sky) const {
+	return sky.sky_debug_get_sh(p_sky);
+}
+
 void RendererSceneRenderRD::environment_glow_set_use_bicubic_upscale(bool p_enable) {
 	glow_bicubic_upscale = p_enable;
 }

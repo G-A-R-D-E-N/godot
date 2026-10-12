@@ -3857,6 +3857,14 @@
 				Returns, for the sky specified by the [param sky] RID, the generation each roughness layer of the published radiance map was written in, one entry per layer. After a publication every entry is the same value, [method sky_get_radiance_generation]. The array is empty when the sky does not exist, and holds zeros while nothing was published. This is a diagnostic call for tests.
 			</description>
 		</method>
+		<method name="sky_debug_get_sh" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="sky" type="RID" />
+			<description>
+				Reads the published diffuse spherical harmonics of the sky specified by the [param sky] RID back from the GPU and returns them as a dictionary. [b]This call stalls the renderer until the GPU is done, so use it only in tests and tools.[/b]
+				The keys are [code]coefficients[/code], a [PackedFloat32Array] of 27 values (9 coefficients, each with red, green and blue, in the order of [method sky_get_sh_buffer]), [code]generation[/code], the generation ID the coefficients were computed for, [code]valid[/code], whether the buffer holds a finished result, and [code]texel_count[/code], the number of radiance texels that were summed. When the spherical harmonics are off, [code]coefficients[/code] is empty, [code]generation[/code] is [code]0[/code] and [code]valid[/code] is [code]false[/code].
+			</description>
+		</method>
 		<method name="sky_get_radiance_generation" qualifiers="const">
 			<return type="int" />
 			<param index="0" name="sky" type="RID" />
@@ -3865,14 +3873,31 @@
 				An incremental sky renders its update into a second map and copies it into the one the renderer reads at the start of the next frame, so all viewports and probes of one frame see the same generation. The first publication of a sky, and the first one after the radiance map was freed, is copied at once. Quality and realtime skies finish an update inside one frame and publish it at once.
 			</description>
 		</method>
+		<method name="sky_get_sh_buffer" qualifiers="const">
+			<return type="RID" />
+			<param index="0" name="sky" type="RID" />
+			<description>
+				Returns the storage buffer that holds the diffuse spherical harmonics of the sky specified by the [param sky] RID, or an invalid RID when they are off (see [method sky_set_sh_enabled]). The RID changes when the radiance map is created again after a change of the radiance size or the process mode, so read it again every frame instead of keeping it.
+				The buffer is 160 bytes in the std430 layout. Nine [code]vec4[/code] come first, each with the red, green and blue coefficient and an unused fourth value of 0. They are followed by a [code]uvec4[/code]: the low 32 bits of the generation ID, the high 32 bits, [code]1[/code] when the buffer holds a finished result and [code]0[/code] otherwise, and the number of texels that were summed.
+				The coefficients are the orthonormal real spherical harmonics of order 2 of the radiance, c_lm = integral of L(w) Y_lm(w) over the sphere, in world axes with no sky orientation applied, in the units of the radiance map. Their order and constants are: 0: 0.282095, 1: 0.488603 y, 2: 0.488603 z, 3: 0.488603 x, 4: 1.092548 x y, 5: 1.092548 y z, 6: 0.315392 (3 z^2 - 1), 7: 1.092548 x z, 8: 0.546274 (x^2 - y^2). To get the irradiance for a normal, multiply the coefficients of band 0, 1 and 2 by pi, 2 pi / 3 and pi / 4 and sum them with the same functions evaluated at the normal. A sky of constant radiance L gives 3.544908 L for coefficient 0 and 0 for all others.
+				The buffer carries the generation of the radiance map that [method sky_get_radiance_generation] returns, and both change in the same frame.
+			</description>
+		</method>
 		<method name="sky_get_update_stats" qualifiers="const">
 			<return type="Dictionary" />
 			<param index="0" name="sky" type="RID" />
 			<description>
-				Returns diagnostic counters for the update of the specified [param sky] RID's radiance map. The keys are [code]cycles_started[/code], [code]layers_filtered[/code], [code]cycles_completed[/code], [code]last_dirty_reasons[/code], [code]processing_layer[/code], [code]mode[/code], [code]radiance_size[/code], [code]update_requests[/code], [code]update_requests_latched[/code], [code]generation[/code] and [code]publishes[/code].
+				Returns diagnostic counters for the update of the specified [param sky] RID's radiance map. The keys are [code]cycles_started[/code], [code]layers_filtered[/code], [code]cycles_completed[/code], [code]last_dirty_reasons[/code], [code]processing_layer[/code], [code]mode[/code], [code]radiance_size[/code], [code]update_requests[/code], [code]update_requests_latched[/code], [code]generation[/code], [code]publishes[/code], [code]sh_generation[/code] and [code]sh_dispatches[/code].
 				[code]cycles_started[/code] counts the filter cycles that began, [code]layers_filtered[/code] the roughness layers filtered and [code]cycles_completed[/code] the cycles whose last layer is done. Realtime skies filter all their layers in one pass and count the same layers in [code]layers_filtered[/code].
 				[code]last_dirty_reasons[/code] is a bit mask of the reasons recorded since the previous cycle started: [code]1[/code] missing radiance, [code]2[/code] time, [code]4[/code] camera position, [code]8[/code] fog, [code]16[/code] sky material, [code]32[/code] directional lights, [code]64[/code] size or mode change, [code]128[/code] an update requested with [method sky_request_radiance_update].
-				[code]processing_layer[/code] is the next roughness layer an incremental sky will filter, [code]mode[/code] the sky's configured mode and [code]radiance_size[/code] its radiance size. [code]update_requests[/code] counts the calls to [method sky_request_radiance_update] and [code]update_requests_latched[/code] those that arrived while a cycle was running. [code]generation[/code] is the published generation, see [method sky_get_radiance_generation], and [code]publishes[/code] counts the updates that were published. The dictionary is empty when the sky does not exist or the renderer does not track sky updates.
+				[code]processing_layer[/code] is the next roughness layer an incremental sky will filter, [code]mode[/code] the sky's configured mode and [code]radiance_size[/code] its radiance size. [code]update_requests[/code] counts the calls to [method sky_request_radiance_update] and [code]update_requests_latched[/code] those that arrived while a cycle was running. [code]generation[/code] is the published generation, see [method sky_get_radiance_generation], and [code]publishes[/code] counts the updates that were published. [code]sh_generation[/code] is the generation of the published diffuse spherical harmonics, see [method sky_get_sh_buffer], and is [code]0[/code] while they are off or not computed yet. [code]sh_dispatches[/code] counts the times the spherical harmonics were computed on the GPU for this sky. The dictionary is empty when the sky does not exist or the renderer does not track sky updates.
+			</description>
+		</method>
+		<method name="sky_is_sh_enabled" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="sky" type="RID" />
+			<description>
+				Returns [code]true[/code] if the diffuse spherical harmonics are computed for the sky specified by the [param sky] RID, see [method sky_set_sh_enabled].
 			</description>
 		</method>
 		<method name="sky_request_radiance_update">
@@ -3914,6 +3939,14 @@
 			<description>
 				Sets when the radiance map of the sky specified by the [param sky] RID is updated. The default is [constant SKY_RADIANCE_UPDATE_POLICY_AUTOMATIC]. With [constant SKY_RADIANCE_UPDATE_POLICY_MANUAL] only [method sky_request_radiance_update] starts an update. The visible sky is still drawn every frame with the current sky material.
 				Switching back to [constant SKY_RADIANCE_UPDATE_POLICY_AUTOMATIC] updates the radiance map when changes were recorded since the last update.
+			</description>
+		</method>
+		<method name="sky_set_sh_enabled">
+			<return type="void" />
+			<param index="0" name="sky" type="RID" />
+			<param index="1" name="enabled" type="bool" />
+			<description>
+				Turns the diffuse spherical harmonics of the sky specified by the [param sky] RID on or off. They are off by default and cost nothing while off. When they are on, a small compute pass sums the finished radiance map into 9 RGB coefficients every time a radiance update is published, and the coefficients carry the same generation ID as the radiance map. See [method sky_get_sh_buffer] for the data. Turning them on for a sky that already has a published radiance map computes them once from it; turning them off frees the buffers.
 			</description>
 		</method>
 		<method name="spot_light_create">

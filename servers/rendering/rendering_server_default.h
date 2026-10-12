@@ -857,6 +857,10 @@ public:
 	FUNC1RC(PackedInt64Array, sky_debug_get_layer_generations, RID)
 	FUNC2(sky_set_radiance_update_policy, RID, RSE::SkyRadianceUpdatePolicy)
 	FUNC1(sky_request_radiance_update, RID)
+	FUNC2(sky_set_sh_enabled, RID, bool)
+	FUNC1RC(bool, sky_is_sh_enabled, RID)
+	FUNC1RC(RID, sky_get_sh_buffer, RID)
+	FUNC1RC(Dictionary, sky_debug_get_sh, RID)
 
 	/* ENVIRONMENT */
 

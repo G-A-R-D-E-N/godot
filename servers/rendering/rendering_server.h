@@ -647,6 +647,10 @@ public:
 	virtual PackedInt64Array sky_debug_get_layer_generations(RID p_sky) const = 0;
 	virtual void sky_set_radiance_update_policy(RID p_sky, RSE::SkyRadianceUpdatePolicy p_policy) = 0;
 	virtual void sky_request_radiance_update(RID p_sky) = 0;
+	virtual void sky_set_sh_enabled(RID p_sky, bool p_enabled) = 0;
+	virtual bool sky_is_sh_enabled(RID p_sky) const = 0;
+	virtual RID sky_get_sh_buffer(RID p_sky) const = 0;
+	virtual Dictionary sky_debug_get_sh(RID p_sky) const = 0;
 
 	/* COMPOSITOR EFFECTS API */
 

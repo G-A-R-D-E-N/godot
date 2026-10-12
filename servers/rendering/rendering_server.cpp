@@ -3064,6 +3064,10 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("sky_debug_get_layer_generations", "sky"), &RenderingServer::sky_debug_get_layer_generations);
 	ClassDB::bind_method(D_METHOD("sky_set_radiance_update_policy", "sky", "policy"), &RenderingServer::sky_set_radiance_update_policy);
 	ClassDB::bind_method(D_METHOD("sky_request_radiance_update", "sky"), &RenderingServer::sky_request_radiance_update);
+	ClassDB::bind_method(D_METHOD("sky_set_sh_enabled", "sky", "enabled"), &RenderingServer::sky_set_sh_enabled);
+	ClassDB::bind_method(D_METHOD("sky_is_sh_enabled", "sky"), &RenderingServer::sky_is_sh_enabled);
+	ClassDB::bind_method(D_METHOD("sky_get_sh_buffer", "sky"), &RenderingServer::sky_get_sh_buffer);
+	ClassDB::bind_method(D_METHOD("sky_debug_get_sh", "sky"), &RenderingServer::sky_debug_get_sh);
 
 	BIND_ENUM_CONSTANT(RSE::SKY_MODE_AUTOMATIC);
 	BIND_ENUM_CONSTANT(RSE::SKY_MODE_QUALITY);

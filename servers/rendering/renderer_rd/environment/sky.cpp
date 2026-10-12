@@ -568,6 +568,22 @@ void SkyRD::Sky::free_radiance() {
 	publish_pending = false;
 	working_layer_generations.clear();
 	published_layer_generations.clear();
+	free_sh_buffers();
+	sh_initial_pending = sh_enabled;
+}
+
+void SkyRD::Sky::free_sh_buffers() {
+	if (sh_buffer.is_valid()) {
+		RD::get_singleton()->free_rid(sh_buffer);
+		sh_buffer = RID();
+	}
+	if (working_sh_buffer.is_valid()) {
+		RD::get_singleton()->free_rid(working_sh_buffer);
+		working_sh_buffer = RID();
+	}
+	sh_generation = 0;
+	working_sh_generation = 0;
+	working_sh_ready = false;
 }
 
 bool SkyRD::Sky::uses_working_radiance() const {
@@ -868,6 +884,12 @@ void SkyRD::init() {
 		}
 	}
 
+	{
+		sky_sh.shader.initialize({ "" });
+		sky_sh.shader_version = sky_sh.shader.version_create();
+		sky_sh.pipeline.create_compute_pipeline(sky_sh.shader.version_get_shader(sky_sh.shader_version, 0));
+	}
+
 	// register our shader funds
 	material_storage->shader_set_data_request_function(RendererRD::MaterialStorage::SHADER_TYPE_SKY, _create_sky_shader_funcs);
 	material_storage->material_set_data_request_function(RendererRD::MaterialStorage::SHADER_TYPE_SKY, _create_sky_material_funcs);
@@ -1038,6 +1060,9 @@ void SkyRD::set_texture_format(RD::DataFormat p_texture_format) {
 SkyRD::~SkyRD() {
 	// cleanup anything created in init...
 	RendererRD::MaterialStorage *material_storage = RendererRD::MaterialStorage::get_singleton();
+
+	sky_sh.pipeline.free();
+	sky_sh.shader.version_free(sky_sh.shader_version);
 
 	SkyMaterialData *md = static_cast<SkyMaterialData *>(material_storage->material_get_data(sky_shader.default_material, RendererRD::MaterialStorage::SHADER_TYPE_SKY));
 	sky_shader.shader.version_free(md->shader_data->version);
@@ -1398,10 +1423,11 @@ void SkyRD::update_radiance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, 
 	Sky *sky = get_sky(RendererSceneRenderRD::get_singleton()->environment_get_sky(p_env));
 
 	const uint64_t frame = RSG::rasterizer->get_frame_number();
-	sky->publish_if_due(frame);
+	_publish_if_due(sky, frame);
 	if (sky->publish_pending) {
 		return;
 	}
+	_sh_compute_initial(sky);
 
 	RSE::SkyMode sky_mode = sky->internal_mode;
 	bool update_single_frame = sky_mode == RSE::SKY_MODE_REALTIME || sky_mode == RSE::SKY_MODE_QUALITY;
@@ -1517,6 +1543,7 @@ void SkyRD::update_radiance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, 
 		if (update_single_frame || sky->processing_layer >= max_processing_layer) {
 			sky->stats_cycles_completed++;
 			sky->finish_cycle(frame);
+			_sh_after_cycle(sky);
 		}
 		sky->reflection.dirty = false;
 		sky->cycle_running = sky->internal_mode == RSE::SKY_MODE_INCREMENTAL && sky->processing_layer < max_processing_layer;
@@ -1536,6 +1563,7 @@ void SkyRD::update_radiance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, 
 				sky->stats_cycles_completed++;
 				sky->cycle_running = false;
 				sky->finish_cycle(frame);
+				_sh_after_cycle(sky);
 			}
 		}
 	}
@@ -1678,8 +1706,170 @@ void SkyRD::publish_completed_cycles() {
 	for (const RID &rid : sky_owner.get_owned_list()) {
 		Sky *sky = sky_owner.get_or_null(rid);
 		if (sky) {
-			sky->publish_if_due(frame);
+			_publish_if_due(sky, frame);
 		}
+	}
+}
+
+bool SkyRD::_publish_if_due(Sky *p_sky, uint64_t p_frame) {
+	if (!p_sky->publish_if_due(p_frame)) {
+		return false;
+	}
+	_sh_after_publication(p_sky);
+	return true;
+}
+
+void SkyRD::_sh_create_buffers(Sky *p_sky) {
+	if (!p_sky->sh_enabled || p_sky->radiance.is_null()) {
+		return;
+	}
+
+	Vector<uint8_t> zeros;
+	zeros.resize_initialized(SH_BUFFER_SIZE);
+	if (p_sky->sh_buffer.is_null()) {
+		p_sky->sh_buffer = RD::get_singleton()->storage_buffer_create(SH_BUFFER_SIZE, zeros);
+		RD::get_singleton()->set_resource_name(p_sky->sh_buffer, "Sky SH");
+	}
+	if (p_sky->working_radiance.is_valid() && p_sky->working_sh_buffer.is_null()) {
+		p_sky->working_sh_buffer = RD::get_singleton()->storage_buffer_create(SH_BUFFER_SIZE, zeros);
+		RD::get_singleton()->set_resource_name(p_sky->working_sh_buffer, "Sky Working SH");
+	}
+}
+
+bool SkyRD::_sh_get_source(Sky *p_sky, bool p_working, SHSource &r_source) const {
+	const LocalVector<ReflectionData::Layer> &layers = p_sky->reflection.layers;
+	if (layers.is_empty()) {
+		return false;
+	}
+
+	if (sky_use_octmap_array) {
+		const LocalVector<ReflectionData::Layer::Mipmap> &mips = layers[0].mipmaps;
+		ERR_FAIL_COND_V(mips.is_empty(), false);
+		uint32_t lod = 0;
+		while (lod + 1 < mips.size() && uint32_t(mips[lod].size.x) > SH_SOURCE_MAX_SIZE) {
+			lod++;
+		}
+		r_source.size = mips[lod].size;
+		if (p_working && p_sky->working_radiance.is_valid()) {
+			r_source.texture = mips[lod].view;
+			r_source.lod = 0;
+		} else {
+			r_source.texture = p_sky->radiance_first_layer_slice;
+			r_source.lod = lod;
+		}
+		return r_source.texture.is_valid();
+	}
+
+	const LocalVector<ReflectionData::DownsampleLayer::Mipmap> &mips = p_sky->reflection.downsampled_layer.mipmaps;
+	if (mips.is_empty() || layers[0].mipmaps.size() < 2) {
+		return false;
+	}
+	uint32_t lod = 0;
+	while (lod + 1 < mips.size() && uint32_t(mips[lod].size.x) > SH_SOURCE_MAX_SIZE) {
+		lod++;
+	}
+	r_source.texture = p_sky->reflection.downsampled_radiance_octmap;
+	r_source.lod = lod;
+	r_source.size = mips[lod].size;
+	return r_source.texture.is_valid();
+}
+
+bool SkyRD::_sh_dispatch(Sky *p_sky, RID p_dest, uint64_t p_generation, bool p_working) {
+	ERR_FAIL_COND_V(p_dest.is_null(), false);
+
+	SHSource source;
+	if (!_sh_get_source(p_sky, p_working, source)) {
+		return false;
+	}
+
+	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
+	ERR_FAIL_NULL_V(uniform_set_cache, false);
+	RendererRD::MaterialStorage *material_storage = RendererRD::MaterialStorage::get_singleton();
+	ERR_FAIL_NULL_V(material_storage, false);
+
+	RID sampler = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
+	RD::Uniform u_source(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ sampler, source.texture }));
+	RD::Uniform u_dest(RD::UNIFORM_TYPE_STORAGE_BUFFER, 0, p_dest);
+
+	SkySHPushConstant push_constant = {};
+	push_constant.border_size = 1.0f - p_sky->uv_border_size * 2.0f;
+	push_constant.size = uint32_t(source.size.x);
+	push_constant.lod = source.lod;
+	push_constant.generation_low = uint32_t(p_generation & 0xFFFFFFFFu);
+	push_constant.generation_high = uint32_t(p_generation >> 32);
+
+	RID shader = sky_sh.shader.version_get_shader(sky_sh.shader_version, 0);
+	ERR_FAIL_COND_V(shader.is_null(), false);
+
+	RENDER_TIMESTAMP("> Sky SH");
+	RD::get_singleton()->draw_command_begin_label("Sky SH");
+
+	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
+	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, sky_sh.pipeline.get_rid());
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_source), 0);
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 1, u_dest), 1);
+	RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(SkySHPushConstant));
+	RD::get_singleton()->compute_list_dispatch(compute_list, 1, 1, 1);
+	RD::get_singleton()->compute_list_end();
+
+	RD::get_singleton()->draw_command_end_label();
+	RENDER_TIMESTAMP("< Sky SH");
+
+	p_sky->stats_sh_dispatches++;
+	return true;
+}
+
+void SkyRD::_sh_after_cycle(Sky *p_sky) {
+	if (!p_sky->sh_enabled || p_sky->sh_buffer.is_null()) {
+		return;
+	}
+
+	if (p_sky->publish_pending) {
+		if (p_sky->working_sh_buffer.is_null()) {
+			return;
+		}
+		const uint64_t generation = p_sky->last_generation + 1;
+		if (_sh_dispatch(p_sky, p_sky->working_sh_buffer, generation, true)) {
+			p_sky->working_sh_ready = true;
+			p_sky->working_sh_generation = generation;
+		}
+		return;
+	}
+
+	if (_sh_dispatch(p_sky, p_sky->sh_buffer, p_sky->radiance_generation, false)) {
+		p_sky->sh_generation = p_sky->radiance_generation;
+		p_sky->sh_initial_pending = false;
+	}
+}
+
+void SkyRD::_sh_after_publication(Sky *p_sky) {
+	if (!p_sky->sh_enabled || p_sky->sh_buffer.is_null()) {
+		return;
+	}
+
+	const bool working_matches = p_sky->working_sh_ready && p_sky->working_sh_generation == p_sky->radiance_generation && p_sky->working_sh_buffer.is_valid();
+	p_sky->working_sh_ready = false;
+	if (working_matches) {
+		ERR_FAIL_COND(RD::get_singleton()->buffer_copy(p_sky->working_sh_buffer, p_sky->sh_buffer, 0, 0, SH_BUFFER_SIZE) != OK);
+		p_sky->sh_generation = p_sky->radiance_generation;
+		p_sky->sh_initial_pending = false;
+	} else if (_sh_dispatch(p_sky, p_sky->sh_buffer, p_sky->radiance_generation, false)) {
+		p_sky->sh_generation = p_sky->radiance_generation;
+		p_sky->sh_initial_pending = false;
+	}
+}
+
+void SkyRD::_sh_compute_initial(Sky *p_sky) {
+	if (!p_sky->sh_enabled || !p_sky->sh_initial_pending || p_sky->sh_buffer.is_null() || p_sky->radiance_generation == 0 || p_sky->publish_pending) {
+		return;
+	}
+	if (!sky_use_octmap_array && p_sky->cycle_running) {
+		return;
+	}
+
+	if (_sh_dispatch(p_sky, p_sky->sh_buffer, p_sky->radiance_generation, false)) {
+		p_sky->sh_generation = p_sky->radiance_generation;
+		p_sky->sh_initial_pending = false;
 	}
 }
 
@@ -1769,6 +1959,8 @@ void SkyRD::update_dirty_skys() {
 				sky->working_layer_generations[i] = 0;
 				sky->published_layer_generations[i] = 0;
 			}
+
+			_sh_create_buffers(sky);
 		}
 
 		const bool forced = sky->force_cycle || was_missing;
@@ -1944,6 +2136,8 @@ Dictionary SkyRD::sky_get_update_stats(RID p_sky) const {
 	stats["update_requests_latched"] = sky->stats_update_requests_latched;
 	stats["generation"] = static_cast<int64_t>(sky->radiance_generation);
 	stats["publishes"] = sky->stats_publishes;
+	stats["sh_generation"] = static_cast<int64_t>(sky->sh_generation);
+	stats["sh_dispatches"] = sky->stats_sh_dispatches;
 	return stats;
 }
 
@@ -1992,4 +2186,68 @@ void SkyRD::sky_request_radiance_update(RID p_sky) {
 	}
 	sky->stats_pending_dirty_reasons |= REQUESTED;
 	sky->update_requested = true;
+}
+
+void SkyRD::sky_set_sh_enabled(RID p_sky, bool p_enabled) {
+	Sky *sky = get_sky(p_sky);
+	ERR_FAIL_NULL(sky);
+
+	if (sky->sh_enabled == p_enabled) {
+		return;
+	}
+	sky->sh_enabled = p_enabled;
+
+	if (p_enabled) {
+		sky->sh_initial_pending = true;
+		_sh_create_buffers(sky);
+	} else {
+		sky->sh_initial_pending = false;
+		sky->free_sh_buffers();
+	}
+}
+
+bool SkyRD::sky_is_sh_enabled(RID p_sky) const {
+	Sky *sky = get_sky(p_sky);
+	ERR_FAIL_NULL_V(sky, false);
+
+	return sky->sh_enabled;
+}
+
+RID SkyRD::sky_get_sh_buffer(RID p_sky) const {
+	Sky *sky = get_sky(p_sky);
+	ERR_FAIL_NULL_V(sky, RID());
+
+	return sky->sh_enabled ? sky->sh_buffer : RID();
+}
+
+Dictionary SkyRD::sky_debug_get_sh(RID p_sky) const {
+	Dictionary result;
+	PackedFloat32Array coefficients;
+	int64_t generation = 0;
+	int64_t texel_count = 0;
+	bool valid = false;
+
+	Sky *sky = get_sky(p_sky);
+	if (sky && sky->sh_enabled && sky->sh_buffer.is_valid()) {
+		Vector<uint8_t> data = RD::get_singleton()->buffer_get_data(sky->sh_buffer, 0, SH_BUFFER_SIZE);
+		if (data.size() == int(SH_BUFFER_SIZE)) {
+			const float *floats = reinterpret_cast<const float *>(data.ptr());
+			const uint32_t *meta = reinterpret_cast<const uint32_t *>(data.ptr() + 144);
+			coefficients.resize(27);
+			for (int i = 0; i < 9; i++) {
+				for (int c = 0; c < 3; c++) {
+					coefficients.set(i * 3 + c, floats[i * 4 + c]);
+				}
+			}
+			generation = static_cast<int64_t>((uint64_t(meta[1]) << 32) | uint64_t(meta[0]));
+			valid = meta[2] != 0;
+			texel_count = meta[3];
+		}
+	}
+
+	result["coefficients"] = coefficients;
+	result["generation"] = generation;
+	result["valid"] = valid;
+	result["texel_count"] = texel_count;
+	return result;
 }
