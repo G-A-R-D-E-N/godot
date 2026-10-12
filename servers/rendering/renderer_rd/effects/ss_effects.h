@@ -173,6 +173,7 @@ public:
 		const Projection *prev_projections = nullptr;
 		const Vector3 *eye_offsets = nullptr;
 		Transform3D cur_to_prev;
+		Basis view_to_world;
 		uint32_t frame = 0;
 		bool history_valid = false;
 		uint32_t debug_mode = 0;
@@ -743,6 +744,7 @@ private:
 		int32_t rays;
 		uint32_t validate_source;
 		float source_mip;
+		float view_to_world[12];
 	};
 
 	struct ScreenSpaceGIResolvePushConstant {
@@ -766,6 +768,7 @@ private:
 		SCREEN_SPACE_GI_RESOLVE,
 		SCREEN_SPACE_GI_TEMPORAL,
 		SCREEN_SPACE_GI_FAST,
+		SCREEN_SPACE_GI_TRACE_DDGI,
 		SCREEN_SPACE_GI_MAX
 	};
 

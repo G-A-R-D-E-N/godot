@@ -32,6 +32,8 @@
 
 #include "core/config/project_settings.h"
 #include "core/math/geometry_3d.h"
+#include "servers/rendering/renderer_rd/environment/ddgi.h"
+#include "servers/rendering/renderer_rd/environment/surfel_gi.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
@@ -3725,6 +3727,8 @@ void GI::init(SkyRD *p_sky) {
 			variants.push_back(ShaderRD::VariantDefine(group, vrs_base + "\n#define USE_SDFGI\n", default_enabled)); // MODE_SDFGI
 			variants.push_back(ShaderRD::VariantDefine(group, vrs_base + "\n#define USE_SDFGI\n\n#define USE_VOXEL_GI_INSTANCES\n", default_enabled)); // MODE_COMBINED
 			variants.push_back(ShaderRD::VariantDefine(group, vrs_base + "\n#define USE_SDFGI\n\n#define USE_VOXEL_GI_INSTANCES\n#define SAMPLE_VOXEL_GI_NEAREST\n", default_enabled)); // MODE_COMBINED_WITHOUT_SAMPLER
+			variants.push_back(ShaderRD::VariantDefine(group, vrs_base + "\n#define USE_DDGI\n", default_enabled));
+			variants.push_back(ShaderRD::VariantDefine(group, vrs_base + "\n#define USE_DDGI\n#define USE_SURFELS\n", default_enabled));
 		}
 
 		shader.initialize(variants, defines);
@@ -4031,6 +4035,16 @@ void GI::process_gi(Ref<RenderSceneBuffersRD> p_render_buffers, const RID *p_nor
 		RD::get_singleton()->buffer_update(rbgi->scene_data_ubo, 0, sizeof(SceneData), &scene_data);
 	}
 
+	if (p_render_buffers->has_custom_data(RB_SCOPE_DDGI) && p_render_buffers->has_custom_data(RB_SCOPE_SURFELS)) {
+		Size2i size = p_render_buffers->get_texture_slice_size(RB_SCOPE_GI, RB_TEX_AMBIENT, 0);
+		if (p_render_buffers->has_texture(RB_SCOPE_SURFELS, RB_TEX_SURFEL_COVERAGE) && p_render_buffers->get_texture_slice_size(RB_SCOPE_SURFELS, RB_TEX_SURFEL_COVERAGE, 0) != size) {
+			p_render_buffers->clear_context(RB_SCOPE_SURFELS);
+		}
+		if (!p_render_buffers->has_texture(RB_SCOPE_SURFELS, RB_TEX_SURFEL_COVERAGE)) {
+			p_render_buffers->create_texture(RB_SCOPE_SURFELS, RB_TEX_SURFEL_COVERAGE, RD::DATA_FORMAT_R8G8_UNORM, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, size);
+		}
+	}
+
 	// Now compute the contents of our buffers.
 	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 
@@ -4076,8 +4090,22 @@ void GI::process_gi(Ref<RenderSceneBuffersRD> p_render_buffers, const RID *p_nor
 	}
 
 	bool without_sampler = RD::get_singleton()->sampler_is_format_supported_for_filter(RD::DATA_FORMAT_R8G8_UINT, RD::SAMPLER_FILTER_LINEAR);
+	Ref<DDGI::Volume> ddgi_volume;
+	if (p_render_buffers->has_custom_data(RB_SCOPE_DDGI)) {
+		ddgi_volume = p_render_buffers->get_custom_data(RB_SCOPE_DDGI);
+	}
+
+	Ref<SurfelGI::SurfelVolume> surfel_volume;
+	if (ddgi_volume.is_valid() && p_render_buffers->has_custom_data(RB_SCOPE_SURFELS)) {
+		surfel_volume = p_render_buffers->get_custom_data(RB_SCOPE_SURFELS);
+	}
+
 	Mode mode;
-	if (use_sdfgi && use_voxel_gi_instances) {
+	if (surfel_volume.is_valid()) {
+		mode = MODE_DDGI_SURFELS;
+	} else if (ddgi_volume.is_valid()) {
+		mode = MODE_DDGI;
+	} else if (use_sdfgi && use_voxel_gi_instances) {
 		mode = without_sampler ? MODE_COMBINED_WITHOUT_SAMPLER : MODE_COMBINED;
 	} else if (use_sdfgi) {
 		mode = MODE_SDFGI;
@@ -4263,6 +4291,15 @@ void GI::process_gi(Ref<RenderSceneBuffersRD> p_render_buffers, const RID *p_nor
 
 		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, pipelines[pipeline_specialization][mode].get_rid());
 		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, rbgi->uniform_set[v], 0);
+		if (mode == MODE_DDGI || mode == MODE_DDGI_SURFELS) {
+			RID ddgi_shader = shader.version_get_shader(shader_version, (RendererSceneRenderRD::get_singleton()->is_vrs_supported() ? MODE_MAX : 0) + mode);
+			RD::get_singleton()->compute_list_bind_uniform_set(compute_list, UniformSetCacheRD::get_singleton()->get_cache_vec(ddgi_shader, 1, ddgi_volume->gather_uniforms()), 1);
+			if (mode == MODE_DDGI_SURFELS) {
+				LocalVector<RD::Uniform> surfel_uniforms = surfel_volume->gather_uniforms();
+				surfel_uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 6, p_render_buffers->get_texture_slice(RB_SCOPE_SURFELS, RB_TEX_SURFEL_COVERAGE, v, 0)));
+				RD::get_singleton()->compute_list_bind_uniform_set(compute_list, UniformSetCacheRD::get_singleton()->get_cache_vec(ddgi_shader, 2, surfel_uniforms), 2);
+			}
+		}
 		RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(PushConstant));
 
 		if (rbgi->using_half_size_gi) {

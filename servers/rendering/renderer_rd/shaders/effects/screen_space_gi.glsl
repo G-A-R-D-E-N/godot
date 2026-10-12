@@ -4,6 +4,10 @@
 
 #VERSION_DEFINES
 
+#ifdef USE_DDGI
+#extension GL_EXT_samplerless_texture_functions : enable
+#endif
+
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 #define M_PI 3.14159265359
@@ -60,10 +64,26 @@ layout(push_constant, std430) uniform Params {
 	int rays;
 	bool validate_source;
 	float source_mip;
+	vec4 view_to_world[3];
 }
 params;
 
 #include "screen_space_source_validation_inc.glsl"
+
+#ifdef USE_DDGI
+#define DDGI_SET 1
+#define DDGI_UBO_BINDING 0
+#define DDGI_SAMPLING
+layout(set = 1, binding = 1) uniform utexture2DArray ddgi_probe_texture;
+layout(set = 1, binding = 2) uniform texture2DArray ddgi_irradiance_texture;
+layout(set = 1, binding = 3) uniform texture2DArray ddgi_distance_texture;
+layout(set = 1, binding = 4) uniform sampler ddgi_linear_sampler;
+#include "../environment/ddgi_inc.glsl"
+
+vec3 view_to_world(vec3 p_vector) {
+	return vec3(dot(params.view_to_world[0].xyz, p_vector), dot(params.view_to_world[1].xyz, p_vector), dot(params.view_to_world[2].xyz, p_vector));
+}
+#endif
 
 #else
 
@@ -188,7 +208,7 @@ vec2 sample_sequence(ivec2 p_pixel, uint p_index) {
 	return fract(offset + float(p_index + 1u) * vec2(0.7548776662466927, 0.5698402909980532));
 }
 
-int trace_ray(vec3 p_pos, vec3 p_screen_pos, vec3 p_ray_dir, out vec3 r_hit_screen_pos) {
+int trace_ray(vec3 p_pos, vec3 p_screen_pos, vec3 p_ray_dir, out vec3 r_hit_screen_pos, out vec3 r_free_screen_pos) {
 	vec3 end_pos = p_pos + p_ray_dir * params.max_distance;
 	if (!params.orthogonal && end_pos.z > -0.00001) {
 		end_pos -= p_ray_dir / p_ray_dir.z * (end_pos.z + 0.00001);
@@ -206,6 +226,7 @@ int trace_ray(vec3 p_pos, vec3 p_screen_pos, vec3 p_ray_dir, out vec3 r_hit_scre
 	vec2 t2 = max(t0, t1);
 	float t_screen = min(t2.x, t2.y);
 	float t_max = min(t_screen, t_end);
+	float t_free = t_max;
 
 	vec2 cell_step = vec2(screen_ray_dir.x < 0.0 ? -1.0 : 1.0, screen_ray_dir.y < 0.0 ? -1.0 : 1.0);
 
@@ -243,6 +264,7 @@ int trace_ray(vec3 p_pos, vec3 p_screen_pos, vec3 p_ray_dir, out vec3 r_hit_scre
 			if ((z0 - z1) > params.thickness) {
 				hit = false;
 				mip_offset = 0;
+				t_free = min(t_free, t);
 			}
 		}
 
@@ -259,6 +281,7 @@ int trace_ray(vec3 p_pos, vec3 p_screen_pos, vec3 p_ray_dir, out vec3 r_hit_scre
 	}
 
 	r_hit_screen_pos = p_screen_pos + screen_ray_dir * t;
+	r_free_screen_pos = p_screen_pos + screen_ray_dir * min(t_free, t);
 	if (t < t_max && cur_level < 0) {
 		return TRACE_HIT;
 	}
@@ -314,7 +337,8 @@ void main() {
 		}
 
 		vec3 hit_screen_pos;
-		int trace = trace_ray(pos, ray_screen_pos, ray_dir, hit_screen_pos);
+		vec3 free_screen_pos;
+		int trace = trace_ray(pos, ray_screen_pos, ray_dir, hit_screen_pos, free_screen_pos);
 
 		vec4 radiance = vec4(0.0, 0.0, 0.0, trace == TRACE_OFF_SCREEN ? STATE_OFF_SCREEN : (trace == TRACE_STEPS ? STATE_STEPS : STATE_OPEN));
 		vec3 hit_vector = ray_dir * MISS_DISTANCE;
@@ -353,6 +377,17 @@ void main() {
 				radiance = vec4(0.0, 0.0, 0.0, STATE_OPEN);
 			}
 		}
+
+#ifdef USE_DDGI
+		if (radiance.a == STATE_OFF_SCREEN || radiance.a == STATE_OPEN || radiance.a == STATE_STEPS) {
+			float free_distance = max(dot(compute_view_pos(free_screen_pos) - pos, ray_dir), 0.0);
+			vec3 world_position = view_to_world(pos + ray_dir * free_distance);
+			vec4 probe_light = ddgi_sample_radiance(world_position, view_to_world(normal), -normalize(world_position), view_to_world(ray_dir), DDGI_NO_VIEW_LIMIT);
+			if (probe_light.a > 0.0) {
+				radiance = vec4(probe_light.rgb * ddgi.energy, probe_light.a);
+			}
+		}
+#endif
 
 		imageStore(ray_radiance, slot, radiance);
 		imageStore(ray_hit, slot, vec4(hit_vector, cos_source));
@@ -474,7 +509,7 @@ void main() {
 				confidence_sum += weight * confidence;
 				rejected_sum += radiance.a == STATE_DISOCCLUDED ? weight : 0.0;
 				if (confidence > 0.0) {
-					radiance.rgb *= min(1.0, params.firefly_luminance / max(luminance(radiance.rgb) * exposure_scale, 1e-6));
+					radiance.rgb *= min(1.0, params.firefly_luminance / max(abs(luminance(radiance.rgb)) * exposure_scale, 1e-6));
 					hit_weight_sum += weight * confidence;
 					radiance_sum += weight * confidence * radiance.rgb;
 				}
@@ -581,9 +616,7 @@ float neighborhood_weight(int p_offset) {
 
 shared vec4 neighborhood[16][16];
 shared vec2 neighborhood_noise[16][16];
-shared vec4 row_moment1[16][8];
-shared vec4 row_moment2[16][8];
-shared vec2 row_noise[16][8];
+shared vec3 neighborhood_normal[16][16];
 
 void main() {
 	ivec2 pixel_pos = ivec2(gl_GlobalInvocationID.xy);
@@ -595,24 +628,7 @@ void main() {
 		ivec2 tile_pixel = clamp(tile_origin + tile_pos, ivec2(0), params.screen_size - 1);
 		neighborhood[tile_pos.y][tile_pos.x] = texelFetch(fast_history, tile_pixel, 0);
 		neighborhood_noise[tile_pos.y][tile_pos.x] = texelFetch(resolved_info, tile_pixel, 0).yz;
-	}
-	memoryBarrierShared();
-	barrier();
-
-	for (int i = 0; i < 2; i++) {
-		int row = local_pos.y + i * 8;
-		vec4 sum1 = vec4(0.0);
-		vec4 sum2 = vec4(0.0);
-		vec2 noise_sum = vec2(0.0);
-		for (int x = -NEIGHBORHOOD_RADIUS; x <= NEIGHBORHOOD_RADIUS; x++) {
-			vec4 neighbor = neighborhood[row][local_pos.x + NEIGHBORHOOD_RADIUS + x];
-			sum1 += neighbor * neighborhood_weight(x);
-			sum2 += neighbor * neighbor * neighborhood_weight(x);
-			noise_sum += neighborhood_noise[row][local_pos.x + NEIGHBORHOOD_RADIUS + x] * neighborhood_weight(x);
-		}
-		row_moment1[row][local_pos.x] = sum1;
-		row_moment2[row][local_pos.x] = sum2;
-		row_noise[row][local_pos.x] = noise_sum;
+		neighborhood_normal[tile_pos.y][tile_pos.x] = normalize(texelFetch(source_normal_roughness, tile_pixel, 0).xyz * 2.0 - 1.0);
 	}
 	memoryBarrierShared();
 	barrier();
@@ -633,19 +649,29 @@ void main() {
 	vec2 uv = (vec2(pixel_pos) + 0.5) / vec2(params.screen_size);
 	bool reactive = texelFetch(resolved_info, pixel_pos, 0).x < 0.0;
 
+	vec3 centre_normal = neighborhood_normal[local_pos.y + NEIGHBORHOOD_RADIUS][local_pos.x + NEIGHBORHOOD_RADIUS];
 	vec4 moment1 = vec4(0.0);
 	vec4 moment2 = vec4(0.0);
 	vec2 noise = vec2(0.0);
 	float moment_weight = 0.0;
 	for (int y = -NEIGHBORHOOD_RADIUS; y <= NEIGHBORHOOD_RADIUS; y++) {
-		moment1 += row_moment1[local_pos.y + NEIGHBORHOOD_RADIUS + y][local_pos.x] * neighborhood_weight(y);
-		moment2 += row_moment2[local_pos.y + NEIGHBORHOOD_RADIUS + y][local_pos.x] * neighborhood_weight(y);
-		noise += row_noise[local_pos.y + NEIGHBORHOOD_RADIUS + y][local_pos.x] * neighborhood_weight(y);
-		moment_weight += neighborhood_weight(y);
+		for (int x = -NEIGHBORHOOD_RADIUS; x <= NEIGHBORHOOD_RADIUS; x++) {
+			ivec2 tile_pos = local_pos + ivec2(x, y) + NEIGHBORHOOD_RADIUS;
+			float same_surface = clamp(dot(centre_normal, neighborhood_normal[tile_pos.y][tile_pos.x]), 0.0, 1.0);
+			same_surface *= same_surface;
+			same_surface *= same_surface;
+			same_surface *= same_surface;
+			float weight = neighborhood_weight(x) * neighborhood_weight(y) * same_surface;
+			vec4 neighbor = neighborhood[tile_pos.y][tile_pos.x];
+			moment1 += neighbor * weight;
+			moment2 += neighbor * neighbor * weight;
+			noise += neighborhood_noise[tile_pos.y][tile_pos.x] * weight;
+			moment_weight += weight;
+		}
 	}
-	moment1 /= moment_weight * moment_weight;
-	moment2 /= moment_weight * moment_weight;
-	noise /= moment_weight * moment_weight;
+	moment1 /= moment_weight;
+	moment2 /= moment_weight;
+	noise /= moment_weight;
 
 	vec2 history_uv;
 	vec4 result = current;
@@ -654,10 +680,10 @@ void main() {
 		vec4 previous = textureLod(history, history_uv, 0.0);
 		float previous_length = read_history_length(history_uv);
 		vec4 extent = max(2.0 * sqrt(max(moment2 - moment1 * moment1, vec4(0.0))), NOISE_SIGMAS * FAST_NOISE_SCALE * noise.xxxy);
-		vec4 clipped = clip_to_box(max(moment1 - extent, vec4(0.0)), min(moment1 + extent, vec4(vec3(65504.0), 1.0)), previous);
+		vec4 clipped = clip_to_box(vec4(moment1.rgb - extent.rgb, max(moment1.a - extent.a, 0.0)), min(moment1 + extent, vec4(vec3(65504.0), 1.0)), previous);
 		float previous_luma = luminance(previous.rgb);
 		float clipped_luma = luminance(clipped.rgb);
-		previous_length *= 1.0 - abs(clipped_luma - previous_luma) / max(max(clipped_luma, previous_luma), 1e-6);
+		previous_length *= max(1.0 - abs(clipped_luma - previous_luma) / max(max(abs(clipped_luma), abs(previous_luma)), 1e-6), 0.0);
 		float blend = max(1.0 / (previous_length + 1.0), 1.0 / float(max(params.history_frames, 1)));
 		blend = reactive ? 1.0 : blend;
 		result = mix(clipped, current, blend);

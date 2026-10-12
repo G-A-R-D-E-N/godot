@@ -1759,6 +1759,7 @@ void RenderForwardClustered::_process_ssgi(Ref<RenderSceneBuffersRD> p_render_bu
 	settings.prev_projections = last_projections;
 	settings.eye_offsets = p_eye_offsets;
 	settings.cur_to_prev = rb_data->ss_effects_data.ssgi_last_frame_transform.affine_inverse() * p_transform;
+	settings.view_to_world = p_transform.basis;
 	settings.frame = uint32_t(RSG::rasterizer->get_frame_number() & 1023);
 	settings.history_valid = was_traced && rb_data->ss_effects_data.ssgi_history && !p_render_buffers->get_history_discard();
 	settings.debug_mode = get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SSGI_TERMINATION ? 1 : (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SSGI_CONFIDENCE ? 2 : 0);
@@ -1963,6 +1964,11 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 	bool render_shadows = p_render_data->directional_shadows.size() || p_render_data->shadows.size();
 	bool render_gi = rb.is_valid() && p_use_gi;
 
+	if (render_gi && rb->has_custom_data(RB_SCOPE_SURFELS)) {
+		Ref<RendererRD::SurfelGI::SurfelVolume> surfels = rb->get_custom_data(RB_SCOPE_SURFELS);
+		surfel_gi.validate(surfels, rb->get_depth_texture(0));
+	}
+
 	if (render_shadows && render_gi) {
 		RENDER_TIMESTAMP("Render GI + Render Directional/SpotLight Shadows (Parallel)");
 	} else if (render_shadows) {
@@ -1988,7 +1994,7 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 	}
 
 	if (render_gi) {
-		gi.process_gi(rb, p_normal_roughness_slices, p_voxel_gi_buffer, p_render_data->environment, p_render_data->scene_data->view_count, p_render_data->scene_data->view_projection, p_render_data->scene_data->view_eye_offset, p_render_data->scene_data->cam_transform, *p_render_data->voxel_gi_instances);
+		gi.process_gi(rb,p_normal_roughness_slices, p_voxel_gi_buffer, p_render_data->environment, p_render_data->scene_data->view_count, p_render_data->scene_data->view_projection, p_render_data->scene_data->view_eye_offset, p_render_data->scene_data->cam_transform, *p_render_data->voxel_gi_instances);
 	}
 
 	if (render_shadows) {
@@ -2240,6 +2246,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	bool using_sscs = false;
 	bool using_sdfgi = false;
 	bool using_voxelgi = false;
+	bool using_ddgi = false;
 	bool reverse_cull = p_render_data->scene_data->cam_transform.basis.determinant() < 0;
 	bool using_ssil = !is_reflection_probe && p_render_data->environment.is_valid() && environment_get_ssil_enabled(p_render_data->environment);
 	bool using_bounce_source = false;
@@ -2282,6 +2289,9 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		if (p_render_data->environment.is_valid()) {
 			if (environment_get_sdfgi_enabled(p_render_data->environment) && get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_UNSHADED) {
 				using_sdfgi = true;
+			}
+			if (rb->has_custom_data(RB_SCOPE_DDGI) && get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_UNSHADED) {
+				using_ddgi = true;
 			}
 			if (environment_get_ssr_enabled(p_render_data->environment)) {
 				if (!p_render_data->transparent_bg) {
@@ -2334,7 +2344,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	// May have changed due to the above (light buffer enlarged, as an example).
 	_update_render_base_uniform_set();
 
-	_fill_render_list(RENDER_LIST_OPAQUE, p_render_data, PASS_MODE_COLOR, using_sdfgi, using_sdfgi || using_voxelgi, using_motion_pass);
+	_fill_render_list(RENDER_LIST_OPAQUE, p_render_data, PASS_MODE_COLOR, using_sdfgi, using_sdfgi || using_voxelgi || using_ddgi, using_motion_pass);
 	render_list[RENDER_LIST_OPAQUE].sort_by_key();
 	render_list[RENDER_LIST_MOTION].sort_by_key();
 	render_list[RENDER_LIST_ALPHA].sort_by_reverse_depth_and_priority();
@@ -2352,6 +2362,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		} else if (p_render_data->environment.is_valid()) {
 			if (using_ssr ||
 					using_sdfgi ||
+					using_ddgi ||
 					environment_get_ssao_enabled(p_render_data->environment) ||
 					using_ssil ||
 					using_sscs ||
@@ -2555,7 +2566,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	bool using_ssao = depth_pre_pass && !is_reflection_probe && p_render_data->environment.is_valid() && environment_get_ssao_enabled(p_render_data->environment);
 
 	if (depth_pre_pass) { //depth pre pass
-		bool needs_pre_resolve = _needs_post_prepass_render(p_render_data, using_sdfgi || using_voxelgi);
+		bool needs_pre_resolve = _needs_post_prepass_render(p_render_data, using_sdfgi || using_voxelgi || using_ddgi);
 		if (needs_pre_resolve) {
 			RENDER_TIMESTAMP("GI + Render Depth Pre-Pass (Parallel)");
 		} else {
@@ -2566,14 +2577,14 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			RD::get_singleton()->draw_list_begin(depth_framebuffer, RD::DRAW_CLEAR_ALL, depth_pass_clear, 0.0f);
 			RD::get_singleton()->draw_list_end();
 			//start compute processes here, so they run at the same time as depth pre-pass
-			_post_prepass_render(p_render_data, using_sdfgi || using_voxelgi);
+			_post_prepass_render(p_render_data, using_sdfgi || using_voxelgi || using_ddgi);
 		}
 
 		RD::get_singleton()->draw_command_begin_label("Render Depth Pre-Pass");
 
 		RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, nullptr, is_multiview, RID(), samplers, depth_prepass_uniform_buffer_index);
 
-		bool finish_depth = using_ssao || using_ssil || using_sdfgi || using_voxelgi || ce_pre_opaque_resolved_depth || ce_post_opaque_resolved_depth;
+		bool finish_depth = using_ssao || using_ssil || using_sdfgi || using_voxelgi || using_ddgi || ce_pre_opaque_resolved_depth || ce_post_opaque_resolved_depth;
 		RenderListParameters render_list_params(render_list[RENDER_LIST_OPAQUE].elements.ptr(), render_list[RENDER_LIST_OPAQUE].element_info.ptr(), render_list[RENDER_LIST_OPAQUE].elements.size(), reverse_cull, depth_pass_mode, 0, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, base_specialization, !is_reflection_probe);
 		_render_list_with_draw_list(&render_list_params, depth_framebuffer, RD::DrawFlags(needs_pre_resolve ? RD::DRAW_DEFAULT_ALL : RD::DRAW_CLEAR_ALL), depth_pass_clear, 0.0f, 0u, p_render_data->render_region);
 
@@ -2616,7 +2627,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			normal_roughness_views[v] = rb_data->get_normal_roughness(v);
 		}
 	}
-	_pre_opaque_render(p_render_data, using_ssao, using_ssil, using_ssr, using_sscs, using_sdfgi || using_voxelgi, normal_roughness_views, rb_data.is_valid() && rb_data->has_voxelgi() ? rb_data->get_voxelgi() : RID());
+	_pre_opaque_render(p_render_data, using_ssao, using_ssil, using_ssr, using_sscs, using_sdfgi || using_voxelgi || using_ddgi, normal_roughness_views, rb_data.is_valid() && rb_data->has_voxelgi() ? rb_data->get_voxelgi() : RID());
 
 	if (current_cluster_builder) {
 		base_specialization.cluster_has_area_light = current_cluster_builder->get_cluster_count_by_type(ClusterBuilderRD::ELEMENT_TYPE_AREA_LIGHT) != 0;
@@ -4325,6 +4336,14 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 			texture = texture_storage->texture_rd_get_default(is_multiview ? RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_WHITE : RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_WHITE);
 		}
 		u.append_id(texture);
+		uniforms.push_back(u);
+	}
+	{
+		RD::Uniform u;
+		u.binding = 45;
+		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		RID coverage = rb.is_valid() && rb->has_texture(RB_SCOPE_SURFELS, RB_TEX_SURFEL_COVERAGE) ? rb->get_texture(RB_SCOPE_SURFELS, RB_TEX_SURFEL_COVERAGE) : RID();
+		u.append_id(coverage.is_valid() ? coverage : texture_storage->texture_rd_get_default(is_multiview ? RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_BLACK : RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK));
 		uniforms.push_back(u);
 	}
 #ifdef MODULE_TEXTURE_STREAMING_ENABLED

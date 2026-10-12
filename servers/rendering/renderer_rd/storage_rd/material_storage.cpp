@@ -1950,11 +1950,12 @@ Variant MaterialStorage::global_shader_parameter_get(const StringName &p_name) c
 		ERR_FAIL_V_MSG(Variant(), "This function should never be used outside the editor, it can severely damage performance.");
 	}
 
-	if (!global_shader_uniforms.variables.has(p_name)) {
-		return Variant();
-	}
+	return global_shader_parameter_get_internal(p_name);
+}
 
-	return global_shader_uniforms.variables[p_name].value;
+Variant MaterialStorage::global_shader_parameter_get_internal(const StringName &p_name) const {
+	const GlobalShaderUniforms::Variable *variable = global_shader_uniforms.variables.getptr(p_name);
+	return variable ? variable->value : Variant();
 }
 
 RSE::GlobalShaderParameterType MaterialStorage::global_shader_parameter_get_type_internal(const StringName &p_name) const {
@@ -2385,6 +2386,18 @@ RID MaterialStorage::shader_get_default_texture_parameter(RID p_shader, const St
 	}
 
 	return RID();
+}
+
+Variant MaterialStorage::material_get_declared_param(RID p_material, const StringName &p_param) const {
+	Material *material = material_owner.get_or_null(p_material);
+	if (!material || !material->shader || !material->shader->data || !material->shader->data->uniforms.has(p_param)) {
+		return Variant();
+	}
+	const Variant *value = material->params.getptr(p_param);
+	if (value) {
+		return *value;
+	}
+	return material->shader->data->get_default_parameter(p_param);
 }
 
 Variant MaterialStorage::shader_get_parameter_default(RID p_shader, const StringName &p_param) const {

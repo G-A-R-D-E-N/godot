@@ -3876,6 +3876,33 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/sdfgi/frames_to_converge", PROPERTY_HINT_ENUM, "5 (Less Latency but Lower Quality),10,15,20,25,30 (More Latency but Higher Quality)"), 5);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/sdfgi/frames_to_update_lights", PROPERTY_HINT_ENUM, "1 (Slower),2,4,8,16 (Faster)"), 2);
 
+	GLOBAL_DEF("rendering/global_illumination/ddgi/enabled", false);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/probe_grid_horizontal", PROPERTY_HINT_RANGE, "8,64,1"), 32);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/probe_grid_vertical", PROPERTY_HINT_RANGE, "4,32,1"), 16);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/levels", PROPERTY_HINT_RANGE, "1,4,1"), 4);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/probe_spacing", PROPERTY_HINT_RANGE, "0.1,16,0.01,suffix:m"), 1.0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/rays_per_probe", PROPERTY_HINT_RANGE, "32,256,1"), 128);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/probes_per_frame", PROPERTY_HINT_RANGE, "64,16384,1"), 4096);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/hysteresis", PROPERTY_HINT_RANGE, "0.0,0.999,0.001"), 0.97);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/normal_bias", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), 0.1);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/view_bias", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), 0.25);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/energy", PROPERTY_HINT_RANGE, "0.0,16.0,0.01"), 1.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/bounce_energy", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), 1.0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/debug_view", PROPERTY_HINT_ENUM, "Disabled,Irradiance,Ray Hits,Normals,Probe State,Probe Visibility"), 0);
+
+	GLOBAL_DEF("rendering/global_illumination/surfels/enabled", false);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/surfels/capacity", PROPERTY_HINT_RANGE, "4096,1048576,1"), 131072);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/surfels/updates_per_frame", PROPERTY_HINT_RANGE, "256,131072,1"), 16384);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/surfels/radius_scale", PROPERTY_HINT_RANGE, "0.002,0.2,0.001"), 0.02);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/surfels/min_radius", PROPERTY_HINT_RANGE, "0.005,1.0,0.005,suffix:m"), 0.05);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/surfels/max_radius", PROPERTY_HINT_RANGE, "0.05,8.0,0.01,suffix:m"), 2.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/surfels/max_distance", PROPERTY_HINT_RANGE, "1,512,0.1,suffix:m"), 64.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/surfels/ray_distance", PROPERTY_HINT_RANGE, "0.5,128,0.1,suffix:m"), 16.0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/surfels/unseen_frames", PROPERTY_HINT_RANGE, "8,100000,1"), 600);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/surfels/max_samples", PROPERTY_HINT_RANGE, "1,1024,1"), 32);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/surfels/ambient_occlusion_strength", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/surfels/debug_view", PROPERTY_HINT_ENUM, "Disabled,Irradiance,Surfels,Coverage,State"), 0);
+
 	GLOBAL_DEF_RST("rendering/environment/fog/use_legacy_blending", false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/volumetric_fog/volume_size", PROPERTY_HINT_RANGE, "16,512,1"), 64);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/volumetric_fog/volume_depth", PROPERTY_HINT_RANGE, "16,512,1"), 64);

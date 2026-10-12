@@ -30,6 +30,7 @@
 
 #include "mesh_storage.h"
 
+#include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_viewport.h"
 #include "servers/rendering/rendering_server.h"
 #include "servers/rendering/rendering_server_types.h"
@@ -501,6 +502,10 @@ void MeshStorage::mesh_add_surface(RID p_mesh, const RenderingServerTypes::Surfa
 	mesh->surfaces[mesh->surface_count] = s;
 	mesh->surface_count++;
 
+	if (RayScene::get_singleton()) {
+		RayScene::get_singleton()->mesh_surface_added(p_mesh, mesh->surface_count - 1, p_surface);
+	}
+
 	for (MeshInstance *mi : mesh->instances) {
 		_mesh_instance_add_surface(mi, mesh, mesh->surface_count - 1);
 	}
@@ -895,6 +900,10 @@ void MeshStorage::mesh_clear(RID p_mesh) {
 	Mesh *mesh = mesh_owner.get_or_null(p_mesh);
 	ERR_FAIL_NULL(mesh);
 
+	if (RayScene::get_singleton()) {
+		RayScene::get_singleton()->mesh_cleared(p_mesh);
+	}
+
 	// Clear instance data before mesh data.
 	for (MeshInstance *mi : mesh->instances) {
 		_mesh_instance_clear(mi);
@@ -925,6 +934,10 @@ void MeshStorage::mesh_surface_remove(RID p_mesh, int p_surface) {
 	Mesh *mesh = mesh_owner.get_or_null(p_mesh);
 	ERR_FAIL_NULL(mesh);
 	ERR_FAIL_UNSIGNED_INDEX((uint32_t)p_surface, mesh->surface_count);
+
+	if (RayScene::get_singleton()) {
+		RayScene::get_singleton()->mesh_cleared(p_mesh);
+	}
 
 	// Clear instance data before mesh data.
 	for (MeshInstance *mi : mesh->instances) {

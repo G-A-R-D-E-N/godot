@@ -3172,6 +3172,45 @@
 			If [code]true[/code], disables the threaded optimization feature from the NVIDIA drivers, which are known to cause stuttering in most OpenGL applications.
 			[b]Note:[/b] This setting only works on Windows, as threaded optimization is disabled by default on other platforms.
 		</member>
+		<member name="rendering/global_illumination/ddgi/bounce_energy" type="float" setter="" getter="" default="1.0">
+			How much of the probes' own light is fed back into the rays, which gives multiple bounces of indirect light. 0 gives a single bounce.
+		</member>
+		<member name="rendering/global_illumination/ddgi/debug_view" type="int" setter="" getter="" default="0">
+			Replaces the image with a view traced against the DDGI scene copy: [code]Irradiance[/code] shows probe irradiance at the first hit, [code]Ray Hits[/code] shows the light the probe rays see, [code]Normals[/code] shows surface normals with back faces in red, [code]Probe State[/code] colors each surface by its nearest probe (green active, blue idle, red inside geometry, black not traced yet) with dark lines on probe cell edges, and [code]Probe Visibility[/code] shows how much probe light passes the visibility test (green all, red little, magenta none).
+		</member>
+		<member name="rendering/global_illumination/ddgi/enabled" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], turns on dynamic diffuse global illumination (DDGI): a camera-centered grid of irradiance probes updated every frame by tracing rays against a simplified copy of the scene. It feeds the same indirect-light buffer as SDFGI and VoxelGI.
+		</member>
+		<member name="rendering/global_illumination/ddgi/energy" type="float" setter="" getter="" default="1.0">
+			Multiplier for the DDGI indirect light.
+		</member>
+		<member name="rendering/global_illumination/ddgi/hysteresis" type="float" setter="" getter="" default="0.97">
+			How much of the previous result each probe keeps per update. Higher values are smoother but react more slowly to lighting changes.
+		</member>
+		<member name="rendering/global_illumination/ddgi/levels" type="int" setter="" getter="" default="4">
+			The number of nested probe grids. Each level doubles the spacing of the previous one, so more levels reach further from the camera.
+		</member>
+		<member name="rendering/global_illumination/ddgi/normal_bias" type="float" setter="" getter="" default="0.1">
+			Offset of the sample point along the surface normal, in units of probe spacing, to reduce light leaking and self-shadowing.
+		</member>
+		<member name="rendering/global_illumination/ddgi/probe_grid_horizontal" type="int" setter="" getter="" default="32">
+			The number of probes per level along the X and Z axes. Memory and update cost grow with the product of the horizontal and vertical counts.
+		</member>
+		<member name="rendering/global_illumination/ddgi/probe_grid_vertical" type="int" setter="" getter="" default="16">
+			The number of probes per level along the Y axis. Memory and update cost grow with the product of the horizontal and vertical counts.
+		</member>
+		<member name="rendering/global_illumination/ddgi/probe_spacing" type="float" setter="" getter="" default="1.0">
+			The distance between probes in the finest level, in meters.
+		</member>
+		<member name="rendering/global_illumination/ddgi/probes_per_frame" type="int" setter="" getter="" default="4096">
+			The maximum number of probes updated per frame. Probes that just entered the grid are updated first, then the rest in turn, with finer levels updated more often.
+		</member>
+		<member name="rendering/global_illumination/ddgi/rays_per_probe" type="int" setter="" getter="" default="128">
+			The number of rays traced from each updated probe per frame. More rays reduce noise but cost more GPU time.
+		</member>
+		<member name="rendering/global_illumination/ddgi/view_bias" type="float" setter="" getter="" default="0.25">
+			Offset of the sample point towards the camera, in units of probe spacing, to reduce light leaking and self-shadowing.
+		</member>
 		<member name="rendering/global_illumination/gi/use_half_resolution" type="bool" setter="" getter="" default="false" keywords="size">
 			If [code]true[/code], renders [VoxelGI] and SDFGI ([member Environment.sdfgi_enabled]) buffers at halved resolution (e.g. 960×540 when the viewport size is 1920×1080). This improves performance significantly when VoxelGI or SDFGI is enabled, at the cost of artifacts that may be visible on polygon edges. The loss in quality becomes less noticeable as the viewport resolution increases. [LightmapGI] rendering is not affected by this setting.
 			[b]Note:[/b] This property is only read when the project starts. To set half-resolution GI at run-time, call [method RenderingServer.gi_set_use_half_resolution] instead.
@@ -3188,6 +3227,42 @@
 		<member name="rendering/global_illumination/sdfgi/probe_ray_count" type="int" setter="" getter="" default="1">
 			The number of rays to throw per frame when computing signed distance field global illumination. Higher values lead to a less noisy result, at the cost of performance. See also [member rendering/global_illumination/sdfgi/frames_to_converge] and [member rendering/global_illumination/sdfgi/frames_to_update_lights].
 			[b]Note:[/b] This property is only read when the project starts. To control SDFGI quality at runtime, call [method RenderingServer.environment_set_sdfgi_ray_count] instead.
+		</member>
+		<member name="rendering/global_illumination/surfels/ambient_occlusion_strength" type="float" setter="" getter="" default="0.0">
+			How much screen-space ambient occlusion still darkens indirect light where surfels cover a surface. Surfel rays already see nearby occluders, so at [code]1.0[/code] that occlusion is counted twice.
+		</member>
+		<member name="rendering/global_illumination/surfels/capacity" type="int" setter="" getter="" default="131072">
+			Maximum number of surfels kept alive at once. Changing it reallocates the surfel buffers.
+		</member>
+		<member name="rendering/global_illumination/surfels/debug_view" type="int" setter="" getter="" default="0">
+			Shows surfel data in the GI buffer instead of the lit result. [code]0[/code] = disabled, [code]1[/code] = surfel irradiance, [code]2[/code] = surfels in random colors, [code]3[/code] = coverage (red where no surfel covers the pixel), [code]4[/code] = state of the nearest surfel (green settled, yellow new, red rays inside geometry, magenta marked for removal, blue grid cell over the lookup limit).
+		</member>
+		<member name="rendering/global_illumination/surfels/enabled" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], adaptive surfels add fine indirect light on top of DDGI near the camera. Requires [member rendering/global_illumination/ddgi/enabled].
+		</member>
+		<member name="rendering/global_illumination/surfels/max_distance" type="float" setter="" getter="" default="64.0">
+			Surfels farther than this many meters from the camera are removed; DDGI alone lights beyond it.
+		</member>
+		<member name="rendering/global_illumination/surfels/max_radius" type="float" setter="" getter="" default="2.0">
+			Largest surfel radius in meters.
+		</member>
+		<member name="rendering/global_illumination/surfels/max_samples" type="int" setter="" getter="" default="32">
+			Cap on the number of accumulated updates per surfel. Higher values give a steadier result but react more slowly to lighting changes.
+		</member>
+		<member name="rendering/global_illumination/surfels/min_radius" type="float" setter="" getter="" default="0.05">
+			Smallest surfel radius in meters.
+		</member>
+		<member name="rendering/global_illumination/surfels/radius_scale" type="float" setter="" getter="" default="0.02">
+			Surfel radius as a fraction of the distance to the camera, clamped by [member rendering/global_illumination/surfels/min_radius] and [member rendering/global_illumination/surfels/max_radius].
+		</member>
+		<member name="rendering/global_illumination/surfels/ray_distance" type="float" setter="" getter="" default="16.0">
+			Length in meters of each surfel ray. Rays that travel farther take their light from DDGI instead.
+		</member>
+		<member name="rendering/global_illumination/surfels/unseen_frames" type="int" setter="" getter="" default="600">
+			Surfels not seen by the camera for this many frames are removed. The limit shrinks when the surfel pool is nearly full.
+		</member>
+		<member name="rendering/global_illumination/surfels/updates_per_frame" type="int" setter="" getter="" default="16384">
+			Maximum number of surfels traced per frame. Each update traces 8 rays.
 		</member>
 		<member name="rendering/global_illumination/voxel_gi/quality" type="int" setter="" getter="" default="0">
 			The VoxelGI quality to use. High quality leads to more precise lighting and better reflections, but is slower to render. This setting does not affect the baked data and doesn't require baking the [VoxelGI] again to apply.

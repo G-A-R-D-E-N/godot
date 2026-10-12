@@ -174,6 +174,7 @@ uint64_t RendererCompositorRD::frame = 1;
 void RendererCompositorRD::finalize() {
 	texture_storage->_tex_blit_shader_free();
 	memdelete(scene);
+	memdelete(ray_scene);
 	memdelete(canvas);
 	memdelete(fog);
 	memdelete(particles_storage);
@@ -365,6 +366,7 @@ RendererCompositorRD::RendererCompositorRD() {
 	texture_storage = memnew(RendererRD::TextureStorage);
 	material_storage = memnew(RendererRD::MaterialStorage);
 	mesh_storage = memnew(RendererRD::MeshStorage);
+	ray_scene = memnew(RendererRD::RayScene);
 	light_storage = memnew(RendererRD::LightStorage);
 	particles_storage = memnew(RendererRD::ParticlesStorage);
 	fog = memnew(RendererRD::Fog);

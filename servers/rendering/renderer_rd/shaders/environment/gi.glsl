@@ -4,7 +4,7 @@
 
 #VERSION_DEFINES
 
-#ifdef SAMPLE_VOXEL_GI_NEAREST
+#if defined(SAMPLE_VOXEL_GI_NEAREST) || defined(USE_DDGI)
 #extension GL_EXT_samplerless_texture_functions : enable
 #endif
 
@@ -111,6 +111,54 @@ layout(set = 0, binding = 18, std140) uniform SceneData {
 	float pad2;
 }
 scene_data;
+
+#ifdef USE_DDGI
+#define DDGI_SET 1
+#define DDGI_UBO_BINDING 0
+#define DDGI_SAMPLING
+#define ddgi_linear_sampler linear_sampler
+layout(set = 1, binding = 1) uniform utexture2DArray ddgi_probe_texture;
+layout(set = 1, binding = 2) uniform texture2DArray ddgi_irradiance_texture;
+layout(set = 1, binding = 3) uniform texture2DArray ddgi_distance_texture;
+#include "ddgi_inc.glsl"
+#endif
+
+#ifdef USE_SURFELS
+#define SURFEL_SET 2
+#define SURFEL_UBO_BINDING 0
+#include "surfel_inc.glsl"
+
+layout(set = 2, binding = 1, std430) restrict buffer Surfels {
+	Surfel data[];
+}
+surfels;
+
+layout(set = 2, binding = 2, std430) restrict buffer Counters {
+	SurfelCounters data;
+}
+surfel_counters;
+
+layout(set = 2, binding = 3, std430) restrict readonly buffer FreeList {
+	uint data[];
+}
+free_list;
+
+layout(set = 2, binding = 4, std430) restrict readonly buffer BucketOffsets {
+	uint data[];
+}
+surfel_offsets;
+
+layout(set = 2, binding = 5, std430) restrict readonly buffer Cells {
+	uint data[];
+}
+surfel_cells;
+
+layout(rg8, set = 2, binding = 6) uniform restrict writeonly image2D surfel_coverage_buffer;
+
+vec2 surfel_coverage = vec2(0.0);
+
+#include "surfel_gather_inc.glsl"
+#endif
 
 #ifdef USE_VRS
 layout(r8ui, set = 0, binding = 19) uniform restrict readonly uimage2D vrs_buffer;
@@ -606,6 +654,89 @@ void voxel_gi_compute(uint index, vec3 position, vec3 normal, vec3 ref_vec, mat3
 	out_blend += blend;
 }
 
+#ifdef USE_SURFELS
+vec3 surfel_debug_color(uint p_index) {
+	uint h = surfel_hash(p_index + 1u);
+	return vec3(uvec3(h, h >> 8u, h >> 16u) & 0xFFu) / 255.0;
+}
+
+vec3 surfel_coverage_color(float p_coverage) {
+	float c = clamp(p_coverage, 0.0, 2.0);
+	return c < 1.0 ? mix(vec3(1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), c) : mix(vec3(0.0, 1.0, 0.0), vec3(0.0, 0.0, 1.0), c - 1.0);
+}
+
+vec3 surfel_state_color(SurfelLookup p_lookup) {
+	if (p_lookup.saturated) {
+		return vec3(0.0, 0.2, 1.0);
+	}
+	if (p_lookup.nearest == SURFEL_INVALID) {
+		return vec3(0.0);
+	}
+	uint index = p_lookup.nearest;
+	if ((surfels.data[index].flags & SURFEL_FLAG_KILL) != 0u) {
+		return vec3(1.0, 0.0, 1.0);
+	}
+	if (surfels.data[index].inside_count > 0u) {
+		return vec3(1.0, 0.0, 0.0);
+	}
+	return float(surfels.data[index].samples) < SURFEL_CONFIDENT_SAMPLES ? vec3(1.0, 1.0, 0.0) : vec3(0.0, 1.0, 0.0);
+}
+
+void surfel_spawn(ivec2 p_pos, vec3 p_vertex, vec3 p_normal, float p_coverage) {
+	float distance = length(p_vertex);
+	if (distance > surfel_data.max_distance) {
+		return;
+	}
+	float chance = surfel_data.spawn_chance * (1.0 - p_coverage / SURFEL_SPAWN_COVERAGE) * (sc_half_res ? 4.0 : 1.0);
+	uint seed = (uint(p_pos.x) * 1973u) ^ (uint(p_pos.y) * 9277u) ^ (surfel_data.frame * 26699u);
+	if (surfel_random(seed) >= chance) {
+		return;
+	}
+	ivec2 limit = scene_data.screen_size - 1;
+	if (any(lessThan(p_pos, ivec2(1))) || any(greaterThanEqual(p_pos, limit))) {
+		return;
+	}
+
+	vec3 center = reconstruct_position(p_pos);
+	vec3 right = reconstruct_position(p_pos + ivec2(1, 0)) - center;
+	vec3 left = center - reconstruct_position(p_pos - ivec2(1, 0));
+	vec3 up = reconstruct_position(p_pos + ivec2(0, 1)) - center;
+	vec3 down = center - reconstruct_position(p_pos - ivec2(0, 1));
+	vec3 geometry = cross(abs(up.z) < abs(down.z) ? up : down, abs(right.z) < abs(left.z) ? right : left);
+	float area = length(geometry);
+	if (!(area > 0.0)) {
+		return;
+	}
+	geometry = mat3(scene_data.cam_transform) * (geometry / area);
+	if (dot(geometry, p_vertex) > 0.0) {
+		geometry = -geometry;
+	}
+	if (dot(geometry, p_normal) < 0.5) {
+		return;
+	}
+
+	uint available = atomicAdd(surfel_counters.data.free_count, 0xFFFFFFFFu);
+	if (available == 0u || available > surfel_data.capacity) {
+		atomicAdd(surfel_counters.data.free_count, 1u);
+		return;
+	}
+	uint index = free_list.data[available - 1u];
+	surfels.data[index].position = p_vertex + surfel_data.camera_to_anchor;
+	surfels.data[index].radius = surfel_spawn_radius(distance);
+	surfels.data[index].normal = geometry;
+	surfels.data[index].samples = 0u;
+	surfels.data[index].sh_r = vec4(0.0);
+	surfels.data[index].sh_g = vec4(0.0);
+	surfels.data[index].sh_b = vec4(0.0);
+	surfels.data[index].short_mean = vec3(0.0);
+	surfels.data[index].variance = 0.0;
+	surfels.data[index].last_seen = surfel_data.frame;
+	surfels.data[index].flags = SURFEL_FLAG_ALIVE;
+	surfels.data[index].clip = SURFEL_NO_CLIP;
+	surfels.data[index].inside_count = 0u;
+}
+#endif
+
 vec4 fetch_normal_and_roughness(ivec2 pos) {
 	vec4 normal_roughness = texelFetch(sampler2D(normal_roughness_buffer, linear_sampler), pos, 0);
 	normal_roughness.xyz = normalize(normal_roughness.xyz * 2.0 - 1.0);
@@ -632,6 +763,35 @@ void process_gi(ivec2 pos, vec3 vertex, inout vec4 ambient_light, inout vec4 ref
 
 #ifdef USE_SDFGI
 		sdfgi_process(vertex, normal, reflection, roughness, ambient_light, reflection_light);
+#endif
+
+#ifdef USE_DDGI
+		vec4 ddgi_light = ddgi_sample(vertex, normal, view);
+		ambient_light = vec4(ddgi_light.rgb * ddgi.energy, ddgi_light.a);
+#endif
+
+#ifdef USE_SURFELS
+		{
+			SurfelLookup lookup = surfel_lookup(vertex + surfel_data.camera_to_anchor, normal, SURFEL_INVALID);
+			vec3 surfel_light = surfel_eval_irradiance(lookup.sh_r, lookup.sh_g, lookup.sh_b, normal) * ddgi.energy;
+			float debug_scale = max(dot(max(ambient_light.rgb, surfel_light), vec3(0.2126, 0.7152, 0.0722)), 1e-6) * 2.0;
+			float blend = surfel_blend(lookup);
+			float alpha = ambient_light.a + blend - ambient_light.a * blend;
+			ambient_light = alpha > 0.0 ? vec4((ambient_light.rgb * ambient_light.a * (1.0 - blend) + surfel_light * blend) / alpha, alpha) : ambient_light;
+			surfel_coverage = vec2(1.0 - surfel_data.ambient_occlusion_strength, 1.0) * blend;
+			if (surfel_data.debug_view == 1u) {
+				ambient_light = vec4(surfel_light, 1.0);
+			} else if (surfel_data.debug_view == 2u) {
+				ambient_light = vec4((lookup.nearest == SURFEL_INVALID ? vec3(0.0) : surfel_debug_color(lookup.nearest)) * debug_scale, 1.0);
+			} else if (surfel_data.debug_view == 3u) {
+				ambient_light = vec4((lookup.coverage > 0.0 && lookup.light_weight <= 0.0 ? vec3(1.0, 0.0, 1.0) : surfel_coverage_color(lookup.coverage)) * debug_scale, 1.0);
+			} else if (surfel_data.debug_view == 4u) {
+				ambient_light = vec4(surfel_state_color(lookup) * debug_scale, 1.0);
+			}
+			if (!dynamic_object && !lookup.saturated && lookup.coverage < SURFEL_SPAWN_COVERAGE) {
+				surfel_spawn(pos, vertex, normal, lookup.coverage);
+			}
+		}
 #endif
 
 #ifdef USE_VOXEL_GI_INSTANCES
@@ -783,6 +943,20 @@ void main() {
 			imageStore(reflection_buffer, pos + ivec2(3, 2), reflection_light);
 			imageStore(ambient_buffer, pos + ivec2(3, 3), ambient_light);
 			imageStore(reflection_buffer, pos + ivec2(3, 3), reflection_light);
+		}
+	}
+#endif
+
+#ifdef USE_SURFELS
+	uvec2 coverage_block = uvec2(1u);
+#ifdef USE_VRS
+	if (sc_use_vrs) {
+		coverage_block = uvec2(vrs_x, vrs_y);
+	}
+#endif
+	for (uint y = 0u; y < coverage_block.y; y++) {
+		for (uint x = 0u; x < coverage_block.x; x++) {
+			imageStore(surfel_coverage_buffer, pos + ivec2(x, y), vec4(surfel_coverage, 0.0, 0.0));
 		}
 	}
 #endif

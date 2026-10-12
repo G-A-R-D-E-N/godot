@@ -32,6 +32,7 @@
 
 #include "core/config/project_settings.h"
 #include "servers/rendering/renderer_rd/effects/copy_effects.h"
+#include "servers/rendering/renderer_rd/environment/ddgi.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_scene_buffers_rd.h"
 #include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
@@ -400,6 +401,7 @@ SSEffects::SSEffects() {
 		ssgi_modes.push_back("\n#define MODE_RESOLVE\n");
 		ssgi_modes.push_back("\n");
 		ssgi_modes.push_back("\n#define MODE_FAST\n");
+		ssgi_modes.push_back("\n#define MODE_TRACE\n#define USE_DDGI\n");
 
 		ssgi.shader.initialize(ssgi_modes);
 		ssgi.shader_version = ssgi.shader.version_create();
@@ -2458,7 +2460,12 @@ void SSEffects::screen_space_gi(Ref<RenderSceneBuffersRD> p_render_buffers, SSIL
 	RENDER_TIMESTAMP("SSGI Trace");
 	RD::get_singleton()->draw_command_begin_label("SSGI Trace");
 
-	RID trace_shader = ssgi.shader.version_get_shader(ssgi.shader_version, SCREEN_SPACE_GI_TRACE);
+	Ref<DDGI::Volume> ddgi_volume;
+	if (p_render_buffers->has_custom_data(RB_SCOPE_DDGI)) {
+		ddgi_volume = p_render_buffers->get_custom_data(RB_SCOPE_DDGI);
+	}
+	const ScreenSpaceGIMode trace_mode = ddgi_volume.is_valid() ? SCREEN_SPACE_GI_TRACE_DDGI : SCREEN_SPACE_GI_TRACE;
+	RID trace_shader = ssgi.shader.version_get_shader(ssgi.shader_version, trace_mode);
 	for (uint32_t v = 0; v < view_count; v++) {
 		RID source_texture = p_render_buffers->get_texture_slice(RB_SCOPE_BOUNCE_SOURCE, RB_SOURCE, v, 0, 1, source_format.mipmaps);
 		RID hiz_texture = p_render_buffers->get_texture_slice(RB_SCOPE_SSGI, RB_HIZ, v, 0, 1, p_ssil_buffers.mipmaps);
@@ -2477,6 +2484,7 @@ void SSEffects::screen_space_gi(Ref<RenderSceneBuffersRD> p_render_buffers, SSIL
 		push_constant.rays = rays;
 		push_constant.validate_source = 1;
 		push_constant.source_mip = (half_size && source_format.mipmaps > 1) ? 1.0f : 0.0f;
+		MaterialStorage::store_transform_transposed_3x4(Transform3D(p_settings.view_to_world, Vector3()), push_constant.view_to_world);
 
 		RD::Uniform u_scene_data(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, ssgi.ubo);
 		RD::Uniform u_source(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, Vector<RID>{ linear_sampler, source_texture });
@@ -2486,8 +2494,13 @@ void SSEffects::screen_space_gi(Ref<RenderSceneBuffersRD> p_render_buffers, SSIL
 		RD::Uniform u_ray_hit(RD::UNIFORM_TYPE_IMAGE, 5, p_render_buffers->get_texture_slice(RB_SCOPE_SSGI, RB_SSR_RAY_HIT, v, 0));
 
 		RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
-		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, ssgi.pipelines[SCREEN_SPACE_GI_TRACE].get_rid());
+		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, ssgi.pipelines[trace_mode].get_rid());
 		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(trace_shader, 0, u_scene_data, u_source, u_hiz, u_normal_roughness, u_ray_radiance, u_ray_hit), 0);
+		if (ddgi_volume.is_valid()) {
+			LocalVector<RD::Uniform> ddgi_uniforms = ddgi_volume->gather_uniforms();
+			ddgi_uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER, 4, material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED)));
+			RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache_vec(trace_shader, 1, ddgi_uniforms), 1);
+		}
 		RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(push_constant));
 		RD::get_singleton()->compute_list_dispatch_threads(compute_list, trace_size.width, trace_size.height, 1);
 		RD::get_singleton()->compute_list_end();
