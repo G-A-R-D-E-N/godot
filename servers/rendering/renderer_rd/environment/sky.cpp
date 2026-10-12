@@ -560,6 +560,66 @@ void SkyRD::Sky::free_radiance() {
 		}
 		radiance_first_layer_slice = RID();
 	}
+	if (working_radiance.is_valid()) {
+		RD::get_singleton()->free_rid(working_radiance);
+		working_radiance = RID();
+	}
+	radiance_generation = 0;
+	publish_pending = false;
+	working_layer_generations.clear();
+	published_layer_generations.clear();
+}
+
+bool SkyRD::Sky::uses_working_radiance() const {
+	const RSE::SkyMode resolved = mode == RSE::SKY_MODE_AUTOMATIC ? internal_mode : mode;
+	return resolved == RSE::SKY_MODE_INCREMENTAL;
+}
+
+void SkyRD::Sky::tag_layers(int p_first, int p_end) {
+	for (int i = p_first; i < p_end && i < int(working_layer_generations.size()); i++) {
+		working_layer_generations[i] = last_generation + 1;
+	}
+}
+
+void SkyRD::Sky::commit_publication() {
+	published_layer_generations = working_layer_generations;
+	radiance_generation = last_generation + 1;
+	last_generation = radiance_generation;
+	baked_exposure = working_baked_exposure;
+	publish_pending = false;
+	stats_publishes++;
+}
+
+void SkyRD::Sky::copy_working_to_radiance() {
+	uint32_t extent_base = radiance_copy_size;
+	for (int layer = 0; layer < radiance_copy_layers; layer++) {
+		uint32_t extent = extent_base;
+		for (int mip = 0; mip < radiance_copy_mipmaps; mip++) {
+			ERR_BREAK(RD::get_singleton()->texture_copy(working_radiance, radiance, Vector3(), Vector3(), Vector3(extent, extent, 1), mip, mip, layer, layer) != OK);
+			extent = MAX(1u, extent >> 1);
+		}
+	}
+}
+
+void SkyRD::Sky::finish_cycle(uint64_t p_frame) {
+	if (working_radiance.is_null()) {
+		commit_publication();
+	} else if (radiance_generation == 0) {
+		copy_working_to_radiance();
+		commit_publication();
+	} else {
+		publish_pending = true;
+		publish_frame = p_frame;
+	}
+}
+
+bool SkyRD::Sky::publish_if_due(uint64_t p_frame) {
+	if (!publish_pending || p_frame <= publish_frame) {
+		return false;
+	}
+	copy_working_to_radiance();
+	commit_publication();
+	return true;
 }
 
 void SkyRD::Sky::free() {
@@ -1336,6 +1396,13 @@ void SkyRD::update_radiance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, 
 	ERR_FAIL_NULL(shader_data);
 
 	Sky *sky = get_sky(RendererSceneRenderRD::get_singleton()->environment_get_sky(p_env));
+
+	const uint64_t frame = RSG::rasterizer->get_frame_number();
+	sky->publish_if_due(frame);
+	if (sky->publish_pending) {
+		return;
+	}
+
 	RSE::SkyMode sky_mode = sky->internal_mode;
 	bool update_single_frame = sky_mode == RSE::SKY_MODE_REALTIME || sky_mode == RSE::SKY_MODE_QUALITY;
 
@@ -1355,6 +1422,7 @@ void SkyRD::update_radiance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, 
 	// Update radiance octmap
 	if (sky->reflection.dirty && cycle_can_start) {
 		sky->update_requested = false;
+		sky->forced_dirty = false;
 		sky->stats_cycles_started++;
 		sky->stats_last_dirty_reasons = sky->stats_pending_dirty_reasons;
 		sky->stats_pending_dirty_reasons = 0;
@@ -1418,9 +1486,12 @@ void SkyRD::update_radiance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, 
 
 		RD::get_singleton()->draw_command_end_label();
 
+		sky->tag_layers(0, 1);
+
 		if (sky_mode == RSE::SKY_MODE_REALTIME) {
 			sky->reflection.create_reflection_fast_filter(sky_use_octmap_array);
 			sky->stats_layers_filtered += static_cast<uint64_t>(MAX(max_processing_layer - 1, 0));
+			sky->tag_layers(1, max_processing_layer);
 			if (sky_use_octmap_array) {
 				sky->reflection.update_reflection_mipmaps(0, sky->reflection.layers.size());
 			}
@@ -1429,6 +1500,7 @@ void SkyRD::update_radiance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, 
 				for (int i = 1; i < max_processing_layer; i++) {
 					sky->reflection.create_reflection_importance_sample(sky_use_octmap_array, i, sky_ggx_samples_quality);
 					sky->stats_layers_filtered++;
+					sky->tag_layers(i, i + 1);
 				}
 				if (sky_use_octmap_array) {
 					sky->reflection.update_reflection_mipmaps(0, sky->reflection.layers.size());
@@ -1439,11 +1511,12 @@ void SkyRD::update_radiance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, 
 					sky->reflection.update_reflection_mipmaps(0, 1);
 				}
 			}
-			sky->processing_layer = 1;
+			sky->processing_layer = update_single_frame ? max_processing_layer : 1;
 		}
-		sky->baked_exposure = RendererSceneRenderRD::get_singleton()->is_using_physical_light_units() ? p_brightness_multiplier : p_luminance_multiplier;
+		sky->working_baked_exposure = RendererSceneRenderRD::get_singleton()->is_using_physical_light_units() ? p_brightness_multiplier : p_luminance_multiplier;
 		if (update_single_frame || sky->processing_layer >= max_processing_layer) {
 			sky->stats_cycles_completed++;
+			sky->finish_cycle(frame);
 		}
 		sky->reflection.dirty = false;
 		sky->cycle_running = sky->internal_mode == RSE::SKY_MODE_INCREMENTAL && sky->processing_layer < max_processing_layer;
@@ -1456,11 +1529,13 @@ void SkyRD::update_radiance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, 
 				sky->reflection.update_reflection_mipmaps(sky->processing_layer, sky->processing_layer + 1);
 			}
 
+			sky->tag_layers(sky->processing_layer, sky->processing_layer + 1);
 			sky->processing_layer++;
 			sky->stats_layers_filtered++;
 			if (sky->processing_layer >= max_processing_layer) {
 				sky->stats_cycles_completed++;
 				sky->cycle_running = false;
+				sky->finish_cycle(frame);
 			}
 		}
 	}
@@ -1584,6 +1659,30 @@ void SkyRD::invalidate_sky(Sky *p_sky, uint32_t p_reasons) {
 	}
 }
 
+void SkyRD::_create_radiance_textures(Sky *p_sky, RD::TextureFormat p_format) {
+	const bool use_working = p_sky->uses_working_radiance();
+	if (use_working) {
+		p_format.usage_bits |= RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
+	}
+	p_sky->radiance = RD::get_singleton()->texture_create(p_format, RD::TextureView());
+	if (use_working) {
+		p_format.usage_bits &= ~RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
+		p_format.usage_bits |= RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
+		p_sky->working_radiance = RD::get_singleton()->texture_create(p_format, RD::TextureView());
+		RD::get_singleton()->set_resource_name(p_sky->working_radiance, "Sky Working Radiance");
+	}
+}
+
+void SkyRD::publish_completed_cycles() {
+	const uint64_t frame = RSG::rasterizer->get_frame_number();
+	for (const RID &rid : sky_owner.get_owned_list()) {
+		Sky *sky = sky_owner.get_or_null(rid);
+		if (sky) {
+			sky->publish_if_due(frame);
+		}
+	}
+}
+
 void SkyRD::update_dirty_skys() {
 	bool use_raster_effect = RendererRD::CopyEffects::get_singleton()->get_raster_effects().has_flag(RendererRD::CopyEffects::RASTER_EFFECT_OCTMAP);
 	Sky *sky = dirty_sky_list;
@@ -1626,12 +1725,15 @@ void SkyRD::update_dirty_skys() {
 					tf.usage_bits |= RD::TEXTURE_USAGE_STORAGE_BIT;
 				}
 
-				sky->radiance = RD::get_singleton()->texture_create(tf, RD::TextureView());
+				_create_radiance_textures(sky, tf);
 
 				// Create view into the first layer slice for user shaders.
 				sky->radiance_first_layer_slice = RD::get_singleton()->texture_create_shared_from_slice(RD::TextureView(), sky->radiance, 0, 0, mipmaps, RD::TEXTURE_SLICE_2D, 1);
 
-				sky->reflection.update_reflection_data(w, mipmaps, true, sky->radiance, 0, use_realtime, roughness_layers, texture_format, sky->uv_border_size);
+				sky->radiance_copy_layers = layers;
+				sky->radiance_copy_mipmaps = mipmaps;
+				sky->radiance_copy_size = w;
+				sky->reflection.update_reflection_data(w, mipmaps, true, sky->working_radiance.is_valid() ? sky->working_radiance : sky->radiance, 0, use_realtime, roughness_layers, texture_format, sky->uv_border_size);
 			} else {
 				// Double size to approximate texel density of cubemaps + add border for proper filtering/mipmapping.
 				uint32_t padding_pixels = (1 << (MIN(mipmaps, layers) - 1));
@@ -1650,16 +1752,30 @@ void SkyRD::update_dirty_skys() {
 					tf.usage_bits |= RD::TEXTURE_USAGE_STORAGE_BIT;
 				}
 
-				sky->radiance = RD::get_singleton()->texture_create(tf, RD::TextureView());
+				_create_radiance_textures(sky, tf);
 
 				DEV_ASSERT(sky->radiance_first_layer_slice.is_null());
 
-				sky->reflection.update_reflection_data(w, MIN(mipmaps, layers), false, sky->radiance, 0, use_realtime, roughness_layers, texture_format, sky->uv_border_size);
+				sky->radiance_copy_layers = 1;
+				sky->radiance_copy_mipmaps = tf.mipmaps;
+				sky->radiance_copy_size = w;
+				sky->reflection.update_reflection_data(w, MIN(mipmaps, layers), false, sky->working_radiance.is_valid() ? sky->working_radiance : sky->radiance, 0, use_realtime, roughness_layers, texture_format, sky->uv_border_size);
+			}
+
+			const int tag_count = sky_use_octmap_array ? int(sky->reflection.layers.size()) : int(sky->reflection.layers[0].mipmaps.size());
+			sky->working_layer_generations.resize(tag_count);
+			sky->published_layer_generations.resize(tag_count);
+			for (int i = 0; i < tag_count; i++) {
+				sky->working_layer_generations[i] = 0;
+				sky->published_layer_generations[i] = 0;
 			}
 		}
 
 		const bool forced = sky->force_cycle || was_missing;
 		sky->force_cycle = false;
+		if (forced) {
+			sky->forced_dirty = true;
+		}
 		if (forced || sky->radiance_update_policy == RSE::SKY_RADIANCE_UPDATE_POLICY_AUTOMATIC) {
 			sky->reflection.dirty = true;
 			sky->processing_layer = 0;
@@ -1826,7 +1942,28 @@ Dictionary SkyRD::sky_get_update_stats(RID p_sky) const {
 	stats["radiance_size"] = sky->radiance_size;
 	stats["update_requests"] = sky->stats_update_requests;
 	stats["update_requests_latched"] = sky->stats_update_requests_latched;
+	stats["generation"] = static_cast<int64_t>(sky->radiance_generation);
+	stats["publishes"] = sky->stats_publishes;
 	return stats;
+}
+
+int64_t SkyRD::sky_get_radiance_generation(RID p_sky) const {
+	Sky *sky = get_sky(p_sky);
+	ERR_FAIL_NULL_V(sky, 0);
+
+	return static_cast<int64_t>(sky->radiance_generation);
+}
+
+PackedInt64Array SkyRD::sky_debug_get_layer_generations(RID p_sky) const {
+	PackedInt64Array tags;
+	Sky *sky = get_sky(p_sky);
+	ERR_FAIL_NULL_V(sky, tags);
+
+	tags.resize(sky->published_layer_generations.size());
+	for (uint32_t i = 0; i < sky->published_layer_generations.size(); i++) {
+		tags.set(i, static_cast<int64_t>(sky->published_layer_generations[i]));
+	}
+	return tags;
 }
 
 void SkyRD::sky_set_radiance_update_policy(RID p_sky, RSE::SkyRadianceUpdatePolicy p_policy) {
@@ -1840,6 +1977,8 @@ void SkyRD::sky_set_radiance_update_policy(RID p_sky, RSE::SkyRadianceUpdatePoli
 
 	if (p_policy == RSE::SKY_RADIANCE_UPDATE_POLICY_AUTOMATIC && sky->stats_pending_dirty_reasons != 0) {
 		sky->reflection.dirty = true;
+	} else if (p_policy == RSE::SKY_RADIANCE_UPDATE_POLICY_MANUAL && !sky->forced_dirty) {
+		sky->reflection.dirty = false;
 	}
 }
 

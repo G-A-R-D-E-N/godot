@@ -83,6 +83,14 @@ Dictionary RendererSceneRenderRD::sky_get_update_stats(RID p_sky) const {
 	return sky.sky_get_update_stats(p_sky);
 }
 
+int64_t RendererSceneRenderRD::sky_get_radiance_generation(RID p_sky) const {
+	return sky.sky_get_radiance_generation(p_sky);
+}
+
+PackedInt64Array RendererSceneRenderRD::sky_debug_get_layer_generations(RID p_sky) const {
+	return sky.sky_debug_get_layer_generations(p_sky);
+}
+
 void RendererSceneRenderRD::sky_set_radiance_update_policy(RID p_sky, RSE::SkyRadianceUpdatePolicy p_policy) {
 	sky.sky_set_radiance_update_policy(p_sky, p_policy);
 }
@@ -1604,6 +1612,7 @@ void RendererSceneRenderRD::set_debug_draw_mode(RSE::ViewportDebugDraw p_debug_d
 }
 
 void RendererSceneRenderRD::update() {
+	sky.publish_completed_cycles();
 	sky.update_dirty_skys();
 }
 

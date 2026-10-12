@@ -1195,6 +1195,8 @@ public:
 	PASS2(sky_set_material, RID, RID)
 	PASS4R(Ref<Image>, sky_bake_panorama, RID, float, bool, const Size2i &)
 	PASS1RC(Dictionary, sky_get_update_stats, RID)
+	PASS1RC(int64_t, sky_get_radiance_generation, RID)
+	PASS1RC(PackedInt64Array, sky_debug_get_layer_generations, RID)
 	PASS2(sky_set_radiance_update_policy, RID, RSE::SkyRadianceUpdatePolicy)
 	PASS1(sky_request_radiance_update, RID)
 

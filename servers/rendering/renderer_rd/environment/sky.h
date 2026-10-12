@@ -276,6 +276,7 @@ public:
 		static inline const int REAL_TIME_ROUGHNESS_LAYERS = 7;
 
 		RID radiance;
+		RID working_radiance;
 		RID radiance_first_layer_slice;
 		RID quarter_res_pass;
 		RID quarter_res_framebuffer;
@@ -297,6 +298,7 @@ public:
 		int processing_layer = 0;
 		Sky *dirty_list = nullptr;
 		float baked_exposure = 1.0;
+		float working_baked_exposure = 1.0;
 
 		uint64_t stats_cycles_started = 0;
 		uint64_t stats_layers_filtered = 0;
@@ -310,6 +312,18 @@ public:
 		bool update_requested = false;
 		bool force_cycle = false;
 		bool cycle_running = false;
+		bool forced_dirty = false;
+
+		uint64_t radiance_generation = 0;
+		uint64_t last_generation = 0;
+		uint64_t stats_publishes = 0;
+		bool publish_pending = false;
+		uint64_t publish_frame = 0;
+		int radiance_copy_layers = 1;
+		int radiance_copy_mipmaps = 1;
+		uint32_t radiance_copy_size = 0;
+		LocalVector<uint64_t> working_layer_generations;
+		LocalVector<uint64_t> published_layer_generations;
 
 		// State to track when radiance octmap needs updating.
 		SkyMaterialData *prev_material_data = nullptr;
@@ -326,6 +340,12 @@ public:
 		float prev_fog_light_energy = 0.0;
 
 		void free_radiance();
+		bool uses_working_radiance() const;
+		void tag_layers(int p_first, int p_end);
+		void commit_publication();
+		void copy_working_to_radiance();
+		void finish_cycle(uint64_t p_frame);
+		bool publish_if_due(uint64_t p_frame);
 
 		void free();
 		void mark_reflection_dirty(uint32_t p_reasons);
@@ -357,12 +377,14 @@ public:
 	~SkyRD();
 
 	void setup_sky(const RenderDataRD *p_render_data, const Size2i p_screen_size);
+	void publish_completed_cycles();
 	void update_radiance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_env, const Vector3 &p_global_pos, double p_time, float p_luminance_multiplier = 1.0, float p_brightness_multiplier = 1.0);
 	void update_res_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_env, double p_time, float p_luminance_multiplier = 1.0, float p_brightness_multiplier = 1.0);
 	void draw_sky(RD::DrawListID p_draw_list, Ref<RenderSceneBuffersRD> p_render_buffers, RID p_env, RID p_fb, double p_time, float p_luminance_multiplier = 1.0, float p_brightness_multiplier = 1.0);
 
 	void invalidate_sky(Sky *p_sky, uint32_t p_reasons);
 	void update_dirty_skys();
+	void _create_radiance_textures(Sky *p_sky, RD::TextureFormat p_format);
 
 	RID sky_get_material(RID p_sky) const;
 	RID sky_get_radiance_texture_rd(RID p_sky) const;
@@ -379,6 +401,8 @@ public:
 	Ref<Image> sky_bake_panorama(RID p_sky, float p_energy, bool p_bake_irradiance, const Size2i &p_size);
 	float sky_get_uv_border_size(RID p_sky);
 	Dictionary sky_get_update_stats(RID p_sky) const;
+	int64_t sky_get_radiance_generation(RID p_sky) const;
+	PackedInt64Array sky_debug_get_layer_generations(RID p_sky) const;
 	void sky_set_radiance_update_policy(RID p_sky, RSE::SkyRadianceUpdatePolicy p_policy);
 	void sky_request_radiance_update(RID p_sky);
 };

@@ -33,6 +33,7 @@
 #include "core/math/projection.h"
 #include "core/templates/paged_array.h"
 #include "core/variant/dictionary.h"
+#include "core/variant/variant.h"
 #include "servers/rendering/renderer_geometry_instance.h"
 #include "servers/rendering/rendering_server_types.h"
 #include "servers/rendering/storage/compositor_storage.h"
@@ -83,6 +84,8 @@ public:
 	virtual void sky_set_material(RID p_sky, RID p_material) = 0;
 	virtual Ref<Image> sky_bake_panorama(RID p_sky, float p_energy, bool p_bake_irradiance, const Size2i &p_size) = 0;
 	virtual Dictionary sky_get_update_stats(RID p_sky) const { return Dictionary(); }
+	virtual int64_t sky_get_radiance_generation(RID p_sky) const { return 0; }
+	virtual PackedInt64Array sky_debug_get_layer_generations(RID p_sky) const { return PackedInt64Array(); }
 	virtual void sky_set_radiance_update_policy(RID p_sky, RSE::SkyRadianceUpdatePolicy p_policy) {}
 	virtual void sky_request_radiance_update(RID p_sky) {}
 
