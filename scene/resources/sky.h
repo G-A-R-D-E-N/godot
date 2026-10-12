@@ -55,10 +55,17 @@ public:
 		PROCESS_MODE_REALTIME
 	};
 
+	enum RadianceUpdatePolicy {
+		RADIANCE_UPDATE_POLICY_AUTOMATIC,
+		RADIANCE_UPDATE_POLICY_MANUAL
+	};
+
 private:
 	RID sky;
 	ProcessMode mode = PROCESS_MODE_AUTOMATIC;
 	RadianceSize radiance_size = RADIANCE_SIZE_256;
+	RadianceUpdatePolicy radiance_update_policy = RADIANCE_UPDATE_POLICY_AUTOMATIC;
+	bool sh_enabled = false;
 	Ref<Material> sky_material;
 
 protected:
@@ -71,6 +78,19 @@ public:
 	void set_process_mode(ProcessMode p_mode);
 	ProcessMode get_process_mode() const;
 
+	void set_radiance_update_policy(RadianceUpdatePolicy p_policy);
+	RadianceUpdatePolicy get_radiance_update_policy() const;
+
+	void set_sh_enabled(bool p_enabled);
+	bool is_sh_enabled() const;
+
+	void request_radiance_update();
+	int64_t get_radiance_generation() const;
+	Dictionary get_update_stats() const;
+	RID get_sh_buffer() const;
+	Dictionary get_sh_debug() const;
+	PackedInt64Array get_layer_generations() const;
+
 	void set_material(const Ref<Material> &p_material);
 	Ref<Material> get_material() const;
 
@@ -82,3 +102,4 @@ public:
 
 VARIANT_ENUM_CAST(Sky::RadianceSize)
 VARIANT_ENUM_CAST(Sky::ProcessMode)
+VARIANT_ENUM_CAST(Sky::RadianceUpdatePolicy)
