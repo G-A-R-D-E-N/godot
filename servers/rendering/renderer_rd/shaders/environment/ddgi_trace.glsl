@@ -193,7 +193,6 @@ void main() {
 
 #ifdef MODE_SURFEL_TRACE
 
-
 shared vec4 ray_values[64];
 shared vec3 ray_directions[64];
 shared uint clip_bits[64];

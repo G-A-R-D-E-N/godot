@@ -7120,10 +7120,10 @@ Node3DEditorViewport::Node3DEditorViewport(Node3DEditor *p_spatial_editor, int p
 			TTRC("Displays the radiance SSR samples in the next frame: the opaque image without the SSR term and without fog. Requires SSR to be enabled in Environment."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("SSR Hit Distance"), VIEW_DISPLAY_DEBUG_SSR_HIT_DISTANCE, SupportedRenderingMethods::FORWARD_PLUS,
 			TTRC("Displays the distance to the stochastic screen-space reflection hits as d / (d + 2) for d in meters (black = no hit). Requires SSR in Environment with the Stochastic backend in the project settings."));
-		_add_advanced_debug_draw_mode_item(display_submenu, TTRC("SSGI Termination"), VIEW_DISPLAY_DEBUG_SSGI_TERMINATION, SupportedRenderingMethods::FORWARD_PLUS,
-				TTRC("Displays how each traced screen-space GI ray ended: green = valid hit, blue = left the screen, grey = no hit within the trace distance, yellow = out of steps, red = rejected. Requires SSIL in Environment with the Traced backend in the project settings."));
-		_add_advanced_debug_draw_mode_item(display_submenu, TTRC("SSGI Confidence"), VIEW_DISPLAY_DEBUG_SSGI_CONFIDENCE, SupportedRenderingMethods::FORWARD_PLUS,
-				TTRC("Displays the traced screen-space GI confidence: white = screen-space result used fully, black = fallback ambient light used. Requires SSIL in Environment with the Traced backend in the project settings."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("SSGI Termination"), VIEW_DISPLAY_DEBUG_SSGI_TERMINATION, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays how each traced screen-space GI ray ended: green = valid hit, blue = left the screen, gray = no hit within the trace distance, yellow = out of steps, red = rejected. Requires SSIL in Environment with the Traced backend in the project settings."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("SSGI Confidence"), VIEW_DISPLAY_DEBUG_SSGI_CONFIDENCE, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays the traced screen-space GI confidence: white = screen-space result used fully, black = fallback ambient light used. Requires SSIL in Environment with the Traced backend in the project settings."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Persistent AO"), VIEW_DISPLAY_DEBUG_PERSISTENT_AO, SupportedRenderingMethods::FORWARD_PLUS,
 			TTRC("Displays the material ambient occlusion each surface writes (the AO built-in, including decals), before screen-space AO."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Fallback Source (Specular)"), VIEW_DISPLAY_DEBUG_FALLBACK_SOURCE_SPECULAR, SupportedRenderingMethods::FORWARD_PLUS,

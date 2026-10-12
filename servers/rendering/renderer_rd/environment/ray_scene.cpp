@@ -30,10 +30,11 @@
 
 #include "ray_scene.h"
 
+#include "ddgi.h"
+
 #include "core/config/project_settings.h"
 #include "core/templates/hashfuncs.h"
 #include "core/templates/sort_array.h"
-#include "ddgi.h"
 #include "servers/rendering/renderer_geometry_instance.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/light_storage.h"

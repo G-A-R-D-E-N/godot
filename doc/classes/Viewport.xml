@@ -844,7 +844,7 @@
 			[b]Note:[/b] Only supported when using the Forward+ rendering method, with [member ProjectSettings.rendering/environment/screen_space_reflection/backend] set to Stochastic.
 		</constant>
 		<constant name="DEBUG_DRAW_SSGI_TERMINATION" value="48" enum="DebugDraw">
-			Draws how each traced screen-space GI ray ended: green = valid hit (brightness = confidence), blue = left the screen, grey = reached the trace distance without a hit, yellow = ran out of steps, red = rejected (back face, thickness or self hit), magenta = hit point not visible in the previous frame. Black = not traced (sky). Only shown when [member ProjectSettings.rendering/environment/ssil/backend] is Traced.
+			Draws how each traced screen-space GI ray ended: green = valid hit (brightness = confidence), blue = left the screen, gray = reached the trace distance without a hit, yellow = ran out of steps, red = rejected (back face, thickness or self hit), magenta = hit point not visible in the previous frame. Black = not traced (sky). Only shown when [member ProjectSettings.rendering/environment/ssil/backend] is Traced.
 		</constant>
 		<constant name="DEBUG_DRAW_SSGI_CONFIDENCE" value="49" enum="DebugDraw">
 			Draws the traced screen-space GI confidence: white = the screen-space result is used fully, black = the fallback ambient light (sky, probes) is used.
