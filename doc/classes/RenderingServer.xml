@@ -3850,6 +3850,24 @@
 				Once finished with your RID, you will want to free the RID using the RenderingServer's [method free_rid] method.
 			</description>
 		</method>
+		<method name="sky_get_update_stats" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="sky" type="RID" />
+			<description>
+				Returns diagnostic counters for the update of the specified [param sky] RID's radiance map. The keys are [code]cycles_started[/code], [code]layers_filtered[/code], [code]cycles_completed[/code], [code]last_dirty_reasons[/code], [code]processing_layer[/code], [code]mode[/code], [code]radiance_size[/code], [code]update_requests[/code] and [code]update_requests_latched[/code].
+				[code]cycles_started[/code] counts the filter cycles that began, [code]layers_filtered[/code] the roughness layers filtered and [code]cycles_completed[/code] the cycles whose last layer is done. Realtime skies filter all their layers in one pass and count the same layers in [code]layers_filtered[/code].
+				[code]last_dirty_reasons[/code] is a bit mask of the reasons recorded since the previous cycle started: [code]1[/code] missing radiance, [code]2[/code] time, [code]4[/code] camera position, [code]8[/code] fog, [code]16[/code] sky material, [code]32[/code] directional lights, [code]64[/code] size or mode change, [code]128[/code] an update requested with [method sky_request_radiance_update].
+				[code]processing_layer[/code] is the next roughness layer an incremental sky will filter, [code]mode[/code] the sky's configured mode and [code]radiance_size[/code] its radiance size. [code]update_requests[/code] counts the calls to [method sky_request_radiance_update] and [code]update_requests_latched[/code] those that arrived while a cycle was running. The dictionary is empty when the sky does not exist or the renderer does not track sky updates.
+			</description>
+		</method>
+		<method name="sky_request_radiance_update">
+			<return type="void" />
+			<param index="0" name="sky" type="RID" />
+			<description>
+				Requests one full update of the radiance map of the specified [param sky] RID, in the sky's current process mode. An incremental sky filters one roughness layer per frame until the update is done, a quality or realtime sky filters all layers at once. The update uses the sky material and lights as they are in the frame in which it starts.
+				A request that arrives while an update is running is kept, one at most, and starts right after the running update finishes. Several requests before an update starts give a single update. With [constant SKY_RADIANCE_UPDATE_POLICY_AUTOMATIC] the request starts an update in addition to the automatic ones.
+			</description>
+		</method>
 		<method name="sky_set_material">
 			<return type="void" />
 			<param index="0" name="sky" type="RID" />
@@ -3872,6 +3890,15 @@
 			<param index="1" name="radiance_size" type="int" />
 			<description>
 				Sets the [param radiance_size] of the sky specified by the [param sky] RID (in pixels). Equivalent to [member Sky.radiance_size].
+			</description>
+		</method>
+		<method name="sky_set_radiance_update_policy">
+			<return type="void" />
+			<param index="0" name="sky" type="RID" />
+			<param index="1" name="policy" type="int" enum="RenderingServer.SkyRadianceUpdatePolicy" />
+			<description>
+				Sets when the radiance map of the sky specified by the [param sky] RID is updated. The default is [constant SKY_RADIANCE_UPDATE_POLICY_AUTOMATIC]. With [constant SKY_RADIANCE_UPDATE_POLICY_MANUAL] only [method sky_request_radiance_update] starts an update. The visible sky is still drawn every frame with the current sky material.
+				Switching back to [constant SKY_RADIANCE_UPDATE_POLICY_AUTOMATIC] updates the radiance map when changes were recorded since the last update.
 			</description>
 		</method>
 		<method name="spot_light_create">
@@ -5835,6 +5862,12 @@
 		<constant name="SKY_MODE_REALTIME" value="3" enum="SkyMode">
 			Uses the fast filtering algorithm to process the radiance map. In general this results in lower quality, but substantially faster run times. If you need better quality, but still need to update the sky every frame, consider turning on [member ProjectSettings.rendering/reflections/sky_reflections/fast_filter_high_quality].
 			[b]Note:[/b] The fast filtering algorithm is limited to 256×256 cubemaps, so [method sky_set_radiance_size] must be set to [code]256[/code]. Otherwise, a warning is printed and the overridden radiance size is ignored.
+		</constant>
+		<constant name="SKY_RADIANCE_UPDATE_POLICY_AUTOMATIC" value="0" enum="SkyRadianceUpdatePolicy">
+			The radiance map updates when the sky material, lights, fog, [code]TIME[/code] or [code]POSITION[/code] change. This is the default.
+		</constant>
+		<constant name="SKY_RADIANCE_UPDATE_POLICY_MANUAL" value="1" enum="SkyRadianceUpdatePolicy">
+			Changes of the sky material, lights, fog, [code]TIME[/code] and [code]POSITION[/code] do not update the radiance map. Only [method sky_request_radiance_update] does. A missing radiance map, a change of the radiance size and a change of the process mode still update it.
 		</constant>
 		<constant name="COMPOSITOR_EFFECT_FLAG_ACCESS_RESOLVED_COLOR" value="1" enum="CompositorEffectFlags">
 			The rendering effect requires the color buffer to be resolved if MSAA is enabled.

@@ -3059,11 +3059,17 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("sky_set_mode", "sky", "mode"), &RenderingServer::sky_set_mode);
 	ClassDB::bind_method(D_METHOD("sky_set_material", "sky", "material"), &RenderingServer::sky_set_material);
 	ClassDB::bind_method(D_METHOD("sky_bake_panorama", "sky", "energy", "bake_irradiance", "size"), &RenderingServer::sky_bake_panorama);
+	ClassDB::bind_method(D_METHOD("sky_get_update_stats", "sky"), &RenderingServer::sky_get_update_stats);
+	ClassDB::bind_method(D_METHOD("sky_set_radiance_update_policy", "sky", "policy"), &RenderingServer::sky_set_radiance_update_policy);
+	ClassDB::bind_method(D_METHOD("sky_request_radiance_update", "sky"), &RenderingServer::sky_request_radiance_update);
 
 	BIND_ENUM_CONSTANT(RSE::SKY_MODE_AUTOMATIC);
 	BIND_ENUM_CONSTANT(RSE::SKY_MODE_QUALITY);
 	BIND_ENUM_CONSTANT(RSE::SKY_MODE_INCREMENTAL);
 	BIND_ENUM_CONSTANT(RSE::SKY_MODE_REALTIME);
+
+	BIND_ENUM_CONSTANT(RSE::SKY_RADIANCE_UPDATE_POLICY_AUTOMATIC);
+	BIND_ENUM_CONSTANT(RSE::SKY_RADIANCE_UPDATE_POLICY_MANUAL);
 
 	/* COMPOSITOR EFFECT API */
 

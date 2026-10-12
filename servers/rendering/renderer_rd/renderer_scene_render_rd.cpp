@@ -79,6 +79,18 @@ Ref<Image> RendererSceneRenderRD::sky_bake_panorama(RID p_sky, float p_energy, b
 	return sky.sky_bake_panorama(p_sky, p_energy, p_bake_irradiance, p_size);
 }
 
+Dictionary RendererSceneRenderRD::sky_get_update_stats(RID p_sky) const {
+	return sky.sky_get_update_stats(p_sky);
+}
+
+void RendererSceneRenderRD::sky_set_radiance_update_policy(RID p_sky, RSE::SkyRadianceUpdatePolicy p_policy) {
+	sky.sky_set_radiance_update_policy(p_sky, p_policy);
+}
+
+void RendererSceneRenderRD::sky_request_radiance_update(RID p_sky) {
+	sky.sky_request_radiance_update(p_sky);
+}
+
 void RendererSceneRenderRD::environment_glow_set_use_bicubic_upscale(bool p_enable) {
 	glow_bicubic_upscale = p_enable;
 }

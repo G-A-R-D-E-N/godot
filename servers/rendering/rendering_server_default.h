@@ -852,6 +852,9 @@ public:
 	FUNC2(sky_set_mode, RID, RSE::SkyMode)
 	FUNC2(sky_set_material, RID, RID)
 	FUNC4R(Ref<Image>, sky_bake_panorama, RID, float, bool, const Size2i &)
+	FUNC1RC(Dictionary, sky_get_update_stats, RID)
+	FUNC2(sky_set_radiance_update_policy, RID, RSE::SkyRadianceUpdatePolicy)
+	FUNC1(sky_request_radiance_update, RID)
 
 	/* ENVIRONMENT */
 

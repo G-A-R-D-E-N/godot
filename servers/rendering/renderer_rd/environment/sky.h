@@ -55,6 +55,17 @@ public:
 		SKY_SET_FOG,
 	};
 
+	enum SkyDirtyReason {
+		RADIANCE_MISSING = 1,
+		TIME = 2,
+		POSITION = 4,
+		FOG = 8,
+		MATERIAL = 16,
+		LIGHTS = 32,
+		SIZE_OR_MODE = 64,
+		REQUESTED = 128,
+	};
+
 	const int SAMPLERS_BINDING_FIRST_INDEX = 4;
 
 	// Skys need less info from Directional Lights than the normal shaders
@@ -287,6 +298,19 @@ public:
 		Sky *dirty_list = nullptr;
 		float baked_exposure = 1.0;
 
+		uint64_t stats_cycles_started = 0;
+		uint64_t stats_layers_filtered = 0;
+		uint64_t stats_cycles_completed = 0;
+		uint32_t stats_pending_dirty_reasons = 0;
+		uint32_t stats_last_dirty_reasons = 0;
+		uint64_t stats_update_requests = 0;
+		uint64_t stats_update_requests_latched = 0;
+
+		RSE::SkyRadianceUpdatePolicy radiance_update_policy = RSE::SKY_RADIANCE_UPDATE_POLICY_AUTOMATIC;
+		bool update_requested = false;
+		bool force_cycle = false;
+		bool cycle_running = false;
+
 		// State to track when radiance octmap needs updating.
 		SkyMaterialData *prev_material_data = nullptr;
 		uint64_t prev_material_version = 0;
@@ -304,6 +328,7 @@ public:
 		void free_radiance();
 
 		void free();
+		void mark_reflection_dirty(uint32_t p_reasons);
 
 		RID get_textures(SkyTextureSetVersion p_version, RID p_default_shader_rd, bool p_is_multiview, Ref<RenderSceneBuffersRD> p_render_buffers);
 		bool set_radiance_size(int p_radiance_size);
@@ -336,7 +361,7 @@ public:
 	void update_res_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_env, double p_time, float p_luminance_multiplier = 1.0, float p_brightness_multiplier = 1.0);
 	void draw_sky(RD::DrawListID p_draw_list, Ref<RenderSceneBuffersRD> p_render_buffers, RID p_env, RID p_fb, double p_time, float p_luminance_multiplier = 1.0, float p_brightness_multiplier = 1.0);
 
-	void invalidate_sky(Sky *p_sky);
+	void invalidate_sky(Sky *p_sky, uint32_t p_reasons);
 	void update_dirty_skys();
 
 	RID sky_get_material(RID p_sky) const;
@@ -353,6 +378,9 @@ public:
 	void sky_set_material(RID p_sky, RID p_material);
 	Ref<Image> sky_bake_panorama(RID p_sky, float p_energy, bool p_bake_irradiance, const Size2i &p_size);
 	float sky_get_uv_border_size(RID p_sky);
+	Dictionary sky_get_update_stats(RID p_sky) const;
+	void sky_set_radiance_update_policy(RID p_sky, RSE::SkyRadianceUpdatePolicy p_policy);
+	void sky_request_radiance_update(RID p_sky);
 };
 
 } // namespace RendererRD

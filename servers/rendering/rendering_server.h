@@ -642,6 +642,9 @@ public:
 	virtual void sky_set_mode(RID p_sky, RSE::SkyMode p_mode) = 0;
 	virtual void sky_set_material(RID p_sky, RID p_material) = 0;
 	virtual Ref<Image> sky_bake_panorama(RID p_sky, float p_energy, bool p_bake_irradiance, const Size2i &p_size) = 0;
+	virtual Dictionary sky_get_update_stats(RID p_sky) const = 0;
+	virtual void sky_set_radiance_update_policy(RID p_sky, RSE::SkyRadianceUpdatePolicy p_policy) = 0;
+	virtual void sky_request_radiance_update(RID p_sky) = 0;
 
 	/* COMPOSITOR EFFECTS API */
 
@@ -1152,6 +1155,7 @@ VARIANT_ENUM_CAST_EXT(RSE::ViewportSDFScale, RenderingServer::ViewportSDFScale);
 VARIANT_ENUM_CAST_EXT(RSE::ViewportVRSMode, RenderingServer::ViewportVRSMode);
 VARIANT_ENUM_CAST_EXT(RSE::ViewportVRSUpdateMode, RenderingServer::ViewportVRSUpdateMode);
 VARIANT_ENUM_CAST_EXT(RSE::SkyMode, RenderingServer::SkyMode);
+VARIANT_ENUM_CAST_EXT(RSE::SkyRadianceUpdatePolicy, RenderingServer::SkyRadianceUpdatePolicy);
 VARIANT_ENUM_CAST_EXT(RSE::CompositorEffectCallbackType, RenderingServer::CompositorEffectCallbackType);
 VARIANT_ENUM_CAST_EXT(RSE::CompositorEffectFlags, RenderingServer::CompositorEffectFlags);
 VARIANT_ENUM_CAST_EXT(RSE::EnvironmentBG, RenderingServer::EnvironmentBG);

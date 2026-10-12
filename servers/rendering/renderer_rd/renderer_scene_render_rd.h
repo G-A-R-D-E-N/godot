@@ -198,6 +198,9 @@ public:
 	virtual void sky_set_mode(RID p_sky, RSE::SkyMode p_mode) override;
 	virtual void sky_set_material(RID p_sky, RID p_material) override;
 	virtual Ref<Image> sky_bake_panorama(RID p_sky, float p_energy, bool p_bake_irradiance, const Size2i &p_size) override;
+	virtual Dictionary sky_get_update_stats(RID p_sky) const override;
+	virtual void sky_set_radiance_update_policy(RID p_sky, RSE::SkyRadianceUpdatePolicy p_policy) override;
+	virtual void sky_request_radiance_update(RID p_sky) override;
 
 	/* ENVIRONMENT API */
 
