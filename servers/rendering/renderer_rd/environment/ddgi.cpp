@@ -374,7 +374,7 @@ void DDGI::_fill_sky(TracePushConstant &r_push_constant, RID &r_sky_texture, RID
 		}
 		r_sky_texture = p_sky->radiance;
 		r_push_constant.sky_flags = SKY_FLAGS_MODE_SKY;
-		r_push_constant.sky_energy = sky_energy;
+		r_push_constant.sky_energy = sky_energy * scene_render->environment_get_bg_energy_multiplier(p_environment);
 		r_push_constant.sky_border_size[0] = p_sky->uv_border_size;
 		r_push_constant.sky_border_size[1] = 1.0f - p_sky->uv_border_size * 2.0f;
 		const Quaternion orientation = scene_render->environment_get_sky_orientation(p_environment).get_quaternion().inverse();
