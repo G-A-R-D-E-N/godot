@@ -52,7 +52,6 @@ void main() {
 	} else {
 		vec3 N = oct_to_vec3_with_border(uv_interp, params.border_size.y);
 		vec4 sum = vec4(0.0, 0.0, 0.0, 0.0);
-		float solid_angle_texel = 4.0 * M_PI / (params.source_size * params.source_size);
 		float roughness2 = params.roughness * params.roughness;
 		float roughness4 = roughness2 * roughness2;
 
@@ -77,7 +76,7 @@ void main() {
 
 				float solid_angle_sample = 1.0 / (float(params.sample_count) * pdf + 0.0001);
 
-				float mipLevel = params.roughness == 0.0 ? 0.0 : 0.5 * log2(solid_angle_sample / solid_angle_texel);
+				float mipLevel = params.roughness == 0.0 ? 0.0 : 0.5 * log2(solid_angle_sample / texel_solid_angle(L));
 
 				vec2 sample_uv = vec3_to_oct_with_border(L, params.border_size);
 				sum.rgb += textureLod(source_oct, sample_uv, mipLevel).rgb * ndotl;
