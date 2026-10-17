@@ -280,6 +280,7 @@ public:
 			FLAG_VISIBILITY_DEPENDENCY_FADE_CHILDREN = (1 << 22),
 			FLAG_GEOM_PROJECTOR_SOFTSHADOW_DIRTY = (1 << 23),
 			FLAG_IGNORE_ALL_CULLING = (1 << 24),
+			FLAG_RAY_SCENE_ONLY = (1 << 25),
 		};
 
 		uint32_t flags = 0;
@@ -419,6 +420,7 @@ public:
 		float lod_bias;
 
 		bool ignore_occlusion_culling;
+		bool ray_scene_only = false;
 		bool ignore_all_culling;
 
 		Vector<RID> materials;
