@@ -119,7 +119,8 @@ vec3 ddgi_sample_level(uint p_level, vec3 p_position, vec3 p_normal, vec3 p_view
 		}
 
 		vec3 probe_position = ddgi_probe_position(p_level, local, ddgi_offset(data));
-		vec3 to_probe = normalize(probe_position - p_position);
+		vec3 probe_delta = probe_position - p_position;
+		vec3 to_probe = probe_delta / max(length(probe_delta), 1e-4);
 		float wrap = (dot(to_probe, p_normal) + 1.0) * 0.5;
 		float weight = wrap * wrap + 0.2;
 

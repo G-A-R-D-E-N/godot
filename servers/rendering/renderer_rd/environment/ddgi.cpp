@@ -200,7 +200,7 @@ void DDGI::Volume::fill_ubo(UBO &r_ubo, const Vector3 &p_camera_position) const 
 	const Quaternion rotation(Math::sqrt(1.0f - u1) * Math::sin(u2), Math::sqrt(1.0f - u1) * Math::cos(u2), Math::sqrt(u1) * Math::sin(u3), Math::sqrt(u1) * Math::cos(u3));
 	MaterialStorage::store_transform(Transform3D(Basis(rotation.normalized()), Vector3()), r_ubo.ray_rotation);
 
-	r_ubo.rays_per_probe = settings.rays_per_probe;
+	r_ubo.rays_per_probe = MIN(settings.rays_per_probe, MAX_RAYS);
 	r_ubo.frame = frame;
 	r_ubo.max_distance = settings.spacing * float(1 << (settings.level_count - 1)) * float(MAX(dims.x, MAX(dims.y, dims.z)));
 	r_ubo.probe_capacity = settings.probes_per_frame;

@@ -221,14 +221,15 @@ int trace_ray(vec3 p_pos, vec3 p_screen_pos, vec3 p_ray_dir, out vec3 r_hit_scre
 
 	bool facing_camera = screen_ray_dir.z >= 0.0;
 
-	vec2 t0 = (vec2(0.0) - p_screen_pos.xy) / screen_ray_dir.xy;
-	vec2 t1 = (vec2(1.0) - p_screen_pos.xy) / screen_ray_dir.xy;
+	vec2 cell_step = vec2(screen_ray_dir.x < 0.0 ? -1.0 : 1.0, screen_ray_dir.y < 0.0 ? -1.0 : 1.0);
+	vec2 inv_dir = cell_step / max(abs(screen_ray_dir.xy), vec2(1e-9));
+
+	vec2 t0 = (vec2(0.0) - p_screen_pos.xy) * inv_dir;
+	vec2 t1 = (vec2(1.0) - p_screen_pos.xy) * inv_dir;
 	vec2 t2 = max(t0, t1);
 	float t_screen = min(t2.x, t2.y);
 	float t_max = min(t_screen, t_end);
 	float t_free = t_max;
-
-	vec2 cell_step = vec2(screen_ray_dir.x < 0.0 ? -1.0 : 1.0, screen_ray_dir.y < 0.0 ? -1.0 : 1.0);
 
 	int cur_level = 0;
 	int cur_iteration = params.num_steps;
@@ -238,7 +239,7 @@ int trace_ray(vec3 p_pos, vec3 p_screen_pos, vec3 p_ray_dir, out vec3 r_hit_scre
 		vec2 cell_index = floor(p_screen_pos.xy * params.screen_size);
 		vec2 new_cell_index = cell_index + clamp(cell_step, vec2(0.0), vec2(1.0));
 		vec2 new_cell_pos = (new_cell_index / params.screen_size) + cell_step * 0.000001;
-		vec2 pos_t = (new_cell_pos - p_screen_pos.xy) / screen_ray_dir.xy;
+		vec2 pos_t = (new_cell_pos - p_screen_pos.xy) * inv_dir;
 		t = min(pos_t.x, pos_t.y);
 	}
 
@@ -252,7 +253,7 @@ int trace_ray(vec3 p_pos, vec3 p_screen_pos, vec3 p_ray_dir, out vec3 r_hit_scre
 
 		vec2 new_cell_index = cell_index + clamp(cell_step, vec2(0.0), vec2(1.0));
 		vec2 new_cell_pos = (new_cell_index / cell_count) + cell_step * 0.000001;
-		vec2 pos_t = (new_cell_pos - p_screen_pos.xy) / screen_ray_dir.xy;
+		vec2 pos_t = (new_cell_pos - p_screen_pos.xy) * inv_dir;
 		float edge_t = min(pos_t.x, pos_t.y);
 
 		bool hit = facing_camera ? (t <= depth_t) : (depth_t <= edge_t);
