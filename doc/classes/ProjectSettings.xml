@@ -3235,7 +3235,7 @@
 			Maximum number of surfels kept alive at once. Changing it reallocates the surfel buffers.
 		</member>
 		<member name="rendering/global_illumination/surfels/debug_view" type="int" setter="" getter="" default="0">
-			Shows surfel data in the GI buffer instead of the lit result. [code]0[/code] = disabled, [code]1[/code] = surfel irradiance, [code]2[/code] = surfels in random colors, [code]3[/code] = coverage (red where no surfel covers the pixel), [code]4[/code] = state of the nearest surfel (green settled, yellow new, red rays inside geometry, magenta marked for removal, blue grid cell over the lookup limit).
+			Shows surfel data in the GI buffer instead of the lit result. [code]0[/code] = disabled, [code]1[/code] = surfel irradiance, [code]2[/code] = surfels in random colors, [code]3[/code] = coverage (red where no surfel covers the pixel), [code]4[/code] = state of the nearest surfel (green settled, yellow new, red rays inside geometry, magenta marked for removal, blue grid cell over the lookup limit), [code]5[/code] = saturation (grey unsaturated, blue saturated cells, shading to red as the previous frame's kills of crowded surfels in saturated cells approach 64).
 		</member>
 		<member name="rendering/global_illumination/surfels/enabled" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], adaptive surfels add fine indirect light on top of DDGI near the camera. Requires [member rendering/global_illumination/ddgi/enabled].

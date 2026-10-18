@@ -32,6 +32,8 @@ struct SurfelCounters {
 	uint alive_count;
 	uint update_count;
 	uint previous_alive;
+	uint saturated_kills;
+	uint previous_saturated_kills;
 };
 
 layout(set = SURFEL_SET, binding = SURFEL_UBO_BINDING, std140) uniform SurfelData {

@@ -91,6 +91,8 @@ void main() {
 	counters.data.previous_alive = counters.data.alive_count;
 	counters.data.alive_count = 0u;
 	counters.data.update_count = 0u;
+	counters.data.previous_saturated_kills = counters.data.saturated_kills;
+	counters.data.saturated_kills = 0u;
 }
 
 #endif
@@ -287,6 +289,9 @@ void main() {
 	SurfelLookup lookup = surfel_lookup(position, normal, index);
 	if (lookup.coverage > 3.0 || lookup.saturated) {
 		surfels.data[index].flags |= SURFEL_FLAG_KILL;
+		if (lookup.coverage <= 3.0) {
+			atomicAdd(counters.data.saturated_kills, 1u);
+		}
 	}
 }
 

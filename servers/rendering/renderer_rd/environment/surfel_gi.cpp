@@ -56,7 +56,7 @@ SurfelGI::Settings SurfelGI::get_project_settings() {
 	settings.unseen_frames = CLAMP(GLOBAL_GET_CACHED(int, "rendering/global_illumination/surfels/unseen_frames"), 8, 100000);
 	settings.max_samples = CLAMP(GLOBAL_GET_CACHED(int, "rendering/global_illumination/surfels/max_samples"), 1, 1024);
 	settings.ambient_occlusion_strength = CLAMP(GLOBAL_GET_CACHED(float, "rendering/global_illumination/surfels/ambient_occlusion_strength"), 0.0f, 1.0f);
-	settings.debug_view = CLAMP(GLOBAL_GET_CACHED(int, "rendering/global_illumination/surfels/debug_view"), 0, (int)DEBUG_VIEW_STATE);
+	settings.debug_view = CLAMP(GLOBAL_GET_CACHED(int, "rendering/global_illumination/surfels/debug_view"), 0, (int)DEBUG_VIEW_SATURATION);
 	return settings;
 }
 

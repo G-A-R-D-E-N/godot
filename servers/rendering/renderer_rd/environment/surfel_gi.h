@@ -46,7 +46,7 @@ namespace RendererRD {
 class SurfelGI {
 public:
 	static constexpr uint32_t SURFEL_SIZE = 112;
-	static constexpr uint32_t COUNTERS_SIZE = 16;
+	static constexpr uint32_t COUNTERS_SIZE = 24;
 	static constexpr uint32_t CELL_RADII = 4;
 	static constexpr uint32_t BUCKETS_PER_SURFEL = 2;
 	static constexpr uint32_t CELLS_PER_SURFEL = 12;
@@ -71,6 +71,7 @@ public:
 		DEBUG_VIEW_SURFELS,
 		DEBUG_VIEW_COVERAGE,
 		DEBUG_VIEW_STATE,
+		DEBUG_VIEW_SATURATION,
 	};
 
 	struct Settings {

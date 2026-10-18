@@ -3901,7 +3901,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/surfels/unseen_frames", PROPERTY_HINT_RANGE, "8,100000,1"), 600);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/surfels/max_samples", PROPERTY_HINT_RANGE, "1,1024,1"), 32);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/surfels/ambient_occlusion_strength", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), 0.0);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/surfels/debug_view", PROPERTY_HINT_ENUM, "Disabled,Irradiance,Surfels,Coverage,State"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/surfels/debug_view", PROPERTY_HINT_ENUM, "Disabled,Irradiance,Surfels,Coverage,State,Saturation"), 0);
 
 	GLOBAL_DEF_RST("rendering/environment/fog/use_legacy_blending", false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/volumetric_fog/volume_size", PROPERTY_HINT_RANGE, "16,512,1"), 64);

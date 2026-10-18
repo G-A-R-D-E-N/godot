@@ -787,6 +787,9 @@ void process_gi(ivec2 pos, vec3 vertex, inout vec4 ambient_light, inout vec4 ref
 				ambient_light = vec4((lookup.coverage > 0.0 && lookup.light_weight <= 0.0 ? vec3(1.0, 0.0, 1.0) : surfel_coverage_color(lookup.coverage)) * debug_scale, 1.0);
 			} else if (surfel_data.debug_view == 4u) {
 				ambient_light = vec4(surfel_state_color(lookup) * debug_scale, 1.0);
+			} else if (surfel_data.debug_view == 5u) {
+				float churn = clamp(float(surfel_counters.data.previous_saturated_kills) / 64.0, 0.0, 1.0);
+				ambient_light = vec4((lookup.saturated ? mix(vec3(0.0, 0.2, 1.0), vec3(1.0, 0.0, 0.0), churn) : vec3(0.1)) * debug_scale, 1.0);
 			}
 			if (!dynamic_object && !lookup.saturated && lookup.coverage < SURFEL_SPAWN_COVERAGE) {
 				surfel_spawn(pos, vertex, normal, lookup.coverage);
