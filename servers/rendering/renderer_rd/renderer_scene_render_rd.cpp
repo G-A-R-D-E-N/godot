@@ -33,6 +33,7 @@
 #include "core/config/project_settings.h"
 #include "core/io/image.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
+#include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/framebuffer_cache_rd.h"
 #include "servers/rendering/renderer_rd/shaders/decal_data_inc.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/light_data_inc.glsl.gen.h"
@@ -1083,6 +1084,14 @@ void RendererSceneRenderRD::_render_buffers_debug_draw(const RenderDataRD *p_ren
 
 	RID render_target = rb->get_render_target();
 
+	if (rb->has_custom_data(RB_SCOPE_DDGI)) {
+		Ref<RendererRD::DDGI::Volume> volume = rb->get_custom_data(RB_SCOPE_DDGI);
+		if (volume->debug_texture.is_valid()) {
+			Size2i rtsize = texture_storage->render_target_get_size(render_target);
+			copy_effects->copy_to_fb_rect(volume->debug_texture, texture_storage->render_target_get_rd_framebuffer(render_target), Rect2i(Vector2(), rtsize), false, false, false, true);
+		}
+	}
+
 	if (debug_draw == RSE::VIEWPORT_DEBUG_DRAW_SHADOW_ATLAS) {
 		if (p_render_data->shadow_atlas.is_valid()) {
 			RID shadow_atlas_texture = RendererRD::LightStorage::get_singleton()->shadow_atlas_get_texture(p_render_data->shadow_atlas);
@@ -1369,7 +1378,7 @@ void RendererSceneRenderRD::_update_vrs(Ref<RenderSceneBuffersRD> p_render_buffe
 
 bool RendererSceneRenderRD::_needs_post_prepass_render(RenderDataRD *p_render_data, bool p_use_gi) {
 	if (p_render_data->render_buffers.is_valid()) {
-		if (p_render_data->render_buffers->has_custom_data(RB_SCOPE_SDFGI)) {
+		if (p_render_data->render_buffers->has_custom_data(RB_SCOPE_SDFGI) || p_render_data->render_buffers->has_custom_data(RB_SCOPE_DDGI)) {
 			return true;
 		}
 	}
@@ -1377,14 +1386,36 @@ bool RendererSceneRenderRD::_needs_post_prepass_render(RenderDataRD *p_render_da
 }
 
 void RendererSceneRenderRD::_post_prepass_render(RenderDataRD *p_render_data, bool p_use_gi) {
-	if (p_render_data->render_buffers.is_valid() && p_use_gi) {
-		if (!p_render_data->render_buffers->has_custom_data(RB_SCOPE_SDFGI)) {
-			return;
-		}
-
-		Ref<RendererRD::GI::SDFGI> sdfgi = p_render_data->render_buffers->get_custom_data(RB_SCOPE_SDFGI);
-		sdfgi->update_probes(p_render_data->environment, sky.sky_owner.get_or_null(environment_get_sky(p_render_data->environment)));
+	if (p_render_data->render_buffers.is_null() || !p_use_gi) {
+		return;
 	}
+	RendererRD::SkyRD::Sky *render_sky = p_render_data->environment.is_valid() ? sky.sky_owner.get_or_null(environment_get_sky(p_render_data->environment)) : nullptr;
+	if (p_render_data->render_buffers->has_custom_data(RB_SCOPE_SDFGI)) {
+		Ref<RendererRD::GI::SDFGI> sdfgi = p_render_data->render_buffers->get_custom_data(RB_SCOPE_SDFGI);
+		sdfgi->update_probes(p_render_data->environment, render_sky);
+	}
+	if (p_render_data->render_buffers->has_custom_data(RB_SCOPE_DDGI)) {
+		Ref<RendererRD::DDGI::Volume> volume = p_render_data->render_buffers->get_custom_data(RB_SCOPE_DDGI);
+		ddgi.process(volume, p_render_data->environment, render_sky, p_render_data->camera_attributes, p_render_data->scene_data->cam_projection, p_render_data->scene_data->cam_transform, p_render_data->render_buffers->get_internal_size());
+		if (p_render_data->render_buffers->has_custom_data(RB_SCOPE_SURFELS)) {
+			Ref<RendererRD::SurfelGI::SurfelVolume> surfels = p_render_data->render_buffers->get_custom_data(RB_SCOPE_SURFELS);
+			surfel_gi.process(surfels, ddgi, volume);
+		}
+	}
+}
+
+AABB RendererSceneRenderRD::ray_scene_get_region(const Vector3 &p_camera_position) const {
+	if (!RendererRD::RayScene::get_singleton() || !RendererRD::DDGI::is_enabled()) {
+		return AABB();
+	}
+	const RendererRD::DDGI::Settings settings = RendererRD::DDGI::get_project_settings();
+	const real_t spacing = settings.spacing * real_t(1 << (settings.level_count - 1));
+	const Vector3 half = (Vector3(settings.dims) * 0.5 + Vector3(2, 2, 2)) * spacing;
+	return AABB(p_camera_position - half, half * 2.0);
+}
+
+void RendererSceneRenderRD::ray_scene_update(const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const Vector<RID> &p_directional_lights, RID p_camera_attributes, const Vector3 &p_camera_position) {
+	RendererRD::RayScene::get_singleton()->update(p_instances, p_lights, p_directional_lights, p_camera_attributes, p_camera_position);
 }
 
 void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render_buffers, const CameraData *p_camera_data, const CameraData *p_prev_camera_data, const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const PagedArray<RID> &p_reflection_probes, const PagedArray<RID> &p_voxel_gi_instances, const PagedArray<RID> &p_decals, const PagedArray<RID> &p_lightmaps, const PagedArray<RID> &p_fog_volumes, RID p_environment, RID p_camera_attributes, RID p_compositor, RID p_shadow_atlas, RID p_occluder_debug_tex, RID p_reflection_atlas, RID p_reflection_probe, int p_reflection_probe_pass, float p_screen_mesh_lod_threshold, const RenderShadowData *p_render_shadows, int p_render_shadow_count, const RenderSDFGIData *p_render_sdfgi_regions, int p_render_sdfgi_region_count, float p_window_output_max_value, const RenderSDFGIUpdateData *p_sdfgi_update_data, RenderingServerTypes::RenderInfo *r_render_info) {
@@ -1530,6 +1561,10 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 
 	Color clear_color;
 	if (p_render_buffers.is_valid() && p_reflection_probe.is_null()) {
+		if (is_dynamic_gi_supported()) {
+			ddgi.update(rb, p_camera_data->main_transform.origin);
+			surfel_gi.update(rb, RendererRD::RayScene::get_singleton()->get_anchor(), p_camera_data->main_projection, p_camera_data->main_transform, rb->get_internal_size());
+		}
 		clear_color = texture_storage->render_target_get_clear_request_color(rb->get_render_target());
 		float exposure_normalization = is_using_physical_light_units() && p_camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes) : 1.0f;
 		rb->update_history_reset(RSG::rasterizer->get_frame_number(), GLOBAL_GET_CACHED(int, "rendering/anti_aliasing/quality/history_reset_serial"), exposure_normalization);
@@ -1843,6 +1878,8 @@ void RendererSceneRenderRD::init() {
 
 	if (is_dynamic_gi_supported()) {
 		gi.init(&sky);
+		ddgi.init(&sky);
+		surfel_gi.init();
 	}
 
 	{ //decals
@@ -1944,6 +1981,8 @@ RendererSceneRenderRD::~RendererSceneRenderRD() {
 
 	if (is_dynamic_gi_supported()) {
 		gi.free();
+		ddgi.free();
+		surfel_gi.free();
 	}
 
 	if (is_volumetric_supported()) {

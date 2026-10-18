@@ -447,6 +447,7 @@ public:
 	virtual Variant global_shader_parameter_get(const StringName &p_name) const override;
 	virtual RSE::GlobalShaderParameterType global_shader_parameter_get_type(const StringName &p_name) const override;
 	RSE::GlobalShaderParameterType global_shader_parameter_get_type_internal(const StringName &p_name) const;
+	Variant global_shader_parameter_get_internal(const StringName &p_name) const;
 
 	virtual void global_shader_parameters_load_settings(bool p_load_textures = true) override;
 	virtual void global_shader_parameters_clear() override;
@@ -504,6 +505,7 @@ public:
 	virtual bool material_is_animated(RID p_material) override;
 	virtual bool material_casts_shadows(RID p_material) override;
 	virtual RSE::CullMode material_get_cull_mode(RID p_material) const override;
+	Variant material_get_declared_param(RID p_material, const StringName &p_param) const;
 
 	virtual void material_get_instance_shader_parameters(RID p_material, List<InstanceShaderParam> *r_parameters) override;
 
