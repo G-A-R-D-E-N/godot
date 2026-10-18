@@ -1405,7 +1405,7 @@ void RendererSceneRenderRD::_post_prepass_render(RenderDataRD *p_render_data, bo
 }
 
 AABB RendererSceneRenderRD::ray_scene_get_region(const Vector3 &p_camera_position) const {
-	if (!RendererRD::DDGI::is_enabled()) {
+	if (!RendererRD::RayScene::get_singleton() || !RendererRD::DDGI::is_enabled()) {
 		return AABB();
 	}
 	const RendererRD::DDGI::Settings settings = RendererRD::DDGI::get_project_settings();

@@ -174,7 +174,9 @@ uint64_t RendererCompositorRD::frame = 1;
 void RendererCompositorRD::finalize() {
 	texture_storage->_tex_blit_shader_free();
 	memdelete(scene);
-	memdelete(ray_scene);
+	if (ray_scene) {
+		memdelete(ray_scene);
+	}
 	memdelete(canvas);
 	memdelete(fog);
 	memdelete(particles_storage);
@@ -394,6 +396,10 @@ RendererCompositorRD::RendererCompositorRD() {
 	}
 
 	ERR_FAIL_NULL_MSG(scene, "No RendererSceneRenderRDs available.");
+	if (!scene->is_dynamic_gi_supported()) {
+		memdelete(ray_scene);
+		ray_scene = nullptr;
+	}
 	scene->init();
 }
 
