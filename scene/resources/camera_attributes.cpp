@@ -94,6 +94,16 @@ float CameraAttributes::get_auto_exposure_scale() const {
 	return auto_exposure_scale;
 }
 
+void CameraAttributes::set_auto_exposure_highlight_limit(float p_limit) {
+	auto_exposure_highlight_limit = CLAMP(p_limit, 0.0f, 16.0f);
+	RS::get_singleton()->camera_attributes_set_auto_exposure_highlight_limit(camera_attributes, auto_exposure_highlight_limit);
+	emit_changed();
+}
+
+float CameraAttributes::get_auto_exposure_highlight_limit() const {
+	return auto_exposure_highlight_limit;
+}
+
 RID CameraAttributes::get_rid() const {
 	return camera_attributes;
 }
@@ -125,6 +135,8 @@ void CameraAttributes::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_auto_exposure_speed"), &CameraAttributes::get_auto_exposure_speed);
 	ClassDB::bind_method(D_METHOD("set_auto_exposure_scale", "exposure_grey"), &CameraAttributes::set_auto_exposure_scale);
 	ClassDB::bind_method(D_METHOD("get_auto_exposure_scale"), &CameraAttributes::get_auto_exposure_scale);
+	ClassDB::bind_method(D_METHOD("set_auto_exposure_highlight_limit", "limit"), &CameraAttributes::set_auto_exposure_highlight_limit);
+	ClassDB::bind_method(D_METHOD("get_auto_exposure_highlight_limit"), &CameraAttributes::get_auto_exposure_highlight_limit);
 
 	ADD_GROUP("Exposure", "exposure_");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "exposure_sensitivity", PROPERTY_HINT_RANGE, "0.1,32000.0,0.1,suffix:ISO"), "set_exposure_sensitivity", "get_exposure_sensitivity");
@@ -134,6 +146,7 @@ void CameraAttributes::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_exposure_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_auto_exposure_enabled", "is_auto_exposure_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_scale", PROPERTY_HINT_RANGE, "0.01,64,0.01"), "set_auto_exposure_scale", "get_auto_exposure_scale");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_speed", PROPERTY_HINT_RANGE, "0.01,64,0.01"), "set_auto_exposure_speed", "get_auto_exposure_speed");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_highlight_limit", PROPERTY_HINT_RANGE, "0,16,0.01,suffix:EV"), "set_auto_exposure_highlight_limit", "get_auto_exposure_highlight_limit");
 }
 
 CameraAttributes::CameraAttributes() {

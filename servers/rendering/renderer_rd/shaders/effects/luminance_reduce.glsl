@@ -24,7 +24,7 @@ layout(r32f, set = 0, binding = 0) uniform restrict readonly image2D source_lumi
 
 layout(r32f, set = 1, binding = 0) uniform restrict writeonly image2D dest_luminance;
 
-#ifdef WRITE_LUMINANCE
+#if defined(READ_TEXTURE) || defined(WRITE_LUMINANCE)
 layout(set = 2, binding = 0) uniform sampler2D prev_luminance;
 #endif
 
@@ -33,7 +33,9 @@ layout(push_constant, std430) uniform Params {
 	float max_luminance;
 	float min_luminance;
 	float exposure_adjust;
-	float pad[3];
+	float block_scale;
+	float highlight_limit;
+	float pad;
 }
 params;
 
@@ -41,10 +43,17 @@ void main() {
 	uint t = gl_LocalInvocationID.y * BLOCK_SIZE + gl_LocalInvocationID.x;
 	ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
 
-	if (any(lessThan(pos, params.source_size))) {
+	if (all(lessThan(pos, params.source_size))) {
 #ifdef READ_TEXTURE
 		vec3 v = texelFetch(source_texture, pos, 0).rgb;
-		tmp_data[t] = max(v.r, max(v.g, v.b));
+		float lum = max(v.r, max(v.g, v.b));
+		if (params.highlight_limit > 0.0) {
+			float prev_avg = texelFetch(prev_luminance, ivec2(0, 0), 0).r;
+			if (prev_avg > 0.0) {
+				lum = min(lum, prev_avg * params.highlight_limit);
+			}
+		}
+		tmp_data[t] = lum;
 #else
 		tmp_data[t] = imageLoad(source_luminance, pos).r;
 #endif
@@ -68,10 +77,7 @@ void main() {
 	} while (size >= 1);
 
 	if (t == 0) {
-		//compute rect size
-		ivec2 rect_size = min(params.source_size - pos, ivec2(BLOCK_SIZE));
-		float avg = tmp_data[0] / float(rect_size.x * rect_size.y);
-		//float avg = tmp_data[0] / float(BLOCK_SIZE*BLOCK_SIZE);
+		float avg = tmp_data[0] * params.block_scale;
 		pos /= ivec2(BLOCK_SIZE);
 #ifdef WRITE_LUMINANCE
 		float prev_lum = texelFetch(prev_luminance, ivec2(0, 0), 0).r; //1 pixel previous exposure

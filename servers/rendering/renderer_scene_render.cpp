@@ -137,6 +137,10 @@ void RendererSceneRender::environment_initialize(RID p_rid) {
 }
 
 void RendererSceneRender::environment_free(RID p_rid) {
+	RID sh_user = environment_storage.environment_get_ambient_sky_sh_user(p_rid);
+	if (sh_user.is_valid()) {
+		sky_add_ambient_sh_users(sh_user, -1);
+	}
 	environment_storage.environment_free(p_rid);
 }
 
@@ -152,6 +156,7 @@ void RendererSceneRender::environment_set_background(RID p_env, RSE::Environment
 
 void RendererSceneRender::environment_set_sky(RID p_env, RID p_sky) {
 	environment_storage.environment_set_sky(p_env, p_sky);
+	_environment_sync_ambient_sky_sh_user(p_env);
 }
 
 void RendererSceneRender::environment_set_sky_custom_fov(RID p_env, float p_scale) {
@@ -176,6 +181,26 @@ void RendererSceneRender::environment_set_canvas_max_layer(RID p_env, int p_max_
 
 void RendererSceneRender::environment_set_ambient_light(RID p_env, const Color &p_color, RSE::EnvironmentAmbientSource p_ambient, float p_energy, float p_sky_contribution, RSE::EnvironmentReflectionSource p_reflection_source) {
 	environment_storage.environment_set_ambient_light(p_env, p_color, p_ambient, p_energy, p_sky_contribution, p_reflection_source);
+}
+
+void RendererSceneRender::environment_set_ambient_sky_sh(RID p_env, bool p_enabled) {
+	environment_storage.environment_set_ambient_sky_sh(p_env, p_enabled);
+	_environment_sync_ambient_sky_sh_user(p_env);
+}
+
+void RendererSceneRender::_environment_sync_ambient_sky_sh_user(RID p_env) {
+	RID wanted = environment_storage.environment_get_ambient_sky_sh(p_env) ? environment_storage.environment_get_sky(p_env) : RID();
+	RID current = environment_storage.environment_get_ambient_sky_sh_user(p_env);
+	if (wanted == current) {
+		return;
+	}
+	if (current.is_valid()) {
+		sky_add_ambient_sh_users(current, -1);
+	}
+	if (wanted.is_valid()) {
+		sky_add_ambient_sh_users(wanted, 1);
+	}
+	environment_storage.environment_set_ambient_sky_sh_user(p_env, wanted);
 }
 
 RSE::EnvironmentBG RendererSceneRender::environment_get_background(RID p_env) const {
@@ -220,6 +245,10 @@ Color RendererSceneRender::environment_get_ambient_light(RID p_env) const {
 
 float RendererSceneRender::environment_get_ambient_light_energy(RID p_env) const {
 	return environment_storage.environment_get_ambient_light_energy(p_env);
+}
+
+bool RendererSceneRender::environment_get_ambient_sky_sh(RID p_env) const {
+	return environment_storage.environment_get_ambient_sky_sh(p_env);
 }
 
 float RendererSceneRender::environment_get_ambient_sky_contribution(RID p_env) const {

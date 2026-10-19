@@ -648,6 +648,11 @@ enum SkyMode {
 	SKY_MODE_REALTIME,
 };
 
+enum SkyRadianceUpdatePolicy {
+	SKY_RADIANCE_UPDATE_POLICY_AUTOMATIC,
+	SKY_RADIANCE_UPDATE_POLICY_MANUAL,
+};
+
 /* COMPOSITOR EFFECTS API */
 
 enum CompositorEffectFlags {

@@ -55,7 +55,9 @@ private:
 		float max_luminance;
 		float min_luminance;
 		float exposure_adjust;
-		float pad[3];
+		float block_scale;
+		float highlight_limit;
+		float pad;
 	};
 
 	struct LuminanceReduce {
@@ -73,11 +75,12 @@ private:
 
 	struct LuminanceReduceRasterPushConstant {
 		int32_t source_size[2];
-		int32_t dest_size[2];
 		float exposure_adjust;
 		float min_luminance;
 		float max_luminance;
-		uint32_t pad1;
+		float block_scale;
+		float highlight_limit;
+		float pad;
 	};
 
 	struct LuminanceReduceFragment {
@@ -105,7 +108,7 @@ public:
 
 	Ref<LuminanceBuffers> get_luminance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers);
 	RID get_current_luminance_buffer(Ref<RenderSceneBuffersRD> p_render_buffers);
-	void luminance_reduction(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set = false);
+	void luminance_reduction(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set = false, float p_highlight_limit = 0.0);
 
 	Luminance(bool p_prefer_raster_effects);
 	~Luminance();

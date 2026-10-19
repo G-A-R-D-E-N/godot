@@ -79,6 +79,46 @@ Ref<Image> RendererSceneRenderRD::sky_bake_panorama(RID p_sky, float p_energy, b
 	return sky.sky_bake_panorama(p_sky, p_energy, p_bake_irradiance, p_size);
 }
 
+Dictionary RendererSceneRenderRD::sky_get_update_stats(RID p_sky) const {
+	return sky.sky_get_update_stats(p_sky);
+}
+
+int64_t RendererSceneRenderRD::sky_get_radiance_generation(RID p_sky) const {
+	return sky.sky_get_radiance_generation(p_sky);
+}
+
+PackedInt64Array RendererSceneRenderRD::sky_debug_get_layer_generations(RID p_sky) const {
+	return sky.sky_debug_get_layer_generations(p_sky);
+}
+
+void RendererSceneRenderRD::sky_set_radiance_update_policy(RID p_sky, RSE::SkyRadianceUpdatePolicy p_policy) {
+	sky.sky_set_radiance_update_policy(p_sky, p_policy);
+}
+
+void RendererSceneRenderRD::sky_request_radiance_update(RID p_sky) {
+	sky.sky_request_radiance_update(p_sky);
+}
+
+void RendererSceneRenderRD::sky_set_sh_enabled(RID p_sky, bool p_enabled) {
+	sky.sky_set_sh_enabled(p_sky, p_enabled);
+}
+
+void RendererSceneRenderRD::sky_add_ambient_sh_users(RID p_sky, int p_delta) {
+	sky.sky_add_ambient_sh_users(p_sky, p_delta);
+}
+
+bool RendererSceneRenderRD::sky_is_sh_enabled(RID p_sky) const {
+	return sky.sky_is_sh_enabled(p_sky);
+}
+
+RID RendererSceneRenderRD::sky_get_sh_buffer(RID p_sky) const {
+	return sky.sky_get_sh_buffer(p_sky);
+}
+
+Dictionary RendererSceneRenderRD::sky_debug_get_sh(RID p_sky) const {
+	return sky.sky_debug_get_sh(p_sky);
+}
+
 void RendererSceneRenderRD::environment_glow_set_use_bicubic_upscale(bool p_enable) {
 	glow_bicubic_upscale = p_enable;
 }
@@ -567,7 +607,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 		double step = RSG::camera_attributes->camera_attributes_get_auto_exposure_adjust_speed(p_render_data->camera_attributes) * time_step;
 		float auto_exposure_min_sensitivity = RSG::camera_attributes->camera_attributes_get_auto_exposure_min_sensitivity(p_render_data->camera_attributes);
 		float auto_exposure_max_sensitivity = RSG::camera_attributes->camera_attributes_get_auto_exposure_max_sensitivity(p_render_data->camera_attributes);
-		luminance->luminance_reduction(rb->get_internal_texture(), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate);
+		luminance->luminance_reduction(rb->get_internal_texture(), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate, RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_limit(p_render_data->camera_attributes));
 
 		// Swap final reduce with prev luminance.
 
@@ -1592,6 +1632,7 @@ void RendererSceneRenderRD::set_debug_draw_mode(RSE::ViewportDebugDraw p_debug_d
 }
 
 void RendererSceneRenderRD::update() {
+	sky.publish_completed_cycles();
 	sky.update_dirty_skys();
 }
 

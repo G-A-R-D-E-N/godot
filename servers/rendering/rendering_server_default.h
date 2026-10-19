@@ -852,6 +852,15 @@ public:
 	FUNC2(sky_set_mode, RID, RSE::SkyMode)
 	FUNC2(sky_set_material, RID, RID)
 	FUNC4R(Ref<Image>, sky_bake_panorama, RID, float, bool, const Size2i &)
+	FUNC1RC(Dictionary, sky_get_update_stats, RID)
+	FUNC1RC(int64_t, sky_get_radiance_generation, RID)
+	FUNC1RC(PackedInt64Array, sky_debug_get_layer_generations, RID)
+	FUNC2(sky_set_radiance_update_policy, RID, RSE::SkyRadianceUpdatePolicy)
+	FUNC1(sky_request_radiance_update, RID)
+	FUNC2(sky_set_sh_enabled, RID, bool)
+	FUNC1RC(bool, sky_is_sh_enabled, RID)
+	FUNC1RC(RID, sky_get_sh_buffer, RID)
+	FUNC1RC(Dictionary, sky_debug_get_sh, RID)
 
 	/* ENVIRONMENT */
 
@@ -866,6 +875,7 @@ public:
 	FUNC2(environment_set_canvas_max_layer, RID, int)
 	FUNC6(environment_set_ambient_light, RID, const Color &, RSE::EnvironmentAmbientSource, float, float, RSE::EnvironmentReflectionSource)
 
+	FUNC2(environment_set_ambient_sky_sh, RID, bool)
 	FUNC2(environment_set_camera_feed_id, RID, int)
 
 	FUNC6(environment_set_ssr, RID, bool, int, float, float, float)
@@ -930,6 +940,7 @@ public:
 	FUNC8(camera_attributes_set_dof_blur, RID, bool, float, float, bool, float, float, float)
 	FUNC3(camera_attributes_set_exposure, RID, float, float)
 	FUNC6(camera_attributes_set_auto_exposure, RID, bool, float, float, float, float)
+	FUNC2(camera_attributes_set_auto_exposure_highlight_limit, RID, float)
 
 	/* SCENARIO API */
 

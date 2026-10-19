@@ -642,6 +642,15 @@ public:
 	virtual void sky_set_mode(RID p_sky, RSE::SkyMode p_mode) = 0;
 	virtual void sky_set_material(RID p_sky, RID p_material) = 0;
 	virtual Ref<Image> sky_bake_panorama(RID p_sky, float p_energy, bool p_bake_irradiance, const Size2i &p_size) = 0;
+	virtual Dictionary sky_get_update_stats(RID p_sky) const = 0;
+	virtual int64_t sky_get_radiance_generation(RID p_sky) const = 0;
+	virtual PackedInt64Array sky_debug_get_layer_generations(RID p_sky) const = 0;
+	virtual void sky_set_radiance_update_policy(RID p_sky, RSE::SkyRadianceUpdatePolicy p_policy) = 0;
+	virtual void sky_request_radiance_update(RID p_sky) = 0;
+	virtual void sky_set_sh_enabled(RID p_sky, bool p_enabled) = 0;
+	virtual bool sky_is_sh_enabled(RID p_sky) const = 0;
+	virtual RID sky_get_sh_buffer(RID p_sky) const = 0;
+	virtual Dictionary sky_debug_get_sh(RID p_sky) const = 0;
 
 	/* COMPOSITOR EFFECTS API */
 
@@ -668,6 +677,7 @@ public:
 	virtual void environment_set_bg_energy(RID p_env, float p_multiplier, float p_exposure_value) = 0;
 	virtual void environment_set_canvas_max_layer(RID p_env, int p_max_layer) = 0;
 	virtual void environment_set_ambient_light(RID p_env, const Color &p_color, RSE::EnvironmentAmbientSource p_ambient = RSE::ENV_AMBIENT_SOURCE_BG, float p_energy = 1.0, float p_sky_contribution = 0.0, RSE::EnvironmentReflectionSource p_reflection_source = RSE::ENV_REFLECTION_SOURCE_BG) = 0;
+	virtual void environment_set_ambient_sky_sh(RID p_env, bool p_enabled) = 0;
 	virtual void environment_set_camera_feed_id(RID p_env, int p_camera_feed_id) = 0;
 
 	virtual void environment_set_glow(RID p_env, bool p_enable, Vector<float> p_levels, float p_intensity, float p_strength, float p_mix, float p_bloom_threshold, RSE::EnvironmentGlowBlendMode p_blend_mode, float p_hdr_bleed_threshold, float p_hdr_bleed_scale, float p_hdr_luminance_cap, float p_glow_map_strength, RID p_glow_map) = 0;
@@ -727,6 +737,7 @@ public:
 	virtual void camera_attributes_set_dof_blur(RID p_camera_attributes, bool p_far_enable, float p_far_distance, float p_far_transition, bool p_near_enable, float p_near_distance, float p_near_transition, float p_amount) = 0;
 	virtual void camera_attributes_set_exposure(RID p_camera_attributes, float p_multiplier, float p_exposure_normalization) = 0;
 	virtual void camera_attributes_set_auto_exposure(RID p_camera_attributes, bool p_enable, float p_min_sensitivity, float p_max_sensitivity, float p_speed, float p_scale) = 0;
+	virtual void camera_attributes_set_auto_exposure_highlight_limit(RID p_camera_attributes, float p_limit) = 0;
 
 	/* SCENARIO API */
 
@@ -1152,6 +1163,7 @@ VARIANT_ENUM_CAST_EXT(RSE::ViewportSDFScale, RenderingServer::ViewportSDFScale);
 VARIANT_ENUM_CAST_EXT(RSE::ViewportVRSMode, RenderingServer::ViewportVRSMode);
 VARIANT_ENUM_CAST_EXT(RSE::ViewportVRSUpdateMode, RenderingServer::ViewportVRSUpdateMode);
 VARIANT_ENUM_CAST_EXT(RSE::SkyMode, RenderingServer::SkyMode);
+VARIANT_ENUM_CAST_EXT(RSE::SkyRadianceUpdatePolicy, RenderingServer::SkyRadianceUpdatePolicy);
 VARIANT_ENUM_CAST_EXT(RSE::CompositorEffectCallbackType, RenderingServer::CompositorEffectCallbackType);
 VARIANT_ENUM_CAST_EXT(RSE::CompositorEffectFlags, RenderingServer::CompositorEffectFlags);
 VARIANT_ENUM_CAST_EXT(RSE::EnvironmentBG, RenderingServer::EnvironmentBG);

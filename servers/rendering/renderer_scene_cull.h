@@ -1194,6 +1194,15 @@ public:
 	PASS2(sky_set_mode, RID, RSE::SkyMode)
 	PASS2(sky_set_material, RID, RID)
 	PASS4R(Ref<Image>, sky_bake_panorama, RID, float, bool, const Size2i &)
+	PASS1RC(Dictionary, sky_get_update_stats, RID)
+	PASS1RC(int64_t, sky_get_radiance_generation, RID)
+	PASS1RC(PackedInt64Array, sky_debug_get_layer_generations, RID)
+	PASS2(sky_set_radiance_update_policy, RID, RSE::SkyRadianceUpdatePolicy)
+	PASS1(sky_request_radiance_update, RID)
+	PASS2(sky_set_sh_enabled, RID, bool)
+	PASS1RC(bool, sky_is_sh_enabled, RID)
+	PASS1RC(RID, sky_get_sh_buffer, RID)
+	PASS1RC(Dictionary, sky_debug_get_sh, RID)
 
 	// Compositor effect
 
@@ -1231,6 +1240,7 @@ public:
 	PASS3(environment_set_bg_energy, RID, float, float)
 	PASS2(environment_set_canvas_max_layer, RID, int)
 	PASS6(environment_set_ambient_light, RID, const Color &, RSE::EnvironmentAmbientSource, float, float, RSE::EnvironmentReflectionSource)
+	PASS2(environment_set_ambient_sky_sh, RID, bool)
 	PASS2(environment_set_camera_feed_id, RID, int)
 
 	PASS1RC(RSE::EnvironmentBG, environment_get_background, RID)

@@ -4269,6 +4269,20 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 	}
 	{
 		RD::Uniform u;
+		u.binding = 43;
+		u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+		RID sky_sh_buffer;
+		if (p_render_data && is_environment(p_render_data->environment) && environment_get_ambient_sky_sh(p_render_data->environment)) {
+			RID sky_rid = environment_get_sky(p_render_data->environment);
+			if (sky_rid.is_valid()) {
+				sky_sh_buffer = sky.sky_get_sh_buffer(sky_rid);
+			}
+		}
+		u.append_id(sky_sh_buffer.is_valid() ? sky_sh_buffer : default_sky_sh_buffer);
+		uniforms.push_back(u);
+	}
+	{
+		RD::Uniform u;
 		u.binding = 44;
 		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
 		RID texture;
@@ -5698,6 +5712,12 @@ void RenderForwardClustered::_update_shader_quality_settings() {
 RenderForwardClustered::RenderForwardClustered() {
 	singleton = this;
 
+	{
+		Vector<uint8_t> zeros;
+		zeros.resize_initialized(RendererRD::SkyRD::SH_BUFFER_SIZE);
+		default_sky_sh_buffer = RD::get_singleton()->storage_buffer_create(RendererRD::SkyRD::SH_BUFFER_SIZE, zeros);
+	}
+
 	/* SCENE SHADER */
 
 	dithered_instance_fade = GLOBAL_GET("rendering/visibility/dithered_instance_fade");
@@ -5867,6 +5887,8 @@ RenderForwardClustered::RenderForwardClustered() {
 }
 
 RenderForwardClustered::~RenderForwardClustered() {
+	RD::get_singleton()->free_rid(default_sky_sh_buffer);
+
 	if (ss_effects != nullptr) {
 		memdelete(ss_effects);
 		ss_effects = nullptr;

@@ -47,3 +47,9 @@ float radicalInverse_VdC(uint bits) {
 vec2 Hammersley(uint i, uint N) {
 	return vec2(float(i) / float(N), radicalInverse_VdC(i));
 }
+
+float texel_solid_angle(vec3 L) {
+	float l1 = abs(L.x) + abs(L.y) + abs(L.z);
+	float valid_size = float(params.source_size) * params.border_size.y;
+	return 4.0 * l1 * l1 * l1 / (valid_size * valid_size);
+}

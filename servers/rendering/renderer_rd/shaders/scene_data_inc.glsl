@@ -14,6 +14,7 @@
 #define SCENE_DATA_FLAGS_IN_SHADOW_PASS (1 << 8)
 #define SCENE_DATA_FLAGS_USE_PHYSICAL_LIGHT_UNITS (1 << 9)
 #define SCENE_DATA_FLAGS_USE_THIN_CASTER_PCSS (1 << 10)
+#define SCENE_DATA_FLAGS_USE_AMBIENT_SKY_SH (1 << 11)
 
 struct SceneData {
 	mat4 projection_matrix;

@@ -27,7 +27,6 @@ void main() {
 			imageStore(dest_octmap, ivec2(id), vec4(texture(source_oct, uv).rgb, 1.0));
 		}
 	} else {
-		float solid_angle_texel = 4.0 * M_PI / float(params.source_size * params.source_size);
 		float roughness2 = params.roughness * params.roughness;
 		float roughness4 = roughness2 * roughness2;
 
@@ -51,8 +50,7 @@ void main() {
 
 				float solid_angle_sample = 1.0 / (float(total_samples) * pdf + 0.0001);
 
-				float mipLevel = 0.5 * log2(solid_angle_sample / solid_angle_texel);
-				samples[sample_idx] = vec4(L_local, mipLevel);
+				samples[sample_idx] = vec4(L_local, solid_angle_sample);
 			} else {
 				samples[sample_idx] = vec4(-1.0);
 			}
@@ -76,7 +74,8 @@ void main() {
 				if (ndotl > 0.0) {
 					vec3 L_world = T * s.xyz;
 					vec2 sample_uv = vec3_to_oct_with_border(L_world, params.border_size);
-					sum.rgb += textureLod(source_oct, sample_uv, s.w).rgb * ndotl;
+					float mipLevel = 0.5 * log2(s.w / texel_solid_angle(L_world));
+					sum.rgb += textureLod(source_oct, sample_uv, mipLevel).rgb * ndotl;
 					sum.a += ndotl;
 				}
 			}

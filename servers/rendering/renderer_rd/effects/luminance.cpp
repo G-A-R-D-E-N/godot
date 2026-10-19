@@ -89,8 +89,8 @@ void Luminance::LuminanceBuffers::configure(RenderSceneBuffersRD *p_render_buffe
 	int h = internal_size.y;
 
 	while (true) {
-		w = MAX(w / 8, 1);
-		h = MAX(h / 8, 1);
+		w = MAX(Math::division_round_up(w, 8), 1);
+		h = MAX(Math::division_round_up(h, 8), 1);
 
 		RD::TextureFormat tf;
 		tf.format = RD::DATA_FORMAT_R32_SFLOAT;
@@ -156,7 +156,7 @@ RID Luminance::get_current_luminance_buffer(Ref<RenderSceneBuffersRD> p_render_b
 	return RID();
 }
 
-void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set) {
+void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set, float p_highlight_limit) {
 	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
 	ERR_FAIL_NULL(uniform_set_cache);
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
@@ -165,6 +165,11 @@ void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_
 	// setup our uniforms
 	RID default_sampler = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 
+	const int level_count = p_luminance_buffers->reduce.size();
+	const float level_scale = 1.0f / 64.0f;
+	const float final_scale = float(Math::pow(64.0, double(level_count - 1)) / (double(p_source_size.x) * double(p_source_size.y)));
+	const float highlight_multiplier = (p_highlight_limit > 0.0f && !p_set) ? Math::pow(2.0f, p_highlight_limit) : 0.0f;
+
 	if (prefer_raster_effects) {
 		LuminanceReduceRasterPushConstant push_constant;
 		memset(&push_constant, 0, sizeof(LuminanceReduceRasterPushConstant));
@@ -172,14 +177,18 @@ void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_
 		push_constant.max_luminance = p_max_luminance;
 		push_constant.min_luminance = p_min_luminance;
 		push_constant.exposure_adjust = p_adjust;
+		push_constant.highlight_limit = highlight_multiplier;
 
-		for (int i = 0; i < p_luminance_buffers->reduce.size(); i++) {
-			push_constant.source_size[0] = i == 0 ? p_source_size.x : push_constant.dest_size[0];
-			push_constant.source_size[1] = i == 0 ? p_source_size.y : push_constant.dest_size[1];
-			push_constant.dest_size[0] = MAX(push_constant.source_size[0] / 8, 1);
-			push_constant.dest_size[1] = MAX(push_constant.source_size[1] / 8, 1);
+		Size2i dest_size = p_source_size;
 
-			bool final = !p_set && (push_constant.dest_size[0] == 1) && (push_constant.dest_size[1] == 1);
+		for (int i = 0; i < level_count; i++) {
+			push_constant.source_size[0] = dest_size.x;
+			push_constant.source_size[1] = dest_size.y;
+			dest_size.x = MAX(Math::division_round_up(dest_size.x, 8), 1);
+			dest_size.y = MAX(Math::division_round_up(dest_size.y, 8), 1);
+			push_constant.block_scale = i == level_count - 1 ? final_scale : level_scale;
+
+			bool final = !p_set && (dest_size.x == 1) && (dest_size.y == 1);
 			LuminanceReduceRasterMode mode = final ? LUMINANCE_REDUCE_FRAGMENT_FINAL : (i == 0 ? LUMINANCE_REDUCE_FRAGMENT_FIRST : LUMINANCE_REDUCE_FRAGMENT);
 			RID shader = luminance_reduce_raster.shader.version_get_shader(luminance_reduce_raster.shader_version, mode);
 
@@ -190,7 +199,7 @@ void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_
 			RD::DrawListID draw_list = RD::get_singleton()->draw_list_begin(framebuffer);
 			RD::get_singleton()->draw_list_bind_render_pipeline(draw_list, luminance_reduce_raster.pipelines[mode].get_render_pipeline(RD::INVALID_ID, RD::get_singleton()->framebuffer_get_format(framebuffer)));
 			RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 0, u_source_texture), 0);
-			if (final) {
+			if (final || i == 0) {
 				RD::Uniform u_current_texture(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, p_luminance_buffers->current }));
 				RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 1, u_current_texture), 1);
 			}
@@ -209,11 +218,13 @@ void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_
 		push_constant.max_luminance = p_max_luminance;
 		push_constant.min_luminance = p_min_luminance;
 		push_constant.exposure_adjust = p_adjust;
+		push_constant.highlight_limit = highlight_multiplier;
 
 		RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 
-		for (int i = 0; i < p_luminance_buffers->reduce.size(); i++) {
+		for (int i = 0; i < level_count; i++) {
 			RID shader;
+			push_constant.block_scale = i == level_count - 1 ? final_scale : level_scale;
 
 			if (i == 0) {
 				shader = luminance_reduce.shader.version_get_shader(luminance_reduce.shader_version, LUMINANCE_REDUCE_READ);
@@ -221,10 +232,12 @@ void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_
 
 				RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, luminance_reduce.pipelines[LUMINANCE_REDUCE_READ]);
 				RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_source_texture), 0);
+				RD::Uniform u_prev_texture(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, p_luminance_buffers->current }));
+				RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 2, u_prev_texture), 2);
 			} else {
 				RD::get_singleton()->compute_list_add_barrier(compute_list); //needs barrier, wait until previous is done
 
-				if (i == p_luminance_buffers->reduce.size() - 1 && !p_set) {
+				if (i == level_count - 1 && !p_set) {
 					shader = luminance_reduce.shader.version_get_shader(luminance_reduce.shader_version, LUMINANCE_REDUCE_WRITE);
 					RD::Uniform u_current_texture(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, p_luminance_buffers->current }));
 
@@ -246,8 +259,8 @@ void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_
 
 			RD::get_singleton()->compute_list_dispatch_threads(compute_list, push_constant.source_size[0], push_constant.source_size[1], 1);
 
-			push_constant.source_size[0] = MAX(push_constant.source_size[0] / 8, 1);
-			push_constant.source_size[1] = MAX(push_constant.source_size[1] / 8, 1);
+			push_constant.source_size[0] = MAX(Math::division_round_up(push_constant.source_size[0], 8), 1);
+			push_constant.source_size[1] = MAX(Math::division_round_up(push_constant.source_size[1], 8), 1);
 		}
 
 		RD::get_singleton()->compute_list_end();
