@@ -18,7 +18,7 @@
 			The metered value is the exact arithmetic mean, over every pixel of the rendered frame, of the largest colour channel of each pixel. Use [member auto_exposure_highlight_limit] to stop very small, very bright pixels from dominating that mean.
 		</member>
 		<member name="auto_exposure_highlight_limit" type="float" setter="set_auto_exposure_highlight_limit" getter="get_auto_exposure_highlight_limit" default="0.0">
-			Limits how much a single pixel can raise the metered scene luminance, in EV above the adapted average. Before averaging, each pixel's luminance is capped at the previous frame's adapted average multiplied by [code]2^auto_exposure_highlight_limit[/code]. A value of [code]0.0[/code] disables the limit, which is the stock behaviour. The range is [code]0.0[/code] to [code]16.0[/code].
+			Limits how much a single pixel can raise the metered scene luminance, in EV above the adapted average. Before averaging, each pixel's luminance is capped at the previous frame's adapted average multiplied by [code]2^auto_exposure_highlight_limit[/code]. A value of [code]0.0[/code] disables the limit, which is the stock behavior. The range is [code]0.0[/code] to [code]16.0[/code].
 			The bound: a bright area keeps a bounded effect only while its share of the frame times [code]2^auto_exposure_highlight_limit[/code] stays below [code]1[/code]. At 4 EV that means the area must cover less than 6.25 % of the frame. Above that share, the exposure moves toward the unlimited mean instead of holding at the limit.
 			The limit is not applied on the first frame or after the adapted luminance is reset, because there is no previous average to compare against.
 		</member>
