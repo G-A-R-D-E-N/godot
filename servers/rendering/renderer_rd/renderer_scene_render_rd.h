@@ -40,8 +40,10 @@
 #include "servers/rendering/renderer_rd/effects/smaa.h"
 #include "servers/rendering/renderer_rd/effects/tone_mapper.h"
 #include "servers/rendering/renderer_rd/effects/vrs.h"
+#include "servers/rendering/renderer_rd/environment/ddgi.h"
 #include "servers/rendering/renderer_rd/environment/gi.h"
 #include "servers/rendering/renderer_rd/environment/sky.h"
+#include "servers/rendering/renderer_rd/environment/surfel_gi.h"
 #include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_data_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_scene_buffers_rd.h"
@@ -123,6 +125,8 @@ protected:
 
 	RendererRD::SkyRD sky;
 	RendererRD::GI gi;
+	RendererRD::DDGI ddgi;
+	RendererRD::SurfelGI surfel_gi;
 
 	virtual void _update_shader_quality_settings() {}
 	static bool _debug_draw_can_use_effects(RSE::ViewportDebugDraw p_debug_draw);
@@ -184,6 +188,9 @@ public:
 	/* GI */
 
 	RendererRD::GI *get_gi() { return &gi; }
+
+	virtual AABB ray_scene_get_region(const Vector3 &p_camera_position) const override;
+	virtual void ray_scene_update(const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const Vector<RID> &p_directional_lights, RID p_camera_attributes, const Vector3 &p_camera_position) override;
 
 	/* SKY */
 

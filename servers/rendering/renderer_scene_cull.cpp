@@ -2967,6 +2967,15 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 #define OCCLUSION_CULLED (cull_data.occlusion_buffer != nullptr && (cull_data.scenario->instance_data[i].flags & InstanceData::FLAG_IGNORE_OCCLUSION_CULLING) == 0 && cull_data.occlusion_buffer->is_occluded(cull_data.scenario->instance_aabbs[i].bounds, cull_data.cam_transform.origin, inv_cam_transform, *cull_data.camera_matrix, z_near, is_orthogonal, cull_data.scenario->instance_data[i].occlusion_timeout))
 
 		if (!HIDDEN_BY_VISIBILITY_CHECKS) {
+			if (cull_data.cull->ray_scene_region.has_volume() && LAYER_CHECK && cull_data.scenario->instance_aabbs[i].in_aabb(cull_data.cull->ray_scene_region) && VIS_CHECK) {
+				uint32_t base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
+				if (base_type == RSE::INSTANCE_MESH) {
+					cull_result.ray_scene_geometry_instances.push_back(idata.instance_geometry);
+				} else if (base_type == RSE::INSTANCE_LIGHT && RSG::light_storage->light_get_type(idata.base_rid) != RSE::LIGHT_DIRECTIONAL) {
+					cull_result.ray_scene_lights.push_back(RID::from_uint64(idata.instance_data_rid));
+				}
+			}
+
 			if ((LAYER_CHECK && IN_FRUSTUM(cull_data.cull->frustum) && VIS_CHECK && !OCCLUSION_CULLED) || (cull_data.scenario->instance_data[i].flags & InstanceData::FLAG_IGNORE_ALL_CULLING)) {
 				uint32_t base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
 				if (base_type == RSE::INSTANCE_LIGHT) {
@@ -3455,6 +3464,8 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		}
 	}
 
+	cull.ray_scene_region = p_reflection_probe.is_null() ? scene_render->ray_scene_get_region(p_camera_data->main_transform.origin) : AABB();
+
 	scene_cull_result.clear();
 
 	{
@@ -3743,6 +3754,10 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 	if (p_viewport.is_valid()) {
 		occluders_tex = RSG::viewport->viewport_get_occluder_debug_texture(p_viewport);
 		prev_camera_data = RSG::viewport->viewport_get_prev_camera_data(p_viewport);
+	}
+
+	if (cull.ray_scene_region.has_volume()) {
+		scene_render->ray_scene_update(scene_cull_result.ray_scene_geometry_instances, scene_cull_result.ray_scene_lights, directional_lights, camera_attributes, p_camera_data->main_transform.origin);
 	}
 
 	RENDER_TIMESTAMP("Render 3D Scene");

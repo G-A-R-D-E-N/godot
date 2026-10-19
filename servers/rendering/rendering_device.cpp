@@ -8877,19 +8877,24 @@ Vector<uint8_t> RenderingDevice::_load_pipeline_cache() {
 void RenderingDevice::update_pipeline_cache(bool p_closing) {
 	ERR_FAIL_COND(!pipeline_cache_enabled);
 
+	if (p_closing) {
+		WorkerThreadPool::TaskID running_save = WorkerThreadPool::INVALID_TASK_ID;
+		{
+			_THREAD_SAFE_METHOD_
+			running_save = pipeline_cache_save_task;
+			pipeline_cache_save_task = WorkerThreadPool::INVALID_TASK_ID;
+		}
+		// Never wait for the save while holding _thread_safe_: _save_pipeline_cache locks it.
+		if (running_save != WorkerThreadPool::INVALID_TASK_ID) {
+			WorkerThreadPool::get_singleton()->wait_for_task_completion(running_save);
+		}
+	}
+
 	_THREAD_SAFE_METHOD_
 
-	{
-		bool still_saving = pipeline_cache_save_task != WorkerThreadPool::INVALID_TASK_ID && !WorkerThreadPool::get_singleton()->is_task_completed(pipeline_cache_save_task);
-		if (still_saving) {
-			if (p_closing) {
-				WorkerThreadPool::get_singleton()->wait_for_task_completion(pipeline_cache_save_task);
-				pipeline_cache_save_task = WorkerThreadPool::INVALID_TASK_ID;
-			} else {
-				// We can't save until the currently running save is done. We'll retry next time; worst case, we'll save when exiting.
-				return;
-			}
-		}
+	if (!p_closing && pipeline_cache_save_task != WorkerThreadPool::INVALID_TASK_ID && !WorkerThreadPool::get_singleton()->is_task_completed(pipeline_cache_save_task)) {
+		// We can't save until the currently running save is done. We'll retry next time; worst case, we'll save when exiting.
+		return;
 	}
 
 	{

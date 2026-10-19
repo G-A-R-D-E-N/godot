@@ -33,6 +33,7 @@
 #include "core/io/image.h"
 #include "servers/rendering/renderer_compositor.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
+#include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/framebuffer_cache_rd.h"
 #include "servers/rendering/renderer_rd/renderer_canvas_render_rd.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
@@ -57,6 +58,7 @@ protected:
 	RendererRD::LightStorage *light_storage = nullptr;
 	RendererRD::MaterialStorage *material_storage = nullptr;
 	RendererRD::MeshStorage *mesh_storage = nullptr;
+	RendererRD::RayScene *ray_scene = nullptr;
 	RendererRD::ParticlesStorage *particles_storage = nullptr;
 	RendererRD::TextureStorage *texture_storage = nullptr;
 	RendererRD::Utilities *utilities = nullptr;
