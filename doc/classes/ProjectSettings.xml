@@ -2964,6 +2964,15 @@
 		<member name="rendering/driver/threads/thread_model" type="int" setter="" getter="" default="1" experimental="This setting has several known bugs which can lead to crashing, especially when using particles or resizing the window. Not recommended for use in production at this stage.">
 			The thread model to use for rendering. Rendering on a thread may improve performance, but synchronizing to the main thread can cause a bit more jitter.
 		</member>
+		<member name="rendering/environment/auto_exposure/clamp_adjust" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], the auto exposure adaptation factor (auto exposure speed times the frame time) is limited to the range 0 to 1 on the compute path, as the raster path already does. Frames shorter than 1 / speed seconds are not affected. Without it a frame longer than one second overshoots the target brightness, and a frame longer than two seconds makes the update diverge to the minimum or maximum sensitivity.
+		</member>
+		<member name="rendering/environment/auto_exposure/debug_log" type="bool" setter="" getter="" default="false">
+			Debug only. If [code]true[/code], every frame with auto exposure prints one [code]AEX_LOG[/code] line with the frame counter, the frame time, the adaptation factor before and after clamping, whether the adaptation was reset, the luminance limits and the luminance after the reduction (read back without stalling, so the line appears a few frames late). Read when the scene buffers are created.
+		</member>
+		<member name="rendering/environment/auto_exposure/debug_log_hdr" type="bool" setter="" getter="" default="false">
+			Debug only, used with [member rendering/environment/auto_exposure/debug_log]. Also reads back the HDR scene buffer every frame (this stalls the GPU, so frame times are not representative) and adds to the log line the number of NaN, infinite and very large values, the mean of the largest color channel over the finite pixels, and the same mean over every pixel without the highlight limit, which is what the reduction measures. The covered share is always 1, because the reduction measures the whole frame.
+		</member>
 		<member name="rendering/environment/defaults/default_clear_color" type="Color" setter="" getter="" default="Color(0.3, 0.3, 0.3, 1)">
 			Default background clear color. Overridable per [Viewport] using its [Environment]. See [member Environment.background_mode] and [member Environment.background_color] in particular. To change this default color programmatically, use [method RenderingServer.set_default_clear_color].
 		</member>

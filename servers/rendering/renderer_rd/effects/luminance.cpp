@@ -107,6 +107,9 @@ void Luminance::LuminanceBuffers::configure(RenderSceneBuffersRD *p_render_buffe
 
 		if (final) {
 			tf.usage_bits |= RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
+			if (GLOBAL_GET("rendering/environment/auto_exposure/debug_log")) {
+				tf.usage_bits |= RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
+			}
 		}
 
 		RID texture = RD::get_singleton()->texture_create(tf, RD::TextureView());
