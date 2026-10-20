@@ -70,8 +70,8 @@ Dictionary RenderDataRD::get_water_lighting_data() const {
 	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
 	ERR_FAIL_NULL_V(light_storage, result);
 
-	result["abi_version"] = 1;
-	result["directional_light_stride_bytes"] = 464;
+	result["abi_version"] = 2;
+	result["directional_light_stride_bytes"] = 528;
 	result["positional_light_stride_bytes"] = 224;
 	result["max_directional_lights"] = light_storage->get_max_directional_lights();
 	result["directional_light_buffer"] = light_storage->get_directional_light_buffer();

@@ -113,8 +113,8 @@ func _process(_delta: float) -> bool:
 	match stage:
 		0:
 			check(s.get("available",false),"native_method_available")
-			check(s.get("abi_version",0)==1,"abi_version")
-			check(s.get("directional_buffer_size",0)==8*464,"native_uniform_layout")
+			check(s.get("abi_version",0)==2,"abi_version")
+			check(s.get("directional_buffer_size",0)==8*528,"native_uniform_layout")
 			check(s.get("positional_light_stride_bytes",0)==224,"native_positional_layout")
 			check(s.get("directional_light_count",0)==1 and s.get("omni_light_count",0)==1 and s.get("spot_light_count",0)==1,"current_light_counts")
 			check(s.get("directional_shadow_texture_valid",false) and s.get("positional_shadow_texture_valid",false),"native_shadow_atlases")
