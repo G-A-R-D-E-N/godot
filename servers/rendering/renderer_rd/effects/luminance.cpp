@@ -30,6 +30,7 @@
 
 #include "luminance.h"
 
+#include "core/config/project_settings.h"
 #include "servers/rendering/renderer_rd/framebuffer_cache_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
@@ -107,6 +108,9 @@ void Luminance::LuminanceBuffers::configure(RenderSceneBuffersRD *p_render_buffe
 
 		if (final) {
 			tf.usage_bits |= RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
+			if (GLOBAL_GET("rendering/environment/auto_exposure/debug_log")) {
+				tf.usage_bits |= RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
+			}
 		}
 
 		RID texture = RD::get_singleton()->texture_create(tf, RD::TextureView());

@@ -76,6 +76,9 @@ public:
 	virtual AABB sdfgi_get_pending_region_bounds(const Ref<RenderSceneBuffers> &p_render_buffers, int p_region) const = 0;
 	virtual uint32_t sdfgi_get_pending_region_cascade(const Ref<RenderSceneBuffers> &p_render_buffers, int p_region) const = 0;
 
+	virtual AABB ray_scene_get_region(const Vector3 &p_camera_position) const { return AABB(); }
+	virtual void ray_scene_update(const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const Vector<RID> &p_directional_lights, RID p_camera_attributes, const Vector3 &p_camera_position) {}
+
 	/* SKY API */
 
 	virtual RID sky_allocate() = 0;

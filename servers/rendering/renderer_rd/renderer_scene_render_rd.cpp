@@ -30,9 +30,12 @@
 
 #include "renderer_scene_render_rd.h"
 
+#include "core/config/engine.h"
 #include "core/config/project_settings.h"
 #include "core/io/image.h"
+#include "core/object/callable_mp.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
+#include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/framebuffer_cache_rd.h"
 #include "servers/rendering/renderer_rd/shaders/decal_data_inc.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/light_data_inc.glsl.gen.h"
@@ -492,6 +495,95 @@ void RendererSceneRenderRD::_render_buffers_copy_depth_texture(const RenderDataR
 	RD::get_singleton()->draw_command_end_label();
 }
 
+namespace {
+struct AutoExposureHdrScan {
+	uint64_t nan_values = 0;
+	uint64_t inf_values = 0;
+	uint64_t above_1000 = 0;
+	uint64_t above_60000 = 0;
+	uint64_t finite_pixels = 0;
+	uint64_t bad_pixels = 0;
+	double max_finite = 0.0;
+	double sum_max = 0.0;
+	double sum_max_big = 0.0;
+	double gpu_mean = 0.0;
+	bool valid = false;
+};
+
+float auto_exposure_read_luminance(RID p_texture) {
+	Vector<uint8_t> data = RD::get_singleton()->texture_get_data(p_texture, 0);
+	if (data.size() < 4) {
+		return -1.0f;
+	}
+	float value = 0.0f;
+	memcpy(&value, data.ptr(), sizeof(float));
+	return value;
+}
+
+void auto_exposure_log_async(const Vector<uint8_t> &p_data, const String &p_head) {
+	float value = -1.0f;
+	if (p_data.size() >= 4) {
+		memcpy(&value, p_data.ptr(), sizeof(float));
+	}
+	print_line(vformat("%s current %s", p_head, value));
+}
+
+AutoExposureHdrScan auto_exposure_scan_hdr(RID p_texture, RD::DataFormat p_format, const Size2i &p_size) {
+	AutoExposureHdrScan scan;
+	if (p_format != RD::DATA_FORMAT_R16G16B16A16_SFLOAT) {
+		return scan;
+	}
+	Vector<uint8_t> data = RD::get_singleton()->texture_get_data(p_texture, 0);
+	const uint16_t *pixels = reinterpret_cast<const uint16_t *>(data.ptr());
+	const int64_t count = data.size() / 8;
+	if (count != int64_t(p_size.x) * p_size.y) {
+		return scan;
+	}
+	scan.valid = true;
+	double total = 0.0;
+	for (int64_t i = 0; i < count; i++) {
+		double largest = -1e30;
+		bool bad = false;
+		bool is_nan = false;
+		for (int c = 0; c < 3; c++) {
+			const uint16_t h = pixels[i * 4 + c];
+			if (((h >> 10) & 31) == 31) {
+				if (h & 1023) {
+					scan.nan_values++;
+					is_nan = true;
+				} else {
+					scan.inf_values++;
+					largest = MAX(largest, (h & 0x8000) ? -1e300 : 1e300);
+				}
+				bad = true;
+				continue;
+			}
+			const double v = Math::half_to_float(h);
+			if (v > 1000.0) {
+				scan.above_1000++;
+			}
+			if (v > 60000.0) {
+				scan.above_60000++;
+			}
+			largest = MAX(largest, v);
+		}
+		total += is_nan ? Math::NaN : largest;
+		if (bad) {
+			scan.bad_pixels++;
+			continue;
+		}
+		scan.finite_pixels++;
+		scan.sum_max += largest;
+		scan.max_finite = MAX(scan.max_finite, largest);
+		if (largest > 1000.0) {
+			scan.sum_max_big += largest;
+		}
+	}
+	scan.gpu_mean = total / double(count);
+	return scan;
+}
+} // namespace
+
 void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const RenderDataRD *p_render_data, bool p_use_msaa) {
 	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
 
@@ -604,10 +696,37 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 		bool set_immediate = auto_exposure_version != rb->get_auto_exposure_version() || rb->get_history_reset();
 		rb->set_auto_exposure_version(auto_exposure_version);
 
-		double step = RSG::camera_attributes->camera_attributes_get_auto_exposure_adjust_speed(p_render_data->camera_attributes) * time_step;
+		const double auto_exposure_speed = RSG::camera_attributes->camera_attributes_get_auto_exposure_adjust_speed(p_render_data->camera_attributes);
+		double step = auto_exposure_speed * time_step;
+		const double step_raw = step;
+		if (GLOBAL_GET_CACHED(bool, "rendering/environment/auto_exposure/clamp_adjust")) {
+			step = CLAMP(step, 0.0, 1.0);
+		}
 		float auto_exposure_min_sensitivity = RSG::camera_attributes->camera_attributes_get_auto_exposure_min_sensitivity(p_render_data->camera_attributes);
 		float auto_exposure_max_sensitivity = RSG::camera_attributes->camera_attributes_get_auto_exposure_max_sensitivity(p_render_data->camera_attributes);
+		const bool auto_exposure_log = GLOBAL_GET_CACHED(bool, "rendering/environment/auto_exposure/debug_log");
+		const bool auto_exposure_log_hdr = auto_exposure_log && GLOBAL_GET_CACHED(bool, "rendering/environment/auto_exposure/debug_log_hdr");
 		luminance->luminance_reduction(rb->get_internal_texture(), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate, RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_limit(p_render_data->camera_attributes));
+		if (auto_exposure_log) {
+			const float luminance_multiplier = rb->get_luminance_multiplier();
+			String head = vformat("AEX_LOG drawn %d size %dx%d step %s speed %s adjust_raw %s adjust_used %s immediate %d min_l %s max_l %s lum_mult %s scale %s",
+					Engine::get_singleton()->get_frames_drawn(), rb->get_internal_size().x, rb->get_internal_size().y, time_step, auto_exposure_speed, step_raw, step, set_immediate ? 1 : 0,
+					auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, luminance_multiplier, RSG::camera_attributes->camera_attributes_get_auto_exposure_scale(p_render_data->camera_attributes));
+			if (auto_exposure_log_hdr) {
+				const AutoExposureHdrScan scan = auto_exposure_scan_hdr(rb->get_internal_texture(), rb->get_base_data_format(), rb->get_internal_size());
+				if (scan.valid) {
+					const double mean_finite = scan.finite_pixels ? scan.sum_max / double(scan.finite_pixels) : 0.0;
+					const double big_share = scan.sum_max > 0.0 ? scan.sum_max_big / scan.sum_max : 0.0;
+					head += vformat(" nan %d inf %d bad_px %d gt1000 %d gt60000 %d max_finite %s mean_max_finite %s big_share %s gpu_mean_emulated %s coverage %s",
+							(int64_t)scan.nan_values, (int64_t)scan.inf_values, (int64_t)scan.bad_pixels, (int64_t)scan.above_1000, (int64_t)scan.above_60000, scan.max_finite, mean_finite, big_share, scan.gpu_mean, 1.0);
+				} else {
+					head += " hdr_format_unsupported";
+				}
+				print_line(vformat("%s current %s", head, auto_exposure_read_luminance(luminance_buffers->current)));
+			} else {
+				RD::get_singleton()->texture_get_data_async(luminance_buffers->current, 0, callable_mp_static(&auto_exposure_log_async).bind(head));
+			}
+		}
 
 		// Swap final reduce with prev luminance.
 
@@ -1123,6 +1242,14 @@ void RendererSceneRenderRD::_render_buffers_debug_draw(const RenderDataRD *p_ren
 
 	RID render_target = rb->get_render_target();
 
+	if (rb->has_custom_data(RB_SCOPE_DDGI)) {
+		Ref<RendererRD::DDGI::Volume> volume = rb->get_custom_data(RB_SCOPE_DDGI);
+		if (volume->debug_texture.is_valid()) {
+			Size2i rtsize = texture_storage->render_target_get_size(render_target);
+			copy_effects->copy_to_fb_rect(volume->debug_texture, texture_storage->render_target_get_rd_framebuffer(render_target), Rect2i(Vector2(), rtsize), false, false, false, true);
+		}
+	}
+
 	if (debug_draw == RSE::VIEWPORT_DEBUG_DRAW_SHADOW_ATLAS) {
 		if (p_render_data->shadow_atlas.is_valid()) {
 			RID shadow_atlas_texture = RendererRD::LightStorage::get_singleton()->shadow_atlas_get_texture(p_render_data->shadow_atlas);
@@ -1409,7 +1536,7 @@ void RendererSceneRenderRD::_update_vrs(Ref<RenderSceneBuffersRD> p_render_buffe
 
 bool RendererSceneRenderRD::_needs_post_prepass_render(RenderDataRD *p_render_data, bool p_use_gi) {
 	if (p_render_data->render_buffers.is_valid()) {
-		if (p_render_data->render_buffers->has_custom_data(RB_SCOPE_SDFGI)) {
+		if (p_render_data->render_buffers->has_custom_data(RB_SCOPE_SDFGI) || p_render_data->render_buffers->has_custom_data(RB_SCOPE_DDGI)) {
 			return true;
 		}
 	}
@@ -1417,14 +1544,36 @@ bool RendererSceneRenderRD::_needs_post_prepass_render(RenderDataRD *p_render_da
 }
 
 void RendererSceneRenderRD::_post_prepass_render(RenderDataRD *p_render_data, bool p_use_gi) {
-	if (p_render_data->render_buffers.is_valid() && p_use_gi) {
-		if (!p_render_data->render_buffers->has_custom_data(RB_SCOPE_SDFGI)) {
-			return;
-		}
-
-		Ref<RendererRD::GI::SDFGI> sdfgi = p_render_data->render_buffers->get_custom_data(RB_SCOPE_SDFGI);
-		sdfgi->update_probes(p_render_data->environment, sky.sky_owner.get_or_null(environment_get_sky(p_render_data->environment)));
+	if (p_render_data->render_buffers.is_null() || !p_use_gi) {
+		return;
 	}
+	RendererRD::SkyRD::Sky *render_sky = p_render_data->environment.is_valid() ? sky.sky_owner.get_or_null(environment_get_sky(p_render_data->environment)) : nullptr;
+	if (p_render_data->render_buffers->has_custom_data(RB_SCOPE_SDFGI)) {
+		Ref<RendererRD::GI::SDFGI> sdfgi = p_render_data->render_buffers->get_custom_data(RB_SCOPE_SDFGI);
+		sdfgi->update_probes(p_render_data->environment, render_sky);
+	}
+	if (p_render_data->render_buffers->has_custom_data(RB_SCOPE_DDGI)) {
+		Ref<RendererRD::DDGI::Volume> volume = p_render_data->render_buffers->get_custom_data(RB_SCOPE_DDGI);
+		ddgi.process(volume, p_render_data->environment, render_sky, p_render_data->camera_attributes, p_render_data->scene_data->cam_projection, p_render_data->scene_data->cam_transform, p_render_data->render_buffers->get_internal_size());
+		if (p_render_data->render_buffers->has_custom_data(RB_SCOPE_SURFELS)) {
+			Ref<RendererRD::SurfelGI::SurfelVolume> surfels = p_render_data->render_buffers->get_custom_data(RB_SCOPE_SURFELS);
+			surfel_gi.process(surfels, ddgi, volume);
+		}
+	}
+}
+
+AABB RendererSceneRenderRD::ray_scene_get_region(const Vector3 &p_camera_position) const {
+	if (!RendererRD::RayScene::get_singleton() || !RendererRD::DDGI::is_enabled()) {
+		return AABB();
+	}
+	const RendererRD::DDGI::Settings settings = RendererRD::DDGI::get_project_settings();
+	const real_t spacing = settings.spacing * real_t(1 << (settings.level_count - 1));
+	const Vector3 half = (Vector3(settings.dims) * 0.5 + Vector3(2, 2, 2)) * spacing;
+	return AABB(p_camera_position - half, half * 2.0);
+}
+
+void RendererSceneRenderRD::ray_scene_update(const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const Vector<RID> &p_directional_lights, RID p_camera_attributes, const Vector3 &p_camera_position) {
+	RendererRD::RayScene::get_singleton()->update(p_instances, p_lights, p_directional_lights, p_camera_attributes, p_camera_position);
 }
 
 void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render_buffers, const CameraData *p_camera_data, const CameraData *p_prev_camera_data, const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const PagedArray<RID> &p_reflection_probes, const PagedArray<RID> &p_voxel_gi_instances, const PagedArray<RID> &p_decals, const PagedArray<RID> &p_lightmaps, const PagedArray<RID> &p_fog_volumes, RID p_environment, RID p_camera_attributes, RID p_compositor, RID p_shadow_atlas, RID p_occluder_debug_tex, RID p_reflection_atlas, RID p_reflection_probe, int p_reflection_probe_pass, float p_screen_mesh_lod_threshold, const RenderShadowData *p_render_shadows, int p_render_shadow_count, const RenderSDFGIData *p_render_sdfgi_regions, int p_render_sdfgi_region_count, float p_window_output_max_value, const RenderSDFGIUpdateData *p_sdfgi_update_data, RenderingServerTypes::RenderInfo *r_render_info) {
@@ -1570,6 +1719,10 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 
 	Color clear_color;
 	if (p_render_buffers.is_valid() && p_reflection_probe.is_null()) {
+		if (is_dynamic_gi_supported()) {
+			ddgi.update(rb, p_camera_data->main_transform.origin);
+			surfel_gi.update(rb, RendererRD::RayScene::get_singleton()->get_anchor(), p_camera_data->main_projection, p_camera_data->main_transform, rb->get_internal_size());
+		}
 		clear_color = texture_storage->render_target_get_clear_request_color(rb->get_render_target());
 		float exposure_normalization = is_using_physical_light_units() && p_camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes) : 1.0f;
 		rb->update_history_reset(RSG::rasterizer->get_frame_number(), GLOBAL_GET_CACHED(int, "rendering/anti_aliasing/quality/history_reset_serial"), exposure_normalization);
@@ -1884,6 +2037,8 @@ void RendererSceneRenderRD::init() {
 
 	if (is_dynamic_gi_supported()) {
 		gi.init(&sky);
+		ddgi.init(&sky);
+		surfel_gi.init();
 	}
 
 	{ //decals
@@ -1985,6 +2140,8 @@ RendererSceneRenderRD::~RendererSceneRenderRD() {
 
 	if (is_dynamic_gi_supported()) {
 		gi.free();
+		ddgi.free();
+		surfel_gi.free();
 	}
 
 	if (is_volumetric_supported()) {

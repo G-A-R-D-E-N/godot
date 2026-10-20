@@ -535,8 +535,10 @@ vec3 sky_sh_ambient(vec3 n) {
 
 #ifdef USE_MULTIVIEW
 layout(set = 1, binding = 44) uniform texture2DArray back_depth_buffer;
+layout(set = 1, binding = 45) uniform texture2DArray surfel_coverage_buffer;
 #else
 layout(set = 1, binding = 44) uniform texture2D back_depth_buffer;
+layout(set = 1, binding = 45) uniform texture2D surfel_coverage_buffer;
 #endif
 
 #endif
