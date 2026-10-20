@@ -706,12 +706,25 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 		float auto_exposure_max_sensitivity = RSG::camera_attributes->camera_attributes_get_auto_exposure_max_sensitivity(p_render_data->camera_attributes);
 		const bool auto_exposure_log = GLOBAL_GET_CACHED(bool, "rendering/environment/auto_exposure/debug_log");
 		const bool auto_exposure_log_hdr = auto_exposure_log && GLOBAL_GET_CACHED(bool, "rendering/environment/auto_exposure/debug_log_hdr");
-		luminance->luminance_reduction(rb->get_internal_texture(), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate, RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_limit(p_render_data->camera_attributes));
+		const RSE::AutoExposureMeter auto_exposure_meter = RSG::camera_attributes->camera_attributes_get_auto_exposure_meter(p_render_data->camera_attributes);
+		const bool auto_exposure_histogram = auto_exposure_meter == RSE::AUTO_EXPOSURE_METER_LOG_HISTOGRAM && luminance->supports_histogram_meter();
+		if (auto_exposure_histogram) {
+			luminance->luminance_histogram_meter(rb->get_internal_texture(), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate,
+					RSG::camera_attributes->camera_attributes_get_auto_exposure_clip_low(p_render_data->camera_attributes),
+					RSG::camera_attributes->camera_attributes_get_auto_exposure_clip_high(p_render_data->camera_attributes),
+					RSG::camera_attributes->camera_attributes_get_auto_exposure_center_weight(p_render_data->camera_attributes));
+		} else {
+			if (auto_exposure_meter == RSE::AUTO_EXPOSURE_METER_LOG_HISTOGRAM) {
+				WARN_PRINT_ONCE("The log histogram auto-exposure meter needs the compute effects path; using the mean meter.");
+			}
+			luminance->luminance_reduction(rb->get_internal_texture(), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate, RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_limit(p_render_data->camera_attributes));
+		}
 		if (auto_exposure_log) {
 			const float luminance_multiplier = rb->get_luminance_multiplier();
 			String head = vformat("AEX_LOG drawn %d size %dx%d step %s speed %s adjust_raw %s adjust_used %s immediate %d min_l %s max_l %s lum_mult %s scale %s",
 					Engine::get_singleton()->get_frames_drawn(), rb->get_internal_size().x, rb->get_internal_size().y, time_step, auto_exposure_speed, step_raw, step, set_immediate ? 1 : 0,
 					auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, luminance_multiplier, RSG::camera_attributes->camera_attributes_get_auto_exposure_scale(p_render_data->camera_attributes));
+			head += vformat(" meter %s", auto_exposure_histogram ? "log_histogram" : "mean");
 			if (auto_exposure_log_hdr) {
 				const AutoExposureHdrScan scan = auto_exposure_scan_hdr(rb->get_internal_texture(), rb->get_base_data_format(), rb->get_internal_size());
 				if (scan.valid) {

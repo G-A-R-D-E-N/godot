@@ -195,6 +195,40 @@ float RendererCameraAttributes::camera_attributes_get_auto_exposure_highlight_li
 	return cam_attributes->auto_exposure_highlight_limit;
 }
 
+void RendererCameraAttributes::camera_attributes_set_auto_exposure_meter(RID p_camera_attributes, RSE::AutoExposureMeter p_meter, float p_clip_low, float p_clip_high, float p_center_weight) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL(cam_attributes);
+	ERR_FAIL_INDEX(p_meter, RSE::AUTO_EXPOSURE_METER_LOG_HISTOGRAM + 1);
+	cam_attributes->auto_exposure_meter = p_meter;
+	cam_attributes->auto_exposure_clip_low = CLAMP(p_clip_low, 0.0f, 0.45f);
+	cam_attributes->auto_exposure_clip_high = CLAMP(p_clip_high, 0.0f, 0.45f);
+	cam_attributes->auto_exposure_center_weight = CLAMP(p_center_weight, 0.0f, 1.0f);
+}
+
+RSE::AutoExposureMeter RendererCameraAttributes::camera_attributes_get_auto_exposure_meter(RID p_camera_attributes) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL_V(cam_attributes, RSE::AUTO_EXPOSURE_METER_MEAN);
+	return cam_attributes->auto_exposure_meter;
+}
+
+float RendererCameraAttributes::camera_attributes_get_auto_exposure_clip_low(RID p_camera_attributes) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL_V(cam_attributes, 0.0);
+	return cam_attributes->auto_exposure_clip_low;
+}
+
+float RendererCameraAttributes::camera_attributes_get_auto_exposure_clip_high(RID p_camera_attributes) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL_V(cam_attributes, 0.0);
+	return cam_attributes->auto_exposure_clip_high;
+}
+
+float RendererCameraAttributes::camera_attributes_get_auto_exposure_center_weight(RID p_camera_attributes) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL_V(cam_attributes, 0.0);
+	return cam_attributes->auto_exposure_center_weight;
+}
+
 uint64_t RendererCameraAttributes::camera_attributes_get_auto_exposure_version(RID p_camera_attributes) {
 	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
 	ERR_FAIL_NULL_V(cam_attributes, 0);

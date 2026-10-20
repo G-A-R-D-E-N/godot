@@ -802,6 +802,11 @@ enum DOFBokehShape {
 	DOF_BOKEH_CIRCLE,
 };
 
+enum AutoExposureMeter {
+	AUTO_EXPOSURE_METER_MEAN,
+	AUTO_EXPOSURE_METER_LOG_HISTOGRAM,
+};
+
 /* INSTANCING API */
 
 enum InstanceType {

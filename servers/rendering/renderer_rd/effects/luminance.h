@@ -31,6 +31,7 @@
 #pragma once
 
 #include "servers/rendering/renderer_rd/pipeline_cache_rd.h"
+#include "servers/rendering/renderer_rd/shaders/effects/luminance_histogram.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/luminance_reduce.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/effects/luminance_reduce_raster.glsl.gen.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_scene_buffers_rd.h"
@@ -89,6 +90,34 @@ private:
 		PipelineCacheRD pipelines[LUMINANCE_REDUCE_FRAGMENT_MAX];
 	} luminance_reduce_raster;
 
+	static constexpr int LUMINANCE_HISTOGRAM_BINS = 256;
+	static constexpr int LUMINANCE_HISTOGRAM_MAX_SAMPLES = 1 << 21;
+
+	enum LuminanceHistogramMode {
+		LUMINANCE_HISTOGRAM_ACCUMULATE,
+		LUMINANCE_HISTOGRAM_RESOLVE,
+		LUMINANCE_HISTOGRAM_MAX
+	};
+
+	struct LuminanceHistogramPushConstant {
+		int32_t source_size[2];
+		int32_t stride;
+		float center_weight;
+		float clip_low;
+		float clip_high;
+		float min_luminance;
+		float max_luminance;
+		float exposure_adjust;
+		uint32_t set_immediate;
+		uint32_t pad[2];
+	};
+
+	struct LuminanceHistogram {
+		LuminanceHistogramShaderRD shader;
+		RID shader_version;
+		RID pipelines[LUMINANCE_HISTOGRAM_MAX];
+	} luminance_histogram;
+
 public:
 	class LuminanceBuffers : public RenderBufferCustomDataRD {
 		GDCLASS(LuminanceBuffers, RenderBufferCustomDataRD);
@@ -99,6 +128,7 @@ public:
 	public:
 		Vector<RID> reduce;
 		RID current;
+		RID histogram;
 
 		virtual void configure(RenderSceneBuffersRD *p_render_buffers) override;
 		virtual void free_data() override;
@@ -109,6 +139,9 @@ public:
 	Ref<LuminanceBuffers> get_luminance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers);
 	RID get_current_luminance_buffer(Ref<RenderSceneBuffersRD> p_render_buffers);
 	void luminance_reduction(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set = false, float p_highlight_limit = 0.0);
+	void luminance_histogram_meter(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set, float p_clip_low, float p_clip_high, float p_center_weight);
+	static int histogram_stride(const Size2i p_size);
+	bool supports_histogram_meter() const { return !prefer_raster_effects; }
 
 	Luminance(bool p_prefer_raster_effects);
 	~Luminance();

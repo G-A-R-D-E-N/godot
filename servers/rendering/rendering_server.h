@@ -738,6 +738,7 @@ public:
 	virtual void camera_attributes_set_exposure(RID p_camera_attributes, float p_multiplier, float p_exposure_normalization) = 0;
 	virtual void camera_attributes_set_auto_exposure(RID p_camera_attributes, bool p_enable, float p_min_sensitivity, float p_max_sensitivity, float p_speed, float p_scale) = 0;
 	virtual void camera_attributes_set_auto_exposure_highlight_limit(RID p_camera_attributes, float p_limit) = 0;
+	virtual void camera_attributes_set_auto_exposure_meter(RID p_camera_attributes, RSE::AutoExposureMeter p_meter, float p_clip_low, float p_clip_high, float p_center_weight) = 0;
 
 	/* SCENARIO API */
 
@@ -1182,6 +1183,7 @@ VARIANT_ENUM_CAST_EXT(RSE::EnvironmentSDFGIYScale, RenderingServer::EnvironmentS
 VARIANT_ENUM_CAST_EXT(RSE::SubSurfaceScatteringQuality, RenderingServer::SubSurfaceScatteringQuality);
 VARIANT_ENUM_CAST_EXT(RSE::DOFBlurQuality, RenderingServer::DOFBlurQuality);
 VARIANT_ENUM_CAST_EXT(RSE::DOFBokehShape, RenderingServer::DOFBokehShape);
+VARIANT_ENUM_CAST_EXT(RSE::AutoExposureMeter, RenderingServer::AutoExposureMeter);
 VARIANT_ENUM_CAST_EXT(RSE::ShadowQuality, RenderingServer::ShadowQuality);
 VARIANT_ENUM_CAST_EXT(RSE::InstanceType, RenderingServer::InstanceType);
 VARIANT_ENUM_CAST_EXT(RSE::InstanceFlags, RenderingServer::InstanceFlags);

@@ -3241,6 +3241,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_exposure", "camera_attributes", "multiplier", "normalization"), &RenderingServer::camera_attributes_set_exposure);
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_auto_exposure", "camera_attributes", "enable", "min_sensitivity", "max_sensitivity", "speed", "scale"), &RenderingServer::camera_attributes_set_auto_exposure);
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_auto_exposure_highlight_limit", "camera_attributes", "limit"), &RenderingServer::camera_attributes_set_auto_exposure_highlight_limit);
+	ClassDB::bind_method(D_METHOD("camera_attributes_set_auto_exposure_meter", "camera_attributes", "meter", "clip_low", "clip_high", "center_weight"), &RenderingServer::camera_attributes_set_auto_exposure_meter);
 
 	BIND_ENUM_CONSTANT(RSE::DOF_BOKEH_BOX);
 	BIND_ENUM_CONSTANT(RSE::DOF_BOKEH_HEXAGON);
@@ -3250,6 +3251,9 @@ void RenderingServer::_bind_methods() {
 	BIND_ENUM_CONSTANT(RSE::DOF_BLUR_QUALITY_LOW);
 	BIND_ENUM_CONSTANT(RSE::DOF_BLUR_QUALITY_MEDIUM);
 	BIND_ENUM_CONSTANT(RSE::DOF_BLUR_QUALITY_HIGH);
+
+	BIND_ENUM_CONSTANT(RSE::AUTO_EXPOSURE_METER_MEAN);
+	BIND_ENUM_CONSTANT(RSE::AUTO_EXPOSURE_METER_LOG_HISTOGRAM);
 
 	/* SCENARIO */
 
