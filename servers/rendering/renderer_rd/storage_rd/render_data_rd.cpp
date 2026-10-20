@@ -30,6 +30,7 @@
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/framebuffer_cache_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
+#include "servers/rendering/rendering_server_globals.h"
 
 void RenderDataRD::_bind_methods() {
 	ClassDB::bind_static_method("RenderDataRD", D_METHOD("supports_water_temporal_alpha"), &RenderDataRD::supports_water_temporal_alpha);
@@ -133,7 +134,8 @@ Dictionary RenderDataRD::get_water_fog_data() const {
 	result["fog_depth_end"] = end;
 	result["fog_depth_begin"] = MIN(renderer->environment_get_fog_depth_begin(environment), end - 0.001f);
 	result["fog_depth_curve"] = renderer->environment_get_fog_depth_curve(environment);
-	result["fog_light_color_energy"] = renderer->environment_get_fog_light_color(environment).srgb_to_linear() * renderer->environment_get_fog_light_energy(environment);
+	const float exposure_normalization = renderer->is_using_physical_light_units() && camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(camera_attributes) : 1.0f;
+	result["fog_light_color_energy"] = renderer->environment_get_fog_light_color(environment).srgb_to_linear() * (renderer->environment_get_fog_light_energy(environment) * exposure_normalization);
 	result["fog_sun_scatter"] = renderer->environment_get_fog_sun_scatter(environment);
 	result["fog_aerial_perspective"] = renderer->environment_get_fog_aerial_perspective(environment);
 	result["camera_height_world"] = scene_data ? scene_data->cam_transform.origin.y : 0.0;
