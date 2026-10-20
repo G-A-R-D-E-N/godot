@@ -4381,7 +4381,7 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		if (mask.is_null() || !RD::get_singleton()->texture_is_valid(mask)) {
 			mask = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_BLACK);
 		}
-		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 39, mask));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 46, mask));
 	}
 
 	return UniformSetCacheRD::get_singleton()->get_cache_vec(scene_shader.get_default_shader_rd(is_multiview), RENDER_PASS_UNIFORM_SET, uniforms);
