@@ -43,7 +43,7 @@ public:
 	TAA();
 	~TAA();
 
-	void process(Ref<RenderSceneBuffersRD> p_render_buffers, RD::DataFormat p_format, float p_z_near, float p_z_far, bool p_garden, bool p_reset, bool p_rejected_history);
+	void process(Ref<RenderSceneBuffersRD> p_render_buffers, RD::DataFormat p_format, float p_z_near, float p_z_far, bool p_garden, bool p_reset, bool p_rejected_history, const RID *p_reactivity = nullptr);
 	static RID rejected_history_texture(Ref<RenderSceneBuffersRD> p_render_buffers, uint32_t p_view);
 
 private:
@@ -62,7 +62,7 @@ private:
 	RID garden_rejected_pipeline;
 	int rejected_variant = 1;
 
-	void resolve(RID p_frame, RID p_temp, RID p_depth, RID p_velocity, RID p_prev_velocity, RID p_history, RID p_reactive, Size2 p_resolution, float p_z_near, float p_z_far, bool p_garden, RID p_rejected);
+	void resolve(RID p_frame, RID p_temp, RID p_depth, RID p_velocity, RID p_prev_velocity, RID p_history, RID p_reactive, Size2 p_resolution, float p_z_near, float p_z_far, bool p_garden, RID p_rejected, RID p_reactivity);
 };
 
 } // namespace RendererRD

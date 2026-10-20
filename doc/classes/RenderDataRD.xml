@@ -9,4 +9,56 @@
 	</description>
 	<tutorials>
 	</tutorials>
+	<methods>
+		<method name="supports_water_temporal_alpha" qualifiers="static">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] when the native Forward+ [code]preserve_temporal_alpha[/code] spatial render mode is available. This mode leaves existing color-target alpha unchanged for transparent materials while retaining their ordinary RGB blend factors and depth behavior. It allows a water compositor to supply bounded reactivity separately, without ALPHA=1 water forcing FSR2 to reject all history. Other transparent contributors drawn before or after water keep their native alpha contribution. Apply this mode only to water materials that register their own reactivity. It does not change Mobile or Compatibility rendering. Check for method existence before constructing a native shader variant on older engines.
+			</description>
+		</method>
+		<method name="set_water_fog_mask">
+			<return type="bool" />
+			<param index="0" name="mask" type="RID" />
+			<description>
+				Registers a borrowed water fog ownership mask for this frame during a pre-opaque compositor callback, after ending compute lists. Requires a sampled R8_UNORM, R16_SFLOAT or R32_SFLOAT 2D array texture at internal viewport dimensions with one layer per view. Pixels above 0.5 omit native ordinary and volumetric fog from opaque shading and final sky so a post-sky compositor can integrate air and water exactly once. Unmarked pixels retain native fog. Registration is reset every render call. Invalid RID clears registration. Returns whether the request was accepted. Never free the texture during the current frame. Transparent materials retain native fog; explicit shader custom fog is not overridden. Custom half/quarter-resolution sky intermediates require separate validation.
+			</description>
+		</method>
+		<method name="get_water_fog_data" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				The [code]volumetric_requested[/code] flag reports configured environment intent even in pre-opaque; [code]volumetric_enabled[/code] additionally requires current frame resources. Returns fog ABI version 1, the registered mask and ownership state, and native fog parameters. [code]fog_height[/code] and [code]camera_height_world[/code] are world-space heights. [code]fog_projection[/code] includes backend depth/Y correction without TAA jitter. Camera near/far distances are explicit. Read current volumetric data at post-sky, after the current view's native fog update. [code]volumetric_light_density_texture[/code] is a borrowed unintegrated 3D texture: RGB is lit source density and A is extinction, including native volume injection and reprojection/filtering. Native fog integrates along view Z rather than Euclidean ray distance. [code]volumetric_length[/code] and [code]volumetric_spread[/code] map view Z to texture Z.
+				Radiance metadata exposes the actual native octahedral texture, its array discriminator, layers/mipmaps, maximum roughness LOD, view-to-sky basis, UV border, and pixel size for aerial perspective. Scalar [code]fog_light_color_energy[/code] matches the native linear fog color exactly; it must not be multiplied by exposure again. All texture RIDs are valid only for this render callback and must not be freed by scripts.
+			</description>
+		</method>
+		<method name="get_water_temporal_info" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns ABI version 1 with [code]taa_active[/code], [code]fsr2_active[/code], native NDC [code]jitter[/code], and [code]unjittered_projections[/code], one backend-corrected Projection per view. Use jittered scene projections to reconstruct the current pixel ray, and unjittered projections to compute native previous-minus-current UV velocity. Use the FSR2 flag to preserve scene color alpha in the supplied reactive mask only for FSR2.
+			</description>
+		</method>
+		<method name="set_water_temporal_data">
+			<return type="bool" />
+			<param index="0" name="view" type="int" />
+			<param index="1" name="reactivity" type="RID" />
+			<param index="2" name="reset_history" type="bool" default="false" />
+			<description>
+				Registers a sampled R8_UNORM, R16_SFLOAT or R32_SFLOAT single-view texture at internal dimensions during post-transparent, before temporal resolve. TAA consumes its red channel as a minimum current-frame weight: zero preserves native accumulation and one rejects history. FSR2 receives it as its reactive input; the caller must combine water reactivity with the existing color alpha to preserve other transparent contributions. [param reset_history] invalidates both TAA and FSR2 accumulation for this render call. Missing registration retains native behavior. Invalid RID can request only a reset. Resources are borrowed through the render callback; do not free them during the frame. This does not generate water motion: the compositor must write actual previous/current displaced-surface motion to the resolved velocity buffer separately.
+			</description>
+		</method>
+		<method name="commit_water_color" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Copies the current resolved color into the active MSAA color target for every view, so transparent rendering and its later resolve preserve a water compositor's color changes. Call only from a post-sky or pre-transparent compositor callback after ending all compute lists. The effect must request resolved color. Returns [code]true[/code] on success; with MSAA disabled this is a no-op. Uses a native fullscreen raster copy with nearest sampling. Does not change depth or shadow maps. Resolved radiance is broadcast to all color samples, so this does not implement separate optical integration for each MSAA sample at water boundaries.
+			</description>
+		</method>
+		<method name="get_water_lighting_data" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns versioned light and shadow data for a water [CompositorEffect] during the current render callback. Returns an empty dictionary before current-view lights are uploaded. All returned [RID]s belong to the main [RenderingDevice]; never free them or retain them beyond the callback. Shadow texture RIDs may be invalid when shadows are unavailable. Rebuild bindings when any returned RID changes.
+				Version 1 has [code]abi_version = 1[/code], [code]directional_light_stride_bytes = 464[/code], [code]positional_light_stride_bytes = 224[/code], and [code]max_directional_lights = 8[/code]. [code]directional_light_buffer[/code] is a uniform buffer of native [code]DirectionalLightData[/code] records. [code]omni_light_buffer[/code], [code]spot_light_buffer[/code], and [code]area_light_buffer[/code] are storage buffers of native [code]LightData[/code] records. Their matching [code]*_light_count[/code] keys specify initialized records. The exact shader layouts are in [code]servers/rendering/renderer_rd/shaders/light_data_inc.glsl[/code]; this ABI is guarded by native size and offset assertions.
+				[code]directional_shadow_texture[/code] and [code]positional_shadow_texture[/code] are the native depth atlases, using reversed Z. Light positions and shadow matrices use camera view coordinates; directional [code]direction[/code] points toward the light. Native direct light radiance already includes exposure normalization. [code]emissive_exposure_normalization[/code] is the exact scalar uploaded to the current scene uniform buffer and applies to custom incident radiance only. [code]camera_visible_layers[/code] is the current camera layer mask.
+				[code]cluster_buffer[/code], [code]cluster_size[/code], and [code]cluster_max_elements[/code] describe the Forward+ cluster buffer. The cluster RID can be invalid on other renderers. This interface does not alter opaque shading, fog ownership, transparency ordering, temporal motion, or MSAA resolve behavior.
+			</description>
+		</method>
+	</methods>
 </class>

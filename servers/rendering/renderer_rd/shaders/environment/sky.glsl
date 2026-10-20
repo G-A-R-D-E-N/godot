@@ -118,6 +118,7 @@ layout(set = 2, binding = 2) uniform texture2D quarter_res;
 #endif
 
 layout(set = 3, binding = 0) uniform texture3D volumetric_fog_texture;
+layout(set = 3, binding = 1) uniform texture2DArray water_fog_mask;
 
 #ifdef USE_CUBEMAP_PASS
 #define AT_CUBEMAP_PASS true
@@ -284,14 +285,21 @@ void main() {
 
 #if !defined(DISABLE_FOG)
 
-	// Draw "fixed" fog before volumetric fog to ensure volumetric fog can appear in front of the sky.
-	if (sky_scene_data.fog_enabled) {
+	bool water_owns_fog = false;
+#if !defined(USE_CUBEMAP_PASS) && !defined(USE_HALF_RES_PASS) && !defined(USE_QUARTER_RES_PASS)
+#ifdef USE_MULTIVIEW
+	water_owns_fog = textureLod(sampler2DArray(water_fog_mask, SAMPLER_NEAREST_CLAMP), vec3(uv, ViewIndex), 0.0).r > 0.5;
+#else
+	water_owns_fog = textureLod(sampler2DArray(water_fog_mask, SAMPLER_NEAREST_CLAMP), vec3(uv, 0.0), 0.0).r > 0.5;
+#endif
+#endif
+	if (sky_scene_data.fog_enabled && !water_owns_fog) {
 		vec4 fog = fog_process(cube_normal, frag_color.rgb);
 		frag_color.rgb = mix(frag_color.rgb, fog.rgb, fog.a * sky_scene_data.fog_sky_affect);
 	}
 
 #if !defined(USE_CUBEMAP_PASS)
-	if (sky_scene_data.volumetric_fog_enabled) {
+	if (sky_scene_data.volumetric_fog_enabled && !water_owns_fog) {
 		vec4 fog = volumetric_fog_process(uv);
 		if (sky_scene_data.fog_use_legacy_blending) {
 			frag_color.rgb = mix(frag_color.rgb, fog.rgb, (1.0 - fog.a) * sky_scene_data.volumetric_fog_sky_affect);
