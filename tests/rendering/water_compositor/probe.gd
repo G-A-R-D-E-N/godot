@@ -1,4 +1,4 @@
-extends SceneTree
+extends "res://harness.gd"
 
 class Probe extends CompositorEffect:
 	var mutex := Mutex.new()
@@ -43,71 +43,45 @@ class Probe extends CompositorEffect:
 		mutex.unlock()
 
 var probe: Probe
-var camera: Camera3D
 var sun: DirectionalLight3D
 var omni: OmniLight3D
 var spot: SpotLight3D
-var frames := 0
-var stage := 0
-var checks := 0
-var failed := false
-
-func _init() -> void:
-	call_deferred("_build")
 
 func _build() -> void:
-	root.size = Vector2i(240,180)
-	var scene := Node3D.new()
-	root.add_child(scene)
-	camera = Camera3D.new()
-	scene.add_child(camera)
-	camera.position = Vector3(0,0,6)
-	camera.current = true
+	prefix = "NATIVE_WATER_ABI"
+	build_scene(Vector2i(240,180))
 	camera.attributes = CameraAttributesPractical.new()
 	camera.attributes.exposure_multiplier = 2.0
 	var cube := MeshInstance3D.new()
 	cube.mesh = BoxMesh.new()
-	scene.add_child(cube)
+	world.add_child(cube)
 	sun = DirectionalLight3D.new()
 	sun.light_energy = 2.0
 	sun.shadow_enabled = true
 	sun.rotation_degrees = Vector3(-25,30,0)
-	scene.add_child(sun)
+	world.add_child(sun)
 	omni = OmniLight3D.new()
 	omni.omni_range = 20.0
 	omni.shadow_enabled = true
 	omni.position = Vector3(-2,2,3)
-	scene.add_child(omni)
+	world.add_child(omni)
 	spot = SpotLight3D.new()
 	spot.spot_range = 20.0
 	spot.shadow_enabled = true
 	spot.position = Vector3(2,2,3)
-	scene.add_child(spot)
+	world.add_child(spot)
 	spot.look_at(Vector3.ZERO)
-	var environment := WorldEnvironment.new()
-	environment.environment = Environment.new()
-	environment.environment.background_mode = Environment.BG_COLOR
-	scene.add_child(environment)
 	probe = Probe.new()
-	environment.compositor = Compositor.new()
-	environment.compositor.compositor_effects = [probe]
-
-func check(condition: bool, label: String) -> void:
-	if not condition:
-		push_error("NATIVE_WATER_ABI_FAIL " + label)
-		failed = true
-		quit(1)
-		return
-	checks += 1
-	print("NATIVE_WATER_ABI_PASS ",label)
+	use_compositor(world_environment, [probe])
 
 func _process(_delta: float) -> bool:
-	frames += 1
-	if probe == null or frames%15 != 0:
+	if probe == null or not advance(15):
 		return false
 	var s := probe.read_snapshot()
 	if s.is_empty():
-		check(frames < 600,"callback_timeout")
+		check(frame < 600,"callback_timeout")
+		if frame >= 600:
+			finish()
 		return false
 	print("NATIVE_WATER_ABI_SNAPSHOT ",stage," ",s)
 	match stage:
@@ -135,8 +109,7 @@ func _process(_delta: float) -> bool:
 			sun.visible = false
 		3:
 			check(s.get("directional_light_count",1)==0,"removed_directional_does_not_leak")
-			print("NATIVE_WATER_ABI_SUITE_PASS checks=",checks)
-			quit(1 if failed else 0)
-	stage += 1
+			finish()
+	next_stage()
 	probe.call_deferred("request")
 	return false

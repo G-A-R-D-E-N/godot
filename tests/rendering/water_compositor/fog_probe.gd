@@ -1,4 +1,4 @@
-extends SceneTree
+extends "res://harness.gd"
 
 class MaskEffect extends CompositorEffect:
 	var active := false
@@ -34,7 +34,7 @@ class MaskEffect extends CompositorEffect:
 		if data.has_method("set_water_fog_mask"):
 			registered = data.call("set_water_fog_mask",mask)
 
-class FogInspect extends CompositorEffect:
+class FogInspect extends Effect:
 	var snapshot: Dictionary = {}
 	var shader := RID()
 	var pipeline := RID()
@@ -83,33 +83,19 @@ class FogInspect extends CompositorEffect:
 				s["volume_sample"]=Vector4(values.decode_float(0),values.decode_float(4),values.decode_float(8),values.decode_float(12))
 		snapshot = s
 	func shutdown() -> void:
-		enabled=false
-		RenderingServer.call_on_render_thread(func():
-			var rd := RenderingServer.get_rendering_device()
-			for rid in [shader,sampler,sample_buffer]:
-				if rid.is_valid(): rd.free_rid(rid))
+		rids = [shader,sampler,sample_buffer]
+		super()
 
 var effect: MaskEffect
 var inspect: FogInspect
-var environment: Environment
-var frames := 0
-var stage := 0
-var checks := 0
-var failed := false
+var mobile := false
 var ordinary_reference: Color
 var volume_reference: Color
 
-func _init() -> void:
-	call_deferred("_build")
-
 func _build() -> void:
-	root.size = Vector2i(240,180)
-	var world := Node3D.new()
-	root.add_child(world)
-	var camera := Camera3D.new()
-	camera.position.z = 6
-	camera.current = true
-	world.add_child(camera)
+	mobile = RenderingServer.get_current_rendering_method() == "mobile"
+	prefix = "NATIVE_WATER_FOG_MOBILE" if mobile else "NATIVE_WATER_FOG"
+	build_scene(Vector2i(240,180), Color.WHITE, true)
 	for x in [-1.25,1.25]:
 		var cube := MeshInstance3D.new()
 		cube.mesh = BoxMesh.new()
@@ -120,35 +106,22 @@ func _build() -> void:
 		material.albedo_color = Color.WHITE
 		cube.material_override = material
 		world.add_child(cube)
-	var env := WorldEnvironment.new()
-	environment = Environment.new()
-	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color.WHITE
-	environment.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	environment.fog_enabled = true
 	environment.fog_light_color = Color.RED
 	environment.fog_light_energy = 1
 	environment.fog_density = 0.5
 	environment.fog_sky_affect = 1.0
-	env.environment = environment
-	world.add_child(env)
 	effect = MaskEffect.new()
 	inspect = FogInspect.new()
-	env.compositor = Compositor.new()
-	env.compositor.compositor_effects = [effect,inspect]
-
-func check(condition: bool, label: String, value: Variant) -> void:
-	if not condition:
-		push_error("NATIVE_WATER_FOG_FAIL " + label + " " + str(value))
-		failed = true
-		quit(1)
-		return
-	checks += 1
-	print("NATIVE_WATER_FOG_PASS ",label," ",value)
+	if mobile:
+		inspect.effect_callback_type = CompositorEffect.EFFECT_CALLBACK_TYPE_POST_TRANSPARENT
+	use_compositor(world_environment, [effect,inspect])
 
 func _process(_delta: float) -> bool:
-	frames += 1
-	if effect == null or frames%24 != 0:
+	if effect == null or not advance(24):
+		return false
+	if mobile:
+		_mobile()
 		return false
 	var image := root.get_texture().get_image()
 	var left := image.get_pixel(image.get_width()*0.32,image.get_height()*0.5)
@@ -201,11 +174,18 @@ func _process(_delta: float) -> bool:
 			check(s.has("fog_projection") and s.get("camera_z_far",0.0)>0.0,"unjittered_fog_projection_exposed",s)
 			effect.enabled = false
 			inspect.shutdown()
-			RenderingServer.call_on_render_thread(func():
-				if effect.mask.is_valid():
-					RenderingServer.get_rendering_device().free_rid(effect.mask)
-					effect.mask = RID())
-			print("NATIVE_WATER_FOG_SUITE_PASS checks=",checks)
-			quit(1 if failed else 0)
-	stage += 1
+			free_rids([effect.mask])
+			finish()
+	next_stage()
 	return false
+
+func _mobile() -> void:
+	if stage == 0:
+		effect.active = true
+	else:
+		check(effect.registered and not inspect.snapshot.get("ownership_active",true),"mobile_ownership_inactive",inspect.snapshot)
+		effect.enabled = false
+		inspect.shutdown()
+		free_rids([effect.mask])
+		finish()
+	next_stage()

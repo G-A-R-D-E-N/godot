@@ -31,6 +31,7 @@
 #include "render_data_rd.h"
 
 #include "core/object/class_db.h"
+#include "core/os/os.h"
 #include "servers/rendering/renderer_rd/effects/copy_effects.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
 #include "servers/rendering/renderer_rd/framebuffer_cache_rd.h"
@@ -118,7 +119,7 @@ Dictionary RenderDataRD::get_water_fog_data() const {
 	Dictionary result;
 	result["abi_version"] = 1;
 	result["water_fog_mask"] = water_fog_mask;
-	result["ownership_active"] = water_fog_mask.is_valid() && RD::get_singleton()->texture_is_valid(water_fog_mask);
+	result["ownership_active"] = OS::get_singleton()->get_current_rendering_method() == "forward_plus" && water_fog_mask.is_valid() && RD::get_singleton()->texture_is_valid(water_fog_mask);
 	result["fog_enabled"] = false;
 	result["volumetric_enabled"] = false;
 	result["volumetric_requested"] = false;
@@ -192,7 +193,6 @@ Dictionary RenderDataRD::get_water_temporal_info() const {
 		return result;
 	}
 	result["taa_active"] = render_buffers->get_use_taa();
-	result["preserve_temporal_alpha"] = true;
 	result["fsr2_active"] = render_buffers->get_scaling_3d_mode() == RSE::VIEWPORT_SCALING_3D_MODE_FSR2;
 	result["jitter"] = scene_data->taa_jitter;
 	Array projections;

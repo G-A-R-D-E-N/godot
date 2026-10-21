@@ -1,6 +1,6 @@
-extends SceneTree
+extends "res://harness.gd"
 
-class TemporalProbe extends CompositorEffect:
+class TemporalProbe extends Effect:
 	var reactive := false
 	var reset := false
 	var registered := false
@@ -49,72 +49,46 @@ class TemporalProbe extends CompositorEffect:
 			if data.has_method("set_water_temporal_data"):
 				registered = data.call("set_water_temporal_data",0,mask if reactive else RID(),reset)
 	func shutdown() -> void:
-		enabled = false
-		RenderingServer.call_on_render_thread(func():
-			var rd := RenderingServer.get_rendering_device()
-			for rid in [mask,pipeline,shader]:
-				if rid.is_valid(): rd.free_rid(rid)
-			mask = RID()
-			pipeline = RID()
-			shader = RID())
+		rids = [mask,pipeline,shader]
+		super()
 
 var effect: TemporalProbe
-var frames := 0
-var stage := 0
-var checks := 0
-var failed := false
-
-func _init() -> void:
-	call_deferred("_build")
+var fsr2 := false
 
 func _build() -> void:
-	root.size = Vector2i(240,180)
-	root.use_taa = true
-	var world := Node3D.new()
-	root.add_child(world)
-	var camera := Camera3D.new()
-	camera.position.z = 6
-	camera.current = true
-	world.add_child(camera)
-	var environment := WorldEnvironment.new()
-	environment.environment = Environment.new()
-	environment.environment.background_mode = Environment.BG_COLOR
-	environment.environment.background_color = Color.WHITE
-	environment.environment.tonemap_mode = Environment.TONE_MAPPER_LINEAR
-	world.add_child(environment)
+	fsr2 = OS.get_cmdline_user_args().has("fsr2")
+	prefix = "NATIVE_WATER_FSR2_SMOKE" if fsr2 else "NATIVE_WATER_TEMPORAL"
+	build_scene(Vector2i(240,180), Color.WHITE, true)
+	if fsr2:
+		root.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR2
+	else:
+		root.use_taa = true
 	effect = TemporalProbe.new()
-	environment.compositor = Compositor.new()
-	environment.compositor.compositor_effects = [effect]
-
-func check(condition: bool, label: String, pixel: Color) -> void:
-	if not condition:
-		failed = true
-		push_error("NATIVE_WATER_TEMPORAL_FAIL " + label + " " + str(pixel))
-		quit(1)
-		return
-	checks += 1
-	print("NATIVE_WATER_TEMPORAL_PASS ",label," ",pixel)
+	use_compositor(world_environment, [effect])
 
 func _process(_delta: float) -> bool:
-	frames += 1
-	if effect == null or frames%24 != 0:
+	if effect == null or not advance(24):
 		return false
-	var image := root.get_texture().get_image()
-	var pixel := image.get_pixel(image.get_width()/2,image.get_height()/2)
+	var pixel := center_pixel()
 	match stage:
 		0:
-			check(minf(pixel.r,pixel.b)>0.05,"native_taa_accumulates_changing_pattern",pixel)
+			check(minf(pixel.r,pixel.b)>0.05,"native_fsr2_accumulates_changing_pattern" if fsr2 else "native_taa_accumulates_changing_pattern",pixel)
 			effect.reactive = true
 		1:
-			check(effect.registered and maxf(pixel.r,pixel.b)>0.98 and minf(pixel.r,pixel.b)<0.02,"reactivity_is_consumed_by_taa",pixel)
+			if fsr2:
+				check(effect.registered and is_finite(pixel.r) and is_finite(pixel.b) and maxf(pixel.r,pixel.b)>0.2,"fsr2_reactive_binding_renders_finite",pixel)
+			else:
+				check(effect.registered and maxf(pixel.r,pixel.b)>0.98 and minf(pixel.r,pixel.b)<0.02,"reactivity_is_consumed_by_taa",pixel)
 			effect.reactive = false
 		2:
 			check(minf(pixel.r,pixel.b)>0.05,"unregistered_mask_does_not_leak",pixel)
 			effect.reset = true
 		3:
-			check(maxf(pixel.r,pixel.b)>0.98 and minf(pixel.r,pixel.b)<0.02,"explicit_taa_history_reset",pixel)
+			if fsr2:
+				check(is_finite(pixel.r) and is_finite(pixel.b) and maxf(pixel.r,pixel.b)>0.2,"fsr2_explicit_reset_renders_finite",pixel)
+			else:
+				check(maxf(pixel.r,pixel.b)>0.98 and minf(pixel.r,pixel.b)<0.02,"explicit_taa_history_reset",pixel)
 			effect.shutdown()
-			if not failed: print("NATIVE_WATER_TEMPORAL_SUITE_PASS checks=",checks)
-			quit(1 if failed else 0)
-	stage += 1
+			finish()
+	next_stage()
 	return false
