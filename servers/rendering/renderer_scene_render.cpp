@@ -293,8 +293,16 @@ float RendererSceneRender::environment_get_tonemap_agx_contrast(RID p_env) const
 	return environment_storage.environment_get_tonemap_agx_contrast(p_env);
 }
 
-RendererEnvironmentStorage::TonemapParameters RendererSceneRender::environment_get_tonemap_parameters(RID p_env, bool p_limit_agx_white, float p_output_max_value) const {
-	return environment_storage.environment_get_tonemap_parameters(p_env, p_limit_agx_white, p_output_max_value);
+void RendererSceneRender::environment_set_tonemap_agx_shoulder_start(RID p_env, float p_start) {
+	environment_storage.environment_set_tonemap_agx_shoulder_start(p_env, p_start);
+}
+
+bool RendererSceneRender::environment_uses_tonemap_agx_late_shoulder(RID p_env) const {
+	return environment_storage.environment_uses_tonemap_agx_late_shoulder(p_env);
+}
+
+RendererEnvironmentStorage::TonemapParameters RendererSceneRender::environment_get_tonemap_parameters(RID p_env, bool p_limit_agx_white, float p_output_max_value, bool p_agx_late_shoulder) const {
+	return environment_storage.environment_get_tonemap_parameters(p_env, p_limit_agx_white, p_output_max_value, p_agx_late_shoulder);
 }
 
 // Fog

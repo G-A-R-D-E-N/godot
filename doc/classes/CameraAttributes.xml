@@ -12,15 +12,29 @@
 	<tutorials>
 	</tutorials>
 	<members>
+		<member name="auto_exposure_center_weight" type="float" setter="set_auto_exposure_center_weight" getter="get_auto_exposure_center_weight" default="0.0">
+			How strongly the log histogram meter favors the lower middle of the frame, from [code]0.0[/code] to [code]1.0[/code]. Each metered pixel's weight is [code]8 * (1 + 3 * center_weight * g)[/code], rounded, where [code]g[/code] is a Gaussian with a standard deviation of 0.3 frame heights, centered horizontally and 60% of the way down the frame. At [code]0.0[/code] every pixel counts the same; at [code]0.5[/code] the center of that area counts 2.5 times as much as the left and right edges of a 16:9 frame. Only used when [member auto_exposure_meter] is [constant AUTO_EXPOSURE_METER_LOG_HISTOGRAM].
+		</member>
 		<member name="auto_exposure_enabled" type="bool" setter="set_auto_exposure_enabled" getter="is_auto_exposure_enabled" default="false">
 			If [code]true[/code], enables the tonemapping auto exposure mode of the scene renderer. If [code]true[/code], the renderer will automatically determine the exposure setting to adapt to the scene's illumination and the observed light.
 			[b]Note:[/b] Auto-exposure is only supported in the Forward+ rendering method, not Mobile or Compatibility.
-			The metered value is the exact arithmetic mean, over every pixel of the rendered frame, of the largest colour channel of each pixel. Use [member auto_exposure_highlight_limit] to stop very small, very bright pixels from dominating that mean.
+			The metered value is the exact arithmetic mean, over every pixel of the rendered frame, of the largest colour channel of each pixel. Use [member auto_exposure_highlight_limit] to stop very small, very bright pixels from dominating that mean. [member auto_exposure_meter] selects a camera-like log histogram meter instead.
 		</member>
 		<member name="auto_exposure_highlight_limit" type="float" setter="set_auto_exposure_highlight_limit" getter="get_auto_exposure_highlight_limit" default="0.0">
 			Limits how much a single pixel can raise the metered scene luminance, in EV above the adapted average. Before averaging, each pixel's luminance is capped at the previous frame's adapted average multiplied by [code]2^auto_exposure_highlight_limit[/code]. A value of [code]0.0[/code] disables the limit, which is the stock behavior. The range is [code]0.0[/code] to [code]16.0[/code].
 			The bound: a bright area keeps a bounded effect only while its share of the frame times [code]2^auto_exposure_highlight_limit[/code] stays below [code]1[/code]. At 4 EV that means the area must cover less than 6.25 % of the frame. Above that share, the exposure moves toward the unlimited mean instead of holding at the limit.
 			The limit is not applied on the first frame or after the adapted luminance is reset, because there is no previous average to compare against.
+		</member>
+		<member name="auto_exposure_histogram_clip_high" type="float" setter="set_auto_exposure_histogram_clip_high" getter="get_auto_exposure_histogram_clip_high" default="0.03">
+			The fraction of the total metering weight, taken from the brightest pixels, that the log histogram meter ignores, from [code]0.0[/code] to [code]0.45[/code]. Only used when [member auto_exposure_meter] is [constant AUTO_EXPOSURE_METER_LOG_HISTOGRAM].
+		</member>
+		<member name="auto_exposure_histogram_clip_low" type="float" setter="set_auto_exposure_histogram_clip_low" getter="get_auto_exposure_histogram_clip_low" default="0.03">
+			The fraction of the total metering weight, taken from the darkest pixels, that the log histogram meter ignores, from [code]0.0[/code] to [code]0.45[/code]. Only used when [member auto_exposure_meter] is [constant AUTO_EXPOSURE_METER_LOG_HISTOGRAM].
+		</member>
+		<member name="auto_exposure_meter" type="int" setter="set_auto_exposure_meter" getter="get_auto_exposure_meter" enum="CameraAttributes.AutoExposureMeter" default="0">
+			How the scene luminance is metered for auto-exposure. See [enum AutoExposureMeter].
+			[constant AUTO_EXPOSURE_METER_LOG_HISTOGRAM] builds a weighted histogram of log2 of each pixel's luminance (Rec. 709 weights) in 256 bins of 0.25 EV from [code]2^-32[/code] to [code]2^32[/code], drops the darkest [member auto_exposure_histogram_clip_low] and the brightest [member auto_exposure_histogram_clip_high] of the weight, and meters [code]2^m[/code], where [code]m[/code] is the mean log2 luminance of the rest. Each pixel's weight is split between its two nearest bins, so the mean is within 0.004 EV of the exact value, apart from the two bins at the clip edges. Luminance outside [code]2^-32[/code] to [code]2^32[/code] counts at the nearest end. Pixels that are not a number are skipped; if no pixel is left, the previous value is kept. Above about 2 million pixels, every n-th pixel in each direction is metered. [member auto_exposure_highlight_limit] is not used in this mode. The metered value is clamped to the minimum and maximum sensitivity, also on the first frame and after a reset.
+			[b]Note:[/b] The log histogram meter needs the Forward+ rendering method. Elsewhere the mean meter is used and a warning is printed once.
 		</member>
 		<member name="auto_exposure_scale" type="float" setter="set_auto_exposure_scale" getter="get_auto_exposure_scale" default="0.4">
 			The scale of the auto exposure effect. Affects the intensity of auto exposure.
@@ -37,4 +51,12 @@
 			[b]Note:[/b] Only available when [member ProjectSettings.rendering/lights_and_shadows/use_physical_light_units] is enabled.
 		</member>
 	</members>
+	<constants>
+		<constant name="AUTO_EXPOSURE_METER_MEAN" value="0" enum="AutoExposureMeter">
+			Meters the arithmetic mean of each pixel's largest color channel. This is the stock meter.
+		</constant>
+		<constant name="AUTO_EXPOSURE_METER_LOG_HISTOGRAM" value="1" enum="AutoExposureMeter">
+			Meters the weighted mean log2 luminance of the frame from a histogram, ignoring the darkest and brightest fractions of the weight set by [member auto_exposure_histogram_clip_low] and [member auto_exposure_histogram_clip_high].
+		</constant>
+	</constants>
 </class>

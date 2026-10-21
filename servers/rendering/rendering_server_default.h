@@ -893,6 +893,7 @@ public:
 
 	FUNC4(environment_set_tonemap, RID, RSE::EnvironmentToneMapper, float, float)
 	FUNC2(environment_set_tonemap_agx_contrast, RID, float)
+	FUNC2(environment_set_tonemap_agx_shoulder_start, RID, float)
 
 	FUNC7(environment_set_adjustment, RID, bool, float, float, float, bool, RID)
 
@@ -941,6 +942,7 @@ public:
 	FUNC3(camera_attributes_set_exposure, RID, float, float)
 	FUNC6(camera_attributes_set_auto_exposure, RID, bool, float, float, float, float)
 	FUNC2(camera_attributes_set_auto_exposure_highlight_limit, RID, float)
+	FUNC5(camera_attributes_set_auto_exposure_meter, RID, RSE::AutoExposureMeter, float, float, float)
 
 	/* SCENARIO API */
 

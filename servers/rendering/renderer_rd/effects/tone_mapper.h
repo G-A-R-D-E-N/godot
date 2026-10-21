@@ -77,6 +77,7 @@ private:
 		TONEMAP_FLAG_USE_8_BIT_DEBANDING = (1 << 5),
 		TONEMAP_FLAG_CONVERT_TO_SRGB = (1 << 6),
 		TONEMAP_FLAG_USE_NIGHT_VISION = (1 << 7),
+		TONEMAP_FLAG_AGX_LATE_SHOULDER = (1 << 8),
 		TONEMAP_FLAG_HIGHLIGHT_RANGE_SHIFT = 16,
 	};
 
@@ -152,7 +153,8 @@ private:
 
 		uint32_t night_vision_strength_acuity; // offset 80
 		float night_vision_highlight_range; // offset 84
-		float pad[2]; // offset 88, size 96
+		uint32_t agx_late_shoulder; // offset 88
+		float pad; // offset 92, size 96
 	};
 
 	/* tonemap actually writes to a framebuffer, which is
@@ -190,6 +192,7 @@ public:
 
 		RSE::EnvironmentToneMapper tonemap_mode = RSE::ENV_TONE_MAPPER_LINEAR;
 		float tonemapper_params[4] = { 0.0, 0.0, 0.0, 0.0 };
+		bool agx_late_shoulder = false;
 		float exposure = 1.0;
 		float white = 1.0;
 		float max_value = 1.0;

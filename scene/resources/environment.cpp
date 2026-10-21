@@ -259,6 +259,15 @@ float Environment::get_tonemap_agx_contrast() const {
 	return tonemap_agx_contrast;
 }
 
+void Environment::set_tonemap_agx_shoulder_start(float p_start) {
+	tonemap_agx_shoulder_start = CLAMP(p_start, 0.18f, 1.0f);
+	RS::get_singleton()->environment_set_tonemap_agx_shoulder_start(environment, tonemap_agx_shoulder_start);
+}
+
+float Environment::get_tonemap_agx_shoulder_start() const {
+	return tonemap_agx_shoulder_start;
+}
+
 void Environment::_update_tonemap() {
 	RS::get_singleton()->environment_set_tonemap(
 			environment,
@@ -1273,7 +1282,7 @@ void Environment::_validate_property(PropertyInfo &p_property) const {
 		return;
 	}
 
-	if (p_property.name == "tonemap_agx_contrast") {
+	if (p_property.name == "tonemap_agx_contrast" || p_property.name == "tonemap_agx_shoulder_start") {
 		if (tone_mapper != TONE_MAPPER_AGX) {
 			p_property.usage = PROPERTY_USAGE_NO_EDITOR;
 		}
@@ -1428,6 +1437,8 @@ void Environment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_tonemap_agx_white"), &Environment::get_tonemap_agx_white);
 	ClassDB::bind_method(D_METHOD("set_tonemap_agx_contrast", "contrast"), &Environment::set_tonemap_agx_contrast);
 	ClassDB::bind_method(D_METHOD("get_tonemap_agx_contrast"), &Environment::get_tonemap_agx_contrast);
+	ClassDB::bind_method(D_METHOD("set_tonemap_agx_shoulder_start", "start"), &Environment::set_tonemap_agx_shoulder_start);
+	ClassDB::bind_method(D_METHOD("get_tonemap_agx_shoulder_start"), &Environment::get_tonemap_agx_shoulder_start);
 
 	ADD_GROUP("Tonemap", "tonemap_");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "tonemap_mode", PROPERTY_HINT_ENUM, "Linear,Reinhard,Filmic,ACES,AgX"), "set_tonemapper", "get_tonemapper");
@@ -1435,6 +1446,7 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tonemap_white", PROPERTY_HINT_RANGE, "1,16,0.01,or_greater"), "set_tonemap_white", "get_tonemap_white");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tonemap_agx_white", PROPERTY_HINT_RANGE, "2,16.5,0.01,or_greater"), "set_tonemap_agx_white", "get_tonemap_agx_white");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tonemap_agx_contrast", PROPERTY_HINT_RANGE, "1.0,2.0,0.01,or_greater"), "set_tonemap_agx_contrast", "get_tonemap_agx_contrast");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tonemap_agx_shoulder_start", PROPERTY_HINT_RANGE, "0.18,1.0,0.01"), "set_tonemap_agx_shoulder_start", "get_tonemap_agx_shoulder_start");
 
 	// SSR
 

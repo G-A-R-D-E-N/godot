@@ -104,6 +104,48 @@ float CameraAttributes::get_auto_exposure_highlight_limit() const {
 	return auto_exposure_highlight_limit;
 }
 
+void CameraAttributes::_update_auto_exposure_meter() {
+	RS::get_singleton()->camera_attributes_set_auto_exposure_meter(camera_attributes, RSE::AutoExposureMeter(auto_exposure_meter), auto_exposure_histogram_clip_low, auto_exposure_histogram_clip_high, auto_exposure_center_weight);
+	emit_changed();
+}
+
+void CameraAttributes::set_auto_exposure_meter(AutoExposureMeter p_meter) {
+	ERR_FAIL_INDEX(p_meter, AUTO_EXPOSURE_METER_LOG_HISTOGRAM + 1);
+	auto_exposure_meter = p_meter;
+	_update_auto_exposure_meter();
+}
+
+CameraAttributes::AutoExposureMeter CameraAttributes::get_auto_exposure_meter() const {
+	return auto_exposure_meter;
+}
+
+void CameraAttributes::set_auto_exposure_histogram_clip_low(float p_fraction) {
+	auto_exposure_histogram_clip_low = CLAMP(p_fraction, 0.0f, 0.45f);
+	_update_auto_exposure_meter();
+}
+
+float CameraAttributes::get_auto_exposure_histogram_clip_low() const {
+	return auto_exposure_histogram_clip_low;
+}
+
+void CameraAttributes::set_auto_exposure_histogram_clip_high(float p_fraction) {
+	auto_exposure_histogram_clip_high = CLAMP(p_fraction, 0.0f, 0.45f);
+	_update_auto_exposure_meter();
+}
+
+float CameraAttributes::get_auto_exposure_histogram_clip_high() const {
+	return auto_exposure_histogram_clip_high;
+}
+
+void CameraAttributes::set_auto_exposure_center_weight(float p_weight) {
+	auto_exposure_center_weight = CLAMP(p_weight, 0.0f, 1.0f);
+	_update_auto_exposure_meter();
+}
+
+float CameraAttributes::get_auto_exposure_center_weight() const {
+	return auto_exposure_center_weight;
+}
+
 RID CameraAttributes::get_rid() const {
 	return camera_attributes;
 }
@@ -137,6 +179,14 @@ void CameraAttributes::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_auto_exposure_scale"), &CameraAttributes::get_auto_exposure_scale);
 	ClassDB::bind_method(D_METHOD("set_auto_exposure_highlight_limit", "limit"), &CameraAttributes::set_auto_exposure_highlight_limit);
 	ClassDB::bind_method(D_METHOD("get_auto_exposure_highlight_limit"), &CameraAttributes::get_auto_exposure_highlight_limit);
+	ClassDB::bind_method(D_METHOD("set_auto_exposure_meter", "meter"), &CameraAttributes::set_auto_exposure_meter);
+	ClassDB::bind_method(D_METHOD("get_auto_exposure_meter"), &CameraAttributes::get_auto_exposure_meter);
+	ClassDB::bind_method(D_METHOD("set_auto_exposure_histogram_clip_low", "fraction"), &CameraAttributes::set_auto_exposure_histogram_clip_low);
+	ClassDB::bind_method(D_METHOD("get_auto_exposure_histogram_clip_low"), &CameraAttributes::get_auto_exposure_histogram_clip_low);
+	ClassDB::bind_method(D_METHOD("set_auto_exposure_histogram_clip_high", "fraction"), &CameraAttributes::set_auto_exposure_histogram_clip_high);
+	ClassDB::bind_method(D_METHOD("get_auto_exposure_histogram_clip_high"), &CameraAttributes::get_auto_exposure_histogram_clip_high);
+	ClassDB::bind_method(D_METHOD("set_auto_exposure_center_weight", "weight"), &CameraAttributes::set_auto_exposure_center_weight);
+	ClassDB::bind_method(D_METHOD("get_auto_exposure_center_weight"), &CameraAttributes::get_auto_exposure_center_weight);
 
 	ADD_GROUP("Exposure", "exposure_");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "exposure_sensitivity", PROPERTY_HINT_RANGE, "0.1,32000.0,0.1,suffix:ISO"), "set_exposure_sensitivity", "get_exposure_sensitivity");
@@ -147,6 +197,13 @@ void CameraAttributes::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_scale", PROPERTY_HINT_RANGE, "0.01,64,0.01"), "set_auto_exposure_scale", "get_auto_exposure_scale");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_speed", PROPERTY_HINT_RANGE, "0.01,64,0.01"), "set_auto_exposure_speed", "get_auto_exposure_speed");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_highlight_limit", PROPERTY_HINT_RANGE, "0,16,0.01,suffix:EV"), "set_auto_exposure_highlight_limit", "get_auto_exposure_highlight_limit");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "auto_exposure_meter", PROPERTY_HINT_ENUM, "Mean,Log Histogram"), "set_auto_exposure_meter", "get_auto_exposure_meter");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_histogram_clip_low", PROPERTY_HINT_RANGE, "0,0.45,0.001"), "set_auto_exposure_histogram_clip_low", "get_auto_exposure_histogram_clip_low");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_histogram_clip_high", PROPERTY_HINT_RANGE, "0,0.45,0.001"), "set_auto_exposure_histogram_clip_high", "get_auto_exposure_histogram_clip_high");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_center_weight", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_auto_exposure_center_weight", "get_auto_exposure_center_weight");
+
+	BIND_ENUM_CONSTANT(AUTO_EXPOSURE_METER_MEAN);
+	BIND_ENUM_CONSTANT(AUTO_EXPOSURE_METER_LOG_HISTOGRAM);
 }
 
 CameraAttributes::CameraAttributes() {

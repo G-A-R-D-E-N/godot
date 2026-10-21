@@ -71,6 +71,17 @@
 				Sets the auto-exposure highlight limit, in EV above the previous frame's adapted average. [code]0.0[/code] disables the limit. Each pixel is capped at that average times [code]2^limit[/code]. A bright area keeps a bounded effect only while its share of the frame times [code]2^limit[/code] stays below [code]1[/code] (below 6.25 % of the frame at 4 EV); above that the exposure moves toward the unlimited mean. The limit is not applied on the first frame or after a reset. This has the same meaning as [member CameraAttributes.auto_exposure_highlight_limit].
 			</description>
 		</method>
+		<method name="camera_attributes_set_auto_exposure_meter">
+			<return type="void" />
+			<param index="0" name="camera_attributes" type="RID" />
+			<param index="1" name="meter" type="int" enum="RenderingServer.AutoExposureMeter" />
+			<param index="2" name="clip_low" type="float" />
+			<param index="3" name="clip_high" type="float" />
+			<param index="4" name="center_weight" type="float" />
+			<description>
+				Sets the auto-exposure meter and, for [constant AUTO_EXPOSURE_METER_LOG_HISTOGRAM], the fractions of the darkest and brightest metering weight to ignore (each [code]0.0[/code] to [code]0.45[/code]) and the weight toward the lower middle of the frame ([code]0.0[/code] to [code]1.0[/code]). These have the same meaning as [member CameraAttributes.auto_exposure_meter], [member CameraAttributes.auto_exposure_histogram_clip_low], [member CameraAttributes.auto_exposure_histogram_clip_high] and [member CameraAttributes.auto_exposure_center_weight].
+			</description>
+		</method>
 		<method name="camera_attributes_set_dof_blur">
 			<return type="void" />
 			<param index="0" name="camera_attributes" type="RID" />
@@ -1594,6 +1605,14 @@
 			<param index="1" name="agx_contrast" type="float" />
 			<description>
 				See [member Environment.tonemap_agx_contrast] for more details.
+			</description>
+		</method>
+		<method name="environment_set_tonemap_agx_shoulder_start">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="start" type="float" />
+			<description>
+				See [member Environment.tonemap_agx_shoulder_start] for more details.
 			</description>
 		</method>
 		<method name="environment_set_volumetric_fog">
@@ -6202,6 +6221,12 @@
 		</constant>
 		<constant name="DOF_BLUR_QUALITY_HIGH" value="3" enum="DOFBlurQuality">
 			Highest quality DOF blur. Results in the smoothest looking blur by taking the most samples, but is also significantly slower.
+		</constant>
+		<constant name="AUTO_EXPOSURE_METER_MEAN" value="0" enum="AutoExposureMeter">
+			Meters the arithmetic mean of each pixel's largest color channel. This is the stock meter.
+		</constant>
+		<constant name="AUTO_EXPOSURE_METER_LOG_HISTOGRAM" value="1" enum="AutoExposureMeter">
+			Meters the weighted mean log2 luminance of the frame from a histogram, ignoring the darkest and brightest fractions of the weight. Forward+ only; elsewhere the mean meter is used.
 		</constant>
 		<constant name="INSTANCE_NONE" value="0" enum="InstanceType">
 			The instance does not have a type.
