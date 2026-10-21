@@ -908,7 +908,8 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 			float max_value = using_hdr ? p_render_data->window_output_max_value : 1.0;
 
 			tonemap.tonemap_mode = environment_get_tone_mapper(p_render_data->environment);
-			RendererEnvironmentStorage::TonemapParameters params = environment_get_tonemap_parameters(p_render_data->environment, limit_agx_white, max_value);
+			tonemap.agx_late_shoulder = environment_uses_tonemap_agx_late_shoulder(p_render_data->environment);
+			RendererEnvironmentStorage::TonemapParameters params = environment_get_tonemap_parameters(p_render_data->environment, limit_agx_white, max_value, tonemap.agx_late_shoulder);
 			tonemap.tonemapper_params[0] = params.tonemapper_params[0];
 			tonemap.tonemapper_params[1] = params.tonemapper_params[1];
 			tonemap.tonemapper_params[2] = params.tonemapper_params[2];
@@ -919,6 +920,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 		}
 		if (debug_draw >= RSE::VIEWPORT_DEBUG_DRAW_PERSISTENT_AO && debug_draw <= RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE) {
 			tonemap.tonemap_mode = RSE::ENV_TONE_MAPPER_LINEAR;
+			tonemap.agx_late_shoulder = false;
 			tonemap.exposure = 1.0;
 			tonemap.white = 1.0;
 		}
@@ -1113,7 +1115,8 @@ void RendererSceneRenderRD::_post_process_subpass(RID p_source_texture, RID p_fr
 		float max_value = using_hdr ? p_render_data->window_output_max_value : 1.0;
 
 		tonemap.tonemap_mode = environment_get_tone_mapper(p_render_data->environment);
-		RendererEnvironmentStorage::TonemapParameters params = environment_get_tonemap_parameters(p_render_data->environment, limit_agx_white, max_value);
+		tonemap.agx_late_shoulder = environment_uses_tonemap_agx_late_shoulder(p_render_data->environment);
+		RendererEnvironmentStorage::TonemapParameters params = environment_get_tonemap_parameters(p_render_data->environment, limit_agx_white, max_value, tonemap.agx_late_shoulder);
 		tonemap.tonemapper_params[0] = params.tonemapper_params[0];
 		tonemap.tonemapper_params[1] = params.tonemapper_params[1];
 		tonemap.tonemapper_params[2] = params.tonemapper_params[2];

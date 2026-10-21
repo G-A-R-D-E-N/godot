@@ -893,6 +893,7 @@ public:
 
 	FUNC4(environment_set_tonemap, RID, RSE::EnvironmentToneMapper, float, float)
 	FUNC2(environment_set_tonemap_agx_contrast, RID, float)
+	FUNC2(environment_set_tonemap_agx_shoulder_start, RID, float)
 
 	FUNC7(environment_set_adjustment, RID, bool, float, float, float, bool, RID)
 

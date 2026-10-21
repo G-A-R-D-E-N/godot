@@ -1607,6 +1607,14 @@
 				See [member Environment.tonemap_agx_contrast] for more details.
 			</description>
 		</method>
+		<method name="environment_set_tonemap_agx_shoulder_start">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="start" type="float" />
+			<description>
+				See [member Environment.tonemap_agx_shoulder_start] for more details.
+			</description>
+		</method>
 		<method name="environment_set_volumetric_fog">
 			<return type="void" />
 			<param index="0" name="env" type="RID" />

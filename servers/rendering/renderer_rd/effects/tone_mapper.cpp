@@ -186,6 +186,7 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 	tonemap.push_constant.pixel_size[1] = 1.0 / p_settings.texture_size.y;
 
 	tonemap.push_constant.flags |= p_settings.convert_to_srgb ? TONEMAP_FLAG_CONVERT_TO_SRGB : 0;
+	tonemap.push_constant.flags |= p_settings.agx_late_shoulder ? TONEMAP_FLAG_AGX_LATE_SHOULDER : 0;
 
 	tonemap.push_constant.flags |= p_settings.night_vision.enabled ? TONEMAP_FLAG_USE_NIGHT_VISION : 0;
 	write_night_vision(tonemap.push_constant, p_settings);
@@ -272,6 +273,7 @@ void ToneMapper::tonemapper_mobile(RID p_source_color, RID p_dst_framebuffer, co
 	tonemap_mobile.push_constant.tonemapper_params[1] = p_settings.tonemapper_params[1];
 	tonemap_mobile.push_constant.tonemapper_params[2] = p_settings.tonemapper_params[2];
 	tonemap_mobile.push_constant.tonemapper_params[3] = p_settings.tonemapper_params[3];
+	tonemap_mobile.push_constant.agx_late_shoulder = p_settings.agx_late_shoulder ? 1 : 0;
 
 	write_night_vision(tonemap_mobile.push_constant, p_settings);
 	tonemap_mobile.push_constant.night_vision_highlight_range = p_settings.night_vision.enabled ? p_settings.night_vision.highlight_range : 0.0f;
@@ -366,6 +368,7 @@ void ToneMapper::tonemapper_subpass(RD::DrawListID p_subpass_draw_list, RID p_so
 	tonemap_mobile.push_constant.tonemapper_params[1] = p_settings.tonemapper_params[1];
 	tonemap_mobile.push_constant.tonemapper_params[2] = p_settings.tonemapper_params[2];
 	tonemap_mobile.push_constant.tonemapper_params[3] = p_settings.tonemapper_params[3];
+	tonemap_mobile.push_constant.agx_late_shoulder = p_settings.agx_late_shoulder ? 1 : 0;
 
 	write_night_vision(tonemap_mobile.push_constant, p_settings);
 	tonemap_mobile.push_constant.night_vision_highlight_range = p_settings.night_vision.enabled ? p_settings.night_vision.highlight_range : 0.0f;

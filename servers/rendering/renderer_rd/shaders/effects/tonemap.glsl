@@ -63,6 +63,7 @@ layout(set = 3, binding = 0) uniform sampler3D source_color_correction;
 #define FLAG_USE_8_BIT_DEBANDING (1 << 5)
 #define FLAG_CONVERT_TO_SRGB (1 << 6)
 #define FLAG_USE_NIGHT_VISION (1 << 7)
+#define FLAG_AGX_LATE_SHOULDER (1 << 8)
 
 layout(push_constant, std430) uniform Params {
 	vec3 bcs;
@@ -178,6 +179,29 @@ vec3 allenwp_curve(vec3 x) {
 	return mix(s, t, lessThan(x, vec3(awp_crossover_point)));
 }
 
+vec3 allenwp_curve_late_shoulder(vec3 x) {
+	const float awp_crossover_point = 0.18;
+	float awp_contrast = params.tonemapper_params.x;
+	float awp_toe_a = params.tonemapper_params.y;
+	float awp_start = params.tonemapper_params.z;
+	float awp_w = params.tonemapper_params.w;
+	float awp_slope = awp_contrast * (1.0 - awp_crossover_point);
+	float awp_knee = awp_crossover_point + awp_slope * (awp_start - awp_crossover_point);
+	float awp_shoulder_max = params.output_max_value - awp_knee;
+
+	vec3 s = x - awp_start;
+	vec3 slope_s = awp_slope * s;
+	s = slope_s * (1.0 + s / awp_w) / (1.0 + (slope_s / awp_shoulder_max));
+	s += awp_knee;
+
+	vec3 l = awp_crossover_point + awp_slope * (x - awp_crossover_point);
+
+	vec3 t = pow(x, vec3(awp_contrast));
+	t = t / (t + awp_toe_a);
+
+	return mix(mix(s, l, lessThan(x, vec3(awp_start))), t, lessThan(x, vec3(awp_crossover_point)));
+}
+
 // This is an approximation and simplification of EaryChow's AgX implementation that is used by Blender.
 // This code is based off of the script that generates the AgX_Base_sRGB.cube LUT that Blender uses.
 // Source: https://github.com/EaryChow/AgX_LUT_Gen/blob/main/AgXBasesRGB.py
@@ -218,7 +242,11 @@ vec3 tonemap_agx(vec3 color) {
 
 	// Use the allenwp tonemapping curve to match the Blender AgX curve while
 	// providing stability across all variable dyanimc range (SDR, HDR, EDR).
-	color = allenwp_curve(color);
+	if (bool(params.flags & FLAG_AGX_LATE_SHOULDER)) {
+		color = allenwp_curve_late_shoulder(color);
+	} else {
+		color = allenwp_curve(color);
+	}
 
 	// Clipping to output_max_value is required to address a cyan colour that occurs
 	// with very bright inputs.

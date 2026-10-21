@@ -119,6 +119,7 @@ private:
 	float tonemap_white = 1.0;
 	float tonemap_agx_white = 16.29; // Default to Blender's AgX white.
 	float tonemap_agx_contrast = 1.25; // Default to approximately Blender's AgX contrast.
+	float tonemap_agx_shoulder_start = 0.18;
 	void _update_tonemap();
 
 	// SSR
@@ -298,6 +299,8 @@ public:
 	float get_tonemap_agx_white() const;
 	void set_tonemap_agx_contrast(float p_agx_contrast);
 	float get_tonemap_agx_contrast() const;
+	void set_tonemap_agx_shoulder_start(float p_start);
+	float get_tonemap_agx_shoulder_start() const;
 
 	// SSR
 	void set_ssr_enabled(bool p_enabled);
