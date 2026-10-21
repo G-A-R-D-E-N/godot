@@ -238,6 +238,11 @@ private:
 		float cloud_shadow_plane[4];
 	};
 
+	static_assert(sizeof(LightData) == 224);
+	static_assert(offsetof(LightData, shadow_matrix) == 112);
+	static_assert(sizeof(DirectionalLightData) == 528);
+	static_assert(offsetof(DirectionalLightData, shadow_matrices) == 176);
+
 	uint32_t max_directional_lights;
 	DirectionalLightData *directional_lights = nullptr;
 	RID directional_light_buffer;

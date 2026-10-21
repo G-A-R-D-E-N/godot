@@ -1367,6 +1367,11 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 	if (r_directional_light_count) {
 		RD::get_singleton()->buffer_update(directional_light_buffer, 0, sizeof(DirectionalLightData) * r_directional_light_count, directional_lights);
 	}
+
+	p_render_data->water_omni_light_count = omni_light_count;
+	p_render_data->water_spot_light_count = spot_light_count;
+	p_render_data->water_area_light_count = area_light_count;
+	p_render_data->water_lighting_ready = true;
 }
 
 /* REFLECTION PROBE */

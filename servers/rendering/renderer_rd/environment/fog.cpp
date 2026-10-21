@@ -475,7 +475,7 @@ void Fog::VolumetricFog::init(const Vector3i &fog_size, RID p_sky_shader) {
 	tf.height = fog_size.y;
 	tf.depth = fog_size.z;
 	tf.texture_type = RD::TEXTURE_TYPE_3D;
-	tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
+	tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
 
 	light_density_map = RD::get_singleton()->texture_create(tf, RD::TextureView());
 	RD::get_singleton()->set_resource_name(light_density_map, "Fog light-density map");
@@ -536,6 +536,7 @@ void Fog::VolumetricFog::init(const Vector3i &fog_size, RID p_sky_shader) {
 		uniforms.push_back(u);
 	}
 
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 1, TextureStorage::get_singleton()->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_BLACK)));
 	sky_uniform_set = RD::get_singleton()->uniform_set_create(uniforms, p_sky_shader, RendererRD::SkyRD::SKY_SET_FOG);
 }
 

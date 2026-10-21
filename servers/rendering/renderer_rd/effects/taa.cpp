@@ -63,7 +63,7 @@ TAA::~TAA() {
 	taa_shader.version_free(shader_version);
 }
 
-void TAA::resolve(RID p_frame, RID p_temp, RID p_depth, RID p_velocity, RID p_prev_velocity, RID p_history, RID p_reactive, Size2 p_resolution, float p_z_near, float p_z_far, bool p_garden, RID p_rejected) {
+void TAA::resolve(RID p_frame, RID p_temp, RID p_depth, RID p_velocity, RID p_prev_velocity, RID p_history, RID p_reactive, Size2 p_resolution, float p_z_near, float p_z_far, bool p_garden, RID p_rejected, RID p_reactivity) {
 	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
 	ERR_FAIL_NULL(uniform_set_cache);
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
@@ -98,12 +98,14 @@ void TAA::resolve(RID p_frame, RID p_temp, RID p_depth, RID p_velocity, RID p_pr
 	RD::Uniform u_history(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, { default_sampler, p_history });
 	RD::Uniform u_frame_dest(RD::UNIFORM_TYPE_IMAGE, 5, { p_temp });
 	RD::Uniform u_reactive(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, { default_sampler, p_reactive });
+	RID water_reactivity = p_reactivity.is_valid() ? p_reactivity : TextureStorage::get_singleton()->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
+	RD::Uniform u_reactivity(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8, { default_sampler, water_reactivity });
 
 	if (rejected) {
 		RD::Uniform u_rejected(RD::UNIFORM_TYPE_IMAGE, 7, { p_rejected });
-		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_frame_source, u_depth, u_velocity, u_prev_velocity, u_history, u_frame_dest, u_reactive, u_rejected), 0);
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_frame_source, u_depth, u_velocity, u_prev_velocity, u_history, u_frame_dest, u_reactive, u_rejected, u_reactivity), 0);
 	} else {
-		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_frame_source, u_depth, u_velocity, u_prev_velocity, u_history, u_frame_dest, u_reactive), 0);
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader, 0, u_frame_source, u_depth, u_velocity, u_prev_velocity, u_history, u_frame_dest, u_reactive, u_reactivity), 0);
 	}
 	RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(TAAResolvePushConstant));
 	RD::get_singleton()->compute_list_dispatch_threads(compute_list, p_resolution.width, p_resolution.height, 1);
@@ -117,7 +119,7 @@ RID TAA::rejected_history_texture(Ref<RenderSceneBuffersRD> p_render_buffers, ui
 	return p_render_buffers->get_texture_slice(RB_SCOPE_REJECTED_HISTORY, RB_REJECTED, p_view, 0);
 }
 
-void TAA::process(Ref<RenderSceneBuffersRD> p_render_buffers, RD::DataFormat p_format, float p_z_near, float p_z_far, bool p_garden, bool p_reset, bool p_rejected_history) {
+void TAA::process(Ref<RenderSceneBuffersRD> p_render_buffers, RD::DataFormat p_format, float p_z_near, float p_z_far, bool p_garden, bool p_reset, bool p_rejected_history, const RID *p_reactivity) {
 	CopyEffects *copy_effects = CopyEffects::get_singleton();
 
 	uint32_t view_count = p_render_buffers->get_view_count();
@@ -150,7 +152,7 @@ void TAA::process(Ref<RenderSceneBuffersRD> p_render_buffers, RD::DataFormat p_f
 			RID depth_texture = p_render_buffers->get_depth_texture(v);
 			RID taa_temp = p_render_buffers->get_texture_slice(SNAME("taa"), SNAME("temp"), v, 0);
 			RID reactive = p_render_buffers->has_texture(RB_SCOPE_BUFFERS, RB_TEX_REACTIVE) ? p_render_buffers->get_reactive_buffer(false, v) : TextureStorage::get_singleton()->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
-			resolve(internal_texture, taa_temp, depth_texture, velocity_buffer, taa_prev_velocity, taa_history, reactive, Size2(internal_size.x, internal_size.y), p_z_near, p_z_far, p_garden, rejected);
+			resolve(internal_texture, taa_temp, depth_texture, velocity_buffer, taa_prev_velocity, taa_history, reactive, Size2(internal_size.x, internal_size.y), p_z_near, p_z_far, p_garden, rejected, p_reactivity ? p_reactivity[v] : RID());
 			copy_effects->copy_to_rect(taa_temp, internal_texture, Rect2(0, 0, internal_size.x, internal_size.y));
 		} else if (rejected.is_valid()) {
 			RD::get_singleton()->texture_clear(p_render_buffers->get_texture(RB_SCOPE_REJECTED_HISTORY, RB_REJECTED), Color(1, 1, 1, 1), 0, 1, v, 1);
