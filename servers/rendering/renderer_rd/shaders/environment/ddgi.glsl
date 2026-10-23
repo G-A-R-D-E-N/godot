@@ -165,7 +165,7 @@ void main() {
 		float hysteresis = probe_hysteresis(probe);
 		float updates = hysteresis > 0.0 ? previous.a : 0.0;
 		hysteresis = min(hysteresis * keep, updates / (updates + 1.0));
-		if (max3(abs(result - previous.rgb)) > DDGI_CHANGE_THRESHOLD * max(max3(previous.rgb), max3(result))) {
+		if (max3(abs(result - previous.rgb)) > ddgi.change_threshold * max(max3(previous.rgb), max3(result))) {
 			hysteresis *= 0.5;
 		}
 		tile[texel.y][texel.x] = vec4(mix(result, previous.rgb, hysteresis), min(updates + 1.0, DDGI_MAX_UPDATES));

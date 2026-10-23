@@ -99,6 +99,7 @@ public:
 		float hysteresis = 0.97;
 		float normal_bias = 0.1;
 		float view_bias = 0.25;
+		float change_threshold = 0.25;
 		float energy = 1.0;
 		float bounce_energy = 1.0;
 		uint32_t debug_view = DEBUG_VIEW_DISABLED;
@@ -137,6 +138,9 @@ public:
 		uint32_t frame;
 		float max_distance;
 		uint32_t probe_capacity;
+
+		float change_threshold;
+		float pad[3];
 	};
 
 	struct TracePushConstant {

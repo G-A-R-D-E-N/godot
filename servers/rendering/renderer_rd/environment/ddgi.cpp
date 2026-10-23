@@ -61,6 +61,7 @@ DDGI::Settings DDGI::get_project_settings() {
 	settings.hysteresis = CLAMP(GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/hysteresis"), 0.0f, 0.999f);
 	settings.normal_bias = GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/normal_bias");
 	settings.view_bias = GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/view_bias");
+	settings.change_threshold = CLAMP(GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/change_threshold"), 0.05f, 1.0f);
 	settings.energy = MAX(GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/energy"), 0.0f);
 	settings.bounce_energy = CLAMP(GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/bounce_energy"), 0.0f, 1.0f);
 	settings.debug_view = CLAMP(GLOBAL_GET_CACHED(int, "rendering/global_illumination/ddgi/debug_view"), 0, (int)DEBUG_VIEW_PROBE_VISIBILITY);
@@ -209,6 +210,7 @@ void DDGI::Volume::fill_ubo(UBO &r_ubo, const Vector3 &p_camera_position) const 
 	r_ubo.frame = frame;
 	r_ubo.max_distance = settings.spacing * float(1 << (settings.level_count - 1)) * float(MAX(dims.x, MAX(dims.y, dims.z)));
 	r_ubo.probe_capacity = settings.probes_per_frame;
+	r_ubo.change_threshold = settings.change_threshold;
 }
 
 void DDGI::init(SkyRD *p_sky) {
