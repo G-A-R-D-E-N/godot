@@ -2142,6 +2142,14 @@ void MaterialStorage::global_shader_parameters_instance_update(RID p_instance, i
 	_global_shader_uniform_mark_buffer_dirty(pos, 1);
 }
 
+bool MaterialStorage::global_shader_parameters_instance_read_float(int32_t p_position, float &r_value) const {
+	if (p_position < 0 || uint32_t(p_position) >= global_shader_uniforms.buffer_size || !global_shader_uniforms.buffer_values) {
+		return false;
+	}
+	r_value = global_shader_uniforms.buffer_values[p_position].x;
+	return true;
+}
+
 void MaterialStorage::_update_global_shader_uniforms() {
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
 	if (global_shader_uniforms.buffer_dirty_region_count > 0) {
