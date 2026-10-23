@@ -7,6 +7,7 @@
 
 #define RAY_SCENE_MATERIAL_TWO_SIDED 1u
 #define RAY_SCENE_MATERIAL_SKIP 2u
+#define RAY_SCENE_MATERIAL_SHADOW_PASS 8u
 
 const vec3 luminance_weights = vec3(0.2126, 0.7152, 0.0722);
 
@@ -147,7 +148,11 @@ void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, 
 				}
 				float t = dot(triangle.e2.xyz, q) * inv_det;
 				if (t > 0.0 && t < r_hit.t) {
-					if ((ray_scene_materials.data[p_material_offset + triangle.surface].flags & RAY_SCENE_MATERIAL_SKIP) != 0u) {
+					uint material_flags = ray_scene_materials.data[p_material_offset + triangle.surface].flags;
+					if ((material_flags & RAY_SCENE_MATERIAL_SKIP) != 0u) {
+						continue;
+					}
+					if (p_any && (material_flags & RAY_SCENE_MATERIAL_SHADOW_PASS) != 0u) {
 						continue;
 					}
 					r_hit.t = t;
