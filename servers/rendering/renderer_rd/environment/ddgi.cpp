@@ -32,6 +32,7 @@
 
 #include "core/config/project_settings.h"
 #include "core/math/random_pcg.h"
+#include "servers/rendering/renderer_rd/environment/ddgi_light_tracker.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
@@ -62,6 +63,7 @@ DDGI::Settings DDGI::get_project_settings() {
 	settings.normal_bias = GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/normal_bias");
 	settings.view_bias = GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/view_bias");
 	settings.change_threshold = CLAMP(GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/change_threshold"), 0.05f, 1.0f);
+	settings.light_change_reset = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/light_change_reset");
 	settings.energy = MAX(GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/energy"), 0.0f);
 	settings.bounce_energy = CLAMP(GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/bounce_energy"), 0.0f, 1.0f);
 	settings.debug_view = CLAMP(GLOBAL_GET_CACHED(int, "rendering/global_illumination/ddgi/debug_view"), 0, (int)DEBUG_VIEW_PROBE_VISIBILITY);
@@ -125,6 +127,7 @@ void DDGI::Volume::allocate(const Settings &p_settings) {
 	dispatch_buffer = RD::get_singleton()->storage_buffer_create(dispatch_data.size(), dispatch_data, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
 	RD::get_singleton()->set_resource_name(dispatch_buffer, "DDGI Dispatch");
 	ubo = RD::get_singleton()->uniform_buffer_create(sizeof(UBO));
+	reset_ubo = RD::get_singleton()->uniform_buffer_create(sizeof(ResetUBO));
 	RD::get_singleton()->set_resource_name(ubo, "DDGI UBO");
 }
 
@@ -138,7 +141,7 @@ LocalVector<RD::Uniform> DDGI::Volume::gather_uniforms() const {
 }
 
 void DDGI::Volume::free_data() {
-	RID *owned[] = { &irradiance, &distance, &probe_data, &rays, &probe_list_buffer, &schedule_groups_buffer, &dispatch_buffer, &ubo, &debug_texture };
+	RID *owned[] = { &irradiance, &distance, &probe_data, &rays, &probe_list_buffer, &schedule_groups_buffer, &dispatch_buffer, &ubo, &reset_ubo, &debug_texture };
 	for (RID *rid : owned) {
 		if (rid->is_valid()) {
 			RD::get_singleton()->free_rid(*rid);
@@ -224,6 +227,7 @@ void DDGI::init(SkyRD *p_sky) {
 	modes.push_back("\n#define MODE_SCHEDULE_SCAN\n");
 	modes.push_back("\n#define MODE_SCHEDULE_APPEND\n");
 	modes.push_back("\n#define MODE_SCHEDULE_FINALIZE\n");
+	modes.push_back("\n#define MODE_RESET_COUNTS\n");
 	shader.initialize(modes);
 	shader_version = shader.version_create();
 	for (int i = 0; i < MODE_MAX; i++) {
@@ -313,6 +317,44 @@ void DDGI::_dispatch(Mode p_mode, const Ref<Volume> &p_volume, uint32_t p_x_grou
 	} else {
 		RD::get_singleton()->compute_list_dispatch(compute_list, p_x_groups, 1, 1);
 	}
+	RD::get_singleton()->compute_list_end();
+}
+
+void DDGI::_reset_counts(const Ref<Volume> &p_volume, const Vector3 &p_camera_position) {
+	LocalVector<DDGILightTracker::Box> boxes;
+	const bool all = DDGILightTracker::take(boxes);
+	if (boxes.is_empty() && !all) {
+		return;
+	}
+	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
+	ERR_FAIL_NULL(uniform_set_cache);
+	ResetUBO reset = {};
+	reset.count = MIN(uint32_t(boxes.size()), RESET_BOXES);
+	reset.all = all ? 1u : 0u;
+	for (uint32_t i = 0; i < reset.count; i++) {
+		const Vector3 relative = boxes[i].center - p_camera_position;
+		reset.boxes[i][0] = float(relative.x);
+		reset.boxes[i][1] = float(relative.y);
+		reset.boxes[i][2] = float(relative.z);
+		reset.boxes[i][3] = boxes[i].half;
+	}
+	RD::get_singleton()->buffer_update(p_volume->reset_ubo, 0, sizeof(ResetUBO), &reset);
+
+	RID shader_rid = shader.version_get_shader(shader_version, MODE_RESET_COUNTS);
+	LocalVector<RD::Uniform> uniforms;
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, p_volume->ubo));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, p_volume->probe_list_buffer));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 2, p_volume->rays));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 3, p_volume->irradiance));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 4, p_volume->distance));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 5, p_volume->probe_data));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 8, p_volume->reset_ubo));
+
+	const Vector3i dims = p_volume->settings.dims;
+	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
+	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, pipelines[MODE_RESET_COUNTS].get_rid());
+	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache_vec(shader_rid, 0, uniforms), 0);
+	RD::get_singleton()->compute_list_dispatch(compute_list, uint32_t(dims.x * dims.y), uint32_t(dims.z), p_volume->settings.level_count);
 	RD::get_singleton()->compute_list_end();
 }
 
@@ -424,6 +466,9 @@ void DDGI::process(const Ref<Volume> &p_volume, RID p_environment, SkyRD::Sky *p
 	const Vector3i dims = p_volume->settings.dims;
 	const uint32_t probe_groups = Math::division_round_up(uint32_t(dims.x * dims.y * dims.z) * p_volume->settings.level_count, 64u);
 	RD::get_singleton()->draw_command_begin_label("DDGI Update");
+	if (p_volume->settings.light_change_reset) {
+		_reset_counts(p_volume, p_camera_transform.origin);
+	}
 	RENDER_TIMESTAMP("DDGI Schedule");
 	_dispatch(MODE_SCHEDULE_COUNT, p_volume, probe_groups);
 	_dispatch(MODE_SCHEDULE_PLAN, p_volume, 1);

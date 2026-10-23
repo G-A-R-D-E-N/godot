@@ -35,6 +35,7 @@
 #include "core/templates/sort_array.h"
 #include "servers/rendering/renderer_geometry_instance.h"
 #include "servers/rendering/renderer_rd/environment/ddgi.h"
+#include "servers/rendering/renderer_rd/environment/ddgi_light_tracker.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
@@ -682,6 +683,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		_pack_light(p_lights[i], physical_units, exposure, MAX_CANDIDATE_LIGHTS, local_lights);
 	}
 	_select_lights(p_camera_position - anchor);
+	DDGILightTracker::update(lights, anchor, GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/light_change_reset"));
 	_ensure_buffer(light_buffer, light_capacity, MAX_LIGHTS, sizeof(Light), "Ray Scene Lights");
 	if (lights.size()) {
 		RD::get_singleton()->buffer_update(light_buffer, 0, lights.size() * sizeof(Light), lights.ptr());

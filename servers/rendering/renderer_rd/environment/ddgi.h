@@ -65,6 +65,7 @@ public:
 		MODE_SCHEDULE_SCAN,
 		MODE_SCHEDULE_APPEND,
 		MODE_SCHEDULE_FINALIZE,
+		MODE_RESET_COUNTS,
 		MODE_MAX
 	};
 
@@ -100,6 +101,7 @@ public:
 		float normal_bias = 0.1;
 		float view_bias = 0.25;
 		float change_threshold = 0.25;
+		bool light_change_reset = false;
 		float energy = 1.0;
 		float bounce_energy = 1.0;
 		uint32_t debug_view = DEBUG_VIEW_DISABLED;
@@ -143,6 +145,15 @@ public:
 		float pad[3];
 	};
 
+	static constexpr uint32_t RESET_BOXES = 32;
+
+	struct ResetUBO {
+		float boxes[RESET_BOXES][4];
+		uint32_t count;
+		uint32_t all;
+		uint32_t pad[2];
+	};
+
 	struct TracePushConstant {
 		float sky_color_or_orientation[3];
 		uint32_t sky_flags;
@@ -175,6 +186,7 @@ public:
 		RID schedule_groups_buffer;
 		RID dispatch_buffer;
 		RID ubo;
+		RID reset_ubo;
 		RID debug_texture;
 		Size2i debug_size;
 		RID sky_texture;
@@ -202,6 +214,7 @@ private:
 	bool use_octmap_array = false;
 
 	void _dispatch(Mode p_mode, const Ref<Volume> &p_volume, uint32_t p_x_groups, int32_t p_indirect_offset = -1);
+	void _reset_counts(const Ref<Volume> &p_volume, const Vector3 &p_camera_position);
 	void _trace(TraceMode p_mode, const Ref<Volume> &p_volume, RID p_output, const TracePushConstant &p_push_constant, uint32_t p_x_groups, uint32_t p_y_groups, RID p_indirect_buffer = RID(), uint32_t p_indirect_offset = 0, const LocalVector<RD::Uniform> *p_surfel_uniforms = nullptr);
 	void _fill_sky(TracePushConstant &r_push_constant, RID &r_sky_texture, RID p_environment, SkyRD::Sky *p_sky, RID p_camera_attributes) const;
 

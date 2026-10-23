@@ -12,6 +12,8 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 #elif defined(MODE_SCHEDULE_SCAN)
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+#elif defined(MODE_RESET_COUNTS)
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 #else
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 #endif
@@ -576,6 +578,45 @@ void main() {
 	for (uint i = 0; i < DDGI_SCHEDULE_SLOTS; i++) {
 		probe_list.state_counts[i] = 0u;
 	}
+}
+
+#endif
+
+#ifdef MODE_RESET_COUNTS
+
+#define DDGI_RESET_BOXES 32
+
+layout(set = 0, binding = 8, std140) uniform ResetData {
+	vec4 boxes[DDGI_RESET_BOXES];
+	uint count;
+	uint all_probes;
+	uint pad0;
+	uint pad1;
+}
+reset;
+
+void main() {
+	uint level = gl_WorkGroupID.z;
+	ivec3 slot = ivec3(int(gl_WorkGroupID.x) % ddgi.dims.x, int(gl_WorkGroupID.x) / ddgi.dims.x, int(gl_WorkGroupID.y));
+	ivec3 local = (slot + ddgi.dims - ddgi.levels[level].slot_offset) % ddgi.dims;
+	uvec4 data = imageLoad(probe_image, ddgi_probe_texel(level, slot));
+	uint state = ddgi_state(data, level, local);
+	if (state == DDGI_STATE_NONE) {
+		return;
+	}
+
+	bool inside = reset.all_probes != 0u;
+	vec3 offset = (state == DDGI_STATE_ACTIVE || state == DDGI_STATE_IDLE) ? ddgi_offset(data) : vec3(0.0);
+	vec3 position = ddgi_probe_position(level, local, offset);
+	for (uint i = 0u; i < reset.count && !inside; i++) {
+		inside = all(lessThanEqual(abs(position - reset.boxes[i].xyz), vec3(reset.boxes[i].w)));
+	}
+	if (!inside) {
+		return;
+	}
+
+	ivec3 texel = ivec3(ddgi_tile_origin(slot, DDGI_IRRADIANCE_SIZE) + ivec2(gl_LocalInvocationID.xy), int(level));
+	imageStore(irradiance_image, texel, vec4(imageLoad(irradiance_image, texel).rgb, 0.0));
 }
 
 #endif
