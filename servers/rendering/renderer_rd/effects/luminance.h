@@ -124,6 +124,8 @@ public:
 
 	private:
 		bool prefer_raster_effects;
+		uint32_t current_usage = 0;
+		float current_multiplier = 1.0;
 
 	public:
 		Vector<RID> reduce;
@@ -132,6 +134,8 @@ public:
 
 		virtual void configure(RenderSceneBuffersRD *p_render_buffers) override;
 		virtual void free_data() override;
+
+		~LuminanceBuffers();
 
 		void set_prefer_raster_effects(bool p_prefer_raster_effects);
 	};

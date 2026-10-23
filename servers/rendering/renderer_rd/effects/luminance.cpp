@@ -132,8 +132,16 @@ void Luminance::LuminanceBuffers::configure(RenderSceneBuffersRD *p_render_buffe
 		reduce.push_back(texture);
 
 		if (final) {
-			current = RD::get_singleton()->texture_create(tf, RD::TextureView());
-			RD::get_singleton()->texture_clear(current, Color(0.0, 0.0, 0.0), 0u, 1u, 0u, 1u);
+			if (current.is_valid() && (current_usage != tf.usage_bits || current_multiplier != p_render_buffers->get_luminance_multiplier())) {
+				RD::get_singleton()->free_rid(current);
+				current = RID();
+			}
+			if (current.is_null()) {
+				current = RD::get_singleton()->texture_create(tf, RD::TextureView());
+				RD::get_singleton()->texture_clear(current, Color(0.0, 0.0, 0.0), 0u, 1u, 0u, 1u);
+				current_usage = tf.usage_bits;
+				current_multiplier = p_render_buffers->get_luminance_multiplier();
+			}
 			break;
 		}
 	}
@@ -145,14 +153,15 @@ void Luminance::LuminanceBuffers::free_data() {
 	}
 	reduce.clear();
 
-	if (current.is_valid()) {
-		RD::get_singleton()->free_rid(current);
-		current = RID();
-	}
-
 	if (histogram.is_valid()) {
 		RD::get_singleton()->free_rid(histogram);
 		histogram = RID();
+	}
+}
+
+Luminance::LuminanceBuffers::~LuminanceBuffers() {
+	if (current.is_valid() && RD::get_singleton()) {
+		RD::get_singleton()->free_rid(current);
 	}
 }
 
