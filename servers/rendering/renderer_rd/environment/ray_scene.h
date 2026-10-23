@@ -56,6 +56,7 @@ public:
 	enum MaterialFlags {
 		MATERIAL_FLAG_TWO_SIDED = 1,
 		MATERIAL_FLAG_SKIP = 2,
+		MATERIAL_FLAG_SHADOW_PASS = 8,
 	};
 
 	struct Node {

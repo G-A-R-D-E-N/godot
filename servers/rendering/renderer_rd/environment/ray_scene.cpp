@@ -463,6 +463,10 @@ void RayScene::_material_entry(RID p_material, Material &r_material) const {
 	if (!material_storage->material_casts_shadows(p_material)) {
 		r_material.flags |= MATERIAL_FLAG_SKIP;
 	}
+	const Variant shadow_pass = material_storage->material_get_param(p_material, SNAME("gi_shadow_pass"));
+	if (shadow_pass.get_type() == Variant::BOOL ? bool(shadow_pass) : _param_float(shadow_pass, 0.0f) > 0.5f) {
+		r_material.flags |= MATERIAL_FLAG_SHADOW_PASS;
+	}
 }
 
 void RayScene::_pack_light(RID p_light_instance, bool p_physical_units, float p_exposure, uint32_t p_limit, LocalVector<Light> &r_lights) const {
