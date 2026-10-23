@@ -148,6 +148,7 @@ Files extracted from upstream source:
 Patches:
 
 - `0001-revert-bc6h-reorg.patch` ([GH-73715](https://github.com/godotengine/godot/pull/73715))
+- `0002-bc7-unevaluated-rgb-endpoints.patch` (Garden: BC7 RGBA seeds no longer copy RGB endpoints that were never computed)
 
 
 ## d3d12ma
