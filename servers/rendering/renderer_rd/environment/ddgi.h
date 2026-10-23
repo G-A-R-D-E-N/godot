@@ -150,8 +150,7 @@ public:
 	struct ResetUBO {
 		float boxes[RESET_BOXES][4];
 		uint32_t count;
-		uint32_t all;
-		uint32_t pad[2];
+		uint32_t pad[3];
 	};
 
 	struct TracePushConstant {

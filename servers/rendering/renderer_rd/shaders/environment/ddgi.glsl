@@ -589,9 +589,9 @@ void main() {
 layout(set = 0, binding = 8, std140) uniform ResetData {
 	vec4 boxes[DDGI_RESET_BOXES];
 	uint count;
-	uint all_probes;
 	uint pad0;
 	uint pad1;
+	uint pad2;
 }
 reset;
 
@@ -605,7 +605,7 @@ void main() {
 		return;
 	}
 
-	bool inside = reset.all_probes != 0u;
+	bool inside = false;
 	vec3 offset = (state == DDGI_STATE_ACTIVE || state == DDGI_STATE_IDLE) ? ddgi_offset(data) : vec3(0.0);
 	vec3 position = ddgi_probe_position(level, local, offset);
 	for (uint i = 0u; i < reset.count && !inside; i++) {

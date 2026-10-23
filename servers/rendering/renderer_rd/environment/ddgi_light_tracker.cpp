@@ -31,108 +31,207 @@
 
 #include "ddgi_light_tracker.h"
 
+#include "core/templates/hash_map.h"
 #include "servers/rendering/rendering_server_enums.h"
-
-#include <cstring>
 
 using namespace RendererRD;
 
 namespace {
 
-struct Tracked {
+struct Record {
 	RayScene::Light light;
 	Vector3 world;
+	uint64_t last_fire = 0;
+	uint32_t seen = 0;
 };
 
-LocalVector<Tracked> previous;
+constexpr float ENERGY_BAND_LOW = 0.8f;
+constexpr float ENERGY_BAND_HIGH = 1.25f;
+constexpr float COLOR_TOLERANCE = 0.1f;
+constexpr float RANGE_TOLERANCE = 0.1f;
+constexpr float MOVE_SPACING_FRACTION = 0.25f;
+constexpr float SPOT_COS_TURN = 0.98480775f;
+constexpr float SPOT_TOLERANCE = 0.1f;
+constexpr float SAME_CENTER_SQUARED = 1e-6f;
+constexpr float SAME_HALF = 1e-3f;
+
+HashMap<RID, Record> records;
 LocalVector<DDGILightTracker::Box> pending;
-bool previous_valid = false;
-bool pending_all = false;
+DDGILightTracker::Stats window;
+bool enabled = false;
+bool initialized = false;
+uint64_t frame_now = 0;
+uint32_t generation = 0;
+float spacing = 1.0f;
 
-constexpr double SAME_POSITION_SQUARED = 1e-6;
-
-bool same(const Tracked &p_a, const Tracked &p_b) {
-	return memcmp(&p_a.light, &p_b.light, sizeof(RayScene::Light)) == 0 && p_a.world.distance_squared_to(p_b.world) < SAME_POSITION_SQUARED;
+float half_of(const RayScene::Light &p_light) {
+	return 1.0f / MAX(p_light.inv_radius, 1e-4f);
 }
 
-void post(const Tracked &p_tracked) {
-	if (pending.size() >= DDGILightTracker::MAX_BOXES) {
-		pending_all = true;
+bool differs(const Record &p_reference, const RayScene::Light &p_light, const Vector3 &p_world) {
+	const RayScene::Light &ref = p_reference.light;
+	if (ref.type != p_light.type) {
+		return true;
+	}
+	if (ref.energy == 0.0f || p_light.energy == 0.0f || (ref.energy < 0.0f) != (p_light.energy < 0.0f)) {
+		if (ref.energy != p_light.energy) {
+			return true;
+		}
+	} else {
+		const float ratio = p_light.energy / ref.energy;
+		if (ratio < ENERGY_BAND_LOW || ratio > ENERGY_BAND_HIGH) {
+			return true;
+		}
+	}
+	float reference_peak = 1e-4f;
+	float color_delta = 0.0f;
+	for (int k = 0; k < 3; k++) {
+		reference_peak = MAX(reference_peak, ref.color[k]);
+		color_delta = MAX(color_delta, Math::abs(p_light.color[k] - ref.color[k]));
+	}
+	if (color_delta > COLOR_TOLERANCE * reference_peak) {
+		return true;
+	}
+	if (ref.inv_radius > 0.0f && Math::abs(p_light.inv_radius / ref.inv_radius - 1.0f) > RANGE_TOLERANCE) {
+		return true;
+	}
+	if (p_reference.world.distance_to(p_world) > MOVE_SPACING_FRACTION * spacing) {
+		return true;
+	}
+	if (p_light.type == uint32_t(RSE::LIGHT_SPOT)) {
+		const Vector3 a(ref.direction[0], ref.direction[1], ref.direction[2]);
+		const Vector3 b(p_light.direction[0], p_light.direction[1], p_light.direction[2]);
+		if (a.dot(b) < SPOT_COS_TURN) {
+			return true;
+		}
+		if (Math::abs(p_light.cos_spot_angle - ref.cos_spot_angle) > SPOT_TOLERANCE * MAX(Math::abs(ref.cos_spot_angle), 1e-3f)) {
+			return true;
+		}
+		if (Math::abs(p_light.inv_spot_attenuation - ref.inv_spot_attenuation) > SPOT_TOLERANCE * MAX(Math::abs(ref.inv_spot_attenuation), 1e-3f)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void post(const Vector3 &p_center, float p_half) {
+	for (const DDGILightTracker::Box &box : pending) {
+		if (box.center.distance_squared_to(p_center) < SAME_CENTER_SQUARED && Math::abs(box.half - p_half) < SAME_HALF) {
+			return;
+		}
+	}
+	if (pending.size() >= DDGILightTracker::MAX_PENDING) {
+		uint32_t nearest = 0;
+		real_t best = Math::INF;
+		for (uint32_t i = 0; i < pending.size(); i++) {
+			const real_t d = pending[i].center.distance_squared_to(p_center);
+			if (d < best) {
+				best = d;
+				nearest = i;
+			}
+		}
+		DDGILightTracker::Box &box = pending[nearest];
+		const Vector3 low = (box.center - Vector3(box.half, box.half, box.half)).min(p_center - Vector3(p_half, p_half, p_half));
+		const Vector3 high = (box.center + Vector3(box.half, box.half, box.half)).max(p_center + Vector3(p_half, p_half, p_half));
+		const Vector3 extent = high - low;
+		box.center = (low + high) * 0.5;
+		box.half = float(MAX(extent.x, MAX(extent.y, extent.z)) * 0.5);
 		return;
 	}
 	DDGILightTracker::Box box;
-	box.center = p_tracked.world;
-	box.half = 1.0f / MAX(p_tracked.light.inv_radius, 1e-4f);
+	box.center = p_center;
+	box.half = p_half;
 	pending.push_back(box);
 }
 
 } // namespace
 
-void DDGILightTracker::update(const LocalVector<RayScene::Light> &p_lights, const Vector3 &p_anchor, bool p_enabled) {
+void DDGILightTracker::begin(bool p_enabled, uint64_t p_frame, float p_spacing) {
 	if (!p_enabled) {
-		previous.clear();
-		pending.clear();
-		previous_valid = false;
-		pending_all = false;
+		if (enabled) {
+			records.clear();
+			pending.clear();
+			window = Stats();
+			initialized = false;
+		}
+		enabled = false;
 		return;
 	}
-	LocalVector<Tracked> current;
-	for (const RayScene::Light &light : p_lights) {
-		if (light.type == uint32_t(RSE::LIGHT_DIRECTIONAL)) {
-			continue;
-		}
-		Tracked tracked;
-		tracked.light = light;
-		tracked.world = Vector3(light.position[0], light.position[1], light.position[2]) + p_anchor;
-		for (int k = 0; k < 3; k++) {
-			tracked.light.position[k] = 0.0f;
-		}
-		current.push_back(tracked);
-	}
-	if (previous_valid) {
-		LocalVector<uint8_t> matched;
-		matched.resize(previous.size());
-		for (uint32_t i = 0; i < matched.size(); i++) {
-			matched[i] = 0;
-		}
-		LocalVector<uint8_t> current_matched;
-		current_matched.resize(current.size());
-		for (uint32_t i = 0; i < current.size(); i++) {
-			current_matched[i] = 0;
-			if (i < previous.size() && same(current[i], previous[i])) {
-				current_matched[i] = 1;
-				matched[i] = 1;
-			}
-		}
-		for (uint32_t i = 0; i < current.size(); i++) {
-			if (current_matched[i]) {
-				continue;
-			}
-			for (uint32_t j = 0; j < previous.size(); j++) {
-				if (!matched[j] && same(current[i], previous[j])) {
-					matched[j] = 1;
-					current_matched[i] = 1;
-					break;
-				}
-			}
-			if (!current_matched[i]) {
-				post(current[i]);
-			}
-		}
-		for (uint32_t j = 0; j < previous.size(); j++) {
-			if (!matched[j]) {
-				post(previous[j]);
-			}
-		}
-	}
-	previous = current;
-	previous_valid = true;
+	enabled = true;
+	frame_now = p_frame;
+	spacing = p_spacing;
+	generation++;
 }
 
-bool DDGILightTracker::take(LocalVector<Box> &r_boxes) {
-	r_boxes = pending;
-	const bool all = pending_all;
-	pending.clear();
-	pending_all = false;
-	return all;
+void DDGILightTracker::observe(RID p_light, const RayScene::Light &p_data, const Vector3 &p_anchor) {
+	if (!enabled || p_data.type == uint32_t(RSE::LIGHT_DIRECTIONAL)) {
+		return;
+	}
+	const Vector3 world = Vector3(p_data.position[0], p_data.position[1], p_data.position[2]) + p_anchor;
+	Record *record = records.getptr(p_light);
+	if (!record) {
+		Record created;
+		created.light = p_data;
+		created.world = world;
+		created.last_fire = frame_now;
+		created.seen = generation;
+		records.insert(p_light, created);
+		if (initialized) {
+			post(world, half_of(p_data));
+			window.fired++;
+		}
+		return;
+	}
+	record->seen = generation;
+	if (!differs(*record, p_data, world) || frame_now - record->last_fire < RATE_FRAMES) {
+		return;
+	}
+	post(record->world, half_of(record->light));
+	post(world, half_of(p_data));
+	window.fired++;
+	record->light = p_data;
+	record->world = world;
+	record->last_fire = frame_now;
+}
+
+void DDGILightTracker::end() {
+	if (!enabled) {
+		return;
+	}
+	LocalVector<RID> gone;
+	for (const KeyValue<RID, Record> &entry : records) {
+		if (entry.value.seen != generation) {
+			gone.push_back(entry.key);
+		}
+	}
+	for (const RID &id : gone) {
+		const Record &record = records[id];
+		if (initialized) {
+			post(record.world, half_of(record.light));
+			window.fired++;
+		}
+		records.erase(id);
+	}
+	initialized = true;
+}
+
+void DDGILightTracker::take(LocalVector<Box> &r_boxes) {
+	r_boxes.clear();
+	const uint32_t count = MIN(uint32_t(pending.size()), MAX_BOXES);
+	for (uint32_t i = 0; i < count; i++) {
+		r_boxes.push_back(pending[i]);
+	}
+	LocalVector<Box> rest;
+	for (uint32_t i = count; i < pending.size(); i++) {
+		rest.push_back(pending[i]);
+	}
+	pending = rest;
+}
+
+uint32_t DDGILightTracker::pending_count() {
+	return pending.size();
+}
+
+DDGILightTracker::Stats &DDGILightTracker::stats() {
+	return window;
 }

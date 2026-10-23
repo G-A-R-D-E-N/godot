@@ -320,17 +320,53 @@ void DDGI::_dispatch(Mode p_mode, const Ref<Volume> &p_volume, uint32_t p_x_grou
 	RD::get_singleton()->compute_list_end();
 }
 
+static uint32_t count_touched(const DDGI::Volume &p_volume, const LocalVector<DDGILightTracker::Box> &p_boxes, uint32_t &r_total) {
+	const Vector3i dims = p_volume.settings.dims;
+	const uint32_t per_level = uint32_t(dims.x) * uint32_t(dims.y) * uint32_t(dims.z);
+	uint32_t touched = 0;
+	r_total = 0;
+	LocalVector<uint8_t> marked;
+	for (uint32_t l = 0; l < p_volume.settings.level_count; l++) {
+		if (!p_volume.level_valid[l]) {
+			continue;
+		}
+		r_total += per_level;
+		marked.resize(per_level);
+		for (uint32_t i = 0; i < per_level; i++) {
+			marked[i] = 0;
+		}
+		const double spacing = double(p_volume.settings.spacing) * double(1 << l);
+		for (const DDGILightTracker::Box &box : p_boxes) {
+			Vector3i low, high;
+			for (int k = 0; k < 3; k++) {
+				low[k] = MAX(0, int32_t(Math::ceil((double(box.center[k]) - double(box.half)) / spacing)) - p_volume.g_min[l][k]);
+				high[k] = MIN(dims[k] - 1, int32_t(Math::floor((double(box.center[k]) + double(box.half)) / spacing)) - p_volume.g_min[l][k]);
+			}
+			for (int32_t z = low.z; z <= high.z; z++) {
+				for (int32_t y = low.y; y <= high.y; y++) {
+					for (int32_t x = low.x; x <= high.x; x++) {
+						marked[uint32_t(x + dims.x * (y + dims.y * z))] = 1;
+					}
+				}
+			}
+		}
+		for (uint32_t i = 0; i < per_level; i++) {
+			touched += marked[i];
+		}
+	}
+	return touched;
+}
+
 void DDGI::_reset_counts(const Ref<Volume> &p_volume, const Vector3 &p_camera_position) {
 	LocalVector<DDGILightTracker::Box> boxes;
-	const bool all = DDGILightTracker::take(boxes);
-	if (boxes.is_empty() && !all) {
+	DDGILightTracker::take(boxes);
+	if (boxes.is_empty()) {
 		return;
 	}
 	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
 	ERR_FAIL_NULL(uniform_set_cache);
 	ResetUBO reset = {};
 	reset.count = MIN(uint32_t(boxes.size()), RESET_BOXES);
-	reset.all = all ? 1u : 0u;
 	for (uint32_t i = 0; i < reset.count; i++) {
 		const Vector3 relative = boxes[i].center - p_camera_position;
 		reset.boxes[i][0] = float(relative.x);
@@ -339,6 +375,17 @@ void DDGI::_reset_counts(const Ref<Volume> &p_volume, const Vector3 &p_camera_po
 		reset.boxes[i][3] = boxes[i].half;
 	}
 	RD::get_singleton()->buffer_update(p_volume->reset_ubo, 0, sizeof(ResetUBO), &reset);
+
+	DDGILightTracker::Stats &stats = DDGILightTracker::stats();
+	stats.dispatches++;
+	stats.dispatched += reset.count;
+	if (GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/light_change_reset_log")) {
+		uint32_t total = 0;
+		const uint32_t touched = count_touched(*p_volume.ptr(), boxes, total);
+		stats.touched += touched;
+		stats.total_probes = total;
+		stats.share_sum += total > 0 ? double(touched) / double(total) : 0.0;
+	}
 
 	RID shader_rid = shader.version_get_shader(shader_version, MODE_RESET_COUNTS);
 	LocalVector<RD::Uniform> uniforms;
@@ -468,6 +515,13 @@ void DDGI::process(const Ref<Volume> &p_volume, RID p_environment, SkyRD::Sky *p
 	RD::get_singleton()->draw_command_begin_label("DDGI Update");
 	if (p_volume->settings.light_change_reset) {
 		_reset_counts(p_volume, p_camera_transform.origin);
+		if (GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/light_change_reset_log") && p_volume->frame % 100 == 0) {
+			DDGILightTracker::Stats &stats = DDGILightTracker::stats();
+			const double total = double(MAX(stats.total_probes, 1u));
+			const double per_dispatch = stats.dispatches > 0 ? stats.share_sum / double(stats.dispatches) : 0.0;
+			print_line(vformat("DDGI_RESET frame %d fired %d dispatched %d pending %d dispatches %d touched %d share_total %.5f share_per_dispatch %.5f", int64_t(p_volume->frame), int64_t(stats.fired), int64_t(stats.dispatched), int64_t(DDGILightTracker::pending_count()), int64_t(stats.dispatches), int64_t(stats.touched), double(stats.touched) / total, per_dispatch));
+			stats = DDGILightTracker::Stats();
+		}
 	}
 	RENDER_TIMESTAMP("DDGI Schedule");
 	_dispatch(MODE_SCHEDULE_COUNT, p_volume, probe_groups);

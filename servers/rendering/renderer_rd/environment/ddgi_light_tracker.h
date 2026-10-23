@@ -33,6 +33,7 @@
 
 #include "core/math/vector3.h"
 #include "core/templates/local_vector.h"
+#include "core/templates/rid.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
 
 namespace RendererRD {
@@ -40,14 +41,29 @@ namespace RendererRD {
 class DDGILightTracker {
 public:
 	static constexpr uint32_t MAX_BOXES = 32;
+	static constexpr uint32_t MAX_PENDING = 1024;
+	static constexpr uint64_t RATE_FRAMES = 8;
 
 	struct Box {
 		Vector3 center;
 		float half = 0.0f;
 	};
 
-	static void update(const LocalVector<RayScene::Light> &p_lights, const Vector3 &p_anchor, bool p_enabled);
-	static bool take(LocalVector<Box> &r_boxes);
+	struct Stats {
+		uint32_t fired = 0;
+		uint32_t dispatched = 0;
+		uint32_t dispatches = 0;
+		uint64_t touched = 0;
+		double share_sum = 0.0;
+		uint32_t total_probes = 0;
+	};
+
+	static void begin(bool p_enabled, uint64_t p_frame, float p_spacing);
+	static void observe(RID p_light, const RayScene::Light &p_data, const Vector3 &p_anchor);
+	static void end();
+	static void take(LocalVector<Box> &r_boxes);
+	static uint32_t pending_count();
+	static Stats &stats();
 };
 
 } // namespace RendererRD
