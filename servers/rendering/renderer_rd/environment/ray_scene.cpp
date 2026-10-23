@@ -416,18 +416,6 @@ static float _param_float(const Variant &p_value, float p_default) {
 	return (p_value.get_type() == Variant::FLOAT || p_value.get_type() == Variant::INT) ? float(p_value) : p_default;
 }
 
-static bool _param_flag(const Variant &p_value) {
-	switch (p_value.get_type()) {
-		case Variant::BOOL:
-			return bool(p_value);
-		case Variant::FLOAT:
-		case Variant::INT:
-			return float(p_value) > 0.5f;
-		default:
-			return false;
-	}
-}
-
 static void _store_color(float *r_values, const Color &p_color, float p_scale) {
 	r_values[0] = p_color.r * p_scale;
 	r_values[1] = p_color.g * p_scale;
@@ -475,7 +463,8 @@ void RayScene::_material_entry(RID p_material, Material &r_material) const {
 	if (!material_storage->material_casts_shadows(p_material)) {
 		r_material.flags |= MATERIAL_FLAG_SKIP;
 	}
-	if (_param_flag(material_storage->material_get_param(p_material, SNAME("gi_shadow_pass")))) {
+	const Variant shadow_pass = material_storage->material_get_param(p_material, SNAME("gi_shadow_pass"));
+	if (shadow_pass.get_type() == Variant::BOOL ? bool(shadow_pass) : _param_float(shadow_pass, 0.0f) > 0.5f) {
 		r_material.flags |= MATERIAL_FLAG_SHADOW_PASS;
 	}
 }

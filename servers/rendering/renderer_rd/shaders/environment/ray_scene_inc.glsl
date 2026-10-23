@@ -116,6 +116,7 @@ bool ray_scene_box(vec3 p_origin, vec3 p_inv_direction, vec3 p_min, vec3 p_max, 
 
 void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, vec3 p_origin, vec3 p_direction, bool p_any, inout RaySceneHit r_hit) {
 	vec3 inv_direction = ray_scene_safe_inverse(p_direction);
+	uint skip_mask = p_any ? (RAY_SCENE_MATERIAL_SKIP | RAY_SCENE_MATERIAL_SHADOW_PASS) : RAY_SCENE_MATERIAL_SKIP;
 	uint stack[RAY_SCENE_BLAS_STACK_SIZE];
 	uint sp = 0;
 
@@ -148,11 +149,7 @@ void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, 
 				}
 				float t = dot(triangle.e2.xyz, q) * inv_det;
 				if (t > 0.0 && t < r_hit.t) {
-					uint material_flags = ray_scene_materials.data[p_material_offset + triangle.surface].flags;
-					if ((material_flags & RAY_SCENE_MATERIAL_SKIP) != 0u) {
-						continue;
-					}
-					if (p_any && (material_flags & RAY_SCENE_MATERIAL_SHADOW_PASS) != 0u) {
+					if ((ray_scene_materials.data[p_material_offset + triangle.surface].flags & skip_mask) != 0u) {
 						continue;
 					}
 					r_hit.t = t;
