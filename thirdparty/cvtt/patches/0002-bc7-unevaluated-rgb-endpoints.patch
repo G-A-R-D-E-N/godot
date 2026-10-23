@@ -1,0 +1,29 @@
+diff --git a/thirdparty/cvtt/ConvectionKernels_BC67.cpp b/thirdparty/cvtt/ConvectionKernels_BC67.cpp
+index 011f51570..f2802fd06 100644
+--- a/thirdparty/cvtt/ConvectionKernels_BC67.cpp
++++ b/thirdparty/cvtt/ConvectionKernels_BC67.cpp
+@@ -1249,6 +1249,7 @@ void cvtt::Internal::BC7Computer::TrySinglePlane(uint32_t flags, const MUInt15 p
+         channelWeightsSq[ch] = channelWeights[ch] * channelWeights[ch];
+ 
+     SinglePlaneTemporaries temps;
++    bool rgbEvaluated[BC7Data::g_numShapesAll] = {};
+ 
+     MUInt15 maxAlpha = ParallelMath::MakeUInt15(0);
+     MUInt15 minAlpha = ParallelMath::MakeUInt15(255);
+@@ -1305,6 +1306,7 @@ void cvtt::Internal::BC7Computer::TrySinglePlane(uint32_t flags, const MUInt15 p
+                 epSelector.FinishPass(epPass);
+             }
+             temps.unfinishedRGB[shape] = epSelector.GetEndpoints(channelWeights);
++            rgbEvaluated[shape] = true;
+         }
+     }
+ 
+@@ -1317,7 +1319,7 @@ void cvtt::Internal::BC7Computer::TrySinglePlane(uint32_t flags, const MUInt15 p
+         {
+             int shape = shapeList[shapeIter];
+ 
+-            if (anyBlockHasAlpha || !allowRGBModes)
++            if (anyBlockHasAlpha || !allowRGBModes || !rgbEvaluated[shape])
+             {
+                 int shapeStart = BC7Data::g_shapeRanges[shape][0];
+                 int shapeSize = BC7Data::g_shapeRanges[shape][1];
