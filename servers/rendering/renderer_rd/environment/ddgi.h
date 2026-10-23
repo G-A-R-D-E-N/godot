@@ -100,8 +100,8 @@ public:
 		float hysteresis = 0.97;
 		float normal_bias = 0.1;
 		float view_bias = 0.25;
-		float change_threshold = 0.25;
-		bool light_change_reset = false;
+		float change_threshold = 0.75;
+		bool light_change_reset = true;
 		float energy = 1.0;
 		float bounce_energy = 1.0;
 		uint32_t debug_view = DEBUG_VIEW_DISABLED;
