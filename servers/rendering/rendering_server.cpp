@@ -3909,7 +3909,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/hysteresis", PROPERTY_HINT_RANGE, "0.0,0.999,0.001"), 0.97);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/normal_bias", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), 0.1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/view_bias", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), 0.25);
-	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/change_threshold", PROPERTY_HINT_RANGE, "0.05,1.0,0.01"), 0.75);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/change_threshold", PROPERTY_HINT_RANGE, "0.05,1.0,0.01"), 0.25);
 	GLOBAL_DEF("rendering/global_illumination/ddgi/light_change_reset", true);
 	GLOBAL_DEF("rendering/global_illumination/ddgi/light_change_reset_log", false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/energy", PROPERTY_HINT_RANGE, "0.0,16.0,0.01"), 1.0);
