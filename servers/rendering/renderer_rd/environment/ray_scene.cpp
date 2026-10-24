@@ -457,15 +457,15 @@ static RID _param_texture(const Variant &p_value) {
 	return p_value.get_type() == Variant::RID ? RID(p_value) : RID();
 }
 
-void RayScene::_warn_albedo_fallback(RID p_material, RID p_texture) {
+void RayScene::_warn_albedo_fallback(RID p_material, RID p_texture, RID p_mesh, uint32_t p_surface) {
 	if (albedo_fallback_warned.has(p_material)) {
 		return;
 	}
 	albedo_fallback_warned.insert(p_material);
-	WARN_PRINT(vformat("Ray scene: a material without gi_albedo takes the texture-mean albedo fallback (texture \"%s\").", TextureStorage::get_singleton()->texture_get_path(p_texture)));
+	WARN_PRINT(vformat("Ray scene: a material without gi_albedo takes the texture-mean albedo fallback (mesh \"%s\", surface %d, texture \"%s\").", MeshStorage::get_singleton()->mesh_get_path(p_mesh), p_surface, TextureStorage::get_singleton()->texture_get_path(p_texture)));
 }
 
-void RayScene::_material_entry(RID p_material, Material &r_material) {
+void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, Material &r_material) {
 	r_material = {};
 	r_material.albedo[0] = r_material.albedo[1] = r_material.albedo[2] = 0.48f;
 	if (p_material.is_null()) {
@@ -494,7 +494,7 @@ void RayScene::_material_entry(RID p_material, Material &r_material) {
 				_param_color(material_storage->material_get_declared_param(p_material, SNAME("base_color_texture_tint")), tint);
 			}
 			albedo = tint.srgb_to_linear() * TEXTURE_MEAN_ALBEDO;
-			_warn_albedo_fallback(p_material, texture);
+			_warn_albedo_fallback(p_material, texture, p_mesh, p_surface);
 			albedo_sources[ALBEDO_TEXTURED]++;
 		} else {
 			albedo = albedo.srgb_to_linear();
@@ -506,7 +506,7 @@ void RayScene::_material_entry(RID p_material, Material &r_material) {
 		const RID texture = _param_texture(material_storage->material_get_declared_param(p_material, SNAME("texture_albedo")));
 		if (texture.is_valid()) {
 			albedo *= TEXTURE_MEAN_ALBEDO;
-			_warn_albedo_fallback(p_material, texture);
+			_warn_albedo_fallback(p_material, texture, p_mesh, p_surface);
 		}
 		_store_albedo(r_material.albedo, albedo, 1.0f);
 		albedo_sources[ALBEDO_STANDARD]++;
@@ -702,7 +702,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			CachedMaterial *cached = material_cache.getptr(material);
 			if (!cached) {
 				CachedMaterial entry;
-				_material_entry(material, entry.entry);
+				_material_entry(material, mesh_rid, s, entry.entry);
 				_instance_slots(material, entry);
 				cached = &material_cache.insert(material, entry)->value;
 			}
