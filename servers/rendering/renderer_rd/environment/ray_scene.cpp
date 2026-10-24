@@ -544,6 +544,11 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 			additive_skipped++;
 		}
 	}
+	const Variant coverage = material_storage->material_get_param(p_material, SNAME("gi_coverage"));
+	if (coverage.get_type() == Variant::FLOAT || coverage.get_type() == Variant::INT) {
+		r_material.flags |= MATERIAL_FLAG_BLEND;
+		r_material.coverage = CLAMP(float(coverage), 0.0f, 1.0f);
+	}
 	const Variant shadow_pass = material_storage->material_get_param(p_material, SNAME("gi_shadow_pass"));
 	if (shadow_pass.get_type() == Variant::BOOL ? bool(shadow_pass) : _param_float(shadow_pass, 0.0f) > 0.5f) {
 		r_material.flags |= MATERIAL_FLAG_SHADOW_PASS;

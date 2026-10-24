@@ -163,7 +163,7 @@ vec4 shade_hit(vec3 p_origin, vec3 p_direction, RaySceneHit hit, uint p_seed) {
 
 vec4 shade_ray(vec3 p_origin, vec3 p_direction, float p_max_distance, uint p_seed) {
 	RaySceneHit hit;
-	if (!ray_scene_trace(p_origin, p_direction, p_max_distance, false, hit)) {
+	if (!ray_scene_trace(p_origin, p_direction, p_max_distance, false, p_seed, hit)) {
 		return vec4(min(sky_radiance_in(p_direction), vec3(DDGI_MAX_RADIANCE)), DDGI_MISS_DISTANCE);
 	}
 	return shade_hit(p_origin, p_direction, hit, p_seed);
@@ -230,11 +230,11 @@ void main() {
 		refresh_clip = surfels.data[index].samples == 0u || ((surfel_hash(index) + surfel_data.frame) & 63u) == 0u;
 		if (refresh_clip) {
 			vec2 clip_direction = surfel_clip_directions[ray];
-			if (ray_scene_trace(origin, tangent * clip_direction.x + bitangent * clip_direction.y, clip_length, false, hit)) {
+			if (ray_scene_trace(origin, tangent * clip_direction.x + bitangent * clip_direction.y, clip_length, false, seed ^ 0x5bd1e995u, hit)) {
 				clip = min(14u, uint(ceil(hit.t / clip_length * 14.0)));
 			}
 		}
-		if (ray_scene_trace(origin, direction, surfel_data.ray_distance, false, hit)) {
+		if (ray_scene_trace(origin, direction, surfel_data.ray_distance, false, seed, hit)) {
 			vec4 shaded = shade_hit(origin, direction, hit, seed * 0x2c1b3c6du + 0x297a2d39u);
 			radiance = shaded.rgb;
 			backface = shaded.a < 0.0 ? 1.0 : 0.0;
@@ -348,7 +348,7 @@ void main() {
 	vec3 color;
 	if (params.debug_mode == 1u) {
 		RaySceneHit hit;
-		if (ray_scene_trace(ray_scene.camera_to_anchor, direction, ddgi.max_distance, false, hit)) {
+		if (ray_scene_trace(ray_scene.camera_to_anchor, direction, ddgi.max_distance, false, uint(pixel.y) * 65537u + uint(pixel.x), hit)) {
 			vec3 normal = ray_scene_hit_normal(hit);
 			vec4 irradiance = ddgi_sample(direction * hit.t, hit.backface ? -normal : normal, -direction);
 			color = irradiance.a > 0.0 ? irradiance.rgb : vec3(1.0, 0.0, 1.0);
@@ -360,7 +360,7 @@ void main() {
 	} else if (params.debug_mode == 4u || params.debug_mode == 5u) {
 		RaySceneHit hit;
 		color = vec3(0.0);
-		if (ray_scene_trace(ray_scene.camera_to_anchor, direction, ddgi.max_distance, false, hit)) {
+		if (ray_scene_trace(ray_scene.camera_to_anchor, direction, ddgi.max_distance, false, uint(pixel.y) * 65537u + uint(pixel.x), hit)) {
 			vec3 position = direction * hit.t;
 			vec3 normal = ray_scene_hit_normal(hit);
 			normal = hit.backface ? -normal : normal;
@@ -391,7 +391,7 @@ void main() {
 		color = color / max(vec3(1.0) - color, vec3(1e-4));
 	} else {
 		RaySceneHit hit;
-		if (ray_scene_trace(ray_scene.camera_to_anchor, direction, ddgi.max_distance, false, hit)) {
+		if (ray_scene_trace(ray_scene.camera_to_anchor, direction, ddgi.max_distance, false, uint(pixel.y) * 65537u + uint(pixel.x), hit)) {
 			color = hit.backface ? vec3(1.0, 0.0, 0.0) : ray_scene_hit_normal(hit) * 0.5 + 0.5;
 		} else {
 			color = vec3(0.0);

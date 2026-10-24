@@ -60,6 +60,7 @@ public:
 	enum MaterialFlags {
 		MATERIAL_FLAG_TWO_SIDED = 1,
 		MATERIAL_FLAG_SKIP = 2,
+		MATERIAL_FLAG_BLEND = 4,
 		MATERIAL_FLAG_SHADOW_PASS = 8,
 		MATERIAL_FLAG_SHADOW_ONLY = 16,
 	};
@@ -88,7 +89,7 @@ public:
 
 	struct Material {
 		float albedo[3];
-		float pad;
+		float coverage;
 		float emission[3];
 		uint32_t flags;
 	};
