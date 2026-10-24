@@ -181,7 +181,7 @@ void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, 
 					if (t >= limit) {
 						continue;
 					}
-					if (blend && float(ray_scene_hash(p_seed + triangle_index * 0x9e3779b9u + p_instance * 0x85ebca6bu) >> 8u) >= ray_scene_materials.data[material_index].coverage * 16777216.0) {
+					if (blend && float(ray_scene_hash(ray_scene_hash(p_seed + triangle_index) + p_instance) >> 8u) >= ray_scene_materials.data[material_index].coverage * 16777216.0) {
 						continue;
 					}
 					r_hit.t = t;
