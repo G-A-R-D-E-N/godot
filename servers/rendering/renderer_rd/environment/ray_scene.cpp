@@ -445,9 +445,12 @@ static constexpr float ALBEDO_MAX = 0.9f;
 static const Color TEXTURE_MEAN_ALBEDO = Color(0.1759f, 0.1502f, 0.1185f);
 
 static void _store_albedo(float *r_values, const Color &p_color, float p_scale) {
-	r_values[0] = CLAMP(p_color.r * p_scale, 0.0f, ALBEDO_MAX);
-	r_values[1] = CLAMP(p_color.g * p_scale, 0.0f, ALBEDO_MAX);
-	r_values[2] = CLAMP(p_color.b * p_scale, 0.0f, ALBEDO_MAX);
+	const Color albedo(MAX(p_color.r * p_scale, 0.0f), MAX(p_color.g * p_scale, 0.0f), MAX(p_color.b * p_scale, 0.0f));
+	const float peak = albedo.get_v();
+	const float scale = peak > ALBEDO_MAX ? ALBEDO_MAX / peak : 1.0f;
+	r_values[0] = albedo.r * scale;
+	r_values[1] = albedo.g * scale;
+	r_values[2] = albedo.b * scale;
 }
 
 static RID _param_texture(const Variant &p_value) {
