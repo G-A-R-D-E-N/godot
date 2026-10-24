@@ -61,6 +61,8 @@ public:
 		MODE_PROBE_STATE,
 		MODE_SCHEDULE_COUNT,
 		MODE_SCHEDULE_PLAN,
+		MODE_SCHEDULE_SELECT,
+		MODE_SCHEDULE_SCAN,
 		MODE_SCHEDULE_APPEND,
 		MODE_SCHEDULE_FINALIZE,
 		MODE_MAX
@@ -166,6 +168,7 @@ public:
 		RID probe_data;
 		RID rays;
 		RID probe_list_buffer;
+		RID schedule_groups_buffer;
 		RID dispatch_buffer;
 		RID ubo;
 		RID debug_texture;
