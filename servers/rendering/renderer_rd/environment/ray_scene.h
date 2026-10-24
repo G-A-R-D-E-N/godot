@@ -149,6 +149,18 @@ private:
 
 	LocalVector<Material> materials;
 	HashMap<RID, CachedMaterial> material_cache;
+	enum AlbedoSource {
+		ALBEDO_GI,
+		ALBEDO_GI_CAPPED,
+		ALBEDO_TEXTURED,
+		ALBEDO_UNTEXTURED,
+		ALBEDO_STANDARD,
+		ALBEDO_DEFAULT,
+		ALBEDO_SOURCE_MAX,
+	};
+	uint32_t albedo_sources[ALBEDO_SOURCE_MAX] = {};
+	uint32_t reported_albedo_sources[ALBEDO_SOURCE_MAX] = {};
+	HashSet<RID> albedo_fallback_warned;
 	float emission_scale = 1.0f;
 	LocalVector<Light> lights;
 	LocalVector<Light> local_lights;
@@ -174,7 +186,8 @@ private:
 	void _capture_surface(MeshEntry &r_mesh, uint32_t p_surface, const RenderingServerTypes::SurfaceData &p_surface_data);
 	void _build_blas(MeshEntry &p_mesh);
 	void _assemble(const LocalVector<RID> &p_meshes);
-	void _material_entry(RID p_material, Material &r_material) const;
+	void _material_entry(RID p_material, Material &r_material);
+	void _warn_albedo_fallback(RID p_material, RID p_texture);
 	void _instance_slots(RID p_material, CachedMaterial &r_cached) const;
 	void _pack_light(RID p_light_instance, bool p_physical_units, float p_exposure, uint32_t p_limit, LocalVector<Light> &r_lights) const;
 	void _select_lights(const Vector3 &p_camera);
