@@ -2408,6 +2408,18 @@ Variant MaterialStorage::material_get_declared_param(RID p_material, const Strin
 	return material->shader->data->get_default_parameter(p_param);
 }
 
+int32_t MaterialStorage::material_get_instance_float_index(RID p_material, const StringName &p_param) const {
+	Material *material = material_owner.get_or_null(p_material);
+	if (!material || !material->shader || !material->shader->data) {
+		return -1;
+	}
+	const ShaderLanguage::ShaderNode::Uniform *uniform = material->shader->data->uniforms.getptr(p_param);
+	if (!uniform || uniform->scope != ShaderLanguage::ShaderNode::Uniform::SCOPE_INSTANCE || uniform->type != ShaderLanguage::TYPE_FLOAT) {
+		return -1;
+	}
+	return uniform->instance_index;
+}
+
 Variant MaterialStorage::shader_get_parameter_default(RID p_shader, const StringName &p_param) const {
 	Shader *shader = shader_owner.get_or_null(p_shader);
 	ERR_FAIL_NULL_V(shader, Variant());

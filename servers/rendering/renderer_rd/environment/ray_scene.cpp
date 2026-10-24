@@ -434,18 +434,9 @@ void RayScene::_instance_slots(RID p_material, CachedMaterial &r_cached) const {
 	if (p_material.is_null()) {
 		return;
 	}
-	List<RendererMaterialStorage::InstanceShaderParam> params;
-	MaterialStorage::get_singleton()->material_get_instance_shader_parameters(p_material, &params);
-	for (const RendererMaterialStorage::InstanceShaderParam &param : params) {
-		if (param.info.type != Variant::FLOAT) {
-			continue;
-		}
-		if (param.info.name == SNAME("oc_emission_scale")) {
-			r_cached.scale_index = param.index;
-		} else if (param.info.name == SNAME("oc_emission_bounce")) {
-			r_cached.bounce_index = param.index;
-		}
-	}
+	const MaterialStorage *material_storage = MaterialStorage::get_singleton();
+	r_cached.scale_index = material_storage->material_get_instance_float_index(p_material, SNAME("oc_emission_scale"));
+	r_cached.bounce_index = material_storage->material_get_instance_float_index(p_material, SNAME("oc_emission_bounce"));
 }
 
 void RayScene::_material_entry(RID p_material, Material &r_material) const {
@@ -660,11 +651,11 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 				cached = &material_cache.insert(material, entry)->value;
 			}
 			materials.push_back(cached->entry);
-			const float factor = _instance_float(geometry->shader_uniforms_offset, cached->scale_index) * _instance_float(geometry->shader_uniforms_offset, cached->bounce_index);
+			const float factor = MAX(_instance_float(geometry->shader_uniforms_offset, cached->scale_index), 0.0f) * MAX(_instance_float(geometry->shader_uniforms_offset, cached->bounce_index), 0.0f);
 			if (factor != 1.0f) {
 				Material &instance_material = materials[materials.size() - 1];
 				for (int k = 0; k < 3; k++) {
-					instance_material.emission[k] *= MAX(factor, 0.0f);
+					instance_material.emission[k] *= factor;
 				}
 			}
 		}

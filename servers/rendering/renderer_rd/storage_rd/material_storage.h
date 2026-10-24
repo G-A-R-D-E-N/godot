@@ -507,6 +507,7 @@ public:
 	virtual bool material_casts_shadows(RID p_material) override;
 	virtual RSE::CullMode material_get_cull_mode(RID p_material) const override;
 	Variant material_get_declared_param(RID p_material, const StringName &p_param) const;
+	int32_t material_get_instance_float_index(RID p_material, const StringName &p_param) const;
 
 	virtual void material_get_instance_shader_parameters(RID p_material, List<InstanceShaderParam> *r_parameters) override;
 
