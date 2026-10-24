@@ -46,6 +46,11 @@ namespace RendererRD {
 
 class LightStorage : public RendererLightStorage {
 public:
+	static constexpr uint32_t FAR_SHADOW_SLOTS = 2;
+	static constexpr uint32_t FAR_SHADOW_TEXTURES = 4;
+	static constexpr uint32_t FAR_SHADOW_MAX_LEVELS = 8;
+	static constexpr float FAR_SHADOW_MIN_ELEVATION_DEGREES = 0.5;
+
 	enum ShadowAtlastQuadrant : uint32_t {
 		QUADRANT_SHIFT = 27,
 		OMNI_LIGHT_FLAG = 1 << 26,
@@ -88,6 +93,10 @@ private:
 		Vector2 cloud_shadow_offset;
 		float cloud_shadow_altitude = 2000.0;
 		float cloud_shadow_strength = 0.0;
+		RID far_shadow_textures[FAR_SHADOW_TEXTURES];
+		PackedVector2Array far_shadow_origins;
+		float far_shadow_texel = 0.5;
+		Vector3 far_shadow_direction = Vector3(0, 1, 0);
 
 		Dependency dependency;
 	};
@@ -247,6 +256,29 @@ private:
 	DirectionalLightData *directional_lights = nullptr;
 	RID directional_light_buffer;
 	RID directional_cloud_shadow_textures[RendererSceneRender::MAX_DIRECTIONAL_LIGHTS];
+
+	struct FarShadowSlotData {
+		float levels[FAR_SHADOW_MAX_LEVELS][4];
+		float direction[4];
+		float tan_radius;
+		uint32_t level_count;
+		float eye_y;
+		uint32_t near_level_count;
+	};
+
+	struct FarShadowData {
+		int32_t slot_of_light[RendererSceneRender::MAX_DIRECTIONAL_LIGHTS];
+		FarShadowSlotData slots[FAR_SHADOW_SLOTS];
+	};
+
+	static_assert(sizeof(FarShadowData) == 352);
+
+	FarShadowData far_shadow_data;
+	RID far_shadow_buffer;
+	uint32_t far_shadow_slot_count = 0;
+	RID directional_far_shadow_textures[FAR_SHADOW_SLOTS][FAR_SHADOW_TEXTURES];
+
+	int32_t _far_shadow_slot(const Light *p_light, const DirectionalLightData &p_data, const Transform3D &p_camera_transform);
 
 	static constexpr real_t CLOUD_SHADOW_FADE_METERS = 10.0;
 	float _get_cloud_shadow(const Light *p_light, const Transform3D &p_light_transform, const Transform3D &p_camera_transform, float *r_u, float *r_v, float *r_exponent, float *r_plane) const;
@@ -554,6 +586,11 @@ public:
 	RID light_directional_get_cloud_shadow_texture(RID p_light) const;
 	float light_instance_get_cloud_shadow(RID p_light_instance, const Transform3D &p_camera_transform, float *r_u, float *r_v, float *r_exponent) const;
 	const RID *get_directional_cloud_shadow_textures() const { return directional_cloud_shadow_textures; }
+
+	virtual void light_directional_set_far_shadow(RID p_light, RID p_heights, RID p_bands, RID p_near, RID p_terrain, const PackedVector2Array &p_origins, float p_texel, const Vector3 &p_direction) override;
+	RID get_far_shadow_buffer() const { return far_shadow_buffer; }
+	const RID *get_directional_far_shadow_textures() const { return &directional_far_shadow_textures[0][0]; }
+	bool has_far_shadow() const { return far_shadow_slot_count > 0; }
 
 	virtual RSE::LightDirectionalShadowMode light_directional_get_shadow_mode(RID p_light) override;
 	virtual RSE::LightOmniShadowMode light_omni_get_shadow_mode(RID p_light) override;

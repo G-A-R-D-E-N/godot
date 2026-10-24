@@ -510,6 +510,7 @@ public:
 	FUNC2(light_directional_set_blend_splits, RID, bool)
 	FUNC2(light_directional_set_sky_mode, RID, RSE::LightDirectionalSkyMode)
 	FUNC6(light_directional_set_cloud_shadow, RID, RID, float, const Vector2 &, float, float)
+	FUNC8(light_directional_set_far_shadow, RID, RID, RID, RID, RID, const PackedVector2Array &, float, const Vector3 &)
 
 	FUNC2(light_area_set_size, RID, const Vector2 &)
 	FUNC2(light_area_set_normalize_energy, RID, bool)

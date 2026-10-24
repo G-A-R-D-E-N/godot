@@ -148,6 +148,7 @@ public:
 				uint32_t material_feedback : 1;
 				uint32_t dithered_instance_fade : 1;
 				uint32_t debug_lighting_component : 4;
+				uint32_t use_far_shadow : 1;
 			};
 		};
 

@@ -625,6 +625,77 @@ real_t DirectionalLight3D::get_cloud_shadow_strength() const {
 	return cloud_shadow_strength;
 }
 
+void DirectionalLight3D::_update_far_shadow() {
+	RS::get_singleton()->light_directional_set_far_shadow(light, far_shadow_heights.is_valid() ? far_shadow_heights->get_rid() : RID(), far_shadow_bands.is_valid() ? far_shadow_bands->get_rid() : RID(), far_shadow_near.is_valid() ? far_shadow_near->get_rid() : RID(), far_shadow_terrain.is_valid() ? far_shadow_terrain->get_rid() : RID(), far_shadow_origins, far_shadow_texel, far_shadow_direction);
+}
+
+void DirectionalLight3D::set_far_shadow_heights(const Ref<TextureLayered> &p_value) {
+	ERR_FAIL_COND_MSG(p_value.is_valid() && p_value->get_layered_type() != TextureLayered::LAYERED_TYPE_2D_ARRAY, "Far shadow textures must be 2D texture arrays.");
+	far_shadow_heights = p_value;
+	_update_far_shadow();
+}
+
+Ref<TextureLayered> DirectionalLight3D::get_far_shadow_heights() const {
+	return far_shadow_heights;
+}
+
+void DirectionalLight3D::set_far_shadow_bands(const Ref<TextureLayered> &p_value) {
+	ERR_FAIL_COND_MSG(p_value.is_valid() && p_value->get_layered_type() != TextureLayered::LAYERED_TYPE_2D_ARRAY, "Far shadow textures must be 2D texture arrays.");
+	far_shadow_bands = p_value;
+	_update_far_shadow();
+}
+
+Ref<TextureLayered> DirectionalLight3D::get_far_shadow_bands() const {
+	return far_shadow_bands;
+}
+
+void DirectionalLight3D::set_far_shadow_near(const Ref<TextureLayered> &p_value) {
+	ERR_FAIL_COND_MSG(p_value.is_valid() && p_value->get_layered_type() != TextureLayered::LAYERED_TYPE_2D_ARRAY, "Far shadow textures must be 2D texture arrays.");
+	far_shadow_near = p_value;
+	_update_far_shadow();
+}
+
+Ref<TextureLayered> DirectionalLight3D::get_far_shadow_near() const {
+	return far_shadow_near;
+}
+
+void DirectionalLight3D::set_far_shadow_terrain(const Ref<TextureLayered> &p_value) {
+	ERR_FAIL_COND_MSG(p_value.is_valid() && p_value->get_layered_type() != TextureLayered::LAYERED_TYPE_2D_ARRAY, "Far shadow textures must be 2D texture arrays.");
+	far_shadow_terrain = p_value;
+	_update_far_shadow();
+}
+
+Ref<TextureLayered> DirectionalLight3D::get_far_shadow_terrain() const {
+	return far_shadow_terrain;
+}
+
+void DirectionalLight3D::set_far_shadow_origins(const PackedVector2Array &p_value) {
+	far_shadow_origins = p_value;
+	_update_far_shadow();
+}
+
+PackedVector2Array DirectionalLight3D::get_far_shadow_origins() const {
+	return far_shadow_origins;
+}
+
+void DirectionalLight3D::set_far_shadow_texel(real_t p_value) {
+	far_shadow_texel = p_value;
+	_update_far_shadow();
+}
+
+real_t DirectionalLight3D::get_far_shadow_texel() const {
+	return far_shadow_texel;
+}
+
+void DirectionalLight3D::set_far_shadow_direction(const Vector3 &p_value) {
+	far_shadow_direction = p_value;
+	_update_far_shadow();
+}
+
+Vector3 DirectionalLight3D::get_far_shadow_direction() const {
+	return far_shadow_direction;
+}
+
 void DirectionalLight3D::_validate_property(PropertyInfo &p_property) const {
 	if (Engine::get_singleton()->is_editor_hint()) {
 		if (shadow_mode == SHADOW_ORTHOGONAL && (p_property.name == "directional_shadow_split_1" || p_property.name == "directional_shadow_blend_splits")) {
@@ -667,6 +738,20 @@ void DirectionalLight3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_cloud_shadow_altitude"), &DirectionalLight3D::get_cloud_shadow_altitude);
 	ClassDB::bind_method(D_METHOD("set_cloud_shadow_strength", "strength"), &DirectionalLight3D::set_cloud_shadow_strength);
 	ClassDB::bind_method(D_METHOD("get_cloud_shadow_strength"), &DirectionalLight3D::get_cloud_shadow_strength);
+	ClassDB::bind_method(D_METHOD("set_far_shadow_heights", "texture"), &DirectionalLight3D::set_far_shadow_heights);
+	ClassDB::bind_method(D_METHOD("get_far_shadow_heights"), &DirectionalLight3D::get_far_shadow_heights);
+	ClassDB::bind_method(D_METHOD("set_far_shadow_bands", "texture"), &DirectionalLight3D::set_far_shadow_bands);
+	ClassDB::bind_method(D_METHOD("get_far_shadow_bands"), &DirectionalLight3D::get_far_shadow_bands);
+	ClassDB::bind_method(D_METHOD("set_far_shadow_near", "texture"), &DirectionalLight3D::set_far_shadow_near);
+	ClassDB::bind_method(D_METHOD("get_far_shadow_near"), &DirectionalLight3D::get_far_shadow_near);
+	ClassDB::bind_method(D_METHOD("set_far_shadow_terrain", "texture"), &DirectionalLight3D::set_far_shadow_terrain);
+	ClassDB::bind_method(D_METHOD("get_far_shadow_terrain"), &DirectionalLight3D::get_far_shadow_terrain);
+	ClassDB::bind_method(D_METHOD("set_far_shadow_origins", "origins"), &DirectionalLight3D::set_far_shadow_origins);
+	ClassDB::bind_method(D_METHOD("get_far_shadow_origins"), &DirectionalLight3D::get_far_shadow_origins);
+	ClassDB::bind_method(D_METHOD("set_far_shadow_texel", "texel"), &DirectionalLight3D::set_far_shadow_texel);
+	ClassDB::bind_method(D_METHOD("get_far_shadow_texel"), &DirectionalLight3D::get_far_shadow_texel);
+	ClassDB::bind_method(D_METHOD("set_far_shadow_direction", "direction"), &DirectionalLight3D::set_far_shadow_direction);
+	ClassDB::bind_method(D_METHOD("get_far_shadow_direction"), &DirectionalLight3D::get_far_shadow_direction);
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "sky_mode", PROPERTY_HINT_ENUM, "Light and Sky,Light Only,Sky Only"), "set_sky_mode", "get_sky_mode");
 
@@ -676,6 +761,15 @@ void DirectionalLight3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "cloud_shadow_offset"), "set_cloud_shadow_offset", "get_cloud_shadow_offset");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cloud_shadow_altitude", PROPERTY_HINT_RANGE, "0,20000,1,or_greater,or_less,suffix:m"), "set_cloud_shadow_altitude", "get_cloud_shadow_altitude");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cloud_shadow_strength", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_cloud_shadow_strength", "get_cloud_shadow_strength");
+
+	ADD_GROUP("Far Shadow", "far_shadow_");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "far_shadow_heights", PROPERTY_HINT_RESOURCE_TYPE, "TextureLayered"), "set_far_shadow_heights", "get_far_shadow_heights");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "far_shadow_bands", PROPERTY_HINT_RESOURCE_TYPE, "TextureLayered"), "set_far_shadow_bands", "get_far_shadow_bands");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "far_shadow_near", PROPERTY_HINT_RESOURCE_TYPE, "TextureLayered"), "set_far_shadow_near", "get_far_shadow_near");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "far_shadow_terrain", PROPERTY_HINT_RESOURCE_TYPE, "TextureLayered"), "set_far_shadow_terrain", "get_far_shadow_terrain");
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR2_ARRAY, "far_shadow_origins"), "set_far_shadow_origins", "get_far_shadow_origins");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "far_shadow_texel", PROPERTY_HINT_RANGE, "0.01,64,0.01,or_greater,suffix:m"), "set_far_shadow_texel", "get_far_shadow_texel");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "far_shadow_direction"), "set_far_shadow_direction", "get_far_shadow_direction");
 
 	ADD_GROUP("Directional Shadow", "directional_shadow_");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "directional_shadow_mode", PROPERTY_HINT_ENUM, "Orthogonal (Fast),PSSM 2 Splits (Average),PSSM 4 Splits (Slow)"), "set_shadow_mode", "get_shadow_mode");

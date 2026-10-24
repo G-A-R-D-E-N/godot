@@ -188,8 +188,16 @@ private:
 	Vector2 cloud_shadow_offset;
 	real_t cloud_shadow_altitude = 2000.0;
 	real_t cloud_shadow_strength = 1.0;
+	Ref<TextureLayered> far_shadow_heights;
+	Ref<TextureLayered> far_shadow_bands;
+	Ref<TextureLayered> far_shadow_near;
+	Ref<TextureLayered> far_shadow_terrain;
+	PackedVector2Array far_shadow_origins;
+	real_t far_shadow_texel = 0.5;
+	Vector3 far_shadow_direction = Vector3(0, 1, 0);
 
 	void _update_cloud_shadow();
+	void _update_far_shadow();
 
 protected:
 	static void _bind_methods();
@@ -219,6 +227,27 @@ public:
 
 	void set_cloud_shadow_strength(real_t p_strength);
 	real_t get_cloud_shadow_strength() const;
+
+	void set_far_shadow_heights(const Ref<TextureLayered> &p_value);
+	Ref<TextureLayered> get_far_shadow_heights() const;
+
+	void set_far_shadow_bands(const Ref<TextureLayered> &p_value);
+	Ref<TextureLayered> get_far_shadow_bands() const;
+
+	void set_far_shadow_near(const Ref<TextureLayered> &p_value);
+	Ref<TextureLayered> get_far_shadow_near() const;
+
+	void set_far_shadow_terrain(const Ref<TextureLayered> &p_value);
+	Ref<TextureLayered> get_far_shadow_terrain() const;
+
+	void set_far_shadow_origins(const PackedVector2Array &p_value);
+	PackedVector2Array get_far_shadow_origins() const;
+
+	void set_far_shadow_texel(real_t p_value);
+	real_t get_far_shadow_texel() const;
+
+	void set_far_shadow_direction(const Vector3 &p_value);
+	Vector3 get_far_shadow_direction() const;
 
 	DirectionalLight3D();
 };

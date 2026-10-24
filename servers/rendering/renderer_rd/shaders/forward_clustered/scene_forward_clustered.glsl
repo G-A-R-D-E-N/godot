@@ -1138,6 +1138,8 @@ vec4 volumetric_fog_process(vec2 screen_uv, float z) {
 	return texture(sampler3D(volumetric_fog_texture, SAMPLER_LINEAR_CLAMP), fog_pos);
 }
 
+#include "../far_shadow_inc.glsl"
+
 float directional_cloud_shadow(uint p_index, vec3 p_vertex) {
 	vec2 uv = vec2(dot(directional_lights.data[p_index].cloud_shadow_u.xyz, p_vertex), dot(directional_lights.data[p_index].cloud_shadow_v.xyz, p_vertex)) + vec2(directional_lights.data[p_index].cloud_shadow_u.w, directional_lights.data[p_index].cloud_shadow_v.w);
 	float transmittance = pow(texture(sampler2D(cloud_shadow_textures[p_index], SAMPLER_LINEAR_WITH_MIPMAPS_REPEAT), uv).r, directional_lights.data[p_index].cloud_shadow_exponent);
@@ -3020,12 +3022,12 @@ void fragment_shader(in SceneData scene_data) {
 
 #ifdef USE_LIGHTMAP
 					if (shadowmask_mode == LIGHTMAP_SHADOWMASK_MODE_REPLACE) {
-						shadow = mix(shadow, shadowmask, smoothstep(directional_lights.data[i].fade_from, directional_lights.data[i].fade_to, vertex.z)); //done with negative values for performance
+						shadow = far_shadow_mix(i, shadow, shadowmask, smoothstep(directional_lights.data[i].fade_from, directional_lights.data[i].fade_to, vertex.z), vertex, geo_normal);
 					} else if (shadowmask_mode == LIGHTMAP_SHADOWMASK_MODE_OVERLAY) {
-						shadow = shadowmask * mix(shadow, 1.0, smoothstep(directional_lights.data[i].fade_from, directional_lights.data[i].fade_to, vertex.z)); //done with negative values for performance
+						shadow = shadowmask * far_shadow_mix(i, shadow, 1.0, smoothstep(directional_lights.data[i].fade_from, directional_lights.data[i].fade_to, vertex.z), vertex, geo_normal);
 					} else {
 #endif
-						shadow = mix(shadow, 1.0, smoothstep(directional_lights.data[i].fade_from, directional_lights.data[i].fade_to, vertex.z)); //done with negative values for performance
+						shadow = far_shadow_mix(i, shadow, 1.0, smoothstep(directional_lights.data[i].fade_from, directional_lights.data[i].fade_to, vertex.z), vertex, geo_normal);
 #ifdef USE_LIGHTMAP
 					}
 #endif

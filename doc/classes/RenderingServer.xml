@@ -2220,6 +2220,20 @@
 				Sets the cloud shadow of this directional light. Equivalent to [member DirectionalLight3D.cloud_shadow_texture], [member DirectionalLight3D.cloud_shadow_scale], [member DirectionalLight3D.cloud_shadow_offset], [member DirectionalLight3D.cloud_shadow_altitude] and [member DirectionalLight3D.cloud_shadow_strength].
 			</description>
 		</method>
+		<method name="light_directional_set_far_shadow">
+			<return type="void" />
+			<param index="0" name="light" type="RID" />
+			<param index="1" name="heights" type="RID" />
+			<param index="2" name="bands" type="RID" />
+			<param index="3" name="near" type="RID" />
+			<param index="4" name="terrain" type="RID" />
+			<param index="5" name="origins" type="PackedVector2Array" />
+			<param index="6" name="texel" type="float" />
+			<param index="7" name="direction" type="Vector3" />
+			<description>
+				Sets the far shadow of this directional light. Equivalent to [member DirectionalLight3D.far_shadow_heights], [member DirectionalLight3D.far_shadow_bands], [member DirectionalLight3D.far_shadow_near], [member DirectionalLight3D.far_shadow_terrain], [member DirectionalLight3D.far_shadow_origins], [member DirectionalLight3D.far_shadow_texel] and [member DirectionalLight3D.far_shadow_direction].
+			</description>
+		</method>
 		<method name="light_directional_set_shadow_mode">
 			<return type="void" />
 			<param index="0" name="light" type="RID" />
