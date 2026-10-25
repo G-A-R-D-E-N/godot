@@ -2632,6 +2632,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	}
 	_pre_opaque_render(p_render_data, using_ssao, using_ssil, using_ssr, using_sscs, using_sdfgi || using_voxelgi || using_ddgi, normal_roughness_views, rb_data.is_valid() && rb_data->has_voxelgi() ? rb_data->get_voxelgi() : RID());
 
+	base_specialization.use_far_shadow = light_storage->has_far_shadow();
 	if (current_cluster_builder) {
 		base_specialization.cluster_has_area_light = current_cluster_builder->get_cluster_count_by_type(ClusterBuilderRD::ELEMENT_TYPE_AREA_LIGHT) != 0;
 	}
@@ -4382,6 +4383,21 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 			mask = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_BLACK);
 		}
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 46, mask));
+	}
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 47, light_storage->get_far_shadow_buffer()));
+	{
+		const RID *far_shadow_textures = light_storage->get_directional_far_shadow_textures();
+		const RID white = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_WHITE);
+		for (uint32_t j = 0; j < RendererRD::LightStorage::FAR_SHADOW_TEXTURES; j++) {
+			RD::Uniform u;
+			u.binding = 48 + j;
+			u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+			for (uint32_t slot = 0; slot < RendererRD::LightStorage::FAR_SHADOW_SLOTS; slot++) {
+				RID texture = far_shadow_textures[slot * RendererRD::LightStorage::FAR_SHADOW_TEXTURES + j];
+				u.append_id(p_render_data && texture.is_valid() ? texture : white);
+			}
+			uniforms.push_back(u);
+		}
 	}
 
 	return UniformSetCacheRD::get_singleton()->get_cache_vec(scene_shader.get_default_shader_rd(is_multiview), RENDER_PASS_UNIFORM_SET, uniforms);

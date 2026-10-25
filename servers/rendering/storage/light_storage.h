@@ -76,6 +76,7 @@ public:
 	virtual void light_directional_set_sky_mode(RID p_light, RSE::LightDirectionalSkyMode p_mode) = 0;
 	virtual RSE::LightDirectionalSkyMode light_directional_get_sky_mode(RID p_light) const = 0;
 	virtual void light_directional_set_cloud_shadow(RID p_light, RID p_texture, float p_scale, const Vector2 &p_offset, float p_altitude, float p_strength) {}
+	virtual void light_directional_set_far_shadow(RID p_light, RID p_heights, RID p_bands, RID p_near, RID p_terrain, const PackedVector2Array &p_origins, float p_texel, const Vector3 &p_direction) {}
 
 	virtual RSE::LightDirectionalShadowMode light_directional_get_shadow_mode(RID p_light) = 0;
 	virtual RSE::LightOmniShadowMode light_omni_get_shadow_mode(RID p_light) = 0;

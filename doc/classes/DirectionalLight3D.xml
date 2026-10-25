@@ -51,6 +51,27 @@
 		<member name="directional_shadow_split_3" type="float" setter="set_param" getter="get_param" default="0.5">
 			The distance from shadow split 2 to split 3. Relative to [member directional_shadow_max_distance]. Only used when [member directional_shadow_mode] is [constant SHADOW_PARALLEL_4_SPLITS].
 		</member>
+		<member name="far_shadow_bands" type="TextureLayered" setter="set_far_shadow_bands" getter="get_far_shadow_bands">
+			Distance in meters from each texel of [member far_shadow_heights] to its elevated band, in the red channel, one layer per level. The green channel is reserved.
+		</member>
+		<member name="far_shadow_direction" type="Vector3" setter="set_far_shadow_direction" getter="get_far_shadow_direction" default="Vector3(0, 1, 0)">
+			The direction toward the light, in world space, that the far shadow textures were computed for. Its elevation and azimuth set the shadow's angle and the direction of its penumbra.
+		</member>
+		<member name="far_shadow_heights" type="TextureLayered" setter="set_far_shadow_heights" getter="get_far_shadow_heights">
+			The far shadow of this light past its shadow cascades, one layer per level of a camera-centered clipmap. Each texel holds, relative to [member far_shadow_terrain] and in meters: the height below which a point is in shadow (red), the distance to the caster that sets it (green), and the bottom (blue) and top (alpha) of an elevated band of casters, such as a bridge deck. There is no band where the top is not above the bottom, and a texel with no caster holds [code]-65504[/code] in red. The textures are square, with U along world +X and V along world +Z. The far shadow is used only while all four far shadow textures are set. Its level count is the smallest of the size of [member far_shadow_origins] and the layer counts of this texture, [member far_shadow_bands] and [member far_shadow_terrain]. While it is used, the shadow fades from the cascades to this texture instead of to fully lit, and inside the cascades it adds the casters of [member far_shadow_near]. Reflection probes use it everywhere past their own cascades.
+		</member>
+		<member name="far_shadow_near" type="TextureLayered" setter="set_far_shadow_near" getter="get_far_shadow_near">
+			The first two levels of [member far_shadow_heights] computed only from casters that the shadow cascades do not draw: the shadow height (red) and the caster distance (green). Inside the cascades, a point is shaded by the darker of the cascades and this texture.
+		</member>
+		<member name="far_shadow_origins" type="PackedVector2Array" setter="set_far_shadow_origins" getter="get_far_shadow_origins" default="PackedVector2Array()">
+			The world X and Z of the center of each level of [member far_shadow_heights], finest first. The array size is the number of levels, at most 8.
+		</member>
+		<member name="far_shadow_terrain" type="TextureLayered" setter="set_far_shadow_terrain" getter="get_far_shadow_terrain">
+			The terrain height in meters at each texel of [member far_shadow_heights], one layer per level, in a 32-bit float format.
+		</member>
+		<member name="far_shadow_texel" type="float" setter="set_far_shadow_texel" getter="get_far_shadow_texel" default="0.5">
+			The texel size in meters of the finest level of [member far_shadow_heights]. Each further level doubles it, and a level spans its texture width times its texel size.
+		</member>
 		<member name="sky_mode" type="int" setter="set_sky_mode" getter="get_sky_mode" enum="DirectionalLight3D.SkyMode" default="0">
 			Whether this [DirectionalLight3D] is visible in the sky, in the scene, or both in the sky and in the scene.
 		</member>

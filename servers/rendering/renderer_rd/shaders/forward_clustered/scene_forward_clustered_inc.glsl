@@ -162,6 +162,10 @@ uint sc_debug_lighting_component() {
 	return (sc_packed_1() >> 9) & 15U;
 }
 
+bool sc_use_far_shadow() {
+	return ((sc_packed_1() >> 13) & 1U) != 0;
+}
+
 float sc_luminance_multiplier() {
 	// Not used in clustered renderer but we share some code with the mobile renderer that requires this.
 	return 1.0;
@@ -515,6 +519,29 @@ layout(set = 1, binding = 40) uniform texture2D ss_exposure_texture;
 
 layout(set = 1, binding = 41) uniform texture2D cloud_shadow_textures[MAX_DIRECTIONAL_LIGHT_DATA_STRUCTS];
 layout(set = 1, binding = 42) uniform texture3D aerial_perspective_texture;
+
+#define FAR_SHADOW_SLOTS 2
+#define FAR_SHADOW_MAX_LEVELS 8
+
+struct FarShadowSlot {
+	vec4 levels[FAR_SHADOW_MAX_LEVELS];
+	vec4 direction;
+	float tan_radius;
+	uint level_count;
+	float eye_y;
+	uint near_level_count;
+};
+
+layout(set = 1, binding = 47, std140) uniform FarShadowBlock {
+	ivec4 slot_of_light[2];
+	FarShadowSlot slots[FAR_SHADOW_SLOTS];
+}
+far_shadow;
+
+layout(set = 1, binding = 48) uniform texture2DArray far_shadow_heights[FAR_SHADOW_SLOTS];
+layout(set = 1, binding = 49) uniform texture2DArray far_shadow_bands[FAR_SHADOW_SLOTS];
+layout(set = 1, binding = 50) uniform texture2DArray far_shadow_near[FAR_SHADOW_SLOTS];
+layout(set = 1, binding = 51) uniform texture2DArray far_shadow_terrain[FAR_SHADOW_SLOTS];
 
 layout(set = 1, binding = 43, std430) buffer restrict readonly SkySHBuffer {
 	vec4 coefficients[9];

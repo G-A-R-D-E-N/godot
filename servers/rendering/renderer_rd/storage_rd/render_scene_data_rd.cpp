@@ -156,6 +156,7 @@ void RenderSceneDataRD::update_ubo(RID p_uniform_buffer, RSE::ViewportDebugDraw 
 	ubo.opaque_prepass_threshold = opaque_prepass_threshold;
 	ubo.flags |= material_uv2_mode ? SCENE_DATA_FLAGS_USE_UV2_MATERIAL : 0;
 	ubo.flags |= shadow_pass ? SCENE_DATA_FLAGS_IN_SHADOW_PASS : 0;
+	ubo.flags |= p_reflection_probe_instance.is_valid() ? SCENE_DATA_FLAGS_IN_REFLECTION_PROBE : 0;
 	ubo.flags |= render_scene_render->is_using_physical_light_units() ? SCENE_DATA_FLAGS_USE_PHYSICAL_LIGHT_UNITS : 0;
 	ubo.flags |= GLOBAL_GET_CACHED(bool, "rendering/lights_and_shadows/directional_shadow/soft_shadow_thin_casters") ? SCENE_DATA_FLAGS_USE_THIN_CASTER_PCSS : 0;
 
