@@ -64,12 +64,24 @@ uint32_t generation = 0;
 float spacing = 1.0f;
 
 float half_of(const RayScene::Light &p_light) {
-	return 1.0f / MAX(p_light.inv_radius, 1e-4f);
+	const float range = 1.0f / MAX(p_light.inv_radius, 1e-4f);
+	if (p_light.type != uint32_t(RSE::LIGHT_AREA)) {
+		return range;
+	}
+	const Vector3 a(p_light.half_a[0], p_light.half_a[1], p_light.half_a[2]);
+	const Vector3 b(p_light.half_b[0], p_light.half_b[1], p_light.half_b[2]);
+	return range + Math::sqrt(a.length_squared() + b.length_squared());
+}
+
+bool axis_changed(const float *p_reference, const float *p_axis) {
+	const Vector3 reference(p_reference[0], p_reference[1], p_reference[2]);
+	const Vector3 axis(p_axis[0], p_axis[1], p_axis[2]);
+	return (axis - reference).length() > RANGE_TOLERANCE * MAX(reference.length(), 1e-4f);
 }
 
 bool differs(const Record &p_reference, const RayScene::Light &p_light, const Vector3 &p_world) {
 	const RayScene::Light &ref = p_reference.light;
-	if (ref.type != p_light.type) {
+	if (ref.type != p_light.type || ref.caster_mask != p_light.caster_mask) {
 		return true;
 	}
 	if (ref.energy == 0.0f || p_light.energy == 0.0f || (ref.energy < 0.0f) != (p_light.energy < 0.0f)) {
@@ -107,6 +119,12 @@ bool differs(const Record &p_reference, const RayScene::Light &p_light, const Ve
 			return true;
 		}
 		if (Math::abs(p_light.inv_spot_attenuation - ref.inv_spot_attenuation) > SPOT_TOLERANCE * MAX(Math::abs(ref.inv_spot_attenuation), 1e-3f)) {
+			return true;
+		}
+	} else if (p_light.type == uint32_t(RSE::LIGHT_AREA)) {
+		const Vector3 a(ref.direction[0], ref.direction[1], ref.direction[2]);
+		const Vector3 b(p_light.direction[0], p_light.direction[1], p_light.direction[2]);
+		if (a.dot(b) < SPOT_COS_TURN || axis_changed(ref.half_a, p_light.half_a) || axis_changed(ref.half_b, p_light.half_b)) {
 			return true;
 		}
 	}

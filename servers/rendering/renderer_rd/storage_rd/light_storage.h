@@ -526,6 +526,7 @@ private:
 
 public:
 	static LightStorage *get_singleton();
+	static float light_render_energy(float p_energy, float p_intensity, RSE::LightType p_type, bool p_physical_units);
 
 	LightStorage();
 	virtual ~LightStorage();
