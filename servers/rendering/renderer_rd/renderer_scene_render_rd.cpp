@@ -524,7 +524,7 @@ float auto_exposure_unadapt(float p_luminance, float p_adaptation, float p_pivot
 	if (p_adaptation >= 1.0f || !(p_luminance > 0.0f) || p_luminance >= p_pivot) {
 		return p_luminance;
 	}
-	return p_pivot * Math::pow(p_luminance / p_pivot, 1.0f / MAX(p_adaptation, 1e-3f));
+	return p_pivot * Math::pow(p_luminance / p_pivot, 1.0f / MAX(p_adaptation, 0.05f));
 }
 
 void auto_exposure_log_async(const Vector<uint8_t> &p_data, const String &p_head, float p_adaptation, float p_pivot) {
@@ -532,7 +532,7 @@ void auto_exposure_log_async(const Vector<uint8_t> &p_data, const String &p_head
 	if (p_data.size() >= 4) {
 		memcpy(&value, p_data.ptr(), sizeof(float));
 	}
-	print_line(vformat("%s current %s metered %s", p_head, value, auto_exposure_unadapt(value, p_adaptation, p_pivot)));
+	print_line(vformat("%s current %s unadapted %s", p_head, value, auto_exposure_unadapt(value, p_adaptation, p_pivot)));
 }
 
 AutoExposureHdrScan auto_exposure_scan_hdr(RID p_texture, RD::DataFormat p_format, const Size2i &p_size) {
@@ -746,7 +746,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 					head += " hdr_format_unsupported";
 				}
 				const float current = auto_exposure_read_luminance(luminance_buffers->current);
-				print_line(vformat("%s current %s metered %s", head, current, auto_exposure_unadapt(current, auto_exposure_adaptation, auto_exposure_adaptation_pivot)));
+				print_line(vformat("%s current %s unadapted %s", head, current, auto_exposure_unadapt(current, auto_exposure_adaptation, auto_exposure_adaptation_pivot)));
 			} else {
 				RD::get_singleton()->texture_get_data_async(luminance_buffers->current, 0, callable_mp_static(&auto_exposure_log_async).bind(head, auto_exposure_adaptation, auto_exposure_adaptation_pivot));
 			}
