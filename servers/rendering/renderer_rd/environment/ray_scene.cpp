@@ -35,6 +35,7 @@
 #include "core/templates/sort_array.h"
 #include "servers/rendering/renderer_geometry_instance.h"
 #include "servers/rendering/renderer_rd/environment/ddgi.h"
+#include "servers/rendering/renderer_rd/environment/ddgi_light_tracker.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
@@ -515,6 +516,7 @@ void RayScene::_pack_light(RID p_light_instance, bool p_physical_units, float p_
 	packed.inv_radius = 1.0f / MAX(0.001f, light_storage->light_get_param(light, RSE::LIGHT_PARAM_RANGE));
 	packed.cos_spot_angle = Math::cos(Math::deg_to_rad(light_storage->light_get_param(light, RSE::LIGHT_PARAM_SPOT_ANGLE)));
 	packed.inv_spot_attenuation = 1.0f / MAX(0.0001f, light_storage->light_get_param(light, RSE::LIGHT_PARAM_SPOT_ATTENUATION));
+	DDGILightTracker::observe(p_light_instance, packed, anchor);
 	r_lights.push_back(packed);
 }
 
@@ -675,6 +677,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	const float exposure = p_camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes) : 1.0f;
 	lights.clear();
 	local_lights.clear();
+	DDGILightTracker::begin(GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/light_change_reset"), RSG::rasterizer->get_frame_number(), MAX(GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/probe_spacing"), 0.1f));
 	for (const RID &light_instance : p_directional_lights) {
 		_pack_light(light_instance, physical_units, exposure, MAX_LIGHTS, lights);
 	}
@@ -682,6 +685,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		_pack_light(p_lights[i], physical_units, exposure, MAX_CANDIDATE_LIGHTS, local_lights);
 	}
 	_select_lights(p_camera_position - anchor);
+	DDGILightTracker::end();
 	_ensure_buffer(light_buffer, light_capacity, MAX_LIGHTS, sizeof(Light), "Ray Scene Lights");
 	if (lights.size()) {
 		RD::get_singleton()->buffer_update(light_buffer, 0, lights.size() * sizeof(Light), lights.ptr());

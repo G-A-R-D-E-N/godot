@@ -40,6 +40,8 @@ layout(set = DDGI_SET, binding = DDGI_UBO_BINDING, std140) uniform DDGIData {
 	uint frame;
 	float max_distance;
 	uint probe_capacity;
+
+	float change_threshold;
 }
 ddgi;
 
