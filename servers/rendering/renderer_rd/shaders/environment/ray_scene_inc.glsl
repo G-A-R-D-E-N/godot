@@ -387,7 +387,7 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 		}
 		vec3 light_value = light.color * (light.energy * attenuation * n_dot_l / 3.14159265359);
 		if (light.type == RAY_SCENE_LIGHT_DIRECTIONAL) {
-			if (ray_scene_unshadowed(p_position, p_normal, p_bias, to_light, distance, light.caster_mask, p_seed + i * 0x632be5abu)) {
+			if (ray_scene_unshadowed(p_position, p_normal, p_bias, to_light, distance, light.caster_mask, (p_seed + i * 0x632be5abu) ^ 0x85ebca6bu)) {
 				light_sum += light_value;
 			}
 			continue;
