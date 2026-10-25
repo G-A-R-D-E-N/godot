@@ -2991,7 +2991,7 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 				}
 			}
 
-			if (!(cull_data.scenario->instance_data[i].flags & InstanceData::FLAG_RAY_SCENE_ONLY) && ((LAYER_CHECK && IN_FRUSTUM(cull_data.cull->frustum) && VIS_CHECK && !OCCLUSION_CULLED) || (cull_data.scenario->instance_data[i].flags & InstanceData::FLAG_IGNORE_ALL_CULLING))) {
+			if (!(idata.flags & InstanceData::FLAG_RAY_SCENE_ONLY) && ((LAYER_CHECK && IN_FRUSTUM(cull_data.cull->frustum) && VIS_CHECK && !OCCLUSION_CULLED) || (cull_data.scenario->instance_data[i].flags & InstanceData::FLAG_IGNORE_ALL_CULLING))) {
 				uint32_t base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
 				if (base_type == RSE::INSTANCE_LIGHT) {
 					cull_result.lights.push_back(idata.instance);
