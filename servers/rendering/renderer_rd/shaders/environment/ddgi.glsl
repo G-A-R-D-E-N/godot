@@ -10,6 +10,8 @@ layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 #elif defined(MODE_SCHEDULE_PLAN) || defined(MODE_SCHEDULE_FINALIZE)
 layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+#elif defined(MODE_SCHEDULE_SCAN)
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 #else
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 #endif
@@ -24,6 +26,7 @@ layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 #define DDGI_CHANGE_THRESHOLD 0.25
 #define DDGI_MAX_UPDATES 255.0
 #define DDGI_SCHEDULE_SLOTS 16u
+#define DDGI_SCAN_SIZE 256u
 
 layout(set = 0, binding = 1, std430) restrict buffer ProbeList {
 	uint count;
@@ -33,6 +36,21 @@ layout(set = 0, binding = 1, std430) restrict buffer ProbeList {
 	uint entries[];
 }
 probe_list;
+
+#if defined(MODE_SCHEDULE_SELECT) || defined(MODE_SCHEDULE_SCAN) || defined(MODE_SCHEDULE_APPEND)
+// Per 64-probe group: (carried offset, carried mask, requested offset), (requested mask, left-out mask).
+layout(set = 0, binding = 7, std430) restrict buffer ScheduleGroups {
+	uint requested_cursor;
+	uint carried_cursor;
+	uint carried_total;
+	uint requested_total;
+	uint carried_start;
+	uint requested_start;
+	uint pad[2];
+	uvec4 groups[];
+}
+schedule_groups;
+#endif
 
 layout(rgba16f, set = 0, binding = 2) uniform restrict image2D ray_image;
 layout(rgba16f, set = 0, binding = 3) uniform restrict image2DArray irradiance_image;
@@ -284,10 +302,16 @@ void main() {
 
 #endif
 
-#if defined(MODE_SCHEDULE_COUNT) || defined(MODE_SCHEDULE_APPEND)
+#if defined(MODE_SCHEDULE_COUNT) || defined(MODE_SCHEDULE_SELECT) || defined(MODE_SCHEDULE_APPEND)
 
-shared uint group_values[DDGI_SCHEDULE_SLOTS];
-shared uint group_base;
+// Schedule ids must be storage slots, so the left-out masks stay with their cells when the volume scrolls.
+ivec3 schedule_local(uint p_level, ivec3 p_slot) {
+	return (p_slot - ddgi.levels[p_level].slot_offset + ddgi.dims) % ddgi.dims;
+}
+
+#endif
+
+#if defined(MODE_SCHEDULE_COUNT) || defined(MODE_SCHEDULE_SELECT)
 
 uint schedule_hash(uint p_value) {
 	p_value ^= p_value >> 16u;
@@ -298,16 +322,16 @@ uint schedule_hash(uint p_value) {
 	return p_value;
 }
 
-bool schedule_probe(out uint r_level, out uint r_index, out uint r_state, out uint r_tag) {
+bool schedule_probe(out uint r_level, out uint r_state, out uint r_tag) {
 	uint per_level = uint(ddgi.dims.x * ddgi.dims.y * ddgi.dims.z);
 	uint id = gl_GlobalInvocationID.x;
 	if (id >= per_level * ddgi.level_count) {
 		return false;
 	}
 	r_level = id / per_level;
-	r_index = id % per_level;
-	ivec3 local = ddgi_local_from_index(r_index);
-	uvec4 data = imageLoad(probe_image, ddgi_probe_texel(r_level, ddgi_slot(r_level, local)));
+	ivec3 slot = ddgi_local_from_index(id % per_level);
+	ivec3 local = schedule_local(r_level, slot);
+	uvec4 data = imageLoad(probe_image, ddgi_probe_texel(r_level, slot));
 	r_state = ddgi_state(data, r_level, local);
 	r_tag = ddgi_tag(r_level, local);
 	return true;
@@ -317,13 +341,15 @@ bool schedule_probe(out uint r_level, out uint r_index, out uint r_state, out ui
 
 #ifdef MODE_SCHEDULE_COUNT
 
+shared uint group_values[DDGI_SCHEDULE_SLOTS];
+
 void main() {
 	if (gl_LocalInvocationIndex < DDGI_SCHEDULE_SLOTS) {
 		group_values[gl_LocalInvocationIndex] = 0u;
 	}
 	barrier();
-	uint level, index, state, tag;
-	if (schedule_probe(level, index, state, tag)) {
+	uint level, state, tag;
+	if (schedule_probe(level, state, tag)) {
 		atomicAdd(group_values[level * 4u + state], 1u);
 	}
 	barrier();
@@ -367,36 +393,160 @@ void main() {
 		float rate = max(min(1.0, scale * weights[i]), 1e-6);
 		probe_list.strides[i] = uint(ceil(1.0 / rate - 1e-3));
 	}
-	probe_list.count = 0u;
+}
+
+#endif
+
+#ifdef MODE_SCHEDULE_SELECT
+
+shared uint group_masks[4];
+
+void main() {
+	uint lane = gl_LocalInvocationIndex;
+	if (lane < 4u) {
+		group_masks[lane] = 0u;
+	}
+	barrier();
+	uint entry = gl_WorkGroupID.x * 2u;
+	uint left_lo = schedule_groups.groups[entry + 1u].z;
+	uint left_hi = schedule_groups.groups[entry + 1u].w;
+	uint word = lane >> 5u;
+	uint bit = 1u << (lane & 31u);
+	uint level, state, tag;
+	if (schedule_probe(level, state, tag)) {
+		if (((word == 0u ? left_lo : left_hi) & bit) != 0u) {
+			atomicOr(group_masks[word], bit);
+		} else {
+			uint stride = probe_list.strides[level * 4u + state];
+			if ((schedule_hash(tag ^ (level * 0x9E3779B9u)) + ddgi.frame) % stride == 0u) {
+				atomicOr(group_masks[2u + word], bit);
+			}
+		}
+	}
+	barrier();
+	if (lane == 0u) {
+		uint carried = uint(bitCount(group_masks[0]) + bitCount(group_masks[1]));
+		uint requested = uint(bitCount(group_masks[2]) + bitCount(group_masks[3]));
+		schedule_groups.groups[entry] = uvec4(carried, group_masks[0], group_masks[1], requested);
+		schedule_groups.groups[entry + 1u].xy = uvec2(group_masks[2], group_masks[3]);
+	}
+}
+
+#endif
+
+#ifdef MODE_SCHEDULE_SCAN
+
+shared uvec2 scan_values[DDGI_SCAN_SIZE];
+shared uint cursor_rank;
+
+void main() {
+	uint lane = gl_LocalInvocationIndex;
+	uint group_count = (uint(ddgi.dims.x * ddgi.dims.y * ddgi.dims.z) * ddgi.level_count + 63u) / 64u;
+	uint chunk = (group_count + DDGI_SCAN_SIZE - 1u) / DDGI_SCAN_SIZE;
+	uint first = min(lane * chunk, group_count);
+	uint last = min(first + chunk, group_count);
+	uvec2 sum = uvec2(0u);
+	for (uint g = first; g < last; g++) {
+		sum += schedule_groups.groups[g * 2u].xw;
+	}
+	scan_values[lane] = sum;
+	if (lane == 0u) {
+		cursor_rank = 0u;
+	}
+	barrier();
+	for (uint step = 1u; step < DDGI_SCAN_SIZE; step <<= 1u) {
+		uvec2 add = lane >= step ? scan_values[lane - step] : uvec2(0u);
+		barrier();
+		scan_values[lane] += add;
+		barrier();
+	}
+	uint cursor = schedule_groups.carried_cursor;
+	uvec2 offset = scan_values[lane] - sum;
+	for (uint g = first; g < last; g++) {
+		uvec4 group = schedule_groups.groups[g * 2u];
+		if (g == cursor / 64u) {
+			uint below = (1u << (cursor & 31u)) - 1u;
+			cursor_rank = offset.x + uint((cursor & 32u) == 0u ? bitCount(group.y & below) : bitCount(group.y) + bitCount(group.z & below));
+		}
+		schedule_groups.groups[g * 2u].xw = offset;
+		offset += group.xw;
+	}
+	barrier();
+	if (lane == DDGI_SCAN_SIZE - 1u) {
+		uint carried = scan_values[lane].x;
+		uint requested = scan_values[lane].y;
+		uint room = ddgi.probe_capacity - min(carried, ddgi.probe_capacity);
+		uint start = 0u;
+		if (requested > room && room > 0u) {
+			start = schedule_groups.requested_cursor % requested;
+			schedule_groups.requested_cursor = (start + room) % requested;
+		}
+		schedule_groups.carried_total = carried;
+		schedule_groups.requested_total = requested;
+		schedule_groups.carried_start = carried > ddgi.probe_capacity ? cursor_rank : 0u;
+		schedule_groups.requested_start = start;
+		probe_list.count = carried + requested;
+	}
 }
 
 #endif
 
 #ifdef MODE_SCHEDULE_APPEND
 
+shared uint left_out[2];
+
 void main() {
-	if (gl_LocalInvocationIndex == 0u) {
-		group_values[0] = 0u;
+	uint lane = gl_LocalInvocationIndex;
+	if (lane < 2u) {
+		left_out[lane] = 0u;
 	}
 	barrier();
-	uint level, index, state, tag;
+	uint entry = gl_WorkGroupID.x * 2u;
+	uvec4 carried = schedule_groups.groups[entry];
+	uint requested_lo = schedule_groups.groups[entry + 1u].x;
+	uint requested_hi = schedule_groups.groups[entry + 1u].y;
+	uint word = lane >> 5u;
+	uint bit = 1u << (lane & 31u);
+	uint below = bit - 1u;
+	uint capacity = ddgi.probe_capacity;
+	uint carried_total = schedule_groups.carried_total;
+	uint served = min(carried_total, capacity);
+	uint position = capacity;
 	bool selected = false;
-	uint local_slot = 0u;
-	if (schedule_probe(level, index, state, tag)) {
-		uint stride = probe_list.strides[level * 4u + state];
-		selected = (schedule_hash(tag ^ (level * 0x9E3779B9u)) + ddgi.frame) % stride == 0u;
-		if (selected) {
-			local_slot = atomicAdd(group_values[0], 1u);
+	if (((word == 0u ? carried.y : carried.z) & bit) != 0u) {
+		// Ordering: carried probes take the first positions, rotated from the cursor when they overflow.
+		selected = true;
+		position = carried.x + uint(word == 0u ? bitCount(carried.y & below) : bitCount(carried.y) + bitCount(carried.z & below));
+		if (carried_total > capacity) {
+			position = (position + carried_total - schedule_groups.carried_start) % carried_total;
+			if (position == capacity) {
+				schedule_groups.carried_cursor = gl_GlobalInvocationID.x;
+			}
+		}
+	} else if (((word == 0u ? requested_lo : requested_hi) & bit) != 0u) {
+		selected = true;
+		uint rank = carried.w + uint(word == 0u ? bitCount(requested_lo & below) : bitCount(requested_lo) + bitCount(requested_hi & below));
+		uint requested_total = schedule_groups.requested_total;
+		uint room = capacity - served;
+		if (requested_total > room && room > 0u) {
+			rank = (rank + requested_total - schedule_groups.requested_start) % requested_total;
+		}
+		position = rank < room ? served + rank : capacity;
+	}
+	if (selected) {
+		if (position < capacity) {
+			uint per_level = uint(ddgi.dims.x * ddgi.dims.y * ddgi.dims.z);
+			uint id = gl_GlobalInvocationID.x;
+			uint level = id / per_level;
+			ivec3 local = schedule_local(level, ddgi_local_from_index(id % per_level));
+			probe_list.entries[position] = (level << 28) | uint(local.x + (local.y + local.z * ddgi.dims.y) * ddgi.dims.x);
+		} else {
+			atomicOr(left_out[word], bit);
 		}
 	}
 	barrier();
-	if (gl_LocalInvocationIndex == 0u) {
-		group_base = atomicAdd(probe_list.count, group_values[0]);
-	}
-	barrier();
-	uint list_index = group_base + local_slot;
-	if (selected && list_index < ddgi.probe_capacity) {
-		probe_list.entries[list_index] = (level << 28) | index;
+	if (lane == 0u) {
+		schedule_groups.groups[entry + 1u].zw = uvec2(left_out[0], left_out[1]);
 	}
 }
 

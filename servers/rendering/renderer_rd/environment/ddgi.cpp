@@ -113,6 +113,11 @@ void DDGI::Volume::allocate(const Settings &p_settings) {
 	list_data.fill(0);
 	probe_list_buffer = RD::get_singleton()->storage_buffer_create(list_data.size(), list_data);
 	RD::get_singleton()->set_resource_name(probe_list_buffer, "DDGI Probe List");
+	Vector<uint8_t> groups_data;
+	groups_data.resize(2 * (1 + Math::division_round_up(uint32_t(dims.x * dims.y * dims.z) * settings.level_count, 64u)) * 4 * sizeof(uint32_t));
+	groups_data.fill(0);
+	schedule_groups_buffer = RD::get_singleton()->storage_buffer_create(groups_data.size(), groups_data);
+	RD::get_singleton()->set_resource_name(schedule_groups_buffer, "DDGI Schedule Groups");
 	Vector<uint8_t> dispatch_data;
 	dispatch_data.resize(sizeof(uint32_t) * 9);
 	dispatch_data.fill(0);
@@ -132,7 +137,7 @@ LocalVector<RD::Uniform> DDGI::Volume::gather_uniforms() const {
 }
 
 void DDGI::Volume::free_data() {
-	RID *owned[] = { &irradiance, &distance, &probe_data, &rays, &probe_list_buffer, &dispatch_buffer, &ubo, &debug_texture };
+	RID *owned[] = { &irradiance, &distance, &probe_data, &rays, &probe_list_buffer, &schedule_groups_buffer, &dispatch_buffer, &ubo, &debug_texture };
 	for (RID *rid : owned) {
 		if (rid->is_valid()) {
 			RD::get_singleton()->free_rid(*rid);
@@ -213,6 +218,8 @@ void DDGI::init(SkyRD *p_sky) {
 	modes.push_back("\n#define MODE_PROBE_STATE\n");
 	modes.push_back("\n#define MODE_SCHEDULE_COUNT\n");
 	modes.push_back("\n#define MODE_SCHEDULE_PLAN\n");
+	modes.push_back("\n#define MODE_SCHEDULE_SELECT\n");
+	modes.push_back("\n#define MODE_SCHEDULE_SCAN\n");
 	modes.push_back("\n#define MODE_SCHEDULE_APPEND\n");
 	modes.push_back("\n#define MODE_SCHEDULE_FINALIZE\n");
 	shader.initialize(modes);
@@ -290,7 +297,14 @@ void DDGI::_dispatch(Mode p_mode, const Ref<Volume> &p_volume, uint32_t p_x_grou
 
 	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, pipelines[p_mode].get_rid());
-	RID uniform_set = p_mode == MODE_SCHEDULE_FINALIZE ? uniform_set_cache->get_cache(shader_rid, 0, u_ubo, u_list, u_rays, u_irradiance, u_distance, u_probe_data, RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 6, p_volume->dispatch_buffer)) : uniform_set_cache->get_cache(shader_rid, 0, u_ubo, u_list, u_rays, u_irradiance, u_distance, u_probe_data);
+	RID uniform_set;
+	if (p_mode == MODE_SCHEDULE_FINALIZE) {
+		uniform_set = uniform_set_cache->get_cache(shader_rid, 0, u_ubo, u_list, u_rays, u_irradiance, u_distance, u_probe_data, RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 6, p_volume->dispatch_buffer));
+	} else if (p_mode == MODE_SCHEDULE_SELECT || p_mode == MODE_SCHEDULE_SCAN || p_mode == MODE_SCHEDULE_APPEND) {
+		uniform_set = uniform_set_cache->get_cache(shader_rid, 0, u_ubo, u_list, u_rays, u_irradiance, u_distance, u_probe_data, RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 7, p_volume->schedule_groups_buffer));
+	} else {
+		uniform_set = uniform_set_cache->get_cache(shader_rid, 0, u_ubo, u_list, u_rays, u_irradiance, u_distance, u_probe_data);
+	}
 	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set, 0);
 	if (p_indirect_offset >= 0) {
 		RD::get_singleton()->compute_list_dispatch_indirect(compute_list, p_volume->dispatch_buffer, p_indirect_offset);
@@ -411,6 +425,8 @@ void DDGI::process(const Ref<Volume> &p_volume, RID p_environment, SkyRD::Sky *p
 	RENDER_TIMESTAMP("DDGI Schedule");
 	_dispatch(MODE_SCHEDULE_COUNT, p_volume, probe_groups);
 	_dispatch(MODE_SCHEDULE_PLAN, p_volume, 1);
+	_dispatch(MODE_SCHEDULE_SELECT, p_volume, probe_groups);
+	_dispatch(MODE_SCHEDULE_SCAN, p_volume, 1);
 	_dispatch(MODE_SCHEDULE_APPEND, p_volume, probe_groups);
 	_dispatch(MODE_SCHEDULE_FINALIZE, p_volume, 1);
 	RENDER_TIMESTAMP("DDGI Trace");
