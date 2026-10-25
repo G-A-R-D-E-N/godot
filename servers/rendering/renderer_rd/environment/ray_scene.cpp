@@ -40,6 +40,7 @@
 #include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/mesh_storage.h"
+#include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
 #include "servers/rendering/rendering_server.h"
 #include "servers/rendering/rendering_server_globals.h"
 
@@ -440,10 +441,35 @@ void RayScene::_instance_slots(RID p_material, CachedMaterial &r_cached) const {
 	r_cached.bounce_index = material_storage->material_get_instance_float_index(p_material, SNAME("oc_emission_bounce"));
 }
 
-void RayScene::_material_entry(RID p_material, Material &r_material) const {
+static constexpr float ALBEDO_MAX = 0.9f;
+static const Color TEXTURE_MEAN_ALBEDO = Color(0.1759f, 0.1502f, 0.1185f);
+
+static void _store_albedo(float *r_values, const Color &p_color, float p_scale) {
+	const Color albedo(MAX(p_color.r * p_scale, 0.0f), MAX(p_color.g * p_scale, 0.0f), MAX(p_color.b * p_scale, 0.0f));
+	const float peak = albedo.get_v();
+	const float scale = peak > ALBEDO_MAX ? ALBEDO_MAX / peak : 1.0f;
+	r_values[0] = albedo.r * scale;
+	r_values[1] = albedo.g * scale;
+	r_values[2] = albedo.b * scale;
+}
+
+static RID _param_texture(const Variant &p_value) {
+	return p_value.get_type() == Variant::RID ? RID(p_value) : RID();
+}
+
+void RayScene::_warn_albedo_fallback(RID p_material, RID p_texture, RID p_mesh, uint32_t p_surface) {
+	if (albedo_fallback_warned.has(p_material)) {
+		return;
+	}
+	albedo_fallback_warned.insert(p_material);
+	WARN_PRINT(vformat("Ray scene: a material without gi_albedo takes the texture-mean albedo fallback (mesh \"%s\", surface %d, texture \"%s\").", MeshStorage::get_singleton()->mesh_get_path(p_mesh), p_surface, TextureStorage::get_singleton()->texture_get_path(p_texture)));
+}
+
+void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, Material &r_material) {
 	r_material = {};
 	r_material.albedo[0] = r_material.albedo[1] = r_material.albedo[2] = 0.48f;
 	if (p_material.is_null()) {
+		albedo_sources[ALBEDO_DEFAULT]++;
 		return;
 	}
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
@@ -451,14 +477,41 @@ void RayScene::_material_entry(RID p_material, Material &r_material) const {
 	Color albedo;
 	Color emission;
 	if (_param_color(material_storage->material_get_param(p_material, SNAME("gi_albedo")), albedo) && albedo.r >= 0.0f && albedo.g >= 0.0f && albedo.b >= 0.0f) {
-		_store_color(r_material.albedo, albedo, 1.0f);
+		if (albedo.get_v() > ALBEDO_MAX) {
+			albedo_sources[ALBEDO_GI_CAPPED]++;
+		}
+		_store_albedo(r_material.albedo, albedo, 1.0f);
+		albedo_sources[ALBEDO_GI]++;
 	} else if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("base_color")), albedo)) {
-		const float weight = _param_float(material_storage->material_get_declared_param(p_material, SNAME("base_weight")), 1.0f);
-		albedo = albedo.srgb_to_linear();
-		_store_color(r_material.albedo, albedo, weight);
+		const float weight = CLAMP(_param_float(material_storage->material_get_declared_param(p_material, SNAME("base_weight")), 1.0f), 0.0f, 1.0f);
+		RID texture;
+		if (material_storage->material_get_declared_param(p_material, SNAME("use_base_color_opacity_texture")).booleanize()) {
+			texture = _param_texture(material_storage->material_get_declared_param(p_material, SNAME("base_color_opacity_texture")));
+		}
+		if (texture.is_valid()) {
+			Color tint = albedo;
+			if (material_storage->material_get_declared_param(p_material, SNAME("use_texture_ranges")).booleanize()) {
+				_param_color(material_storage->material_get_declared_param(p_material, SNAME("base_color_texture_tint")), tint);
+			}
+			albedo = tint.srgb_to_linear() * TEXTURE_MEAN_ALBEDO;
+			_warn_albedo_fallback(p_material, texture, p_mesh, p_surface);
+			albedo_sources[ALBEDO_TEXTURED]++;
+		} else {
+			albedo = albedo.srgb_to_linear();
+			albedo_sources[ALBEDO_UNTEXTURED]++;
+		}
+		_store_albedo(r_material.albedo, albedo, weight);
 	} else if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("albedo")), albedo)) {
 		albedo = albedo.srgb_to_linear();
-		_store_color(r_material.albedo, albedo, 1.0f);
+		const RID texture = _param_texture(material_storage->material_get_declared_param(p_material, SNAME("texture_albedo")));
+		if (texture.is_valid()) {
+			albedo *= TEXTURE_MEAN_ALBEDO;
+			_warn_albedo_fallback(p_material, texture, p_mesh, p_surface);
+		}
+		_store_albedo(r_material.albedo, albedo, 1.0f);
+		albedo_sources[ALBEDO_STANDARD]++;
+	} else {
+		albedo_sources[ALBEDO_DEFAULT]++;
 	}
 
 	if (_param_color(material_storage->material_get_param(p_material, SNAME("gi_emission")), emission) && emission.r >= 0.0f && emission.g >= 0.0f && emission.b >= 0.0f) {
@@ -611,6 +664,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	instances.clear();
 	materials.clear();
 	material_cache.clear();
+	memset(albedo_sources, 0, sizeof(albedo_sources));
 	emission_scale = _param_float(MaterialStorage::get_singleton()->global_shader_parameter_get_internal(SNAME("openpbr_emission_scale")), 1.0f);
 	LocalVector<BuildPrimitive> primitives;
 	uint32_t signature = HASH_MURMUR3_SEED;
@@ -648,7 +702,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			CachedMaterial *cached = material_cache.getptr(material);
 			if (!cached) {
 				CachedMaterial entry;
-				_material_entry(material, entry.entry);
+				_material_entry(material, mesh_rid, s, entry.entry);
 				_instance_slots(material, entry);
 				cached = &material_cache.insert(material, entry)->value;
 			}
@@ -677,6 +731,10 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 
 	if (signature != instance_signature || anchor_moved || need_assembly || tlas_node_buffer.is_null()) {
 		instance_signature = signature;
+		if (memcmp(albedo_sources, reported_albedo_sources, sizeof(albedo_sources)) != 0) {
+			memcpy(reported_albedo_sources, albedo_sources, sizeof(albedo_sources));
+			print_line(vformat("Ray scene albedo: gi_albedo %d (%d capped at 0.9), textured fallback %d, untextured %d, standard %d, default %d.", albedo_sources[ALBEDO_GI], albedo_sources[ALBEDO_GI_CAPPED], albedo_sources[ALBEDO_TEXTURED], albedo_sources[ALBEDO_UNTEXTURED], albedo_sources[ALBEDO_STANDARD], albedo_sources[ALBEDO_DEFAULT]));
+		}
 		build_bvh(primitives, TLAS_LEAF_SIZE, TLAS_MAX_DEPTH, tlas_nodes);
 		LocalVector<Instance> ordered;
 		ordered.resize(MAX(1u, instances.size()));
