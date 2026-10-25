@@ -1345,6 +1345,7 @@ void RendererSceneCull::instance_geometry_set_flag(RID p_instance, RSE::Instance
 			}
 		} break;
 		case RSE::INSTANCE_FLAG_RAY_SCENE_ONLY: {
+			ERR_FAIL_COND_MSG(p_enabled && instance->base_type != RSE::INSTANCE_MESH, "INSTANCE_FLAG_RAY_SCENE_ONLY works on mesh instances only.");
 			instance->ray_scene_only = p_enabled;
 
 			if (instance->scenario && instance->array_index >= 0) {
@@ -1886,7 +1887,7 @@ void RendererSceneCull::_update_instance(Instance *p_instance) const {
 		if (p_instance->ignore_all_culling) {
 			idata.flags |= InstanceData::FLAG_IGNORE_ALL_CULLING;
 		}
-		if (p_instance->ray_scene_only) {
+		if (p_instance->ray_scene_only && p_instance->base_type == RSE::INSTANCE_MESH) {
 			idata.flags |= InstanceData::FLAG_RAY_SCENE_ONLY;
 		}
 
