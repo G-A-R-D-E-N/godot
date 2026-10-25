@@ -34,11 +34,13 @@ TEST_FORCE_LINK(test_ray_scene_lights)
 
 #ifdef RD_ENABLED
 
+#include "servers/rendering/renderer_rd/environment/ddgi_light_tracker.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
 
 namespace TestRaySceneLights {
 
+using RendererRD::DDGILightTracker;
 using RendererRD::LightStorage;
 using RendererRD::RayScene;
 
@@ -95,6 +97,84 @@ TEST_CASE("[RayScene] Area light half axes ignore node scale") {
 	CHECK(half_a.normalized().is_equal_approx(basis.get_column(Vector3::AXIS_X).normalized()));
 	CHECK(half_b.normalized().is_equal_approx(basis.get_column(Vector3::AXIS_Y).normalized()));
 	CHECK(light.area == doctest::Approx(0.125));
+}
+
+constexpr float RANGE = 5.0f;
+
+RayScene::Light tracked_light(RSE::LightType p_type, uint32_t p_mask) {
+	RayScene::Light light = {};
+	light.type = uint32_t(p_type);
+	light.energy = 1.0f;
+	light.inv_radius = 1.0f / RANGE;
+	light.caster_mask = p_mask;
+	light.color[0] = light.color[1] = light.color[2] = 1.0f;
+	return light;
+}
+
+RayScene::Light tracked_rect(float p_yaw, float p_roll, float p_half_a, uint32_t p_mask) {
+	const Basis basis = Basis(Vector3(0, 1, 0), Math::deg_to_rad(p_yaw)) * Basis(Vector3(0, 0, 1), Math::deg_to_rad(p_roll));
+	const Vector3 facing = basis.xform(Vector3(0, 0, -1));
+	const Vector3 half_a = basis.xform(Vector3(p_half_a, 0, 0));
+	const Vector3 half_b = basis.xform(Vector3(0, 0.125, 0));
+	RayScene::Light light = tracked_light(RSE::LIGHT_AREA, p_mask);
+	for (int k = 0; k < 3; k++) {
+		light.direction[k] = float(facing[k]);
+		light.half_a[k] = float(half_a[k]);
+		light.half_b[k] = float(half_b[k]);
+	}
+	return light;
+}
+
+RayScene::Light tracked_omni(float p_x) {
+	RayScene::Light light = tracked_light(RSE::LIGHT_OMNI, 0xFFFFFFFF);
+	light.position[0] = p_x;
+	return light;
+}
+
+uint32_t tracker_frame(uint64_t p_frame, const RayScene::Light &p_rect, const RayScene::Light *p_omni, LocalVector<DDGILightTracker::Box> &r_boxes) {
+	DDGILightTracker::begin(true, p_frame, 1.0f);
+	DDGILightTracker::observe(RID::from_uint64(1), p_rect, Vector3());
+	if (p_omni) {
+		DDGILightTracker::observe(RID::from_uint64(2), *p_omni, Vector3());
+	}
+	DDGILightTracker::end();
+	DDGILightTracker::take(r_boxes);
+	return r_boxes.size();
+}
+
+TEST_CASE("[RayScene] DDGI light tracker resets for a turned, rolled or resized rect, a caster mask change and a moved omni") {
+	const float reach = RANGE + Math::sqrt(0.25f * 0.25f + 0.125f * 0.125f);
+	const float wide_reach = RANGE + Math::sqrt(0.3f * 0.3f + 0.125f * 0.125f);
+	LocalVector<DDGILightTracker::Box> boxes;
+	DDGILightTracker::begin(false, 0, 1.0f);
+
+	CHECK(tracker_frame(0, tracked_rect(0, 0, 0.25f, 0xFFFFFFFF), nullptr, boxes) == 0);
+	CHECK(tracker_frame(8, tracked_rect(0, 0, 0.25f, 0xFFFFFFFF), nullptr, boxes) == 0);
+	CHECK(tracker_frame(16, tracked_rect(5, 0, 0.25f, 0xFFFFFFFF), nullptr, boxes) == 0);
+
+	REQUIRE(tracker_frame(24, tracked_rect(20, 0, 0.25f, 0xFFFFFFFF), nullptr, boxes) == 1);
+	CHECK(boxes[0].center.is_zero_approx());
+	CHECK(boxes[0].half == doctest::Approx(reach));
+
+	CHECK(tracker_frame(25, tracked_rect(40, 0, 0.25f, 0xFFFFFFFF), nullptr, boxes) == 0);
+	CHECK(tracker_frame(32, tracked_rect(40, 0, 0.25f, 0xFFFFFFFF), nullptr, boxes) == 1);
+	CHECK(tracker_frame(40, tracked_rect(40, 90, 0.25f, 0xFFFFFFFF), nullptr, boxes) == 1);
+
+	REQUIRE(tracker_frame(48, tracked_rect(40, 90, 0.3f, 0xFFFFFFFF), nullptr, boxes) == 2);
+	CHECK(MIN(boxes[0].half, boxes[1].half) == doctest::Approx(reach));
+	CHECK(MAX(boxes[0].half, boxes[1].half) == doctest::Approx(wide_reach));
+
+	CHECK(tracker_frame(56, tracked_rect(40, 90, 0.3f, 0x1), nullptr, boxes) == 1);
+
+	const RayScene::Light omni = tracked_omni(2.0f);
+	REQUIRE(tracker_frame(64, tracked_rect(40, 90, 0.3f, 0x1), &omni, boxes) == 1);
+	CHECK(boxes[0].center.is_equal_approx(Vector3(2, 0, 0)));
+	CHECK(boxes[0].half == doctest::Approx(RANGE));
+
+	const RayScene::Light moved = tracked_omni(2.5f);
+	CHECK(tracker_frame(72, tracked_rect(60, 90, 0.3f, 0x1), &moved, boxes) == 3);
+
+	DDGILightTracker::begin(false, 0, 1.0f);
 }
 
 } // namespace TestRaySceneLights
