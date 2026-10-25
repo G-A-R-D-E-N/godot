@@ -126,7 +126,7 @@ vec3 origin_surfel_normal = vec3(0.0, 1.0, 0.0);
 
 vec4 shade_hit(vec3 p_origin, vec3 p_direction, RaySceneHit hit, uint p_seed) {
 	RaySceneMaterial material = ray_scene_hit_material(hit);
-	bool two_sided = bool(material.flags & RAY_SCENE_MATERIAL_TWO_SIDED);
+	bool two_sided = hit.blend || bool(material.flags & RAY_SCENE_MATERIAL_TWO_SIDED);
 	if (hit.backface && !two_sided) {
 		return vec4(0.0, 0.0, 0.0, -hit.t);
 	}
