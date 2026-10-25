@@ -423,6 +423,23 @@ static void _store_color(float *r_values, const Color &p_color, float p_scale) {
 	r_values[2] = p_color.b * p_scale;
 }
 
+static float _instance_float(int32_t p_offset, int32_t p_index) {
+	if (p_offset < 0 || p_index < 0) {
+		return 1.0f;
+	}
+	float value = 1.0f;
+	return MaterialStorage::get_singleton()->global_shader_parameters_instance_read_float(p_offset + p_index, value) ? value : 1.0f;
+}
+
+void RayScene::_instance_slots(RID p_material, CachedMaterial &r_cached) const {
+	if (p_material.is_null()) {
+		return;
+	}
+	const MaterialStorage *material_storage = MaterialStorage::get_singleton();
+	r_cached.scale_index = material_storage->material_get_instance_float_index(p_material, SNAME("oc_emission_scale"));
+	r_cached.bounce_index = material_storage->material_get_instance_float_index(p_material, SNAME("oc_emission_bounce"));
+}
+
 void RayScene::_material_entry(RID p_material, Material &r_material) const {
 	r_material = {};
 	r_material.albedo[0] = r_material.albedo[1] = r_material.albedo[2] = 0.48f;
@@ -444,8 +461,8 @@ void RayScene::_material_entry(RID p_material, Material &r_material) const {
 		_store_color(r_material.albedo, albedo, 1.0f);
 	}
 
-	if (_param_color(material_storage->material_get_param(p_material, SNAME("gi_emission")), emission)) {
-		_store_color(r_material.emission, emission, 1.0f);
+	if (_param_color(material_storage->material_get_param(p_material, SNAME("gi_emission")), emission) && emission.r >= 0.0f && emission.g >= 0.0f && emission.b >= 0.0f) {
+		_store_color(r_material.emission, emission, emission_scale);
 	} else if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("emission_color")), emission)) {
 		const float luminance = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_luminance")), 0.0f);
 		const float bounce = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_bounce_weight")), 1.0f);
@@ -628,13 +645,21 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			if (material.is_null()) {
 				material = mesh_storage->mesh_surface_get_material(mesh_rid, s);
 			}
-			Material *cached = material_cache.getptr(material);
+			CachedMaterial *cached = material_cache.getptr(material);
 			if (!cached) {
-				Material entry;
-				_material_entry(material, entry);
+				CachedMaterial entry;
+				_material_entry(material, entry.entry);
+				_instance_slots(material, entry);
 				cached = &material_cache.insert(material, entry)->value;
 			}
-			materials.push_back(*cached);
+			materials.push_back(cached->entry);
+			const float factor = MAX(_instance_float(geometry->shader_uniforms_offset, cached->scale_index), 0.0f) * MAX(_instance_float(geometry->shader_uniforms_offset, cached->bounce_index), 0.0f);
+			if (factor != 1.0f) {
+				Material &instance_material = materials[materials.size() - 1];
+				for (int k = 0; k < 3; k++) {
+					instance_material.emission[k] *= factor;
+				}
+			}
 		}
 
 		const AABB bounds = transform.xform(mesh->aabb);

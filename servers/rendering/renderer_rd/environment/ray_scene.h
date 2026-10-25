@@ -141,8 +141,14 @@ private:
 	LocalVector<Triangle> triangles;
 
 	LocalVector<Instance> instances;
+	struct CachedMaterial {
+		Material entry;
+		int32_t scale_index = -1;
+		int32_t bounce_index = -1;
+	};
+
 	LocalVector<Material> materials;
-	HashMap<RID, Material> material_cache;
+	HashMap<RID, CachedMaterial> material_cache;
 	float emission_scale = 1.0f;
 	LocalVector<Light> lights;
 	LocalVector<Light> local_lights;
@@ -169,6 +175,7 @@ private:
 	void _build_blas(MeshEntry &p_mesh);
 	void _assemble(const LocalVector<RID> &p_meshes);
 	void _material_entry(RID p_material, Material &r_material) const;
+	void _instance_slots(RID p_material, CachedMaterial &r_cached) const;
 	void _pack_light(RID p_light_instance, bool p_physical_units, float p_exposure, uint32_t p_limit, LocalVector<Light> &r_lights) const;
 	void _select_lights(const Vector3 &p_camera);
 	static void _ensure_buffer(RID &r_buffer, uint32_t &r_capacity, uint32_t p_count, uint32_t p_stride, const char *p_name);
