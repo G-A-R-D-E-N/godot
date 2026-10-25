@@ -45,6 +45,23 @@ LightStorage *LightStorage::get_singleton() {
 	return singleton;
 }
 
+float LightStorage::light_render_energy(float p_energy, float p_intensity, RSE::LightType p_type, bool p_physical_units) {
+	float energy = p_energy;
+	if (!p_physical_units) {
+		energy *= Math::PI;
+		return energy;
+	}
+	energy *= p_intensity;
+	if (p_type == RSE::LIGHT_OMNI) {
+		energy *= 1.0 / (Math::PI * 4.0);
+	} else if (p_type == RSE::LIGHT_AREA) {
+		energy *= 1.0 / (Math::PI * 2.0);
+	} else if (p_type == RSE::LIGHT_SPOT) {
+		energy *= 1.0 / Math::PI;
+	}
+	return energy;
+}
+
 LightStorage::LightStorage() {
 	singleton = this;
 
@@ -918,13 +935,7 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 
 				float sign = light->negative ? -1 : 1;
 
-				light_data.energy = sign * light->param[RSE::LIGHT_PARAM_ENERGY];
-
-				if (RendererSceneRenderRD::get_singleton()->is_using_physical_light_units()) {
-					light_data.energy *= light->param[RSE::LIGHT_PARAM_INTENSITY];
-				} else {
-					light_data.energy *= Math::PI;
-				}
+				light_data.energy = light_render_energy(sign * light->param[RSE::LIGHT_PARAM_ENERGY], light->param[RSE::LIGHT_PARAM_INTENSITY], RSE::LIGHT_DIRECTIONAL, RendererSceneRenderRD::get_singleton()->is_using_physical_light_units());
 
 				if (p_render_data->camera_attributes.is_valid()) {
 					light_data.energy *= RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes);
@@ -1210,24 +1221,7 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 			}
 		}
 
-		float energy = sign * light->param[RSE::LIGHT_PARAM_ENERGY] * fade;
-
-		if (RendererSceneRenderRD::get_singleton()->is_using_physical_light_units()) {
-			energy *= light->param[RSE::LIGHT_PARAM_INTENSITY];
-
-			// Convert from Luminous Power to Luminous Intensity
-			if (type == RSE::LIGHT_OMNI) {
-				energy *= 1.0 / (Math::PI * 4.0);
-			} else if (type == RSE::LIGHT_AREA) {
-				energy *= 1.0 / (Math::PI * 2.0);
-			} else {
-				// Spot Lights are not physically accurate, Luminous Intensity should change in relation to the cone angle.
-				// We make this assumption to keep them easy to control.
-				energy *= 1.0 / Math::PI;
-			}
-		} else {
-			energy *= Math::PI;
-		}
+		float energy = light_render_energy(sign * light->param[RSE::LIGHT_PARAM_ENERGY] * fade, light->param[RSE::LIGHT_PARAM_INTENSITY], type, RendererSceneRenderRD::get_singleton()->is_using_physical_light_units());
 
 		if (p_render_data->camera_attributes.is_valid()) {
 			energy *= RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes);
