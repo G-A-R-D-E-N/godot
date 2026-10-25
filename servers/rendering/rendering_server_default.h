@@ -943,6 +943,7 @@ public:
 	FUNC3(camera_attributes_set_exposure, RID, float, float)
 	FUNC6(camera_attributes_set_auto_exposure, RID, bool, float, float, float, float)
 	FUNC2(camera_attributes_set_auto_exposure_highlight_limit, RID, float)
+	FUNC3(camera_attributes_set_auto_exposure_adaptation, RID, float, float)
 	FUNC5(camera_attributes_set_auto_exposure_meter, RID, RSE::AutoExposureMeter, float, float, float)
 
 	/* SCENARIO API */

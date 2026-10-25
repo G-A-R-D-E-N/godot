@@ -6,6 +6,10 @@ layout(push_constant, std430) uniform PushConstant {
 	float max_luminance;
 	float block_scale;
 	float highlight_limit;
-	float pad;
+	float adaptation;
+	float adaptation_pivot;
+	uint final_level;
+	float pad0;
+	float pad1;
 }
 settings;

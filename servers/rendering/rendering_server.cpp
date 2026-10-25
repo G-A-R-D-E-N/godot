@@ -3243,6 +3243,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_exposure", "camera_attributes", "multiplier", "normalization"), &RenderingServer::camera_attributes_set_exposure);
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_auto_exposure", "camera_attributes", "enable", "min_sensitivity", "max_sensitivity", "speed", "scale"), &RenderingServer::camera_attributes_set_auto_exposure);
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_auto_exposure_highlight_limit", "camera_attributes", "limit"), &RenderingServer::camera_attributes_set_auto_exposure_highlight_limit);
+	ClassDB::bind_method(D_METHOD("camera_attributes_set_auto_exposure_adaptation", "camera_attributes", "adaptation", "pivot_luminance"), &RenderingServer::camera_attributes_set_auto_exposure_adaptation);
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_auto_exposure_meter", "camera_attributes", "meter", "clip_low", "clip_high", "center_weight"), &RenderingServer::camera_attributes_set_auto_exposure_meter);
 
 	BIND_ENUM_CONSTANT(RSE::DOF_BOKEH_BOX);

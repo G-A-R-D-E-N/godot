@@ -12,6 +12,9 @@
 	<tutorials>
 	</tutorials>
 	<members>
+		<member name="auto_exposure_adaptation_pivot_sensitivity" type="float" setter="set_auto_exposure_adaptation_pivot_sensitivity" getter="get_auto_exposure_adaptation_pivot_sensitivity" default="0.0">
+			The pivot (in ISO, the same unit as [member auto_exposure_min_sensitivity]) below which [member CameraAttributes.auto_exposure_adaptation] applies. A pivot equal to the minimum sensitivity converts to the same luminance as that minimum. [code]0.0[/code] disables partial adaptation.
+		</member>
 		<member name="auto_exposure_max_sensitivity" type="float" setter="set_auto_exposure_max_sensitivity" getter="get_auto_exposure_max_sensitivity" default="800.0">
 			The maximum sensitivity (in ISO) used when calculating auto exposure. When calculating scene average luminance, color values will be clamped to at least this value. This limits the auto-exposure from exposing below a certain brightness, resulting in a cut off point where the scene will remain bright.
 		</member>

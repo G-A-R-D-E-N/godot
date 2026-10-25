@@ -48,6 +48,8 @@ private:
 		float auto_exposure_adjust_speed = 1.0;
 		float auto_exposure_scale = 1.0;
 		float auto_exposure_highlight_limit = 0.0;
+		float auto_exposure_adaptation = 1.0;
+		float auto_exposure_adaptation_pivot = 0.0;
 		RSE::AutoExposureMeter auto_exposure_meter = RSE::AUTO_EXPOSURE_METER_MEAN;
 		float auto_exposure_clip_low = 0.03;
 		float auto_exposure_clip_high = 0.03;
@@ -111,6 +113,9 @@ public:
 	float camera_attributes_get_auto_exposure_scale(RID p_camera_attributes);
 	void camera_attributes_set_auto_exposure_highlight_limit(RID p_camera_attributes, float p_limit);
 	float camera_attributes_get_auto_exposure_highlight_limit(RID p_camera_attributes);
+	void camera_attributes_set_auto_exposure_adaptation(RID p_camera_attributes, float p_adaptation, float p_pivot_luminance);
+	float camera_attributes_get_auto_exposure_adaptation(RID p_camera_attributes);
+	float camera_attributes_get_auto_exposure_adaptation_pivot(RID p_camera_attributes);
 	void camera_attributes_set_auto_exposure_meter(RID p_camera_attributes, RSE::AutoExposureMeter p_meter, float p_clip_low, float p_clip_high, float p_center_weight);
 	RSE::AutoExposureMeter camera_attributes_get_auto_exposure_meter(RID p_camera_attributes);
 	float camera_attributes_get_auto_exposure_clip_low(RID p_camera_attributes);

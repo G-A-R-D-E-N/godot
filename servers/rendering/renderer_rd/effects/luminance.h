@@ -58,7 +58,10 @@ private:
 		float exposure_adjust;
 		float block_scale;
 		float highlight_limit;
-		float pad;
+		float adaptation;
+		float adaptation_pivot;
+		uint32_t final_level;
+		float pad[2];
 	};
 
 	struct LuminanceReduce {
@@ -81,7 +84,10 @@ private:
 		float max_luminance;
 		float block_scale;
 		float highlight_limit;
-		float pad;
+		float adaptation;
+		float adaptation_pivot;
+		uint32_t final_level;
+		float pad[2];
 	};
 
 	struct LuminanceReduceFragment {
@@ -109,7 +115,8 @@ private:
 		float max_luminance;
 		float exposure_adjust;
 		uint32_t set_immediate;
-		uint32_t pad[2];
+		float adaptation;
+		float adaptation_pivot;
 	};
 
 	struct LuminanceHistogram {
@@ -142,8 +149,8 @@ public:
 
 	Ref<LuminanceBuffers> get_luminance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers);
 	RID get_current_luminance_buffer(Ref<RenderSceneBuffersRD> p_render_buffers);
-	void luminance_reduction(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set = false, float p_highlight_limit = 0.0);
-	void luminance_histogram_meter(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set, float p_clip_low, float p_clip_high, float p_center_weight);
+	void luminance_reduction(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set = false, float p_highlight_limit = 0.0, float p_adaptation = 1.0, float p_adaptation_pivot = 0.0);
+	void luminance_histogram_meter(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set, float p_clip_low, float p_clip_high, float p_center_weight, float p_adaptation = 1.0, float p_adaptation_pivot = 0.0);
 	static int histogram_stride(const Size2i p_size);
 	bool supports_histogram_meter() const { return !prefer_raster_effects; }
 

@@ -38,10 +38,12 @@ layout(push_constant, std430) uniform Params {
 	float max_luminance;
 	float exposure_adjust;
 	uint set_immediate;
-	uint pad0;
-	uint pad1;
+	float adaptation;
+	float adaptation_pivot;
 }
 params;
+
+#include "luminance_adaptation_inc.glsl"
 
 shared uint local_bins[BINS];
 
@@ -131,7 +133,7 @@ void main() {
 		float prev = texelFetch(prev_luminance, ivec2(0, 0), 0).r;
 		float result = clamp(prev > 0.0 ? prev : params.min_luminance, params.min_luminance, params.max_luminance);
 		if (local_kept[0] > 0.0) {
-			float target = exp2(local_sum[0] / local_kept[0]);
+			float target = luminance_adapt(exp2(local_sum[0] / local_kept[0]), params.adaptation, params.adaptation_pivot);
 			if (params.set_immediate != 0u || !(prev > 0.0)) {
 				result = clamp(target, params.min_luminance, params.max_luminance);
 			} else {

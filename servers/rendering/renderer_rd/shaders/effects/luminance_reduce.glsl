@@ -35,9 +35,15 @@ layout(push_constant, std430) uniform Params {
 	float exposure_adjust;
 	float block_scale;
 	float highlight_limit;
-	float pad;
+	float adaptation;
+	float adaptation_pivot;
+	uint final_level;
+	float pad0;
+	float pad1;
 }
 params;
+
+#include "luminance_adaptation_inc.glsl"
 
 void main() {
 	uint t = gl_LocalInvocationID.y * BLOCK_SIZE + gl_LocalInvocationID.x;
@@ -50,7 +56,7 @@ void main() {
 		if (params.highlight_limit > 0.0) {
 			float prev_avg = texelFetch(prev_luminance, ivec2(0, 0), 0).r;
 			if (prev_avg > 0.0) {
-				lum = min(lum, prev_avg * params.highlight_limit);
+				lum = min(lum, luminance_unadapt(prev_avg, params.adaptation, params.adaptation_pivot) * params.highlight_limit);
 			}
 		}
 		tmp_data[t] = lum;
@@ -78,6 +84,9 @@ void main() {
 
 	if (t == 0) {
 		float avg = tmp_data[0] * params.block_scale;
+		if (params.final_level != 0u) {
+			avg = luminance_adapt(avg, params.adaptation, params.adaptation_pivot);
+		}
 		pos /= ivec2(BLOCK_SIZE);
 #ifdef WRITE_LUMINANCE
 		float prev_lum = texelFetch(prev_luminance, ivec2(0, 0), 0).r; //1 pixel previous exposure
