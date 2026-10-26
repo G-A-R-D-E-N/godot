@@ -32,6 +32,7 @@
 
 #include "core/templates/paged_allocator.h"
 #include "servers/rendering/multi_uma_buffer.h"
+#include "servers/rendering/renderer_alpha_sort.h"
 #include "servers/rendering/renderer_rd/cluster_builder_rd.h"
 #include "servers/rendering/renderer_rd/effects/fsr2.h"
 #include "servers/rendering/renderer_rd/effects/motion_vectors_store.h"
@@ -779,15 +780,9 @@ private:
 			sorter.sort(elements.ptr(), elements.size());
 		}
 
-		struct SortByReverseDepthAndPriority {
-			_FORCE_INLINE_ bool operator()(const GeometryInstanceSurfaceDataCache *A, const GeometryInstanceSurfaceDataCache *B) const {
-				return (A->sort.priority == B->sort.priority) ? (A->owner->depth > B->owner->depth) : (A->sort.priority < B->sort.priority);
-			}
-		};
-
 		void sort_by_reverse_depth_and_priority() { //used for alpha
 
-			SortArray<GeometryInstanceSurfaceDataCache *, SortByReverseDepthAndPriority> sorter;
+			SortArray<GeometryInstanceSurfaceDataCache *, SortByReverseDepthAndPriority<GeometryInstanceSurfaceDataCache>> sorter;
 			sorter.sort(elements.ptr(), elements.size());
 		}
 
