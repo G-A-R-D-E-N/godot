@@ -708,19 +708,13 @@ private:
 
 		//should eventually be replaced by radix
 
-		struct SortByKey {
-			_FORCE_INLINE_ bool operator()(const GeometryInstanceSurface *A, const GeometryInstanceSurface *B) const {
-				return (A->sort.sort_key2 == B->sort.sort_key2) ? (A->sort.sort_key1 < B->sort.sort_key1) : (A->sort.sort_key2 < B->sort.sort_key2);
-			}
-		};
-
 		void sort_by_key() {
-			SortArray<GeometryInstanceSurface *, SortByKey> sorter;
+			SortArray<GeometryInstanceSurface *, SortByKeyAndOwner<GeometryInstanceSurface>> sorter;
 			sorter.sort(elements.ptr(), elements.size());
 		}
 
 		void sort_by_key_range(uint32_t p_from, uint32_t p_size) {
-			SortArray<GeometryInstanceSurface *, SortByKey> sorter;
+			SortArray<GeometryInstanceSurface *, SortByKeyAndOwner<GeometryInstanceSurface>> sorter;
 			sorter.sort(elements.ptr() + p_from, p_size);
 		}
 

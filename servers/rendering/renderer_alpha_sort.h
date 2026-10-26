@@ -33,6 +33,19 @@
 #include "core/typedefs.h"
 
 template <typename T>
+struct SortByKeyAndOwner {
+	_FORCE_INLINE_ bool operator()(const T *A, const T *B) const {
+		if (A->sort.sort_key2 != B->sort.sort_key2) {
+			return A->sort.sort_key2 < B->sort.sort_key2;
+		}
+		if (A->sort.sort_key1 != B->sort.sort_key1) {
+			return A->sort.sort_key1 < B->sort.sort_key1;
+		}
+		return (uintptr_t)A->owner < (uintptr_t)B->owner;
+	}
+};
+
+template <typename T>
 struct SortByReverseDepthAndPriority {
 	_FORCE_INLINE_ bool operator()(const T *A, const T *B) const {
 		if (A->sort.priority != B->sort.priority) {
