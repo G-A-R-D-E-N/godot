@@ -105,7 +105,7 @@ void DDGI::Volume::allocate(const Settings &p_settings) {
 	RD::TextureFormat ray_format;
 	ray_format.texture_type = RD::TEXTURE_TYPE_2D;
 	ray_format.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
-	ray_format.width = settings.rays_per_probe;
+	ray_format.width = settings.rays_per_probe * 2;
 	ray_format.height = settings.probes_per_frame;
 	ray_format.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT;
 	rays = RD::get_singleton()->texture_create(ray_format, RD::TextureView());

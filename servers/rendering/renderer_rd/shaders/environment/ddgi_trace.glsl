@@ -186,7 +186,27 @@ void main() {
 	uint state = ddgi_state(data, level, local);
 	vec3 offset = state == DDGI_STATE_NONE ? vec3(0.0) : ddgi_offset(data);
 	vec3 origin = ddgi_probe_position(level, local, offset) + ray_scene.camera_to_anchor;
-	imageStore(ray_image, ivec2(ray_index, list_index), shade_ray(origin, ddgi_ray_direction(ray_index), ddgi.max_distance, ray_scene_hash(entry * 9781u + ddgi.frame * 6271u) + ray_index * 0x2c1b3c6du));
+	vec3 direction = ddgi_ray_direction(ray_index);
+	uint seed = ray_scene_hash(entry * 9781u + ddgi.frame * 6271u) + ray_index * 0x2c1b3c6du;
+	RaySceneHit hit;
+	vec4 ray;
+	float geometry = DDGI_MISS_DISTANCE;
+	if (!ray_scene_trace(origin, direction, ddgi.max_distance, false, seed, hit)) {
+		ray = vec4(min(sky_radiance_in(direction), vec3(DDGI_MAX_RADIANCE)), DDGI_MISS_DISTANCE);
+	} else {
+		ray = shade_hit(origin, direction, hit, seed);
+		geometry = ray.a;
+		if (hit.blend) {
+			RaySceneHit opaque;
+			geometry = DDGI_MISS_DISTANCE;
+			if (ray_scene_trace_opaque(origin, direction, ddgi.max_distance, seed, opaque)) {
+				bool back = opaque.backface && !bool(ray_scene_hit_material(opaque).flags & RAY_SCENE_MATERIAL_TWO_SIDED);
+				geometry = back ? -opaque.t : opaque.t;
+			}
+		}
+	}
+	imageStore(ray_image, ivec2(ray_index, list_index), ray);
+	imageStore(ray_image, ivec2(ddgi.rays_per_probe + ray_index, list_index), vec4(0.0, 0.0, 0.0, geometry));
 }
 
 #endif
