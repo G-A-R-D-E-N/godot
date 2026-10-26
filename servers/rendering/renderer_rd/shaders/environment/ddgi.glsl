@@ -240,11 +240,15 @@ void main() {
 	vec3 closest_front_direction = vec3(0.0);
 	vec3 closest_back_direction = vec3(0.0);
 	vec3 farthest_front_direction = vec3(0.0);
+	float closest_surface = 1e20;
 	float log_sum = 0.0;
 	float log_square_sum = 0.0;
 	for (uint r = 0; r < ddgi.rays_per_probe; r++) {
 		vec4 ray = imageLoad(ray_image, ivec2(r, list_index));
-		float hit = ray.a;
+		float hit = imageLoad(ray_image, ivec2(ddgi.rays_per_probe + r, list_index)).a;
+		if (ray.a >= 0.0) {
+			closest_surface = min(closest_surface, ray.a);
+		}
 		vec3 direction = ddgi_ray_direction(r);
 		if (hit < 0.0) {
 			backfaces++;
@@ -295,7 +299,7 @@ void main() {
 	uint state = DDGI_STATE_ACTIVE;
 	if (inside) {
 		state = DDGI_STATE_INSIDE;
-	} else if (closest_front > spacing * 1.7320508) {
+	} else if (closest_surface > spacing * 1.7320508) {
 		state = DDGI_STATE_IDLE;
 	}
 	imageStore(probe_image, ddgi_probe_texel(probe.level, probe.slot), uvec4(floatBitsToUint(offset), (state << 30) | ddgi_tag(probe.level, probe.local)));
