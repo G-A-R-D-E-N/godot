@@ -146,6 +146,15 @@ float CameraAttributes::get_auto_exposure_center_weight() const {
 	return auto_exposure_center_weight;
 }
 
+void CameraAttributes::set_auto_exposure_adaptation(float p_adaptation) {
+	auto_exposure_adaptation = CLAMP(p_adaptation, 0.0f, 1.0f);
+	_update_auto_exposure();
+}
+
+float CameraAttributes::get_auto_exposure_adaptation() const {
+	return auto_exposure_adaptation;
+}
+
 RID CameraAttributes::get_rid() const {
 	return camera_attributes;
 }
@@ -187,6 +196,8 @@ void CameraAttributes::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_auto_exposure_histogram_clip_high"), &CameraAttributes::get_auto_exposure_histogram_clip_high);
 	ClassDB::bind_method(D_METHOD("set_auto_exposure_center_weight", "weight"), &CameraAttributes::set_auto_exposure_center_weight);
 	ClassDB::bind_method(D_METHOD("get_auto_exposure_center_weight"), &CameraAttributes::get_auto_exposure_center_weight);
+	ClassDB::bind_method(D_METHOD("set_auto_exposure_adaptation", "adaptation"), &CameraAttributes::set_auto_exposure_adaptation);
+	ClassDB::bind_method(D_METHOD("get_auto_exposure_adaptation"), &CameraAttributes::get_auto_exposure_adaptation);
 
 	ADD_GROUP("Exposure", "exposure_");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "exposure_sensitivity", PROPERTY_HINT_RANGE, "0.1,32000.0,0.1,suffix:ISO"), "set_exposure_sensitivity", "get_exposure_sensitivity");
@@ -201,6 +212,7 @@ void CameraAttributes::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_histogram_clip_low", PROPERTY_HINT_RANGE, "0,0.45,0.001"), "set_auto_exposure_histogram_clip_low", "get_auto_exposure_histogram_clip_low");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_histogram_clip_high", PROPERTY_HINT_RANGE, "0,0.45,0.001"), "set_auto_exposure_histogram_clip_high", "get_auto_exposure_histogram_clip_high");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_center_weight", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_auto_exposure_center_weight", "get_auto_exposure_center_weight");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_adaptation", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_auto_exposure_adaptation", "get_auto_exposure_adaptation");
 
 	BIND_ENUM_CONSTANT(AUTO_EXPOSURE_METER_MEAN);
 	BIND_ENUM_CONSTANT(AUTO_EXPOSURE_METER_LOG_HISTOGRAM);
@@ -317,6 +329,15 @@ float CameraAttributesPractical::get_auto_exposure_max_sensitivity() const {
 	return auto_exposure_max;
 }
 
+void CameraAttributesPractical::set_auto_exposure_adaptation_pivot_sensitivity(float p_pivot) {
+	auto_exposure_adaptation_pivot = MAX(p_pivot, 0.0f);
+	_update_auto_exposure();
+}
+
+float CameraAttributesPractical::get_auto_exposure_adaptation_pivot_sensitivity() const {
+	return auto_exposure_adaptation_pivot;
+}
+
 void CameraAttributesPractical::_update_auto_exposure() {
 	RS::get_singleton()->camera_attributes_set_auto_exposure(
 			get_rid(),
@@ -325,6 +346,7 @@ void CameraAttributesPractical::_update_auto_exposure() {
 			auto_exposure_max * ((12.5 / 100.0) / exposure_sensitivity), // Convert from Sensitivity to Luminance
 			auto_exposure_speed,
 			auto_exposure_scale);
+	RS::get_singleton()->camera_attributes_set_auto_exposure_adaptation(get_rid(), auto_exposure_adaptation, auto_exposure_adaptation_pivot * ((12.5 / 100.0) / exposure_sensitivity));
 	emit_changed();
 }
 
@@ -361,6 +383,8 @@ void CameraAttributesPractical::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_auto_exposure_max_sensitivity"), &CameraAttributesPractical::get_auto_exposure_max_sensitivity);
 	ClassDB::bind_method(D_METHOD("set_auto_exposure_min_sensitivity", "min_sensitivity"), &CameraAttributesPractical::set_auto_exposure_min_sensitivity);
 	ClassDB::bind_method(D_METHOD("get_auto_exposure_min_sensitivity"), &CameraAttributesPractical::get_auto_exposure_min_sensitivity);
+	ClassDB::bind_method(D_METHOD("set_auto_exposure_adaptation_pivot_sensitivity", "pivot_sensitivity"), &CameraAttributesPractical::set_auto_exposure_adaptation_pivot_sensitivity);
+	ClassDB::bind_method(D_METHOD("get_auto_exposure_adaptation_pivot_sensitivity"), &CameraAttributesPractical::get_auto_exposure_adaptation_pivot_sensitivity);
 
 	ADD_GROUP("DOF Blur", "dof_blur_");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "dof_blur_far_enabled"), "set_dof_blur_far_enabled", "is_dof_blur_far_enabled");
@@ -374,6 +398,7 @@ void CameraAttributesPractical::_bind_methods() {
 	ADD_GROUP("Auto Exposure", "auto_exposure_");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_min_sensitivity", PROPERTY_HINT_RANGE, "0,1600,0.01,or_greater,suffic:ISO"), "set_auto_exposure_min_sensitivity", "get_auto_exposure_min_sensitivity");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_max_sensitivity", PROPERTY_HINT_RANGE, "0,64000,0.1,or_greater,suffic:ISO"), "set_auto_exposure_max_sensitivity", "get_auto_exposure_max_sensitivity");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_adaptation_pivot_sensitivity", PROPERTY_HINT_RANGE, "0,64000,0.1,or_greater,suffix:ISO"), "set_auto_exposure_adaptation_pivot_sensitivity", "get_auto_exposure_adaptation_pivot_sensitivity");
 }
 
 CameraAttributesPractical::CameraAttributesPractical() {
@@ -514,6 +539,15 @@ float CameraAttributesPhysical::get_auto_exposure_max_exposure_value() const {
 	return auto_exposure_max;
 }
 
+void CameraAttributesPhysical::set_auto_exposure_adaptation_pivot_exposure_value(float p_pivot) {
+	auto_exposure_adaptation_pivot = p_pivot;
+	_update_auto_exposure();
+}
+
+float CameraAttributesPhysical::get_auto_exposure_adaptation_pivot_exposure_value() const {
+	return auto_exposure_adaptation_pivot;
+}
+
 void CameraAttributesPhysical::_update_auto_exposure() {
 	RS::get_singleton()->camera_attributes_set_auto_exposure(
 			get_rid(),
@@ -522,6 +556,7 @@ void CameraAttributesPhysical::_update_auto_exposure() {
 			std::pow(2.0, auto_exposure_max) * (12.5 / exposure_sensitivity), // Convert from EV100 to Luminance
 			auto_exposure_speed,
 			auto_exposure_scale);
+	RS::get_singleton()->camera_attributes_set_auto_exposure_adaptation(get_rid(), auto_exposure_adaptation, std::pow(2.0, auto_exposure_adaptation_pivot) * (12.5 / exposure_sensitivity));
 	emit_changed();
 }
 
@@ -554,6 +589,8 @@ void CameraAttributesPhysical::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_auto_exposure_max_exposure_value"), &CameraAttributesPhysical::get_auto_exposure_max_exposure_value);
 	ClassDB::bind_method(D_METHOD("set_auto_exposure_min_exposure_value", "exposure_value_min"), &CameraAttributesPhysical::set_auto_exposure_min_exposure_value);
 	ClassDB::bind_method(D_METHOD("get_auto_exposure_min_exposure_value"), &CameraAttributesPhysical::get_auto_exposure_min_exposure_value);
+	ClassDB::bind_method(D_METHOD("set_auto_exposure_adaptation_pivot_exposure_value", "pivot_exposure_value"), &CameraAttributesPhysical::set_auto_exposure_adaptation_pivot_exposure_value);
+	ClassDB::bind_method(D_METHOD("get_auto_exposure_adaptation_pivot_exposure_value"), &CameraAttributesPhysical::get_auto_exposure_adaptation_pivot_exposure_value);
 
 	ADD_GROUP("Frustum", "frustum_");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "frustum_focus_distance", PROPERTY_HINT_RANGE, "0.01,4000.0,0.01,suffix:m"), "set_focus_distance", "get_focus_distance");
@@ -568,6 +605,7 @@ void CameraAttributesPhysical::_bind_methods() {
 	ADD_GROUP("Auto Exposure", "auto_exposure_");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_min_exposure_value", PROPERTY_HINT_RANGE, "-16.0,16.0,0.01,or_greater,suffix:EV100"), "set_auto_exposure_min_exposure_value", "get_auto_exposure_min_exposure_value");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_max_exposure_value", PROPERTY_HINT_RANGE, "-16.0,16.0,0.01,or_greater,suffix:EV100"), "set_auto_exposure_max_exposure_value", "get_auto_exposure_max_exposure_value");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_adaptation_pivot_exposure_value", PROPERTY_HINT_RANGE, "-16.0,16.0,0.01,or_greater,suffix:EV100"), "set_auto_exposure_adaptation_pivot_exposure_value", "get_auto_exposure_adaptation_pivot_exposure_value");
 }
 
 CameraAttributesPhysical::CameraAttributesPhysical() {

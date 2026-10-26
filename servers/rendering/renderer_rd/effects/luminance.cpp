@@ -189,7 +189,7 @@ RID Luminance::get_current_luminance_buffer(Ref<RenderSceneBuffersRD> p_render_b
 	return RID();
 }
 
-void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set, float p_highlight_limit) {
+void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set, float p_highlight_limit, float p_adaptation, float p_adaptation_pivot) {
 	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
 	ERR_FAIL_NULL(uniform_set_cache);
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
@@ -211,6 +211,8 @@ void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_
 		push_constant.min_luminance = p_min_luminance;
 		push_constant.exposure_adjust = p_adjust;
 		push_constant.highlight_limit = highlight_multiplier;
+		push_constant.adaptation = p_adaptation;
+		push_constant.adaptation_pivot = p_adaptation_pivot;
 
 		Size2i dest_size = p_source_size;
 
@@ -220,6 +222,7 @@ void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_
 			dest_size.x = MAX(Math::division_round_up(dest_size.x, 8), 1);
 			dest_size.y = MAX(Math::division_round_up(dest_size.y, 8), 1);
 			push_constant.block_scale = i == level_count - 1 ? final_scale : level_scale;
+			push_constant.final_level = i == level_count - 1 ? 1 : 0;
 
 			bool final = !p_set && (dest_size.x == 1) && (dest_size.y == 1);
 			LuminanceReduceRasterMode mode = final ? LUMINANCE_REDUCE_FRAGMENT_FINAL : (i == 0 ? LUMINANCE_REDUCE_FRAGMENT_FIRST : LUMINANCE_REDUCE_FRAGMENT);
@@ -252,12 +255,15 @@ void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_
 		push_constant.min_luminance = p_min_luminance;
 		push_constant.exposure_adjust = p_adjust;
 		push_constant.highlight_limit = highlight_multiplier;
+		push_constant.adaptation = p_adaptation;
+		push_constant.adaptation_pivot = p_adaptation_pivot;
 
 		RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 
 		for (int i = 0; i < level_count; i++) {
 			RID shader;
 			push_constant.block_scale = i == level_count - 1 ? final_scale : level_scale;
+			push_constant.final_level = i == level_count - 1 ? 1 : 0;
 
 			if (i == 0) {
 				shader = luminance_reduce.shader.version_get_shader(luminance_reduce.shader_version, LUMINANCE_REDUCE_READ);
@@ -306,7 +312,7 @@ int Luminance::histogram_stride(const Size2i p_size) {
 	return MAX(1, int(Math::ceil(Math::sqrt(double(p_size.x) * double(p_size.y) / double(LUMINANCE_HISTOGRAM_MAX_SAMPLES)))));
 }
 
-void Luminance::luminance_histogram_meter(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set, float p_clip_low, float p_clip_high, float p_center_weight) {
+void Luminance::luminance_histogram_meter(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set, float p_clip_low, float p_clip_high, float p_center_weight, float p_adaptation, float p_adaptation_pivot) {
 	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
 	ERR_FAIL_NULL(uniform_set_cache);
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
@@ -329,6 +335,8 @@ void Luminance::luminance_histogram_meter(RID p_source_texture, const Size2i p_s
 	push_constant.max_luminance = p_max_luminance;
 	push_constant.exposure_adjust = p_adjust;
 	push_constant.set_immediate = p_set ? 1 : 0;
+	push_constant.adaptation = p_adaptation;
+	push_constant.adaptation_pivot = p_adaptation_pivot;
 
 	RD::get_singleton()->buffer_clear(p_luminance_buffers->histogram, 0, LUMINANCE_HISTOGRAM_BINS * sizeof(uint32_t));
 

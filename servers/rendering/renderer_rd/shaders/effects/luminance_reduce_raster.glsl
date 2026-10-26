@@ -28,6 +28,8 @@ void main() {
 layout(location = 0) in vec2 uv_interp;
 /* clang-format on */
 
+#include "luminance_adaptation_inc.glsl"
+
 layout(set = 0, binding = 0) uniform sampler2D source_exposure;
 
 #if defined(FINAL_PASS) || defined(FIRST_PASS)
@@ -46,7 +48,7 @@ void main() {
 	if (settings.highlight_limit > 0.0) {
 		highp float prev_avg = texelFetch(prev_luminance, ivec2(0, 0), 0).r;
 		if (prev_avg > 0.0) {
-			value_limit = prev_avg * settings.highlight_limit;
+			value_limit = luminance_unadapt(prev_avg, settings.adaptation, settings.adaptation_pivot) * settings.highlight_limit;
 		}
 	}
 #endif
@@ -64,6 +66,9 @@ void main() {
 	}
 
 	luminance = block_sum * settings.block_scale;
+	if (settings.final_level != 0u) {
+		luminance = luminance_adapt(luminance, settings.adaptation, settings.adaptation_pivot);
+	}
 
 #ifdef FINAL_PASS
 	luminance = clamp(luminance, settings.min_luminance, settings.max_luminance);

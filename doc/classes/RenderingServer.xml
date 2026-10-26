@@ -63,6 +63,15 @@
 				Sets the parameters to use with the auto-exposure effect. These parameters take on the same meaning as their counterparts in [CameraAttributes] and [CameraAttributesPractical].
 			</description>
 		</method>
+		<method name="camera_attributes_set_auto_exposure_adaptation">
+			<return type="void" />
+			<param index="0" name="camera_attributes" type="RID" />
+			<param index="1" name="adaptation" type="float" />
+			<param index="2" name="pivot_luminance" type="float" />
+			<description>
+				Sets partial auto-exposure adaptation. Below [param pivot_luminance], in the same luminance unit as the min and max passed to [method camera_attributes_set_auto_exposure], a metered luminance [code]L[/code] becomes [code]pivot_luminance * (L / pivot_luminance)^adaptation[/code] before the clamp. [param adaptation] [code]1.0[/code] or a pivot of [code]0.0[/code] leaves the meter unchanged. This has the same meaning as [member CameraAttributes.auto_exposure_adaptation].
+			</description>
+		</method>
 		<method name="camera_attributes_set_auto_exposure_highlight_limit">
 			<return type="void" />
 			<param index="0" name="camera_attributes" type="RID" />

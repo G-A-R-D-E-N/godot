@@ -520,12 +520,19 @@ float auto_exposure_read_luminance(RID p_texture) {
 	return value;
 }
 
-void auto_exposure_log_async(const Vector<uint8_t> &p_data, const String &p_head) {
+float auto_exposure_unadapt(float p_luminance, float p_adaptation, float p_pivot) {
+	if (p_adaptation >= 1.0f || !(p_luminance > 0.0f) || p_luminance >= p_pivot) {
+		return p_luminance;
+	}
+	return p_pivot * Math::pow(p_luminance / p_pivot, 1.0f / MAX(p_adaptation, 0.05f));
+}
+
+void auto_exposure_log_async(const Vector<uint8_t> &p_data, const String &p_head, float p_adaptation, float p_pivot) {
 	float value = -1.0f;
 	if (p_data.size() >= 4) {
 		memcpy(&value, p_data.ptr(), sizeof(float));
 	}
-	print_line(vformat("%s current %s", p_head, value));
+	print_line(vformat("%s current %s unadapted %s", p_head, value, auto_exposure_unadapt(value, p_adaptation, p_pivot)));
 }
 
 AutoExposureHdrScan auto_exposure_scan_hdr(RID p_texture, RD::DataFormat p_format, const Size2i &p_size) {
@@ -708,23 +715,26 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 		const bool auto_exposure_log_hdr = auto_exposure_log && GLOBAL_GET_CACHED(bool, "rendering/environment/auto_exposure/debug_log_hdr");
 		const RSE::AutoExposureMeter auto_exposure_meter = RSG::camera_attributes->camera_attributes_get_auto_exposure_meter(p_render_data->camera_attributes);
 		const bool auto_exposure_histogram = auto_exposure_meter == RSE::AUTO_EXPOSURE_METER_LOG_HISTOGRAM && luminance->supports_histogram_meter();
+		const float auto_exposure_adaptation = RSG::camera_attributes->camera_attributes_get_auto_exposure_adaptation(p_render_data->camera_attributes);
+		const float auto_exposure_adaptation_pivot = RSG::camera_attributes->camera_attributes_get_auto_exposure_adaptation_pivot(p_render_data->camera_attributes);
 		if (auto_exposure_histogram) {
 			luminance->luminance_histogram_meter(rb->get_internal_texture(), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate,
 					RSG::camera_attributes->camera_attributes_get_auto_exposure_clip_low(p_render_data->camera_attributes),
 					RSG::camera_attributes->camera_attributes_get_auto_exposure_clip_high(p_render_data->camera_attributes),
-					RSG::camera_attributes->camera_attributes_get_auto_exposure_center_weight(p_render_data->camera_attributes));
+					RSG::camera_attributes->camera_attributes_get_auto_exposure_center_weight(p_render_data->camera_attributes),
+					auto_exposure_adaptation, auto_exposure_adaptation_pivot);
 		} else {
 			if (auto_exposure_meter == RSE::AUTO_EXPOSURE_METER_LOG_HISTOGRAM) {
 				WARN_PRINT_ONCE("The log histogram auto-exposure meter needs the compute effects path; using the mean meter.");
 			}
-			luminance->luminance_reduction(rb->get_internal_texture(), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate, RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_limit(p_render_data->camera_attributes));
+			luminance->luminance_reduction(rb->get_internal_texture(), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate, RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_limit(p_render_data->camera_attributes), auto_exposure_adaptation, auto_exposure_adaptation_pivot);
 		}
 		if (auto_exposure_log) {
 			const float luminance_multiplier = rb->get_luminance_multiplier();
 			String head = vformat("AEX_LOG drawn %d size %dx%d step %s speed %s adjust_raw %s adjust_used %s immediate %d min_l %s max_l %s lum_mult %s scale %s",
 					Engine::get_singleton()->get_frames_drawn(), rb->get_internal_size().x, rb->get_internal_size().y, time_step, auto_exposure_speed, step_raw, step, set_immediate ? 1 : 0,
 					auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, luminance_multiplier, RSG::camera_attributes->camera_attributes_get_auto_exposure_scale(p_render_data->camera_attributes));
-			head += vformat(" meter %s", auto_exposure_histogram ? "log_histogram" : "mean");
+			head += vformat(" meter %s adaptation %s pivot_l %s", auto_exposure_histogram ? "log_histogram" : "mean", auto_exposure_adaptation, auto_exposure_adaptation_pivot);
 			if (auto_exposure_log_hdr) {
 				const AutoExposureHdrScan scan = auto_exposure_scan_hdr(rb->get_internal_texture(), rb->get_base_data_format(), rb->get_internal_size());
 				if (scan.valid) {
@@ -735,9 +745,10 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 				} else {
 					head += " hdr_format_unsupported";
 				}
-				print_line(vformat("%s current %s", head, auto_exposure_read_luminance(luminance_buffers->current)));
+				const float current = auto_exposure_read_luminance(luminance_buffers->current);
+				print_line(vformat("%s current %s unadapted %s", head, current, auto_exposure_unadapt(current, auto_exposure_adaptation, auto_exposure_adaptation_pivot)));
 			} else {
-				RD::get_singleton()->texture_get_data_async(luminance_buffers->current, 0, callable_mp_static(&auto_exposure_log_async).bind(head));
+				RD::get_singleton()->texture_get_data_async(luminance_buffers->current, 0, callable_mp_static(&auto_exposure_log_async).bind(head, auto_exposure_adaptation, auto_exposure_adaptation_pivot));
 			}
 		}
 

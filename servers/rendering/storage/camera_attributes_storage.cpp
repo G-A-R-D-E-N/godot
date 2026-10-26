@@ -195,6 +195,25 @@ float RendererCameraAttributes::camera_attributes_get_auto_exposure_highlight_li
 	return cam_attributes->auto_exposure_highlight_limit;
 }
 
+void RendererCameraAttributes::camera_attributes_set_auto_exposure_adaptation(RID p_camera_attributes, float p_adaptation, float p_pivot_luminance) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL(cam_attributes);
+	cam_attributes->auto_exposure_adaptation = CLAMP(p_adaptation, 0.0f, 1.0f);
+	cam_attributes->auto_exposure_adaptation_pivot = MAX(p_pivot_luminance, 0.0f);
+}
+
+float RendererCameraAttributes::camera_attributes_get_auto_exposure_adaptation(RID p_camera_attributes) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL_V(cam_attributes, 1.0);
+	return cam_attributes->auto_exposure_adaptation;
+}
+
+float RendererCameraAttributes::camera_attributes_get_auto_exposure_adaptation_pivot(RID p_camera_attributes) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL_V(cam_attributes, 0.0);
+	return cam_attributes->auto_exposure_adaptation_pivot;
+}
+
 void RendererCameraAttributes::camera_attributes_set_auto_exposure_meter(RID p_camera_attributes, RSE::AutoExposureMeter p_meter, float p_clip_low, float p_clip_high, float p_center_weight) {
 	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
 	ERR_FAIL_NULL(cam_attributes);

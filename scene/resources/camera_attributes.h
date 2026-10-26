@@ -63,6 +63,8 @@ protected:
 	float auto_exposure_histogram_clip_low = 0.03;
 	float auto_exposure_histogram_clip_high = 0.03;
 	float auto_exposure_center_weight = 0.0;
+	float auto_exposure_adaptation = 1.0;
+	float auto_exposure_adaptation_pivot = 0.0;
 	void _update_auto_exposure_meter();
 	virtual void _update_auto_exposure() {}
 
@@ -91,6 +93,8 @@ public:
 	float get_auto_exposure_histogram_clip_high() const;
 	void set_auto_exposure_center_weight(float p_weight);
 	float get_auto_exposure_center_weight() const;
+	void set_auto_exposure_adaptation(float p_adaptation);
+	float get_auto_exposure_adaptation() const;
 
 	CameraAttributes();
 	~CameraAttributes();
@@ -142,6 +146,8 @@ public:
 	float get_auto_exposure_min_sensitivity() const;
 	void set_auto_exposure_max_sensitivity(float p_max);
 	float get_auto_exposure_max_sensitivity() const;
+	void set_auto_exposure_adaptation_pivot_sensitivity(float p_pivot);
+	float get_auto_exposure_adaptation_pivot_sensitivity() const;
 
 	virtual float calculate_exposure_normalization() const override;
 
@@ -196,6 +202,8 @@ public:
 	float get_auto_exposure_min_exposure_value() const;
 	void set_auto_exposure_max_exposure_value(float p_max);
 	float get_auto_exposure_max_exposure_value() const;
+	void set_auto_exposure_adaptation_pivot_exposure_value(float p_pivot);
+	float get_auto_exposure_adaptation_pivot_exposure_value() const;
 
 	virtual float calculate_exposure_normalization() const override;
 
