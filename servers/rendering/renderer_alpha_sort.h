@@ -45,8 +45,13 @@ struct SortByReverseDepthAndPriority {
 			return (uintptr_t)A->owner < (uintptr_t)B->owner;
 		}
 		if (A->surface_index != B->surface_index) {
-			return A->surface_index < B->surface_index;
+			return A->surface_index > B->surface_index;
 		}
-		return (uintptr_t)A < (uintptr_t)B;
+		for (const T *s = A->next; s; s = s->next) {
+			if (s == B) {
+				return true;
+			}
+		}
+		return false;
 	}
 };

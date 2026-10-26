@@ -49,30 +49,35 @@ struct Surface {
 	} sort;
 	Owner *owner = nullptr;
 	uint32_t surface_index = 0;
+	Surface *next = nullptr;
 };
 
 struct Scene {
 	Owner owners[5];
+	Surface *heads[5] = {};
 	Surface surfaces[30];
 	LocalVector<Surface *> expected;
 
 	Scene() {
 		const float depths[5] = { 9.0f, 5.0f, 5.0f, 2.0f, 5.0f };
 		const uint32_t counts[5] = { 2, 8, 6, 6, 8 };
-		int slot = 29;
+		uint32_t made = 0;
 		for (int o = 0; o < 5; o++) {
 			owners[o].depth = depths[o];
 			for (uint32_t s = 0; s < counts[o]; s++) {
-				Surface &surface = surfaces[slot--];
+				Surface &surface = surfaces[(made++ * 7) % 30];
 				surface.owner = &owners[o];
 				surface.surface_index = o == 4 ? MIN(s, 6u) : s;
 				surface.sort.priority = o == 4 ? 1 : 0;
+				surface.next = heads[o];
+				heads[o] = &surface;
 			}
 		}
-		for (int i = 29; i >= 0; i--) {
-			expected.push_back(&surfaces[i]);
+		for (int o = 0; o < 5; o++) {
+			for (Surface *surface = heads[o]; surface; surface = surface->next) {
+				expected.push_back(surface);
+			}
 		}
-		SWAP(expected[28], expected[29]);
 	}
 };
 
