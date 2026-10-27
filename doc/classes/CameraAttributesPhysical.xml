@@ -22,6 +22,9 @@
 		</method>
 	</methods>
 	<members>
+		<member name="auto_exposure_adaptation_pivot_exposure_value" type="float" setter="set_auto_exposure_adaptation_pivot_exposure_value" getter="get_auto_exposure_adaptation_pivot_exposure_value" default="0.0">
+			The pivot (in EV100, the same unit as [member auto_exposure_min_exposure_value]) below which [member CameraAttributes.auto_exposure_adaptation] applies. Unlike the practical pivot, [code]0.0[/code] is a real pivot (EV100 0); only [member CameraAttributes.auto_exposure_adaptation] at [code]1.0[/code] turns partial adaptation off.
+		</member>
 		<member name="auto_exposure_max_exposure_value" type="float" setter="set_auto_exposure_max_exposure_value" getter="get_auto_exposure_max_exposure_value" default="10.0">
 			The maximum luminance (in EV100) used when calculating auto exposure. When calculating scene average luminance, color values will be clamped to at least this value. This limits the auto-exposure from exposing below a certain brightness, resulting in a cut off point where the scene will remain bright.
 		</member>

@@ -45,6 +45,23 @@ LightStorage *LightStorage::get_singleton() {
 	return singleton;
 }
 
+float LightStorage::light_render_energy(float p_energy, float p_intensity, RSE::LightType p_type, bool p_physical_units) {
+	float energy = p_energy;
+	if (!p_physical_units) {
+		energy *= Math::PI;
+		return energy;
+	}
+	energy *= p_intensity;
+	if (p_type == RSE::LIGHT_OMNI) {
+		energy *= 1.0 / (Math::PI * 4.0);
+	} else if (p_type == RSE::LIGHT_AREA) {
+		energy *= 1.0 / (Math::PI * 2.0);
+	} else if (p_type == RSE::LIGHT_SPOT) {
+		energy *= 1.0 / Math::PI;
+	}
+	return energy;
+}
+
 LightStorage::LightStorage() {
 	singleton = this;
 
@@ -447,6 +464,71 @@ void LightStorage::light_directional_set_cloud_shadow(RID p_light, RID p_texture
 	light->cloud_shadow_strength = CLAMP(p_strength, 0.0f, 1.0f);
 }
 
+void LightStorage::light_directional_set_far_shadow(RID p_light, RID p_heights, RID p_bands, RID p_near, RID p_terrain, const PackedVector2Array &p_origins, float p_texel, const Vector3 &p_direction) {
+	Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL(light);
+
+	light->far_shadow_textures[0] = p_heights;
+	light->far_shadow_textures[1] = p_bands;
+	light->far_shadow_textures[2] = p_near;
+	light->far_shadow_textures[3] = p_terrain;
+	light->far_shadow_origins = p_origins;
+	light->far_shadow_texel = MAX(p_texel, 0.001f);
+	light->far_shadow_direction = p_direction.length_squared() > 0.0 ? p_direction.normalized() : Vector3(0, 1, 0);
+}
+
+int32_t LightStorage::_far_shadow_slot(const Light *p_light, const DirectionalLightData &p_data, const Transform3D &p_camera_transform) {
+	if (p_data.shadow_opacity <= 0.001 || p_light->far_shadow_origins.is_empty()) {
+		return -1;
+	}
+	TextureStorage *texture_storage = TextureStorage::get_singleton();
+	RID textures[FAR_SHADOW_TEXTURES];
+	RD::TextureFormat formats[FAR_SHADOW_TEXTURES];
+	for (uint32_t j = 0; j < FAR_SHADOW_TEXTURES; j++) {
+		textures[j] = texture_storage->texture_get_rd_texture(p_light->far_shadow_textures[j]);
+		if (textures[j].is_null()) {
+			return -1;
+		}
+		formats[j] = RD::get_singleton()->texture_get_format(textures[j]);
+	}
+	if (formats[0].width != formats[0].height) {
+		WARN_PRINT_ONCE("Far shadow textures must be square; the far shadow of this light is off.");
+		return -1;
+	}
+	if (far_shadow_slot_count >= FAR_SHADOW_SLOTS) {
+		WARN_PRINT_ONCE("Far shadows are drawn for at most two directional lights; further lights fade to lit past their cascades.");
+		return -1;
+	}
+
+	const int32_t slot = far_shadow_slot_count++;
+	FarShadowSlotData &data = far_shadow_data.slots[slot];
+	const real_t width = MAX(1u, formats[0].width);
+	const uint32_t layers = MIN(formats[0].array_layers, MIN(formats[1].array_layers, formats[3].array_layers));
+	const uint32_t levels = MIN(MIN((uint32_t)p_light->far_shadow_origins.size(), FAR_SHADOW_MAX_LEVELS), layers);
+	const Vector3 eye = p_camera_transform.origin;
+	for (uint32_t k = 0; k < levels; k++) {
+		const real_t texel = p_light->far_shadow_texel * real_t(1u << k);
+		data.levels[k][0] = p_light->far_shadow_origins[k].x - eye.x;
+		data.levels[k][1] = p_light->far_shadow_origins[k].y - eye.z;
+		data.levels[k][2] = 1.0 / (texel * width);
+		data.levels[k][3] = texel;
+	}
+	const Vector3 dir = p_light->far_shadow_direction;
+	const real_t flat = MAX(Vector2(dir.x, dir.z).length(), (real_t)CMP_EPSILON);
+	data.direction[0] = dir.x;
+	data.direction[1] = dir.y;
+	data.direction[2] = dir.z;
+	data.direction[3] = MAX(dir.y / flat, Math::tan(Math::deg_to_rad((real_t)FAR_SHADOW_MIN_ELEVATION_DEGREES)));
+	data.tan_radius = p_data.softshadow_angle > 0.0 ? p_data.softshadow_angle * p_data.soft_shadow_scale : 0.0;
+	data.level_count = levels;
+	data.eye_y = eye.y;
+	data.near_level_count = MIN(MIN(levels, 2u), formats[2].array_layers);
+	for (uint32_t j = 0; j < FAR_SHADOW_TEXTURES; j++) {
+		directional_far_shadow_textures[slot][j] = textures[j];
+	}
+	return slot;
+}
+
 RID LightStorage::light_directional_get_cloud_shadow_texture(RID p_light) const {
 	const Light *light = light_owner.get_or_null(p_light);
 	ERR_FAIL_NULL_V(light, RID());
@@ -717,6 +799,10 @@ void LightStorage::free_light_data() {
 		RD::get_singleton()->free_rid(directional_light_buffer);
 		directional_light_buffer = RID();
 	}
+	if (far_shadow_buffer.is_valid()) {
+		RD::get_singleton()->free_rid(far_shadow_buffer);
+		far_shadow_buffer = RID();
+	}
 
 	if (omni_light_buffer.is_valid()) {
 		RD::get_singleton()->free_rid(omni_light_buffer);
@@ -789,6 +875,8 @@ void LightStorage::set_max_lights(const uint32_t p_max_lights) {
 	uint32_t directional_light_buffer_size = max_directional_lights * sizeof(DirectionalLightData);
 	directional_lights = memnew_arr(DirectionalLightData, max_directional_lights);
 	directional_light_buffer = RD::get_singleton()->uniform_buffer_create(directional_light_buffer_size);
+	far_shadow_data = {};
+	far_shadow_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(FarShadowData));
 }
 
 void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const PagedArray<RID> &p_lights, const Transform3D &p_camera_transform, RID p_shadow_atlas, bool p_using_shadows, uint32_t &r_directional_light_count, uint32_t &r_positional_light_count, bool &r_directional_light_soft_shadows) {
@@ -808,6 +896,16 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 
 	for (RID &cloud_shadow_texture : directional_cloud_shadow_textures) {
 		cloud_shadow_texture = RID();
+	}
+
+	far_shadow_slot_count = 0;
+	for (int32_t &slot : far_shadow_data.slot_of_light) {
+		slot = -1;
+	}
+	for (RID(&textures)[FAR_SHADOW_TEXTURES] : directional_far_shadow_textures) {
+		for (RID &texture : textures) {
+			texture = RID();
+		}
 	}
 
 	for (int i = 0; i < (int)p_lights.size(); i++) {
@@ -837,13 +935,7 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 
 				float sign = light->negative ? -1 : 1;
 
-				light_data.energy = sign * light->param[RSE::LIGHT_PARAM_ENERGY];
-
-				if (RendererSceneRenderRD::get_singleton()->is_using_physical_light_units()) {
-					light_data.energy *= light->param[RSE::LIGHT_PARAM_INTENSITY];
-				} else {
-					light_data.energy *= Math::PI;
-				}
+				light_data.energy = light_render_energy(sign * light->param[RSE::LIGHT_PARAM_ENERGY], light->param[RSE::LIGHT_PARAM_INTENSITY], RSE::LIGHT_DIRECTIONAL, RendererSceneRenderRD::get_singleton()->is_using_physical_light_units());
 
 				if (p_render_data->camera_attributes.is_valid()) {
 					light_data.energy *= RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes);
@@ -961,6 +1053,8 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 						light_data.fade_to = -fade_end;
 					}
 				}
+
+				far_shadow_data.slot_of_light[r_directional_light_count] = _far_shadow_slot(light, light_data, p_camera_transform);
 
 				r_directional_light_count++;
 			} break;
@@ -1127,24 +1221,7 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 			}
 		}
 
-		float energy = sign * light->param[RSE::LIGHT_PARAM_ENERGY] * fade;
-
-		if (RendererSceneRenderRD::get_singleton()->is_using_physical_light_units()) {
-			energy *= light->param[RSE::LIGHT_PARAM_INTENSITY];
-
-			// Convert from Luminous Power to Luminous Intensity
-			if (type == RSE::LIGHT_OMNI) {
-				energy *= 1.0 / (Math::PI * 4.0);
-			} else if (type == RSE::LIGHT_AREA) {
-				energy *= 1.0 / (Math::PI * 2.0);
-			} else {
-				// Spot Lights are not physically accurate, Luminous Intensity should change in relation to the cone angle.
-				// We make this assumption to keep them easy to control.
-				energy *= 1.0 / Math::PI;
-			}
-		} else {
-			energy *= Math::PI;
-		}
+		float energy = light_render_energy(sign * light->param[RSE::LIGHT_PARAM_ENERGY] * fade, light->param[RSE::LIGHT_PARAM_INTENSITY], type, RendererSceneRenderRD::get_singleton()->is_using_physical_light_units());
 
 		if (p_render_data->camera_attributes.is_valid()) {
 			energy *= RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes);
@@ -1367,6 +1444,15 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 	if (r_directional_light_count) {
 		RD::get_singleton()->buffer_update(directional_light_buffer, 0, sizeof(DirectionalLightData) * r_directional_light_count, directional_lights);
 	}
+
+	if (far_shadow_slot_count) {
+		RD::get_singleton()->buffer_update(far_shadow_buffer, 0, sizeof(FarShadowData), &far_shadow_data);
+	}
+
+	p_render_data->water_omni_light_count = omni_light_count;
+	p_render_data->water_spot_light_count = spot_light_count;
+	p_render_data->water_area_light_count = area_light_count;
+	p_render_data->water_lighting_ready = true;
 }
 
 /* REFLECTION PROBE */

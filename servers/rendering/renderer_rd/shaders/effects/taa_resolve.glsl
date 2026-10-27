@@ -58,6 +58,7 @@ layout(set = 0, binding = 6) uniform sampler2D reactive_buffer;
 #ifdef MODE_REJECTED_HISTORY
 layout(rgba8, set = 0, binding = 7) uniform restrict writeonly image2D rejected_buffer;
 #endif
+layout(set = 0, binding = 8) uniform sampler2D water_reactivity;
 
 layout(push_constant, std430) uniform Params {
 	vec2 resolution;
@@ -439,6 +440,8 @@ vec3 temporal_antialiasing(uvec2 pos_group_top_left, uvec2 pos_group, uvec2 pos_
 #endif
 		diff = mix(diff, 1.0, reactive);
 		blend_factor = mix(0.0, blend_factor, diff);
+
+		blend_factor = max(blend_factor, clamp(textureLod(water_reactivity, uv, 0.0).r, 0.0, 1.0));
 
 		// Lerp/blend
 		color_resolved = mix(color_history, color_input, blend_factor);

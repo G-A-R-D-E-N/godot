@@ -1138,6 +1138,8 @@ vec4 volumetric_fog_process(vec2 screen_uv, float z) {
 	return texture(sampler3D(volumetric_fog_texture, SAMPLER_LINEAR_CLAMP), fog_pos);
 }
 
+#include "../far_shadow_inc.glsl"
+
 float directional_cloud_shadow(uint p_index, vec3 p_vertex) {
 	vec2 uv = vec2(dot(directional_lights.data[p_index].cloud_shadow_u.xyz, p_vertex), dot(directional_lights.data[p_index].cloud_shadow_v.xyz, p_vertex)) + vec2(directional_lights.data[p_index].cloud_shadow_u.w, directional_lights.data[p_index].cloud_shadow_v.w);
 	float transmittance = pow(texture(sampler2D(cloud_shadow_textures[p_index], SAMPLER_LINEAR_WITH_MIPMAPS_REPEAT), uv).r, directional_lights.data[p_index].cloud_shadow_exponent);
@@ -1701,6 +1703,14 @@ void fragment_shader(in SceneData scene_data) {
 		}
 		fog = res;
 	}
+#ifdef USE_MULTIVIEW
+	float water_owns_fog = textureLod(sampler2DArray(water_fog_mask, SAMPLER_NEAREST_CLAMP), vec3(screen_uv, ViewIndex), 0.0).r;
+#else
+	float water_owns_fog = textureLod(sampler2DArray(water_fog_mask, SAMPLER_NEAREST_CLAMP), vec3(screen_uv, 0.0), 0.0).r;
+#endif
+	if (water_owns_fog > 0.5) {
+		fog = vec4(0.0, 0.0, 0.0, 1.0);
+	}
 #else
 	// Premultiply by opacity and convert opacity to transmittance to match volumetric fog.
 	fog.rgb *= fog.a;
@@ -1952,6 +1962,9 @@ void fragment_shader(in SceneData scene_data) {
 			vec2 ambient_uv = vec3_to_oct_with_border(ambient_dir, vec2(scene_data_block.data.radiance_border_size, 1.0 - scene_data_block.data.radiance_border_size * 2.0));
 			vec3 cubemap_ambient = textureLod(sampler2D(radiance_octmap, DEFAULT_SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP), ambient_uv, roughness_lod).rgb;
 #endif //USE_RADIANCE_OCTMAP_ARRAY
+			if (bool(scene_data.flags & SCENE_DATA_FLAGS_USE_AMBIENT_SKY_SH) && sky_sh.meta.z == 1u) {
+				cubemap_ambient = sky_sh_ambient(ambient_dir);
+			}
 			cubemap_ambient *= scene_data.IBL_exposure_normalization;
 			ambient_light = mix(ambient_light, cubemap_ambient * scene_data.ambient_light_color_energy.a, scene_data.ambient_color_sky_mix);
 		}
@@ -3009,12 +3022,12 @@ void fragment_shader(in SceneData scene_data) {
 
 #ifdef USE_LIGHTMAP
 					if (shadowmask_mode == LIGHTMAP_SHADOWMASK_MODE_REPLACE) {
-						shadow = mix(shadow, shadowmask, smoothstep(directional_lights.data[i].fade_from, directional_lights.data[i].fade_to, vertex.z)); //done with negative values for performance
+						shadow = far_shadow_mix(i, shadow, shadowmask, smoothstep(directional_lights.data[i].fade_from, directional_lights.data[i].fade_to, vertex.z), vertex, geo_normal);
 					} else if (shadowmask_mode == LIGHTMAP_SHADOWMASK_MODE_OVERLAY) {
-						shadow = shadowmask * mix(shadow, 1.0, smoothstep(directional_lights.data[i].fade_from, directional_lights.data[i].fade_to, vertex.z)); //done with negative values for performance
+						shadow = shadowmask * far_shadow_mix(i, shadow, 1.0, smoothstep(directional_lights.data[i].fade_from, directional_lights.data[i].fade_to, vertex.z), vertex, geo_normal);
 					} else {
 #endif
-						shadow = mix(shadow, 1.0, smoothstep(directional_lights.data[i].fade_from, directional_lights.data[i].fade_to, vertex.z)); //done with negative values for performance
+						shadow = far_shadow_mix(i, shadow, 1.0, smoothstep(directional_lights.data[i].fade_from, directional_lights.data[i].fade_to, vertex.z), vertex, geo_normal);
 #ifdef USE_LIGHTMAP
 					}
 #endif

@@ -816,6 +816,9 @@ uint32_t RenderSceneBuffersRD::get_color_usage_bits(bool p_resolve, bool p_msaa,
 		usage_bits |= RD::TEXTURE_USAGE_CAN_COPY_TO_BIT | (p_storage ? RD::TEXTURE_USAGE_STORAGE_BIT : 0);
 	} else {
 		usage_bits |= (p_storage ? RD::TEXTURE_USAGE_STORAGE_BIT : 0);
+		if (GLOBAL_GET("rendering/environment/auto_exposure/debug_log_hdr")) {
+			usage_bits |= RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
+		}
 	}
 
 	return usage_bits;

@@ -183,6 +183,15 @@ float Environment::get_ambient_light_sky_contribution() const {
 	return ambient_sky_contribution;
 }
 
+void Environment::set_ambient_light_sky_sh(bool p_enabled) {
+	ambient_sky_sh = p_enabled;
+	RS::get_singleton()->environment_set_ambient_sky_sh(environment, ambient_sky_sh);
+}
+
+bool Environment::get_ambient_light_sky_sh() const {
+	return ambient_sky_sh;
+}
+
 void Environment::set_reflection_source(ReflectionSource p_source) {
 	reflection_source = p_source;
 	_update_ambient_light();
@@ -248,6 +257,15 @@ void Environment::set_tonemap_agx_contrast(float p_agx_contrast) {
 
 float Environment::get_tonemap_agx_contrast() const {
 	return tonemap_agx_contrast;
+}
+
+void Environment::set_tonemap_agx_shoulder_start(float p_start) {
+	tonemap_agx_shoulder_start = CLAMP(p_start, 0.18f, 1.0f);
+	RS::get_singleton()->environment_set_tonemap_agx_shoulder_start(environment, tonemap_agx_shoulder_start);
+}
+
+float Environment::get_tonemap_agx_shoulder_start() const {
+	return tonemap_agx_shoulder_start;
 }
 
 void Environment::_update_tonemap() {
@@ -1215,7 +1233,7 @@ void Environment::_validate_property(PropertyInfo &p_property) const {
 	if (!Engine::get_singleton()->is_editor_hint()) {
 		return;
 	}
-	if (p_property.name == "sky" || p_property.name == "sky_custom_fov" || p_property.name == "sky_rotation" || p_property.name == "ambient_light_sky_contribution") {
+	if (p_property.name == "sky" || p_property.name == "sky_custom_fov" || p_property.name == "sky_rotation" || p_property.name == "ambient_light_sky_contribution" || p_property.name == "ambient_light_sky_sh") {
 		if (bg_mode != BG_SKY && ambient_source != AMBIENT_SOURCE_SKY && reflection_source != REFLECTION_SOURCE_SKY) {
 			p_property.usage = PROPERTY_USAGE_NO_EDITOR;
 		}
@@ -1264,7 +1282,7 @@ void Environment::_validate_property(PropertyInfo &p_property) const {
 		return;
 	}
 
-	if (p_property.name == "tonemap_agx_contrast") {
+	if (p_property.name == "tonemap_agx_contrast" || p_property.name == "tonemap_agx_shoulder_start") {
 		if (tone_mapper != TONE_MAPPER_AGX) {
 			p_property.usage = PROPERTY_USAGE_NO_EDITOR;
 		}
@@ -1392,6 +1410,8 @@ void Environment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_ambient_light_energy"), &Environment::get_ambient_light_energy);
 	ClassDB::bind_method(D_METHOD("set_ambient_light_sky_contribution", "ratio"), &Environment::set_ambient_light_sky_contribution);
 	ClassDB::bind_method(D_METHOD("get_ambient_light_sky_contribution"), &Environment::get_ambient_light_sky_contribution);
+	ClassDB::bind_method(D_METHOD("set_ambient_light_sky_sh", "enabled"), &Environment::set_ambient_light_sky_sh);
+	ClassDB::bind_method(D_METHOD("get_ambient_light_sky_sh"), &Environment::get_ambient_light_sky_sh);
 	ClassDB::bind_method(D_METHOD("set_reflection_source", "source"), &Environment::set_reflection_source);
 	ClassDB::bind_method(D_METHOD("get_reflection_source"), &Environment::get_reflection_source);
 
@@ -1399,6 +1419,7 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "ambient_light_source", PROPERTY_HINT_ENUM, "Background,Disabled,Color,Sky"), "set_ambient_source", "get_ambient_source");
 	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "ambient_light_color"), "set_ambient_light_color", "get_ambient_light_color");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ambient_light_sky_contribution", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_ambient_light_sky_contribution", "get_ambient_light_sky_contribution");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ambient_light_sky_sh"), "set_ambient_light_sky_sh", "get_ambient_light_sky_sh");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ambient_light_energy", PROPERTY_HINT_RANGE, "0,16,0.01"), "set_ambient_light_energy", "get_ambient_light_energy");
 
 	ADD_GROUP("Reflected Light", "reflected_light_");
@@ -1416,6 +1437,8 @@ void Environment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_tonemap_agx_white"), &Environment::get_tonemap_agx_white);
 	ClassDB::bind_method(D_METHOD("set_tonemap_agx_contrast", "contrast"), &Environment::set_tonemap_agx_contrast);
 	ClassDB::bind_method(D_METHOD("get_tonemap_agx_contrast"), &Environment::get_tonemap_agx_contrast);
+	ClassDB::bind_method(D_METHOD("set_tonemap_agx_shoulder_start", "start"), &Environment::set_tonemap_agx_shoulder_start);
+	ClassDB::bind_method(D_METHOD("get_tonemap_agx_shoulder_start"), &Environment::get_tonemap_agx_shoulder_start);
 
 	ADD_GROUP("Tonemap", "tonemap_");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "tonemap_mode", PROPERTY_HINT_ENUM, "Linear,Reinhard,Filmic,ACES,AgX"), "set_tonemapper", "get_tonemapper");
@@ -1423,6 +1446,7 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tonemap_white", PROPERTY_HINT_RANGE, "1,16,0.01,or_greater"), "set_tonemap_white", "get_tonemap_white");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tonemap_agx_white", PROPERTY_HINT_RANGE, "2,16.5,0.01,or_greater"), "set_tonemap_agx_white", "get_tonemap_agx_white");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tonemap_agx_contrast", PROPERTY_HINT_RANGE, "1.0,2.0,0.01,or_greater"), "set_tonemap_agx_contrast", "get_tonemap_agx_contrast");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tonemap_agx_shoulder_start", PROPERTY_HINT_RANGE, "0.18,1.0,0.01"), "set_tonemap_agx_shoulder_start", "get_tonemap_agx_shoulder_start");
 
 	// SSR
 

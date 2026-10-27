@@ -162,6 +162,10 @@ uint sc_debug_lighting_component() {
 	return (sc_packed_1() >> 9) & 15U;
 }
 
+bool sc_use_far_shadow() {
+	return ((sc_packed_1() >> 13) & 1U) != 0;
+}
+
 float sc_luminance_multiplier() {
 	// Not used in clustered renderer but we share some code with the mobile renderer that requires this.
 	return 1.0;
@@ -496,6 +500,7 @@ layout(set = 1, binding = 32, std140) uniform VoxelGIs {
 voxel_gi_instances;
 
 layout(set = 1, binding = 33) uniform texture3D volumetric_fog_texture;
+layout(set = 1, binding = 46) uniform texture2DArray water_fog_mask;
 
 #ifdef USE_MULTIVIEW
 layout(set = 1, binding = 34) uniform texture2DArray ssil_buffer;
@@ -514,6 +519,47 @@ layout(set = 1, binding = 40) uniform texture2D ss_exposure_texture;
 
 layout(set = 1, binding = 41) uniform texture2D cloud_shadow_textures[MAX_DIRECTIONAL_LIGHT_DATA_STRUCTS];
 layout(set = 1, binding = 42) uniform texture3D aerial_perspective_texture;
+
+#define FAR_SHADOW_SLOTS 2
+#define FAR_SHADOW_MAX_LEVELS 8
+
+struct FarShadowSlot {
+	vec4 levels[FAR_SHADOW_MAX_LEVELS];
+	vec4 direction;
+	float tan_radius;
+	uint level_count;
+	float eye_y;
+	uint near_level_count;
+};
+
+layout(set = 1, binding = 47, std140) uniform FarShadowBlock {
+	ivec4 slot_of_light[2];
+	FarShadowSlot slots[FAR_SHADOW_SLOTS];
+}
+far_shadow;
+
+layout(set = 1, binding = 48) uniform texture2DArray far_shadow_heights[FAR_SHADOW_SLOTS];
+layout(set = 1, binding = 49) uniform texture2DArray far_shadow_bands[FAR_SHADOW_SLOTS];
+layout(set = 1, binding = 50) uniform texture2DArray far_shadow_near[FAR_SHADOW_SLOTS];
+layout(set = 1, binding = 51) uniform texture2DArray far_shadow_terrain[FAR_SHADOW_SLOTS];
+
+layout(set = 1, binding = 43, std430) buffer restrict readonly SkySHBuffer {
+	vec4 coefficients[9];
+	uvec4 meta;
+}
+sky_sh;
+
+vec3 sky_sh_ambient(vec3 n) {
+	n /= max(length(n), 1e-6);
+	vec3 band0 = sky_sh.coefficients[0].rgb * 0.282095;
+	vec3 band1 = (sky_sh.coefficients[1].rgb * n.y + sky_sh.coefficients[2].rgb * n.z + sky_sh.coefficients[3].rgb * n.x) * 0.488603;
+	vec3 band2 = sky_sh.coefficients[4].rgb * (1.092548 * n.x * n.y);
+	band2 += sky_sh.coefficients[5].rgb * (1.092548 * n.y * n.z);
+	band2 += sky_sh.coefficients[6].rgb * (0.315392 * (3.0 * n.z * n.z - 1.0));
+	band2 += sky_sh.coefficients[7].rgb * (1.092548 * n.x * n.z);
+	band2 += sky_sh.coefficients[8].rgb * (0.546274 * (n.x * n.x - n.y * n.y));
+	return max(band0 + band1 * (2.0 / 3.0) + band2 * 0.25, vec3(0.0));
+}
 
 #ifdef USE_MULTIVIEW
 layout(set = 1, binding = 44) uniform texture2DArray back_depth_buffer;

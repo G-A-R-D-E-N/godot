@@ -38,6 +38,7 @@
 #include "core/templates/self_list.h"
 #include "drivers/gles3/storage/light_storage.h"
 #include "drivers/gles3/storage/material_storage.h"
+#include "servers/rendering/renderer_alpha_sort.h"
 #include "servers/rendering/renderer_scene_render.h"
 #include "servers/rendering/rendering_server_enums.h"
 #include "servers/rendering/rendering_server_types.h"
@@ -707,19 +708,13 @@ private:
 
 		//should eventually be replaced by radix
 
-		struct SortByKey {
-			_FORCE_INLINE_ bool operator()(const GeometryInstanceSurface *A, const GeometryInstanceSurface *B) const {
-				return (A->sort.sort_key2 == B->sort.sort_key2) ? (A->sort.sort_key1 < B->sort.sort_key1) : (A->sort.sort_key2 < B->sort.sort_key2);
-			}
-		};
-
 		void sort_by_key() {
-			SortArray<GeometryInstanceSurface *, SortByKey> sorter;
+			SortArray<GeometryInstanceSurface *, SortByKeyAndOwner<GeometryInstanceSurface>> sorter;
 			sorter.sort(elements.ptr(), elements.size());
 		}
 
 		void sort_by_key_range(uint32_t p_from, uint32_t p_size) {
-			SortArray<GeometryInstanceSurface *, SortByKey> sorter;
+			SortArray<GeometryInstanceSurface *, SortByKeyAndOwner<GeometryInstanceSurface>> sorter;
 			sorter.sort(elements.ptr() + p_from, p_size);
 		}
 
@@ -735,15 +730,9 @@ private:
 			sorter.sort(elements.ptr(), elements.size());
 		}
 
-		struct SortByReverseDepthAndPriority {
-			_FORCE_INLINE_ bool operator()(const GeometryInstanceSurface *A, const GeometryInstanceSurface *B) const {
-				return (A->sort.priority == B->sort.priority) ? (A->owner->depth > B->owner->depth) : (A->sort.priority < B->sort.priority);
-			}
-		};
-
 		void sort_by_reverse_depth_and_priority() { //used for alpha
 
-			SortArray<GeometryInstanceSurface *, SortByReverseDepthAndPriority> sorter;
+			SortArray<GeometryInstanceSurface *, SortByReverseDepthAndPriority<GeometryInstanceSurface>> sorter;
 			sorter.sort(elements.ptr(), elements.size());
 		}
 

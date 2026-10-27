@@ -4,9 +4,12 @@
 
 #define RAY_SCENE_LIGHT_DIRECTIONAL 0u
 #define RAY_SCENE_LIGHT_SPOT 2u
+#define RAY_SCENE_LIGHT_AREA 3u
+#define RAY_SCENE_ALL_CASTERS 0xFFFFFFFFu
 
 #define RAY_SCENE_MATERIAL_TWO_SIDED 1u
 #define RAY_SCENE_MATERIAL_SKIP 2u
+#define RAY_SCENE_MATERIAL_SHADOW_PASS 8u
 
 const vec3 luminance_weights = vec3(0.2126, 0.7152, 0.0722);
 
@@ -28,7 +31,8 @@ struct RaySceneInstance {
 	vec4 world_to_object[3];
 	uint blas_root;
 	uint material_offset;
-	uint pad[2];
+	uint layer_mask;
+	uint pad;
 };
 
 struct RaySceneMaterial {
@@ -48,6 +52,10 @@ struct RaySceneLight {
 	float cos_spot_angle;
 	float inv_spot_attenuation;
 	float inv_radius;
+	uint caster_mask;
+	vec3 half_a;
+	float area;
+	vec3 half_b;
 	uint pad;
 };
 
@@ -115,6 +123,7 @@ bool ray_scene_box(vec3 p_origin, vec3 p_inv_direction, vec3 p_min, vec3 p_max, 
 
 void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, vec3 p_origin, vec3 p_direction, bool p_any, inout RaySceneHit r_hit) {
 	vec3 inv_direction = ray_scene_safe_inverse(p_direction);
+	uint skip_mask = p_any ? (RAY_SCENE_MATERIAL_SKIP | RAY_SCENE_MATERIAL_SHADOW_PASS) : RAY_SCENE_MATERIAL_SKIP;
 	uint stack[RAY_SCENE_BLAS_STACK_SIZE];
 	uint sp = 0;
 
@@ -147,7 +156,7 @@ void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, 
 				}
 				float t = dot(triangle.e2.xyz, q) * inv_det;
 				if (t > 0.0 && t < r_hit.t) {
-					if ((ray_scene_materials.data[p_material_offset + triangle.surface].flags & RAY_SCENE_MATERIAL_SKIP) != 0u) {
+					if ((ray_scene_materials.data[p_material_offset + triangle.surface].flags & skip_mask) != 0u) {
 						continue;
 					}
 					r_hit.t = t;
@@ -185,7 +194,7 @@ void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, 
 	}
 }
 
-bool ray_scene_trace(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, out RaySceneHit r_hit) {
+bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, uint p_caster_mask, out RaySceneHit r_hit) {
 	r_hit.t = p_t_max;
 	r_hit.instance = RAY_SCENE_NO_HIT;
 	r_hit.triangle = 0u;
@@ -208,6 +217,9 @@ bool ray_scene_trace(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any,
 		if (node.count > 0u) {
 			for (uint i = 0u; i < min(node.count, RAY_SCENE_LEAF_SIZE); i++) {
 				RaySceneInstance instance = ray_scene_instances.data[node.left_first + i];
+				if (p_caster_mask != RAY_SCENE_ALL_CASTERS && (instance.layer_mask & p_caster_mask) == 0u) {
+					continue;
+				}
 				vec4 origin = vec4(p_origin, 1.0);
 				vec3 local_origin = vec3(dot(instance.world_to_object[0], origin), dot(instance.world_to_object[1], origin), dot(instance.world_to_object[2], origin));
 				vec3 local_direction = vec3(dot(instance.world_to_object[0].xyz, p_direction), dot(instance.world_to_object[1].xyz, p_direction), dot(instance.world_to_object[2].xyz, p_direction));
@@ -243,6 +255,10 @@ bool ray_scene_trace(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any,
 	return r_hit.instance != RAY_SCENE_NO_HIT;
 }
 
+bool ray_scene_trace(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, out RaySceneHit r_hit) {
+	return ray_scene_trace_masked(p_origin, p_direction, p_t_max, p_any, RAY_SCENE_ALL_CASTERS, r_hit);
+}
+
 vec3 ray_scene_hit_normal(RaySceneHit p_hit) {
 	RaySceneTriangle triangle = ray_scene_triangles.data[p_hit.triangle];
 	RaySceneInstance instance = ray_scene_instances.data[p_hit.instance];
@@ -274,9 +290,9 @@ uint ray_scene_hash(uint p_value) {
 	return p_value;
 }
 
-bool ray_scene_unshadowed(vec3 p_position, vec3 p_normal, float p_bias, vec3 p_to_light, float p_distance) {
+bool ray_scene_unshadowed(vec3 p_position, vec3 p_normal, float p_bias, vec3 p_to_light, float p_distance, uint p_caster_mask) {
 	RaySceneHit shadow;
-	return !ray_scene_trace(p_position + p_normal * p_bias, p_to_light, max(p_distance - p_bias, 0.0), true, shadow);
+	return !ray_scene_trace_masked(p_position + p_normal * p_bias, p_to_light, max(p_distance - p_bias, 0.0), true, p_caster_mask, shadow);
 }
 
 vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float p_max_distance, uint p_seed) {
@@ -289,6 +305,8 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 	vec3 exact_light[RAY_SCENE_EXACT_LIGHTS];
 	vec3 exact_direction[RAY_SCENE_EXACT_LIGHTS];
 	float exact_distance[RAY_SCENE_EXACT_LIGHTS];
+	uint exact_mask[RAY_SCENE_EXACT_LIGHTS];
+	uint chosen_mask = RAY_SCENE_ALL_CASTERS;
 	uint local_count = 0u;
 	for (uint i = 0u; i < ray_scene.light_count; i++) {
 		RaySceneLight light = ray_scene_lights.data[i];
@@ -297,6 +315,21 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 		float distance = p_max_distance;
 		if (light.type == RAY_SCENE_LIGHT_DIRECTIONAL) {
 			to_light = -light.direction;
+		} else if (light.type == RAY_SCENE_LIGHT_AREA) {
+			vec3 offset = p_position - light.position;
+			if (dot(light.direction, offset) <= 0.0) {
+				continue;
+			}
+			uint rect_seed = ray_scene_hash(p_seed + 0x68bc21ebu) ^ (i * 0x9e3779b9u);
+			vec2 rect_uv = vec2(float(ray_scene_hash(rect_seed) >> 8u), float(ray_scene_hash(rect_seed ^ 0x2f8f3d5bu) >> 8u)) * (2.0 / 16777216.0) - 1.0;
+			vec3 relative = light.position + light.half_a * rect_uv.x + light.half_b * rect_uv.y - p_position;
+			distance = length(relative);
+			to_light = relative / max(distance, 1e-4);
+			vec2 extent = max(vec2(dot(light.half_a, light.half_a), dot(light.half_b, light.half_b)), vec2(1e-12));
+			vec2 closest = clamp(vec2(dot(offset, light.half_a), dot(offset, light.half_b)) / extent, -1.0, 1.0);
+			float closest_distance = length(offset - light.half_a * closest.x - light.half_b * closest.y);
+			float window = ray_scene_omni_attenuation(closest_distance, light.inv_radius, light.attenuation) * closest_distance * closest_distance;
+			attenuation = window * light.area * max(dot(-to_light, light.direction), 0.0) / max(distance * distance, 1e-8);
 		} else {
 			vec3 relative = light.position - p_position;
 			distance = length(relative);
@@ -314,7 +347,7 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 		}
 		vec3 light_value = light.color * (light.energy * attenuation * n_dot_l / 3.14159265359);
 		if (light.type == RAY_SCENE_LIGHT_DIRECTIONAL) {
-			if (ray_scene_unshadowed(p_position, p_normal, p_bias, to_light, distance)) {
+			if (ray_scene_unshadowed(p_position, p_normal, p_bias, to_light, distance, light.caster_mask)) {
 				light_sum += light_value;
 			}
 			continue;
@@ -328,6 +361,7 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 			exact_light[local_count] = light_value;
 			exact_direction[local_count] = to_light;
 			exact_distance[local_count] = distance;
+			exact_mask[local_count] = light.caster_mask;
 		}
 		local_count++;
 		if (float(ray_scene_hash(p_seed ^ (i * 0x9e3779b9u)) >> 8u) * total_weight < weight * 16777216.0) {
@@ -335,15 +369,16 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 			chosen_direction = to_light;
 			chosen_distance = distance;
 			chosen_weight = weight;
+			chosen_mask = light.caster_mask;
 		}
 	}
 	if (local_count <= RAY_SCENE_EXACT_LIGHTS) {
 		for (uint i = 0u; i < local_count; i++) {
-			if (ray_scene_unshadowed(p_position, p_normal, p_bias, exact_direction[i], exact_distance[i])) {
+			if (ray_scene_unshadowed(p_position, p_normal, p_bias, exact_direction[i], exact_distance[i], exact_mask[i])) {
 				light_sum += exact_light[i];
 			}
 		}
-	} else if (ray_scene_unshadowed(p_position, p_normal, p_bias, chosen_direction, chosen_distance)) {
+	} else if (ray_scene_unshadowed(p_position, p_normal, p_bias, chosen_direction, chosen_distance, chosen_mask)) {
 		light_sum += chosen_light * (total_weight / chosen_weight);
 	}
 	return light_sum;

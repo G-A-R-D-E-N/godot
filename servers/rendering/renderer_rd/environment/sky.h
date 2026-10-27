@@ -32,7 +32,9 @@
 
 #include "core/templates/rid_owner.h"
 #include "servers/rendering/renderer_rd/pipeline_cache_rd.h"
+#include "servers/rendering/renderer_rd/pipeline_deferred_rd.h"
 #include "servers/rendering/renderer_rd/shaders/environment/sky.glsl.gen.h"
+#include "servers/rendering/renderer_rd/shaders/environment/sky_sh.glsl.gen.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_scene_render.h"
 #include "servers/rendering/rendering_device.h"
@@ -53,6 +55,17 @@ public:
 		SKY_SET_MATERIAL,
 		SKY_SET_TEXTURES,
 		SKY_SET_FOG,
+	};
+
+	enum SkyDirtyReason {
+		RADIANCE_MISSING = 1,
+		TIME = 2,
+		POSITION = 4,
+		FOG = 8,
+		MATERIAL = 16,
+		LIGHTS = 32,
+		SIZE_OR_MODE = 64,
+		REQUESTED = 128,
 	};
 
 	const int SAMPLERS_BINDING_FIRST_INDEX = 4;
@@ -135,7 +148,7 @@ private:
 		virtual ~SkyShaderData();
 	};
 
-	void _render_sky(RD::DrawListID p_list, float p_time, RID p_fb, PipelineCacheRD *p_pipeline, RID p_uniform_set, RID p_texture_set, const Projection &p_projection, const Basis &p_orientation, const Vector3 &p_position, float p_luminance_multiplier, float p_brightness_modifier, float p_border_size = 0.0);
+	void _render_sky(RD::DrawListID p_list, float p_time, RID p_fb, PipelineCacheRD *p_pipeline, RID p_uniform_set, RID p_texture_set, const Projection &p_projection, const Basis &p_orientation, const Vector3 &p_position, float p_luminance_multiplier, float p_brightness_modifier, float p_border_size = 0.0, RID p_fog_override = RID());
 	void _update_scene_uniform_set();
 
 public:
@@ -265,6 +278,7 @@ public:
 		static inline const int REAL_TIME_ROUGHNESS_LAYERS = 7;
 
 		RID radiance;
+		RID working_radiance;
 		RID radiance_first_layer_slice;
 		RID quarter_res_pass;
 		RID quarter_res_framebuffer;
@@ -286,6 +300,43 @@ public:
 		int processing_layer = 0;
 		Sky *dirty_list = nullptr;
 		float baked_exposure = 1.0;
+		float working_baked_exposure = 1.0;
+
+		uint64_t stats_cycles_started = 0;
+		uint64_t stats_layers_filtered = 0;
+		uint64_t stats_cycles_completed = 0;
+		uint32_t stats_pending_dirty_reasons = 0;
+		uint32_t stats_last_dirty_reasons = 0;
+		uint64_t stats_update_requests = 0;
+		uint64_t stats_update_requests_latched = 0;
+
+		RSE::SkyRadianceUpdatePolicy radiance_update_policy = RSE::SKY_RADIANCE_UPDATE_POLICY_AUTOMATIC;
+		bool update_requested = false;
+		bool force_cycle = false;
+		bool cycle_running = false;
+		bool forced_dirty = false;
+
+		uint64_t radiance_generation = 0;
+		uint64_t last_generation = 0;
+		uint64_t stats_publishes = 0;
+		bool publish_pending = false;
+		uint64_t publish_frame = 0;
+		int radiance_copy_layers = 1;
+		int radiance_copy_mipmaps = 1;
+		uint32_t radiance_copy_size = 0;
+		LocalVector<uint64_t> working_layer_generations;
+		LocalVector<uint64_t> published_layer_generations;
+
+		bool sh_enabled = false;
+		bool sh_requested = false;
+		int sh_ambient_users = 0;
+		bool sh_initial_pending = false;
+		bool working_sh_ready = false;
+		RID sh_buffer;
+		RID working_sh_buffer;
+		uint64_t sh_generation = 0;
+		uint64_t working_sh_generation = 0;
+		uint64_t stats_sh_dispatches = 0;
 
 		// State to track when radiance octmap needs updating.
 		SkyMaterialData *prev_material_data = nullptr;
@@ -302,8 +353,16 @@ public:
 		float prev_fog_light_energy = 0.0;
 
 		void free_radiance();
+		void free_sh_buffers();
+		bool uses_working_radiance() const;
+		void tag_layers(int p_first, int p_end);
+		void commit_publication();
+		void copy_working_to_radiance();
+		void finish_cycle(uint64_t p_frame);
+		bool publish_if_due(uint64_t p_frame);
 
 		void free();
+		void mark_reflection_dirty(uint32_t p_reasons);
 
 		RID get_textures(SkyTextureSetVersion p_version, RID p_default_shader_rd, bool p_is_multiview, Ref<RenderSceneBuffersRD> p_render_buffers);
 		bool set_radiance_size(int p_radiance_size);
@@ -311,6 +370,38 @@ public:
 		bool set_mode(RSE::SkyMode p_mode);
 		bool set_material(RID p_material);
 		Ref<Image> bake_panorama(float p_energy, int p_roughness_layers, bool p_use_array, const Size2i &p_size);
+	};
+
+	struct SkySHPushConstant {
+		float border_size;
+		uint32_t size;
+		uint32_t lod;
+		uint32_t origin;
+		uint32_t extent;
+		uint32_t group_count;
+		uint32_t generation_low;
+		uint32_t generation_high;
+	};
+
+	struct SkySH {
+		SkyShShaderRD shader;
+		RID shader_version;
+		PipelineDeferredRD tile_pipeline;
+		PipelineDeferredRD reduce_pipeline;
+		RID partial_buffer;
+	} sky_sh;
+
+	static inline const uint32_t SH_BUFFER_SIZE = 160;
+	static inline const uint32_t SH_SOURCE_MAX_SIZE = 320;
+	static inline const uint32_t SH_TILE_WIDTH = 16;
+	static inline const uint32_t SH_TILE_HEIGHT = 8;
+	static inline const uint32_t SH_PARTIAL_STRIDE = 32;
+	static inline const uint32_t SH_PARTIAL_MAX_GROUPS = (SH_SOURCE_MAX_SIZE / SH_TILE_WIDTH) * (SH_SOURCE_MAX_SIZE / SH_TILE_HEIGHT);
+
+	struct SHSource {
+		RID texture;
+		uint32_t lod = 0;
+		Size2i size;
 	};
 
 	uint32_t sky_ggx_samples_quality;
@@ -332,12 +423,22 @@ public:
 	~SkyRD();
 
 	void setup_sky(const RenderDataRD *p_render_data, const Size2i p_screen_size);
+	void publish_completed_cycles();
 	void update_radiance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_env, const Vector3 &p_global_pos, double p_time, float p_luminance_multiplier = 1.0, float p_brightness_multiplier = 1.0);
 	void update_res_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_env, double p_time, float p_luminance_multiplier = 1.0, float p_brightness_multiplier = 1.0);
-	void draw_sky(RD::DrawListID p_draw_list, Ref<RenderSceneBuffersRD> p_render_buffers, RID p_env, RID p_fb, double p_time, float p_luminance_multiplier = 1.0, float p_brightness_multiplier = 1.0);
+	void draw_sky(RD::DrawListID p_draw_list, Ref<RenderSceneBuffersRD> p_render_buffers, RID p_env, RID p_fb, double p_time, float p_luminance_multiplier = 1.0, float p_brightness_multiplier = 1.0, RID p_water_fog_mask = RID());
 
-	void invalidate_sky(Sky *p_sky);
+	void invalidate_sky(Sky *p_sky, uint32_t p_reasons);
 	void update_dirty_skys();
+	void _create_radiance_textures(Sky *p_sky, RD::TextureFormat p_format);
+	bool _publish_if_due(Sky *p_sky, uint64_t p_frame);
+	void _sh_create_buffers(Sky *p_sky);
+	void _sh_apply_enabled(Sky *p_sky);
+	bool _sh_get_source(Sky *p_sky, bool p_working, SHSource &r_source) const;
+	bool _sh_dispatch(Sky *p_sky, RID p_dest, uint64_t p_generation, bool p_working);
+	void _sh_after_cycle(Sky *p_sky);
+	void _sh_after_publication(Sky *p_sky);
+	void _sh_compute_initial(Sky *p_sky);
 
 	RID sky_get_material(RID p_sky) const;
 	RID sky_get_radiance_texture_rd(RID p_sky) const;
@@ -353,6 +454,16 @@ public:
 	void sky_set_material(RID p_sky, RID p_material);
 	Ref<Image> sky_bake_panorama(RID p_sky, float p_energy, bool p_bake_irradiance, const Size2i &p_size);
 	float sky_get_uv_border_size(RID p_sky);
+	Dictionary sky_get_update_stats(RID p_sky) const;
+	int64_t sky_get_radiance_generation(RID p_sky) const;
+	PackedInt64Array sky_debug_get_layer_generations(RID p_sky) const;
+	void sky_set_radiance_update_policy(RID p_sky, RSE::SkyRadianceUpdatePolicy p_policy);
+	void sky_request_radiance_update(RID p_sky);
+	void sky_set_sh_enabled(RID p_sky, bool p_enabled);
+	void sky_add_ambient_sh_users(RID p_sky, int p_delta);
+	bool sky_is_sh_enabled(RID p_sky) const;
+	RID sky_get_sh_buffer(RID p_sky) const;
+	Dictionary sky_debug_get_sh(RID p_sky) const;
 };
 
 } // namespace RendererRD

@@ -53,7 +53,10 @@ public:
 		struct {
 			float awp_contrast;
 			float awp_toe_a;
-			float awp_slope;
+			union {
+				float awp_slope;
+				float awp_start;
+			};
 			float awp_w;
 		};
 	};
@@ -91,6 +94,8 @@ private:
 		float ambient_light_energy = 1.0;
 		float ambient_sky_contribution = 1.0;
 		RSE::EnvironmentReflectionSource reflection_source = RSE::ENV_REFLECTION_SOURCE_BG;
+		bool ambient_sky_sh = false;
+		RID ambient_sky_sh_user;
 		int camera_feed_id = 0;
 
 		// Tonemap
@@ -98,6 +103,7 @@ private:
 		float exposure = 1.0;
 		float white = 1.0;
 		float tonemap_agx_contrast = 1.25; // Default to approximately Blender's AgX contrast
+		float tonemap_agx_shoulder_start = 0.18;
 		float max_value = 1.0;
 
 		// Fog
@@ -224,6 +230,8 @@ public:
 	void environment_set_bg_energy(RID p_env, float p_multiplier, float p_exposure_value);
 	void environment_set_canvas_max_layer(RID p_env, int p_max_layer);
 	void environment_set_ambient_light(RID p_env, const Color &p_color, RSE::EnvironmentAmbientSource p_ambient = RSE::ENV_AMBIENT_SOURCE_BG, float p_energy = 1.0, float p_sky_contribution = 0.0, RSE::EnvironmentReflectionSource p_reflection_source = RSE::ENV_REFLECTION_SOURCE_BG);
+	void environment_set_ambient_sky_sh(RID p_env, bool p_enabled);
+	void environment_set_ambient_sky_sh_user(RID p_env, RID p_sky);
 	void environment_set_camera_feed_id(RID p_env, int p_camera_feed_id);
 	int environment_get_camera_feed_id(RID p_env) const;
 
@@ -239,6 +247,8 @@ public:
 	Color environment_get_ambient_light(RID p_env) const;
 	float environment_get_ambient_light_energy(RID p_env) const;
 	float environment_get_ambient_sky_contribution(RID p_env) const;
+	bool environment_get_ambient_sky_sh(RID p_env) const;
+	RID environment_get_ambient_sky_sh_user(RID p_env) const;
 	RSE::EnvironmentReflectionSource environment_get_reflection_source(RID p_env) const;
 
 	// Tonemap
@@ -248,7 +258,9 @@ public:
 	float environment_get_white(RID p_env, bool p_limit_agx_white, float p_output_max_value) const;
 	void environment_set_tonemap_agx_contrast(RID p_env, float p_agx_contrast);
 	float environment_get_tonemap_agx_contrast(RID p_env) const;
-	TonemapParameters environment_get_tonemap_parameters(RID p_env, bool p_limit_agx_white, float p_output_max_value) const;
+	void environment_set_tonemap_agx_shoulder_start(RID p_env, float p_start);
+	bool environment_uses_tonemap_agx_late_shoulder(RID p_env) const;
+	TonemapParameters environment_get_tonemap_parameters(RID p_env, bool p_limit_agx_white, float p_output_max_value, bool p_agx_late_shoulder = false) const;
 
 	// Fog
 	void environment_set_fog(RID p_env, bool p_enable, const Color &p_light_color, float p_light_energy, float p_sun_scatter, float p_density, float p_height, float p_height_density, float p_aerial_perspective, float p_sky_affect, RSE::EnvironmentFogMode p_mode);

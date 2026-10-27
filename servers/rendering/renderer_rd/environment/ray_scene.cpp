@@ -31,14 +31,17 @@
 #include "ray_scene.h"
 
 #include "core/config/project_settings.h"
+#include "core/os/os.h"
 #include "core/templates/hashfuncs.h"
 #include "core/templates/sort_array.h"
 #include "servers/rendering/renderer_geometry_instance.h"
 #include "servers/rendering/renderer_rd/environment/ddgi.h"
+#include "servers/rendering/renderer_rd/environment/ddgi_light_tracker.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/mesh_storage.h"
+#include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
 #include "servers/rendering/rendering_server.h"
 #include "servers/rendering/rendering_server_globals.h"
 
@@ -422,10 +425,52 @@ static void _store_color(float *r_values, const Color &p_color, float p_scale) {
 	r_values[2] = p_color.b * p_scale;
 }
 
-void RayScene::_material_entry(RID p_material, Material &r_material) const {
+static float _instance_float(int32_t p_offset, int32_t p_index) {
+	if (p_offset < 0 || p_index < 0) {
+		return 1.0f;
+	}
+	float value = 1.0f;
+	return MaterialStorage::get_singleton()->global_shader_parameters_instance_read_float(p_offset + p_index, value) ? value : 1.0f;
+}
+
+void RayScene::_instance_slots(RID p_material, CachedMaterial &r_cached) const {
+	if (p_material.is_null()) {
+		return;
+	}
+	const MaterialStorage *material_storage = MaterialStorage::get_singleton();
+	r_cached.scale_index = material_storage->material_get_instance_float_index(p_material, SNAME("oc_emission_scale"));
+	r_cached.bounce_index = material_storage->material_get_instance_float_index(p_material, SNAME("oc_emission_bounce"));
+}
+
+static constexpr float ALBEDO_MAX = 0.9f;
+static const Color TEXTURE_MEAN_ALBEDO = Color(0.1759f, 0.1502f, 0.1185f);
+
+static void _store_albedo(float *r_values, const Color &p_color, float p_scale) {
+	const Color albedo(MAX(p_color.r * p_scale, 0.0f), MAX(p_color.g * p_scale, 0.0f), MAX(p_color.b * p_scale, 0.0f));
+	const float peak = albedo.get_v();
+	const float scale = peak > ALBEDO_MAX ? ALBEDO_MAX / peak : 1.0f;
+	r_values[0] = albedo.r * scale;
+	r_values[1] = albedo.g * scale;
+	r_values[2] = albedo.b * scale;
+}
+
+static RID _param_texture(const Variant &p_value) {
+	return p_value.get_type() == Variant::RID ? RID(p_value) : RID();
+}
+
+void RayScene::_warn_albedo_fallback(RID p_material, RID p_texture, RID p_mesh, uint32_t p_surface) {
+	if (albedo_fallback_warned.has(p_material)) {
+		return;
+	}
+	albedo_fallback_warned.insert(p_material);
+	WARN_PRINT(vformat("Ray scene: a material without gi_albedo takes the texture-mean albedo fallback (mesh \"%s\", surface %d, texture \"%s\").", MeshStorage::get_singleton()->mesh_get_path(p_mesh), p_surface, TextureStorage::get_singleton()->texture_get_path(p_texture)));
+}
+
+void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, Material &r_material) {
 	r_material = {};
 	r_material.albedo[0] = r_material.albedo[1] = r_material.albedo[2] = 0.48f;
 	if (p_material.is_null()) {
+		albedo_sources[ALBEDO_DEFAULT]++;
 		return;
 	}
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
@@ -433,18 +478,45 @@ void RayScene::_material_entry(RID p_material, Material &r_material) const {
 	Color albedo;
 	Color emission;
 	if (_param_color(material_storage->material_get_param(p_material, SNAME("gi_albedo")), albedo) && albedo.r >= 0.0f && albedo.g >= 0.0f && albedo.b >= 0.0f) {
-		_store_color(r_material.albedo, albedo, 1.0f);
+		if (albedo.get_v() > ALBEDO_MAX) {
+			albedo_sources[ALBEDO_GI_CAPPED]++;
+		}
+		_store_albedo(r_material.albedo, albedo, 1.0f);
+		albedo_sources[ALBEDO_GI]++;
 	} else if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("base_color")), albedo)) {
-		const float weight = _param_float(material_storage->material_get_declared_param(p_material, SNAME("base_weight")), 1.0f);
-		albedo = albedo.srgb_to_linear();
-		_store_color(r_material.albedo, albedo, weight);
+		const float weight = CLAMP(_param_float(material_storage->material_get_declared_param(p_material, SNAME("base_weight")), 1.0f), 0.0f, 1.0f);
+		RID texture;
+		if (material_storage->material_get_declared_param(p_material, SNAME("use_base_color_opacity_texture")).booleanize()) {
+			texture = _param_texture(material_storage->material_get_declared_param(p_material, SNAME("base_color_opacity_texture")));
+		}
+		if (texture.is_valid()) {
+			Color tint = albedo;
+			if (material_storage->material_get_declared_param(p_material, SNAME("use_texture_ranges")).booleanize()) {
+				_param_color(material_storage->material_get_declared_param(p_material, SNAME("base_color_texture_tint")), tint);
+			}
+			albedo = tint.srgb_to_linear() * TEXTURE_MEAN_ALBEDO;
+			_warn_albedo_fallback(p_material, texture, p_mesh, p_surface);
+			albedo_sources[ALBEDO_TEXTURED]++;
+		} else {
+			albedo = albedo.srgb_to_linear();
+			albedo_sources[ALBEDO_UNTEXTURED]++;
+		}
+		_store_albedo(r_material.albedo, albedo, weight);
 	} else if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("albedo")), albedo)) {
 		albedo = albedo.srgb_to_linear();
-		_store_color(r_material.albedo, albedo, 1.0f);
+		const RID texture = _param_texture(material_storage->material_get_declared_param(p_material, SNAME("texture_albedo")));
+		if (texture.is_valid()) {
+			albedo *= TEXTURE_MEAN_ALBEDO;
+			_warn_albedo_fallback(p_material, texture, p_mesh, p_surface);
+		}
+		_store_albedo(r_material.albedo, albedo, 1.0f);
+		albedo_sources[ALBEDO_STANDARD]++;
+	} else {
+		albedo_sources[ALBEDO_DEFAULT]++;
 	}
 
-	if (_param_color(material_storage->material_get_param(p_material, SNAME("gi_emission")), emission)) {
-		_store_color(r_material.emission, emission, 1.0f);
+	if (_param_color(material_storage->material_get_param(p_material, SNAME("gi_emission")), emission) && emission.r >= 0.0f && emission.g >= 0.0f && emission.b >= 0.0f) {
+		_store_color(r_material.emission, emission, emission_scale);
 	} else if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("emission_color")), emission)) {
 		const float luminance = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_luminance")), 0.0f);
 		const float bounce = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_bounce_weight")), 1.0f);
@@ -463,16 +535,43 @@ void RayScene::_material_entry(RID p_material, Material &r_material) const {
 	if (!material_storage->material_casts_shadows(p_material)) {
 		r_material.flags |= MATERIAL_FLAG_SKIP;
 	}
+	const Variant shadow_pass = material_storage->material_get_param(p_material, SNAME("gi_shadow_pass"));
+	if (shadow_pass.get_type() == Variant::BOOL ? bool(shadow_pass) : _param_float(shadow_pass, 0.0f) > 0.5f) {
+		r_material.flags |= MATERIAL_FLAG_SHADOW_PASS;
+	}
 }
 
-void RayScene::_pack_light(RID p_light_instance, bool p_physical_units, float p_exposure, uint32_t p_limit, LocalVector<Light> &r_lights) const {
+float RayScene::light_energy(float p_energy, float p_intensity, RSE::LightType p_type, bool p_physical_units, float p_exposure, const Vector2 &p_area_size, bool p_area_normalize) {
+	float energy = LightStorage::light_render_energy(p_energy, p_intensity, p_type, p_physical_units);
+	energy *= p_exposure;
+	if (p_type == RSE::LIGHT_AREA && p_area_normalize) {
+		energy /= p_area_size.x * p_area_size.y;
+	}
+	return energy;
+}
+
+void RayScene::pack_area(const Basis &p_basis, const Vector2 &p_area_size, Light &r_light) {
+	const Vector3 half_a = p_basis.get_column(Vector3::AXIS_X).normalized() * (p_area_size.x * 0.5f);
+	const Vector3 half_b = p_basis.get_column(Vector3::AXIS_Y).normalized() * (p_area_size.y * 0.5f);
+	for (int k = 0; k < 3; k++) {
+		r_light.half_a[k] = half_a[k];
+		r_light.half_b[k] = half_b[k];
+	}
+	r_light.area = p_area_size.x * p_area_size.y;
+}
+
+void RayScene::_pack_light(RID p_light_instance, bool p_physical_units, float p_exposure, uint32_t p_limit, LocalVector<Light> &r_lights) {
 	LightStorage *light_storage = LightStorage::get_singleton();
 	if (r_lights.size() >= p_limit || !light_storage->owns_light_instance(p_light_instance)) {
 		return;
 	}
 	const RID light = light_storage->light_instance_get_base_light(p_light_instance);
 	const RSE::LightType type = light_storage->light_get_type(light);
-	if (type == RSE::LIGHT_AREA || light_storage->light_get_bake_mode(light) == RSE::LIGHT_BAKE_DISABLED) {
+	if (light_storage->light_get_bake_mode(light) == RSE::LIGHT_BAKE_DISABLED) {
+		return;
+	}
+	const Vector2 area_size = type == RSE::LIGHT_AREA ? light_storage->light_area_get_size(light) : Vector2();
+	if (type == RSE::LIGHT_AREA && !(area_size.x > 0.0f && area_size.y > 0.0f)) {
 		return;
 	}
 
@@ -485,17 +584,7 @@ void RayScene::_pack_light(RID p_light_instance, bool p_physical_units, float p_
 	if (light_storage->light_is_negative(light)) {
 		energy = -energy;
 	}
-	if (p_physical_units) {
-		energy *= light_storage->light_get_param(light, RSE::LIGHT_PARAM_INTENSITY);
-		if (type == RSE::LIGHT_OMNI) {
-			energy *= 1.0f / (Math::PI * 4.0f);
-		} else if (type == RSE::LIGHT_SPOT) {
-			energy *= 1.0f / Math::PI;
-		}
-	} else {
-		energy *= Math::PI;
-	}
-	energy *= p_exposure;
+	energy = light_energy(energy, light_storage->light_get_param(light, RSE::LIGHT_PARAM_INTENSITY), type, p_physical_units, p_exposure, area_size, type == RSE::LIGHT_AREA && light_storage->light_area_get_normalize_energy(light));
 
 	Light packed = {};
 	for (int k = 0; k < 3; k++) {
@@ -511,6 +600,17 @@ void RayScene::_pack_light(RID p_light_instance, bool p_physical_units, float p_
 	packed.inv_radius = 1.0f / MAX(0.001f, light_storage->light_get_param(light, RSE::LIGHT_PARAM_RANGE));
 	packed.cos_spot_angle = Math::cos(Math::deg_to_rad(light_storage->light_get_param(light, RSE::LIGHT_PARAM_SPOT_ANGLE)));
 	packed.inv_spot_attenuation = 1.0f / MAX(0.0001f, light_storage->light_get_param(light, RSE::LIGHT_PARAM_SPOT_ATTENUATION));
+	packed.caster_mask = light_storage->light_get_shadow_caster_mask(light);
+	if (type == RSE::LIGHT_AREA) {
+		pack_area(transform.basis, area_size, packed);
+	}
+	if (type != RSE::LIGHT_DIRECTIONAL) {
+		census.candidates++;
+		census.area_candidates += type == RSE::LIGHT_AREA;
+		census.area_projected += type == RSE::LIGHT_AREA && light_storage->light_area_get_texture(light).is_valid();
+		census.masked_candidates += packed.caster_mask != 0xFFFFFFFFu;
+	}
+	DDGILightTracker::observe(p_light_instance, packed, anchor);
 	r_lights.push_back(packed);
 }
 
@@ -528,25 +628,94 @@ struct LightOrder {
 struct LightNearer {
 	Vector3 camera;
 	static float score(const RayScene::Light &p_light, const Vector3 &p_camera) {
-		return Vector3(p_light.position[0], p_light.position[1], p_light.position[2]).distance_to(p_camera) - 1.0f / p_light.inv_radius;
+		float reach = 1.0f / p_light.inv_radius;
+		if (p_light.type == uint32_t(RSE::LIGHT_AREA)) {
+			reach += Math::sqrt(Vector3(p_light.half_a[0], p_light.half_a[1], p_light.half_a[2]).length_squared() + Vector3(p_light.half_b[0], p_light.half_b[1], p_light.half_b[2]).length_squared());
+		}
+		return Vector3(p_light.position[0], p_light.position[1], p_light.position[2]).distance_to(p_camera) - reach;
 	}
 	bool operator()(const RayScene::Light &p_a, const RayScene::Light &p_b) const {
 		return score(p_a, camera) < score(p_b, camera);
 	}
 };
 
+static double light_power(const RayScene::Light &p_light) {
+	return double(p_light.energy) * (0.2126 * p_light.color[0] + 0.7152 * p_light.color[1] + 0.0722 * p_light.color[2]);
+}
+
 void RayScene::_select_lights(const Vector3 &p_camera) {
 	if (lights.size() + local_lights.size() > MAX_LIGHTS) {
 		const uint32_t keep = MAX_LIGHTS - lights.size();
 		SortArray<Light, LightNearer> nearest;
 		nearest.compare.camera = p_camera;
-		nearest.nth_element(0, local_lights.size(), keep, local_lights.ptr());
-		local_lights.resize(keep);
+		LocalVector<Light> area;
+		LocalVector<Light> rest;
+		for (const Light &light : local_lights) {
+			if (light.type == uint32_t(RSE::LIGHT_AREA)) {
+				area.push_back(light);
+			} else {
+				rest.push_back(light);
+			}
+		}
+		const uint32_t reserved = MIN(MIN(area.size(), RESERVED_AREA_LIGHTS), keep);
+		if (area.size() > reserved) {
+			nearest.nth_element(0, area.size(), reserved, area.ptr());
+		}
+		for (uint32_t i = reserved; i < area.size(); i++) {
+			rest.push_back(area[i]);
+		}
+		const uint32_t rest_keep = keep - reserved;
+		if (rest.size() > rest_keep) {
+			nearest.nth_element(0, rest.size(), rest_keep, rest.ptr());
+		}
+		for (uint32_t i = rest_keep; i < rest.size(); i++) {
+			if (rest[i].caster_mask != 0xFFFFFFFFu) {
+				census.masked_cut++;
+				census.masked_cut_energy += light_power(rest[i]);
+			}
+		}
+		rest.resize(MIN(rest.size(), rest_keep));
+		census.area_reserved = reserved;
+		local_lights.clear();
+		for (uint32_t i = 0; i < reserved; i++) {
+			local_lights.push_back(area[i]);
+		}
+		for (const Light &light : rest) {
+			local_lights.push_back(light);
+		}
+	}
+	for (const Light &light : local_lights) {
+		census.area_packed += light.type == uint32_t(RSE::LIGHT_AREA);
+		if (light.caster_mask != 0xFFFFFFFFu) {
+			census.masked_packed_energy += light_power(light);
+		}
 	}
 	SortArray<Light, LightOrder> ordered;
 	ordered.sort(local_lights.ptr(), local_lights.size());
 	for (const Light &light : local_lights) {
 		lights.push_back(light);
+	}
+}
+
+void RayScene::_print_census() {
+	LocalVector<uint32_t> masks;
+	for (const Light &light : lights) {
+		if (light.caster_mask != 0xFFFFFFFFu && masks.find(light.caster_mask) < 0) {
+			masks.push_back(light.caster_mask);
+		}
+	}
+	for (const Instance &instance : instances) {
+		for (const uint32_t mask : masks) {
+			if ((instance.layer_mask & mask) == 0u) {
+				census.masked_instances++;
+				break;
+			}
+		}
+	}
+	if (census != printed_census) {
+		printed_census = census;
+		print_line(vformat("RAYSCENE_CENSUS candidates %d area_candidates %d area_packed %d area_reserved %d area_projected %d masked_candidates %d masked_cut %d masked_packed_power %f masked_cut_power %f masked_instances %d",
+				census.candidates, census.area_candidates, census.area_packed, census.area_reserved, census.area_projected, census.masked_candidates, census.masked_cut, census.masked_packed_energy, census.masked_cut_energy, census.masked_instances));
 	}
 }
 
@@ -588,6 +757,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	instances.clear();
 	materials.clear();
 	material_cache.clear();
+	memset(albedo_sources, 0, sizeof(albedo_sources));
 	emission_scale = _param_float(MaterialStorage::get_singleton()->global_shader_parameter_get_internal(SNAME("openpbr_emission_scale")), 1.0f);
 	LocalVector<BuildPrimitive> primitives;
 	uint32_t signature = HASH_MURMUR3_SEED;
@@ -613,6 +783,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		MaterialStorage::store_transform_transposed_3x4(inverse, instance.world_to_object);
 		instance.blas_root = mesh->node_offset;
 		instance.material_offset = materials.size();
+		instance.layer_mask = geometry->layer_mask;
 
 		for (uint32_t s = 0; s < mesh->surface_count; s++) {
 			RID material = geometry->data->material_override;
@@ -622,13 +793,21 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			if (material.is_null()) {
 				material = mesh_storage->mesh_surface_get_material(mesh_rid, s);
 			}
-			Material *cached = material_cache.getptr(material);
+			CachedMaterial *cached = material_cache.getptr(material);
 			if (!cached) {
-				Material entry;
-				_material_entry(material, entry);
+				CachedMaterial entry;
+				_material_entry(material, mesh_rid, s, entry.entry);
+				_instance_slots(material, entry);
 				cached = &material_cache.insert(material, entry)->value;
 			}
-			materials.push_back(*cached);
+			materials.push_back(cached->entry);
+			const float factor = MAX(_instance_float(geometry->shader_uniforms_offset, cached->scale_index), 0.0f) * MAX(_instance_float(geometry->shader_uniforms_offset, cached->bounce_index), 0.0f);
+			if (factor != 1.0f) {
+				Material &instance_material = materials[materials.size() - 1];
+				for (int k = 0; k < 3; k++) {
+					instance_material.emission[k] *= factor;
+				}
+			}
 		}
 
 		const AABB bounds = transform.xform(mesh->aabb);
@@ -646,6 +825,10 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 
 	if (signature != instance_signature || anchor_moved || need_assembly || tlas_node_buffer.is_null()) {
 		instance_signature = signature;
+		if (memcmp(albedo_sources, reported_albedo_sources, sizeof(albedo_sources)) != 0) {
+			memcpy(reported_albedo_sources, albedo_sources, sizeof(albedo_sources));
+			print_line(vformat("Ray scene albedo: gi_albedo %d (%d capped at 0.9), textured fallback %d, untextured %d, standard %d, default %d.", albedo_sources[ALBEDO_GI], albedo_sources[ALBEDO_GI_CAPPED], albedo_sources[ALBEDO_TEXTURED], albedo_sources[ALBEDO_UNTEXTURED], albedo_sources[ALBEDO_STANDARD], albedo_sources[ALBEDO_DEFAULT]));
+		}
 		build_bvh(primitives, TLAS_LEAF_SIZE, TLAS_MAX_DEPTH, tlas_nodes);
 		LocalVector<Instance> ordered;
 		ordered.resize(MAX(1u, instances.size()));
@@ -671,6 +854,8 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	const float exposure = p_camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes) : 1.0f;
 	lights.clear();
 	local_lights.clear();
+	census = LightCensus();
+	DDGILightTracker::begin(GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/light_change_reset"), RSG::rasterizer->get_frame_number(), MAX(GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/probe_spacing"), 0.1f));
 	for (const RID &light_instance : p_directional_lights) {
 		_pack_light(light_instance, physical_units, exposure, MAX_LIGHTS, lights);
 	}
@@ -678,6 +863,10 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		_pack_light(p_lights[i], physical_units, exposure, MAX_CANDIDATE_LIGHTS, local_lights);
 	}
 	_select_lights(p_camera_position - anchor);
+	DDGILightTracker::end();
+	if (OS::get_singleton()->is_stdout_verbose()) {
+		_print_census();
+	}
 	_ensure_buffer(light_buffer, light_capacity, MAX_LIGHTS, sizeof(Light), "Ray Scene Lights");
 	if (lights.size()) {
 		RD::get_singleton()->buffer_update(light_buffer, 0, lights.size() * sizeof(Light), lights.ptr());

@@ -71,6 +71,11 @@
 			Defines the amount of light that the sky brings on the scene. A value of [code]0.0[/code] means that the sky's light emission has no effect on the scene illumination, thus all ambient illumination is provided by the ambient light. On the contrary, a value of [code]1.0[/code] means that [i]all[/i] the light that affects the scene is provided by the sky, thus the ambient light parameter has no effect on the scene.
 			[b]Note:[/b] [member ambient_light_sky_contribution] is internally clamped between [code]0.0[/code] and [code]1.0[/code] (inclusive).
 		</member>
+		<member name="ambient_light_sky_sh" type="bool" setter="set_ambient_light_sky_sh" getter="get_ambient_light_sky_sh" default="false">
+			If [code]true[/code] and the ambient light comes from the sky, the ambient light is taken from the diffuse spherical harmonics of the [Sky] (see [member Sky.sh_enabled]) instead of the lowest level of its radiance map. The result is the irradiance of the sky for the surface normal divided by pi, built from 9 coefficients, so it is smooth and has no blur from the filtering of the radiance map. The sky orientation is applied as for the radiance map, and the same energy, exposure and [member ambient_light_sky_contribution] apply. Turning this on switches the spherical harmonics on for the sky while the environment uses it.
+			The reflections are not changed. Until the spherical harmonics were computed for the first time, and when the [Sky] has none, the radiance map is used as before.
+			[b]Note:[/b] Only the Forward+ renderer supports this. The Mobile and Compatibility renderers ignore it.
+		</member>
 		<member name="ambient_light_source" type="int" setter="set_ambient_source" getter="get_ambient_source" enum="Environment.AmbientSource" default="0">
 			The ambient light source to use for rendering materials and global illumination.
 		</member>
@@ -354,6 +359,10 @@
 		</member>
 		<member name="tonemap_agx_contrast" type="float" setter="set_tonemap_agx_contrast" getter="get_tonemap_agx_contrast" default="1.25">
 			Increasing [member tonemap_agx_contrast] will make dark values darker and bright values brighter. Produces a higher quality result than [member adjustment_contrast] without any additional performance cost, but is only available when using the [constant TONE_MAPPER_AGX] tonemapper.
+		</member>
+		<member name="tonemap_agx_shoulder_start" type="float" setter="set_tonemap_agx_shoulder_start" getter="get_tonemap_agx_shoulder_start" default="0.18">
+			Where the AgX curve's highlight shoulder begins, as a scene value after the AgX inset matrix, from [code]0.18[/code] to [code]1.0[/code]. At the default [code]0.18[/code] the curve is the standard one, unchanged. Above it, the curve continues as a straight line with the slope it has at [code]0.18[/code] (so mid-gray keeps its value) up to this start, and the shoulder then rolls off to the output maximum at [member tonemap_agx_white]. A later start keeps light grays and diffuse whites brighter, like a camera's tone curve: at [code]0.63[/code] with the default contrast and white, 18% gray stays at sRGB [code]0.46[/code] and 85% to 90% reflectance lands at about [code]0.88[/code] to [code]0.92[/code] without clipping. The start is limited so that the curve's value at the start is at most 95% of the output maximum. Only effective with the [constant TONE_MAPPER_AGX] tonemapper.
+			[b]Note:[/b] Not supported by the Compatibility renderer, which always uses the standard curve.
 		</member>
 		<member name="tonemap_agx_white" type="float" setter="set_tonemap_agx_white" getter="get_tonemap_agx_white" default="16.29">
 			The white reference value for tonemapping, which indicates where bright white is located in the scale of values provided to the tonemapper. For photorealistic lighting, it is recommended to set [member tonemap_agx_white] to at least [code]6.0[/code]. Higher values result in less blown out highlights, but may make the scene appear lower contrast. [member tonemap_agx_white] is the same as [member tonemap_white], but is only effective with the [constant TONE_MAPPER_AGX] tonemapper. See also [member tonemap_exposure].

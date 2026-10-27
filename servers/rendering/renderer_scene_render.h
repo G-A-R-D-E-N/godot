@@ -32,6 +32,8 @@
 
 #include "core/math/projection.h"
 #include "core/templates/paged_array.h"
+#include "core/variant/dictionary.h"
+#include "core/variant/variant.h"
 #include "servers/rendering/renderer_geometry_instance.h"
 #include "servers/rendering/rendering_server_types.h"
 #include "servers/rendering/storage/compositor_storage.h"
@@ -42,6 +44,8 @@ class RendererSceneRender {
 private:
 	RendererEnvironmentStorage environment_storage;
 	RendererCompositorStorage compositor_storage;
+
+	void _environment_sync_ambient_sky_sh_user(RID p_env);
 
 public:
 	enum {
@@ -84,6 +88,16 @@ public:
 	virtual void sky_set_mode(RID p_sky, RSE::SkyMode p_samples) = 0;
 	virtual void sky_set_material(RID p_sky, RID p_material) = 0;
 	virtual Ref<Image> sky_bake_panorama(RID p_sky, float p_energy, bool p_bake_irradiance, const Size2i &p_size) = 0;
+	virtual Dictionary sky_get_update_stats(RID p_sky) const { return Dictionary(); }
+	virtual int64_t sky_get_radiance_generation(RID p_sky) const { return 0; }
+	virtual PackedInt64Array sky_debug_get_layer_generations(RID p_sky) const { return PackedInt64Array(); }
+	virtual void sky_set_radiance_update_policy(RID p_sky, RSE::SkyRadianceUpdatePolicy p_policy) {}
+	virtual void sky_request_radiance_update(RID p_sky) {}
+	virtual void sky_set_sh_enabled(RID p_sky, bool p_enabled) {}
+	virtual void sky_add_ambient_sh_users(RID p_sky, int p_delta) {}
+	virtual bool sky_is_sh_enabled(RID p_sky) const { return false; }
+	virtual RID sky_get_sh_buffer(RID p_sky) const { return RID(); }
+	virtual Dictionary sky_debug_get_sh(RID p_sky) const { return Dictionary(); }
 
 	/* COMPOSITOR EFFECT API */
 
@@ -123,6 +137,7 @@ public:
 	void environment_set_bg_energy(RID p_env, float p_multiplier, float p_exposure_value);
 	void environment_set_canvas_max_layer(RID p_env, int p_max_layer);
 	void environment_set_ambient_light(RID p_env, const Color &p_color, RSE::EnvironmentAmbientSource p_ambient = RSE::ENV_AMBIENT_SOURCE_BG, float p_energy = 1.0, float p_sky_contribution = 0.0, RSE::EnvironmentReflectionSource p_reflection_source = RSE::ENV_REFLECTION_SOURCE_BG);
+	void environment_set_ambient_sky_sh(RID p_env, bool p_enabled);
 	void environment_set_camera_feed_id(RID p_env, int p_camera_feed_id);
 
 	RSE::EnvironmentBG environment_get_background(RID p_env) const;
@@ -137,6 +152,7 @@ public:
 	Color environment_get_ambient_light(RID p_env) const;
 	float environment_get_ambient_light_energy(RID p_env) const;
 	float environment_get_ambient_sky_contribution(RID p_env) const;
+	bool environment_get_ambient_sky_sh(RID p_env) const;
 	RSE::EnvironmentReflectionSource environment_get_reflection_source(RID p_env) const;
 	int environment_get_camera_feed_id(RID p_env) const;
 
@@ -147,7 +163,9 @@ public:
 	float environment_get_white(RID p_env, bool p_limit_agx_white, float p_output_max_value) const;
 	void environment_set_tonemap_agx_contrast(RID p_env, float p_agx_contrast);
 	float environment_get_tonemap_agx_contrast(RID p_env) const;
-	RendererEnvironmentStorage::TonemapParameters environment_get_tonemap_parameters(RID p_env, bool p_limit_agx_white, float p_output_max_value) const;
+	void environment_set_tonemap_agx_shoulder_start(RID p_env, float p_start);
+	bool environment_uses_tonemap_agx_late_shoulder(RID p_env) const;
+	RendererEnvironmentStorage::TonemapParameters environment_get_tonemap_parameters(RID p_env, bool p_limit_agx_white, float p_output_max_value, bool p_agx_late_shoulder = false) const;
 
 	// Fog
 	void environment_set_fog(RID p_env, bool p_enable, const Color &p_light_color, float p_light_energy, float p_sun_scatter, float p_density, float p_height, float p_height_density, float p_aerial_perspective, float p_sky_affect, RSE::EnvironmentFogMode p_mode);

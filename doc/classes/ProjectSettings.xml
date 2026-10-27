@@ -2964,6 +2964,15 @@
 		<member name="rendering/driver/threads/thread_model" type="int" setter="" getter="" default="1" experimental="This setting has several known bugs which can lead to crashing, especially when using particles or resizing the window. Not recommended for use in production at this stage.">
 			The thread model to use for rendering. Rendering on a thread may improve performance, but synchronizing to the main thread can cause a bit more jitter.
 		</member>
+		<member name="rendering/environment/auto_exposure/clamp_adjust" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], the auto exposure adaptation factor (auto exposure speed times the frame time) is limited to the range 0 to 1 on the compute path, as the raster path already does. Frames shorter than 1 / speed seconds are not affected. Without it a frame longer than one second overshoots the target brightness, and a frame longer than two seconds makes the update diverge to the minimum or maximum sensitivity.
+		</member>
+		<member name="rendering/environment/auto_exposure/debug_log" type="bool" setter="" getter="" default="false">
+			Debug only. If [code]true[/code], every frame with auto exposure prints one [code]AEX_LOG[/code] line with the frame counter, the frame time, the adaptation factor before and after clamping, whether the adaptation was reset, the luminance limits and the luminance after the reduction (read back without stalling, so the line appears a few frames late). Read when the scene buffers are created.
+		</member>
+		<member name="rendering/environment/auto_exposure/debug_log_hdr" type="bool" setter="" getter="" default="false">
+			Debug only, used with [member rendering/environment/auto_exposure/debug_log]. Also reads back the HDR scene buffer every frame (this stalls the GPU, so frame times are not representative) and adds to the log line the number of NaN, infinite and very large values, the mean of the largest color channel over the finite pixels, and the same mean over every pixel without the highlight limit, which is what the reduction measures. The covered share is always 1, because the reduction measures the whole frame.
+		</member>
 		<member name="rendering/environment/defaults/default_clear_color" type="Color" setter="" getter="" default="Color(0.3, 0.3, 0.3, 1)">
 			Default background clear color. Overridable per [Viewport] using its [Environment]. See [member Environment.background_mode] and [member Environment.background_color] in particular. To change this default color programmatically, use [method RenderingServer.set_default_clear_color].
 		</member>
@@ -3174,6 +3183,15 @@
 		</member>
 		<member name="rendering/global_illumination/ddgi/bounce_energy" type="float" setter="" getter="" default="1.0">
 			How much of the probes' own light is fed back into the rays, which gives multiple bounces of indirect light. 0 gives a single bounce.
+		</member>
+		<member name="rendering/global_illumination/ddgi/change_threshold" type="float" setter="" getter="" default="0.25">
+			How far a probe texel's new ray result must differ from its stored value, as a fraction of the larger of the two, before the texel halves its history weight to follow the change faster. Ray noise crosses a low threshold at random, and the rule weights noisy samples more heavily, which biases the probe light by a few percent when one lamp changes brightness next to another. [code]1.0[/code] turns the rule off: the probe light is then unbiased but follows a changed lamp slowly (about 50 frames instead of 1 for a threefold step). The default [code]0.25[/code] keeps the old behavior; a higher value such as [code]0.75[/code] keeps the rule only for very large jumps, which ray noise rarely produces.
+		</member>
+		<member name="rendering/global_illumination/ddgi/light_change_reset" type="bool" setter="" getter="" default="true">
+			When a local light is added, removed or changes by more than a tolerance, every probe on every level whose position lies within the light's old or new range has its update count set to zero. The next updates of those probes then replace the stored irradiance quickly and settle into a plain running average, so a light change shows at once without the history-weight rule of [member rendering/global_illumination/ddgi/change_threshold] having to guess it from noise. A light fires when its energy leaves the ratio band 0.8 to 1.25 against its value at its last reset, its color moves by more than 10 %, its range changes by more than 10 %, it moves by more than a quarter of the level 0 probe spacing, or (spot lights) it turns by more than 10 degrees. A light fires at most once every 8 frames; a change blocked by that limit fires when the limit allows. At most 32 boxes are processed per frame and the rest wait for later frames. Directional lights are not tracked. Off gives the old behavior, where a changed light is followed only by the history-weight rule.
+		</member>
+		<member name="rendering/global_illumination/ddgi/light_change_reset_log" type="bool" setter="" getter="" default="false">
+			Prints one line every 100 DDGI frames with the number of lights that fired, boxes processed and waiting, reset passes, probes touched and their share of all probes. Has no effect on rendering.
 		</member>
 		<member name="rendering/global_illumination/ddgi/debug_view" type="int" setter="" getter="" default="0">
 			Replaces the image with a view traced against the DDGI scene copy: [code]Irradiance[/code] shows probe irradiance at the first hit, [code]Ray Hits[/code] shows the light the probe rays see, [code]Normals[/code] shows surface normals with back faces in red, [code]Probe State[/code] colors each surface by its nearest probe (green active, blue idle, red inside geometry, black not traced yet) with dark lines on probe cell edges, and [code]Probe Visibility[/code] shows how much probe light passes the visibility test (green all, red little, magenta none).

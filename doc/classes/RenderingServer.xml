@@ -63,6 +63,34 @@
 				Sets the parameters to use with the auto-exposure effect. These parameters take on the same meaning as their counterparts in [CameraAttributes] and [CameraAttributesPractical].
 			</description>
 		</method>
+		<method name="camera_attributes_set_auto_exposure_adaptation">
+			<return type="void" />
+			<param index="0" name="camera_attributes" type="RID" />
+			<param index="1" name="adaptation" type="float" />
+			<param index="2" name="pivot_luminance" type="float" />
+			<description>
+				Sets partial auto-exposure adaptation. Below [param pivot_luminance], in the same luminance unit as the min and max passed to [method camera_attributes_set_auto_exposure], a metered luminance [code]L[/code] becomes [code]pivot_luminance * (L / pivot_luminance)^adaptation[/code] before the clamp. [param adaptation] [code]1.0[/code] or a pivot of [code]0.0[/code] leaves the meter unchanged. This has the same meaning as [member CameraAttributes.auto_exposure_adaptation].
+			</description>
+		</method>
+		<method name="camera_attributes_set_auto_exposure_highlight_limit">
+			<return type="void" />
+			<param index="0" name="camera_attributes" type="RID" />
+			<param index="1" name="limit" type="float" />
+			<description>
+				Sets the auto-exposure highlight limit, in EV above the previous frame's adapted average. [code]0.0[/code] disables the limit. Each pixel is capped at that average times [code]2^limit[/code]. A bright area keeps a bounded effect only while its share of the frame times [code]2^limit[/code] stays below [code]1[/code] (below 6.25 % of the frame at 4 EV); above that the exposure moves toward the unlimited mean. The limit is not applied on the first frame or after a reset. This has the same meaning as [member CameraAttributes.auto_exposure_highlight_limit].
+			</description>
+		</method>
+		<method name="camera_attributes_set_auto_exposure_meter">
+			<return type="void" />
+			<param index="0" name="camera_attributes" type="RID" />
+			<param index="1" name="meter" type="int" enum="RenderingServer.AutoExposureMeter" />
+			<param index="2" name="clip_low" type="float" />
+			<param index="3" name="clip_high" type="float" />
+			<param index="4" name="center_weight" type="float" />
+			<description>
+				Sets the auto-exposure meter and, for [constant AUTO_EXPOSURE_METER_LOG_HISTOGRAM], the fractions of the darkest and brightest metering weight to ignore (each [code]0.0[/code] to [code]0.45[/code]) and the weight toward the lower middle of the frame ([code]0.0[/code] to [code]1.0[/code]). These have the same meaning as [member CameraAttributes.auto_exposure_meter], [member CameraAttributes.auto_exposure_histogram_clip_low], [member CameraAttributes.auto_exposure_histogram_clip_high] and [member CameraAttributes.auto_exposure_center_weight].
+			</description>
+		</method>
 		<method name="camera_attributes_set_dof_blur">
 			<return type="void" />
 			<param index="0" name="camera_attributes" type="RID" />
@@ -1331,6 +1359,16 @@
 				Sets the values to be used for ambient light rendering. See [Environment] for more details.
 			</description>
 		</method>
+		<method name="environment_set_ambient_sky_sh">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="enabled" type="bool" />
+			<description>
+				If [code]true[/code], the environment specified by the [param env] RID takes its sky ambient light from the diffuse spherical harmonics of its sky instead of the lowest level of the sky's radiance map. See [member Environment.ambient_light_sky_sh]. It is [code]false[/code] by default, and then nothing changes.
+				While the setting is on, the environment counts as one user of its sky and keeps the sky's spherical harmonics switched on (see [method sky_set_sh_enabled]). Each environment counts once for the sky it has at that moment, and the count drops when the setting is turned off, when the environment gets another sky or is freed. The spherical harmonics stay on while the count is above zero or while [method sky_set_sh_enabled] was called with [code]true[/code] for the sky.
+				Only the Forward+ renderer reads the setting. The Mobile and Compatibility renderers ignore it.
+			</description>
+		</method>
 		<method name="environment_set_background">
 			<return type="void" />
 			<param index="0" name="env" type="RID" />
@@ -1576,6 +1614,14 @@
 			<param index="1" name="agx_contrast" type="float" />
 			<description>
 				See [member Environment.tonemap_agx_contrast] for more details.
+			</description>
+		</method>
+		<method name="environment_set_tonemap_agx_shoulder_start">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="start" type="float" />
+			<description>
+				See [member Environment.tonemap_agx_shoulder_start] for more details.
 			</description>
 		</method>
 		<method name="environment_set_volumetric_fog">
@@ -2181,6 +2227,20 @@
 			<param index="5" name="strength" type="float" />
 			<description>
 				Sets the cloud shadow of this directional light. Equivalent to [member DirectionalLight3D.cloud_shadow_texture], [member DirectionalLight3D.cloud_shadow_scale], [member DirectionalLight3D.cloud_shadow_offset], [member DirectionalLight3D.cloud_shadow_altitude] and [member DirectionalLight3D.cloud_shadow_strength].
+			</description>
+		</method>
+		<method name="light_directional_set_far_shadow">
+			<return type="void" />
+			<param index="0" name="light" type="RID" />
+			<param index="1" name="heights" type="RID" />
+			<param index="2" name="bands" type="RID" />
+			<param index="3" name="near" type="RID" />
+			<param index="4" name="terrain" type="RID" />
+			<param index="5" name="origins" type="PackedVector2Array" />
+			<param index="6" name="texel" type="float" />
+			<param index="7" name="direction" type="Vector3" />
+			<description>
+				Sets the far shadow of this directional light. Equivalent to [member DirectionalLight3D.far_shadow_heights], [member DirectionalLight3D.far_shadow_bands], [member DirectionalLight3D.far_shadow_near], [member DirectionalLight3D.far_shadow_terrain], [member DirectionalLight3D.far_shadow_origins], [member DirectionalLight3D.far_shadow_texel] and [member DirectionalLight3D.far_shadow_direction].
 			</description>
 		</method>
 		<method name="light_directional_set_shadow_mode">
@@ -3850,6 +3910,64 @@
 				Once finished with your RID, you will want to free the RID using the RenderingServer's [method free_rid] method.
 			</description>
 		</method>
+		<method name="sky_debug_get_layer_generations" qualifiers="const">
+			<return type="PackedInt64Array" />
+			<param index="0" name="sky" type="RID" />
+			<description>
+				Returns, for the sky specified by the [param sky] RID, the generation each roughness layer of the published radiance map was written in, one entry per layer. After a publication every entry is the same value, [method sky_get_radiance_generation]. The array is empty when the sky does not exist, and holds zeros while nothing was published. This is a diagnostic call for tests.
+			</description>
+		</method>
+		<method name="sky_debug_get_sh" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="sky" type="RID" />
+			<description>
+				Reads the published diffuse spherical harmonics of the sky specified by the [param sky] RID back from the GPU and returns them as a dictionary. [b]This call stalls the renderer until the GPU is done, so use it only in tests and tools.[/b]
+				The keys are [code]coefficients[/code], a [PackedFloat32Array] of 27 values (9 coefficients, each with red, green and blue, in the order of [method sky_get_sh_buffer]), [code]generation[/code], the generation ID the coefficients were computed for, [code]valid[/code], whether the buffer holds a finished result, and [code]texel_count[/code], the number of radiance texels that were summed. When the spherical harmonics are off, [code]coefficients[/code] is empty, [code]generation[/code] is [code]0[/code] and [code]valid[/code] is [code]false[/code].
+			</description>
+		</method>
+		<method name="sky_get_radiance_generation" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="sky" type="RID" />
+			<description>
+				Returns the generation ID of the radiance map that the renderer reads for the sky specified by the [param sky] RID. [code]0[/code] means that no radiance map was published yet, which is also the case after the radiance size or the process mode changed until the next update finishes. Every finished update raises the ID by one, and an ID is never used twice.
+				An incremental sky renders its update into a second map and copies it into the one the renderer reads at the start of the next frame, so all viewports and probes of one frame see the same generation. The first publication of a sky, and the first one after the radiance map was freed, is copied at once. Quality and realtime skies finish an update inside one frame and publish it at once.
+			</description>
+		</method>
+		<method name="sky_get_sh_buffer" qualifiers="const">
+			<return type="RID" />
+			<param index="0" name="sky" type="RID" />
+			<description>
+				Returns the storage buffer that holds the diffuse spherical harmonics of the sky specified by the [param sky] RID, or an invalid RID when they are off (see [method sky_set_sh_enabled]) or when the sky does not exist. The RID changes when the radiance map is created again after a change of the radiance size or the process mode, so read it again every frame instead of keeping it.
+				The buffer is 160 bytes in the std430 layout. Nine [code]vec4[/code] come first, each with the red, green and blue coefficient and an unused fourth value of 0. They are followed by a [code]uvec4[/code]: the low 32 bits of the generation ID, the high 32 bits, [code]1[/code] when the buffer holds a finished result and [code]0[/code] otherwise, and the number of texels that were summed.
+				The coefficients are the orthonormal real spherical harmonics of order 2 of the radiance, c_lm = integral of L(w) Y_lm(w) over the sphere, in world axes with no sky orientation applied, in the units of the radiance map. Their order and constants are: 0: 0.282095, 1: 0.488603 y, 2: 0.488603 z, 3: 0.488603 x, 4: 1.092548 x y, 5: 1.092548 y z, 6: 0.315392 (3 z^2 - 1), 7: 1.092548 x z, 8: 0.546274 (x^2 - y^2). To get the irradiance for a normal, multiply the coefficients of band 0, 1 and 2 by pi, 2 pi / 3 and pi / 4 and sum them with the same functions evaluated at the normal. A sky of constant radiance L gives 3.544908 L for coefficient 0 and 0 for all others.
+				The buffer carries the generation of the radiance map that [method sky_get_radiance_generation] returns, and both change in the same frame.
+			</description>
+		</method>
+		<method name="sky_get_update_stats" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="sky" type="RID" />
+			<description>
+				Returns diagnostic counters for the update of the specified [param sky] RID's radiance map. The keys are [code]cycles_started[/code], [code]layers_filtered[/code], [code]cycles_completed[/code], [code]last_dirty_reasons[/code], [code]processing_layer[/code], [code]mode[/code], [code]radiance_size[/code], [code]update_requests[/code], [code]update_requests_latched[/code], [code]generation[/code], [code]publishes[/code], [code]sh_generation[/code] and [code]sh_dispatches[/code].
+				[code]cycles_started[/code] counts the filter cycles that began, [code]layers_filtered[/code] the roughness layers filtered and [code]cycles_completed[/code] the cycles whose last layer is done. Realtime skies filter all their layers in one pass and count the same layers in [code]layers_filtered[/code].
+				[code]last_dirty_reasons[/code] is a bit mask of the reasons recorded since the previous cycle started: [code]1[/code] missing radiance, [code]2[/code] time, [code]4[/code] camera position, [code]8[/code] fog, [code]16[/code] sky material, [code]32[/code] directional lights, [code]64[/code] size or mode change, [code]128[/code] an update requested with [method sky_request_radiance_update].
+				[code]processing_layer[/code] is the next roughness layer an incremental sky will filter, [code]mode[/code] the sky's configured mode and [code]radiance_size[/code] its radiance size. [code]update_requests[/code] counts the calls to [method sky_request_radiance_update] and [code]update_requests_latched[/code] those that arrived while a cycle was running. [code]generation[/code] is the published generation, see [method sky_get_radiance_generation], and [code]publishes[/code] counts the updates that were published. [code]sh_generation[/code] is the generation of the published diffuse spherical harmonics, see [method sky_get_sh_buffer], and is [code]0[/code] while they are off or not computed yet. [code]sh_dispatches[/code] counts the times the spherical harmonics were computed on the GPU for this sky. The dictionary is empty when the sky does not exist or the renderer does not track sky updates.
+			</description>
+		</method>
+		<method name="sky_is_sh_enabled" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="sky" type="RID" />
+			<description>
+				Returns [code]true[/code] if the diffuse spherical harmonics are computed for the sky specified by the [param sky] RID, see [method sky_set_sh_enabled].
+			</description>
+		</method>
+		<method name="sky_request_radiance_update">
+			<return type="void" />
+			<param index="0" name="sky" type="RID" />
+			<description>
+				Requests one full update of the radiance map of the specified [param sky] RID, in the sky's current process mode. An incremental sky filters one roughness layer per frame until the update is done, a quality or realtime sky filters all layers at once. The update uses the sky material and lights as they are in the frame in which it starts.
+				A request that arrives while an update is running is kept, one at most, and starts right after the running update finishes. Several requests before an update starts give a single update. With [constant SKY_RADIANCE_UPDATE_POLICY_AUTOMATIC] the request starts an update in addition to the automatic ones.
+			</description>
+		</method>
 		<method name="sky_set_material">
 			<return type="void" />
 			<param index="0" name="sky" type="RID" />
@@ -3872,6 +3990,23 @@
 			<param index="1" name="radiance_size" type="int" />
 			<description>
 				Sets the [param radiance_size] of the sky specified by the [param sky] RID (in pixels). Equivalent to [member Sky.radiance_size].
+			</description>
+		</method>
+		<method name="sky_set_radiance_update_policy">
+			<return type="void" />
+			<param index="0" name="sky" type="RID" />
+			<param index="1" name="policy" type="int" enum="RenderingServer.SkyRadianceUpdatePolicy" />
+			<description>
+				Sets when the radiance map of the sky specified by the [param sky] RID is updated. The default is [constant SKY_RADIANCE_UPDATE_POLICY_AUTOMATIC]. With [constant SKY_RADIANCE_UPDATE_POLICY_MANUAL] only [method sky_request_radiance_update] starts an update. The visible sky is still drawn every frame with the current sky material.
+				Switching back to [constant SKY_RADIANCE_UPDATE_POLICY_AUTOMATIC] updates the radiance map when changes were recorded since the last update.
+			</description>
+		</method>
+		<method name="sky_set_sh_enabled">
+			<return type="void" />
+			<param index="0" name="sky" type="RID" />
+			<param index="1" name="enabled" type="bool" />
+			<description>
+				Turns the diffuse spherical harmonics of the sky specified by the [param sky] RID on or off. They are off by default and cost nothing while off. When they are on, a small compute pass sums the finished radiance map into 9 RGB coefficients every time a radiance update is published, and the coefficients carry the same generation ID as the radiance map. See [method sky_get_sh_buffer] for the data. Turning them on for a sky that already has a published radiance map computes them once from it; turning them off frees the buffers.
 			</description>
 		</method>
 		<method name="spot_light_create">
@@ -5842,6 +5977,12 @@
 			Uses the fast filtering algorithm to process the radiance map. In general this results in lower quality, but substantially faster run times. If you need better quality, but still need to update the sky every frame, consider turning on [member ProjectSettings.rendering/reflections/sky_reflections/fast_filter_high_quality].
 			[b]Note:[/b] The fast filtering algorithm is limited to 256×256 cubemaps, so [method sky_set_radiance_size] must be set to [code]256[/code]. Otherwise, a warning is printed and the overridden radiance size is ignored.
 		</constant>
+		<constant name="SKY_RADIANCE_UPDATE_POLICY_AUTOMATIC" value="0" enum="SkyRadianceUpdatePolicy">
+			The radiance map updates when the sky material, lights, fog, [code]TIME[/code] or [code]POSITION[/code] change. This is the default.
+		</constant>
+		<constant name="SKY_RADIANCE_UPDATE_POLICY_MANUAL" value="1" enum="SkyRadianceUpdatePolicy">
+			Changes of the sky material, lights, fog, [code]TIME[/code] and [code]POSITION[/code] do not update the radiance map. Only [method sky_request_radiance_update] does. A missing radiance map, a change of the radiance size and a change of the process mode still update it.
+		</constant>
 		<constant name="COMPOSITOR_EFFECT_FLAG_ACCESS_RESOLVED_COLOR" value="1" enum="CompositorEffectFlags">
 			The rendering effect requires the color buffer to be resolved if MSAA is enabled.
 		</constant>
@@ -6104,6 +6245,12 @@
 		<constant name="DOF_BLUR_QUALITY_HIGH" value="3" enum="DOFBlurQuality">
 			Highest quality DOF blur. Results in the smoothest looking blur by taking the most samples, but is also significantly slower.
 		</constant>
+		<constant name="AUTO_EXPOSURE_METER_MEAN" value="0" enum="AutoExposureMeter">
+			Meters the arithmetic mean of each pixel's largest color channel. This is the stock meter.
+		</constant>
+		<constant name="AUTO_EXPOSURE_METER_LOG_HISTOGRAM" value="1" enum="AutoExposureMeter">
+			Meters the weighted mean log2 luminance of the frame from a histogram, ignoring the darkest and brightest fractions of the weight. Forward+ only; elsewhere the mean meter is used.
+		</constant>
 		<constant name="INSTANCE_NONE" value="0" enum="InstanceType">
 			The instance does not have a type.
 		</constant>
@@ -6161,7 +6308,10 @@
 		<constant name="INSTANCE_FLAG_IGNORE_OCCLUSION_CULLING" value="3" enum="InstanceFlags">
 			Always draw, even if the instance would be culled by occlusion culling. Does not affect view frustum culling.
 		</constant>
-		<constant name="INSTANCE_FLAG_MAX" value="4" enum="InstanceFlags">
+		<constant name="INSTANCE_FLAG_RAY_SCENE_ONLY" value="4" enum="InstanceFlags">
+			Keeps the instance out of the camera draw lists while the global illumination ray scene still traces it. Mesh instances only; set the base first. The instance must still pass the ray scene region and layer tests. Shadow casting is separate; set it off on the instance if the proxy must not cast. Off by default.
+		</constant>
+		<constant name="INSTANCE_FLAG_MAX" value="5" enum="InstanceFlags">
 			Represents the size of the [enum InstanceFlags] enum.
 		</constant>
 		<constant name="SHADOW_CASTING_SETTING_OFF" value="0" enum="ShadowCastingSetting">

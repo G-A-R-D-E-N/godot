@@ -1344,6 +1344,19 @@ void RendererSceneCull::instance_geometry_set_flag(RID p_instance, RSE::Instance
 				}
 			}
 		} break;
+		case RSE::INSTANCE_FLAG_RAY_SCENE_ONLY: {
+			ERR_FAIL_COND_MSG(p_enabled && instance->base_type != RSE::INSTANCE_MESH, "INSTANCE_FLAG_RAY_SCENE_ONLY works on mesh instances only.");
+			instance->ray_scene_only = p_enabled;
+
+			if (instance->scenario && instance->array_index >= 0) {
+				InstanceData &idata = instance->scenario->instance_data[instance->array_index];
+				if (instance->ray_scene_only) {
+					idata.flags |= InstanceData::FLAG_RAY_SCENE_ONLY;
+				} else {
+					idata.flags &= ~InstanceData::FLAG_RAY_SCENE_ONLY;
+				}
+			}
+		} break;
 		default: {
 		}
 	}
@@ -1873,6 +1886,9 @@ void RendererSceneCull::_update_instance(Instance *p_instance) const {
 		}
 		if (p_instance->ignore_all_culling) {
 			idata.flags |= InstanceData::FLAG_IGNORE_ALL_CULLING;
+		}
+		if (p_instance->ray_scene_only && p_instance->base_type == RSE::INSTANCE_MESH) {
+			idata.flags |= InstanceData::FLAG_RAY_SCENE_ONLY;
 		}
 
 		p_instance->scenario->instance_data.push_back(idata);
@@ -2976,7 +2992,7 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 				}
 			}
 
-			if ((LAYER_CHECK && IN_FRUSTUM(cull_data.cull->frustum) && VIS_CHECK && !OCCLUSION_CULLED) || (cull_data.scenario->instance_data[i].flags & InstanceData::FLAG_IGNORE_ALL_CULLING)) {
+			if (!(idata.flags & InstanceData::FLAG_RAY_SCENE_ONLY) && ((LAYER_CHECK && IN_FRUSTUM(cull_data.cull->frustum) && VIS_CHECK && !OCCLUSION_CULLED) || (cull_data.scenario->instance_data[i].flags & InstanceData::FLAG_IGNORE_ALL_CULLING))) {
 				uint32_t base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
 				if (base_type == RSE::INSTANCE_LIGHT) {
 					cull_result.lights.push_back(idata.instance);

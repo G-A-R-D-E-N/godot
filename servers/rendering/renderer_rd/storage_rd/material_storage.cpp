@@ -2142,6 +2142,14 @@ void MaterialStorage::global_shader_parameters_instance_update(RID p_instance, i
 	_global_shader_uniform_mark_buffer_dirty(pos, 1);
 }
 
+bool MaterialStorage::global_shader_parameters_instance_read_float(int32_t p_position, float &r_value) const {
+	if (p_position < 0 || uint32_t(p_position) >= global_shader_uniforms.buffer_size || !global_shader_uniforms.buffer_values) {
+		return false;
+	}
+	r_value = global_shader_uniforms.buffer_values[p_position].x;
+	return true;
+}
+
 void MaterialStorage::_update_global_shader_uniforms() {
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
 	if (global_shader_uniforms.buffer_dirty_region_count > 0) {
@@ -2398,6 +2406,18 @@ Variant MaterialStorage::material_get_declared_param(RID p_material, const Strin
 		return *value;
 	}
 	return material->shader->data->get_default_parameter(p_param);
+}
+
+int32_t MaterialStorage::material_get_instance_float_index(RID p_material, const StringName &p_param) const {
+	Material *material = material_owner.get_or_null(p_material);
+	if (!material || !material->shader || !material->shader->data) {
+		return -1;
+	}
+	const ShaderLanguage::ShaderNode::Uniform *uniform = material->shader->data->uniforms.getptr(p_param);
+	if (!uniform || uniform->scope != ShaderLanguage::ShaderNode::Uniform::SCOPE_INSTANCE || uniform->type != ShaderLanguage::TYPE_FLOAT) {
+		return -1;
+	}
+	return uniform->instance_index;
 }
 
 Variant MaterialStorage::shader_get_parameter_default(RID p_shader, const StringName &p_param) const {

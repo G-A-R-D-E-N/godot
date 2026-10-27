@@ -156,6 +156,7 @@ void RenderSceneDataRD::update_ubo(RID p_uniform_buffer, RSE::ViewportDebugDraw 
 	ubo.opaque_prepass_threshold = opaque_prepass_threshold;
 	ubo.flags |= material_uv2_mode ? SCENE_DATA_FLAGS_USE_UV2_MATERIAL : 0;
 	ubo.flags |= shadow_pass ? SCENE_DATA_FLAGS_IN_SHADOW_PASS : 0;
+	ubo.flags |= p_reflection_probe_instance.is_valid() ? SCENE_DATA_FLAGS_IN_REFLECTION_PROBE : 0;
 	ubo.flags |= render_scene_render->is_using_physical_light_units() ? SCENE_DATA_FLAGS_USE_PHYSICAL_LIGHT_UNITS : 0;
 	ubo.flags |= GLOBAL_GET_CACHED(bool, "rendering/lights_and_shadows/directional_shadow/soft_shadow_thin_casters") ? SCENE_DATA_FLAGS_USE_THIN_CASTER_PCSS : 0;
 
@@ -196,6 +197,7 @@ void RenderSceneDataRD::update_ubo(RID p_uniform_buffer, RSE::ViewportDebugDraw 
 			bool use_ambient_cubemap = (ambient_src == RSE::ENV_AMBIENT_SOURCE_BG && env_bg == RSE::ENV_BG_SKY) || ambient_src == RSE::ENV_AMBIENT_SOURCE_SKY;
 			bool use_ambient_light = use_ambient_cubemap || ambient_src == RSE::ENV_AMBIENT_SOURCE_COLOR;
 			ubo.flags |= use_ambient_cubemap ? SCENE_DATA_FLAGS_USE_AMBIENT_CUBEMAP : 0;
+			ubo.flags |= (use_ambient_cubemap && render_scene_render->environment_get_ambient_sky_sh(p_env)) ? SCENE_DATA_FLAGS_USE_AMBIENT_SKY_SH : 0;
 			ubo.flags |= use_ambient_light ? SCENE_DATA_FLAGS_USE_AMBIENT_LIGHT : 0;
 		}
 
@@ -310,6 +312,7 @@ void RenderSceneDataRD::update_ubo(RID p_uniform_buffer, RSE::ViewportDebugDraw 
 	}
 
 	uniform_buffer = p_uniform_buffer;
+	current_exposure_normalization = ubo.emissive_exposure_normalization;
 	RD::get_singleton()->buffer_update(uniform_buffer, 0, sizeof(UBODATA), &ubo);
 }
 

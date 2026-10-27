@@ -148,6 +148,7 @@ public:
 				uint32_t material_feedback : 1;
 				uint32_t dithered_instance_fade : 1;
 				uint32_t debug_lighting_component : 4;
+				uint32_t use_far_shadow : 1;
 			};
 		};
 
@@ -261,6 +262,7 @@ public:
 		bool uses_point_size = false;
 		bool uses_alpha = false;
 		bool uses_blend_alpha = false;
+		bool preserve_temporal_alpha = false;
 		bool uses_alpha_clip = false;
 		bool uses_alpha_antialiasing = false;
 		bool uses_depth_prepass_alpha = false;

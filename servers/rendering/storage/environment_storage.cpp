@@ -115,6 +115,18 @@ void RendererEnvironmentStorage::environment_set_ambient_light(RID p_env, const 
 	env->reflection_source = p_reflection_source;
 }
 
+void RendererEnvironmentStorage::environment_set_ambient_sky_sh(RID p_env, bool p_enabled) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->ambient_sky_sh = p_enabled;
+}
+
+void RendererEnvironmentStorage::environment_set_ambient_sky_sh_user(RID p_env, RID p_sky) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->ambient_sky_sh_user = p_sky;
+}
+
 RSE::EnvironmentBG RendererEnvironmentStorage::environment_get_background(RID p_env) const {
 	Environment *env = environment_owner.get_or_null(p_env);
 	ERR_FAIL_NULL_V(env, RSE::ENV_BG_CLEAR_COLOR);
@@ -185,6 +197,18 @@ float RendererEnvironmentStorage::environment_get_ambient_sky_contribution(RID p
 	Environment *env = environment_owner.get_or_null(p_env);
 	ERR_FAIL_NULL_V(env, 1.0);
 	return env->ambient_sky_contribution;
+}
+
+bool RendererEnvironmentStorage::environment_get_ambient_sky_sh(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, false);
+	return env->ambient_sky_sh;
+}
+
+RID RendererEnvironmentStorage::environment_get_ambient_sky_sh_user(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, RID());
+	return env->ambient_sky_sh_user;
 }
 
 RSE::EnvironmentReflectionSource RendererEnvironmentStorage::environment_get_reflection_source(RID p_env) const {
@@ -273,7 +297,19 @@ float RendererEnvironmentStorage::environment_get_tonemap_agx_contrast(RID p_env
 	return env->tonemap_agx_contrast;
 }
 
-RendererEnvironmentStorage::TonemapParameters RendererEnvironmentStorage::environment_get_tonemap_parameters(RID p_env, bool p_limit_agx_white, float p_output_max_value) const {
+void RendererEnvironmentStorage::environment_set_tonemap_agx_shoulder_start(RID p_env, float p_start) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->tonemap_agx_shoulder_start = CLAMP(p_start, 0.18f, 1.0f);
+}
+
+bool RendererEnvironmentStorage::environment_uses_tonemap_agx_late_shoulder(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, false);
+	return env->tone_mapper == RSE::ENV_TONE_MAPPER_AGX && env->tonemap_agx_shoulder_start > 0.18f;
+}
+
+RendererEnvironmentStorage::TonemapParameters RendererEnvironmentStorage::environment_get_tonemap_parameters(RID p_env, bool p_limit_agx_white, float p_output_max_value, bool p_agx_late_shoulder) const {
 	Environment *env = environment_owner.get_or_null(p_env);
 	ERR_FAIL_NULL_V(env, TonemapParameters());
 
@@ -338,6 +374,16 @@ RendererEnvironmentStorage::TonemapParameters RendererEnvironmentStorage::enviro
 		tonemap_parameters.awp_toe_a = awp_toe_a;
 		tonemap_parameters.awp_slope = awp_slope;
 		tonemap_parameters.awp_w = awp_w;
+
+		if (p_agx_late_shoulder && env->tonemap_agx_shoulder_start > awp_crossover_point) {
+			const float line_slope = env->tonemap_agx_contrast * (1.0f - awp_crossover_point);
+			const float max_start = (0.95f * p_output_max_value - awp_crossover_point) / line_slope + awp_crossover_point;
+			const float start = CLAMP(env->tonemap_agx_shoulder_start, awp_crossover_point, MAX(awp_crossover_point, max_start));
+			const float knee = awp_crossover_point + line_slope * (start - awp_crossover_point);
+			const float late_w = (awp_high_clip - start) * (awp_high_clip - start) / (p_output_max_value - knee) * line_slope;
+			tonemap_parameters.awp_start = start;
+			tonemap_parameters.awp_w = late_w;
+		}
 	}
 
 	return tonemap_parameters;

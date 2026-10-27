@@ -2549,6 +2549,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("light_directional_set_blend_splits", "light", "enable"), &RenderingServer::light_directional_set_blend_splits);
 	ClassDB::bind_method(D_METHOD("light_directional_set_sky_mode", "light", "mode"), &RenderingServer::light_directional_set_sky_mode);
 	ClassDB::bind_method(D_METHOD("light_directional_set_cloud_shadow", "light", "texture", "scale", "offset", "altitude", "strength"), &RenderingServer::light_directional_set_cloud_shadow);
+	ClassDB::bind_method(D_METHOD("light_directional_set_far_shadow", "light", "heights", "bands", "near", "terrain", "origins", "texel", "direction"), &RenderingServer::light_directional_set_far_shadow);
 
 	ClassDB::bind_method(D_METHOD("light_area_set_size", "light", "size"), &RenderingServer::light_area_set_size);
 	ClassDB::bind_method(D_METHOD("light_area_set_normalize_energy", "light", "enable"), &RenderingServer::light_area_set_normalize_energy);
@@ -3061,11 +3062,23 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("sky_set_mode", "sky", "mode"), &RenderingServer::sky_set_mode);
 	ClassDB::bind_method(D_METHOD("sky_set_material", "sky", "material"), &RenderingServer::sky_set_material);
 	ClassDB::bind_method(D_METHOD("sky_bake_panorama", "sky", "energy", "bake_irradiance", "size"), &RenderingServer::sky_bake_panorama);
+	ClassDB::bind_method(D_METHOD("sky_get_update_stats", "sky"), &RenderingServer::sky_get_update_stats);
+	ClassDB::bind_method(D_METHOD("sky_get_radiance_generation", "sky"), &RenderingServer::sky_get_radiance_generation);
+	ClassDB::bind_method(D_METHOD("sky_debug_get_layer_generations", "sky"), &RenderingServer::sky_debug_get_layer_generations);
+	ClassDB::bind_method(D_METHOD("sky_set_radiance_update_policy", "sky", "policy"), &RenderingServer::sky_set_radiance_update_policy);
+	ClassDB::bind_method(D_METHOD("sky_request_radiance_update", "sky"), &RenderingServer::sky_request_radiance_update);
+	ClassDB::bind_method(D_METHOD("sky_set_sh_enabled", "sky", "enabled"), &RenderingServer::sky_set_sh_enabled);
+	ClassDB::bind_method(D_METHOD("sky_is_sh_enabled", "sky"), &RenderingServer::sky_is_sh_enabled);
+	ClassDB::bind_method(D_METHOD("sky_get_sh_buffer", "sky"), &RenderingServer::sky_get_sh_buffer);
+	ClassDB::bind_method(D_METHOD("sky_debug_get_sh", "sky"), &RenderingServer::sky_debug_get_sh);
 
 	BIND_ENUM_CONSTANT(RSE::SKY_MODE_AUTOMATIC);
 	BIND_ENUM_CONSTANT(RSE::SKY_MODE_QUALITY);
 	BIND_ENUM_CONSTANT(RSE::SKY_MODE_INCREMENTAL);
 	BIND_ENUM_CONSTANT(RSE::SKY_MODE_REALTIME);
+
+	BIND_ENUM_CONSTANT(RSE::SKY_RADIANCE_UPDATE_POLICY_AUTOMATIC);
+	BIND_ENUM_CONSTANT(RSE::SKY_RADIANCE_UPDATE_POLICY_MANUAL);
 
 	/* COMPOSITOR EFFECT API */
 
@@ -3105,9 +3118,11 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("environment_set_bg_energy", "env", "multiplier", "exposure_value"), &RenderingServer::environment_set_bg_energy);
 	ClassDB::bind_method(D_METHOD("environment_set_canvas_max_layer", "env", "max_layer"), &RenderingServer::environment_set_canvas_max_layer);
 	ClassDB::bind_method(D_METHOD("environment_set_ambient_light", "env", "color", "ambient", "energy", "sky_contribution", "reflection_source"), &RenderingServer::environment_set_ambient_light, DEFVAL(RSE::ENV_AMBIENT_SOURCE_BG), DEFVAL(1.0), DEFVAL(0.0), DEFVAL(RSE::ENV_REFLECTION_SOURCE_BG));
+	ClassDB::bind_method(D_METHOD("environment_set_ambient_sky_sh", "env", "enabled"), &RenderingServer::environment_set_ambient_sky_sh);
 	ClassDB::bind_method(D_METHOD("environment_set_glow", "env", "enable", "levels", "intensity", "strength", "mix", "bloom_threshold", "blend_mode", "hdr_bleed_threshold", "hdr_bleed_scale", "hdr_luminance_cap", "glow_map_strength", "glow_map"), &RenderingServer::environment_set_glow);
 	ClassDB::bind_method(D_METHOD("environment_set_tonemap", "env", "tone_mapper", "exposure", "white"), &RenderingServer::environment_set_tonemap);
 	ClassDB::bind_method(D_METHOD("environment_set_tonemap_agx_contrast", "env", "agx_contrast"), &RenderingServer::environment_set_tonemap_agx_contrast);
+	ClassDB::bind_method(D_METHOD("environment_set_tonemap_agx_shoulder_start", "env", "start"), &RenderingServer::environment_set_tonemap_agx_shoulder_start);
 	ClassDB::bind_method(D_METHOD("environment_set_adjustment", "env", "enable", "brightness", "contrast", "saturation", "use_1d_color_correction", "color_correction"), &RenderingServer::environment_set_adjustment);
 	ClassDB::bind_method(D_METHOD("environment_set_ssr", "env", "enable", "max_steps", "fade_in", "fade_out", "depth_tolerance"), &RenderingServer::environment_set_ssr);
 	ClassDB::bind_method(D_METHOD("environment_set_ssao", "env", "enable", "radius", "intensity", "power", "detail", "horizon", "sharpness", "light_affect", "ao_channel_affect"), &RenderingServer::environment_set_ssao);
@@ -3227,6 +3242,9 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_dof_blur", "camera_attributes", "far_enable", "far_distance", "far_transition", "near_enable", "near_distance", "near_transition", "amount"), &RenderingServer::camera_attributes_set_dof_blur);
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_exposure", "camera_attributes", "multiplier", "normalization"), &RenderingServer::camera_attributes_set_exposure);
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_auto_exposure", "camera_attributes", "enable", "min_sensitivity", "max_sensitivity", "speed", "scale"), &RenderingServer::camera_attributes_set_auto_exposure);
+	ClassDB::bind_method(D_METHOD("camera_attributes_set_auto_exposure_highlight_limit", "camera_attributes", "limit"), &RenderingServer::camera_attributes_set_auto_exposure_highlight_limit);
+	ClassDB::bind_method(D_METHOD("camera_attributes_set_auto_exposure_adaptation", "camera_attributes", "adaptation", "pivot_luminance"), &RenderingServer::camera_attributes_set_auto_exposure_adaptation);
+	ClassDB::bind_method(D_METHOD("camera_attributes_set_auto_exposure_meter", "camera_attributes", "meter", "clip_low", "clip_high", "center_weight"), &RenderingServer::camera_attributes_set_auto_exposure_meter);
 
 	BIND_ENUM_CONSTANT(RSE::DOF_BOKEH_BOX);
 	BIND_ENUM_CONSTANT(RSE::DOF_BOKEH_HEXAGON);
@@ -3236,6 +3254,9 @@ void RenderingServer::_bind_methods() {
 	BIND_ENUM_CONSTANT(RSE::DOF_BLUR_QUALITY_LOW);
 	BIND_ENUM_CONSTANT(RSE::DOF_BLUR_QUALITY_MEDIUM);
 	BIND_ENUM_CONSTANT(RSE::DOF_BLUR_QUALITY_HIGH);
+
+	BIND_ENUM_CONSTANT(RSE::AUTO_EXPOSURE_METER_MEAN);
+	BIND_ENUM_CONSTANT(RSE::AUTO_EXPOSURE_METER_LOG_HISTOGRAM);
 
 	/* SCENARIO */
 
@@ -3307,6 +3328,7 @@ void RenderingServer::_bind_methods() {
 	BIND_ENUM_CONSTANT(RSE::INSTANCE_FLAG_USE_DYNAMIC_GI);
 	BIND_ENUM_CONSTANT(RSE::INSTANCE_FLAG_DRAW_NEXT_FRAME_IF_VISIBLE);
 	BIND_ENUM_CONSTANT(RSE::INSTANCE_FLAG_IGNORE_OCCLUSION_CULLING);
+	BIND_ENUM_CONSTANT(RSE::INSTANCE_FLAG_RAY_SCENE_ONLY);
 	BIND_ENUM_CONSTANT(RSE::INSTANCE_FLAG_MAX);
 
 	BIND_ENUM_CONSTANT(RSE::SHADOW_CASTING_SETTING_OFF);
@@ -3774,6 +3796,10 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/camera/depth_of_field/depth_of_field_bokeh_quality", PROPERTY_HINT_ENUM, "Very Low (Fastest),Low (Fast),Medium (Average),High (Slow)"), 1);
 	GLOBAL_DEF("rendering/camera/depth_of_field/depth_of_field_use_jitter", false);
 
+	GLOBAL_DEF("rendering/environment/auto_exposure/debug_log", false);
+	GLOBAL_DEF("rendering/environment/auto_exposure/debug_log_hdr", false);
+	GLOBAL_DEF("rendering/environment/auto_exposure/clamp_adjust", true);
+
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssao/quality", PROPERTY_HINT_ENUM, "Very Low (Fast),Low (Fast),Medium (Average),High (Slow),Ultra (Custom)"), 2);
 	GLOBAL_DEF("rendering/environment/ssao/half_size", true);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssao/adaptive_target", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), 0.5);
@@ -3886,6 +3912,9 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/hysteresis", PROPERTY_HINT_RANGE, "0.0,0.999,0.001"), 0.97);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/normal_bias", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), 0.1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/view_bias", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), 0.25);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/change_threshold", PROPERTY_HINT_RANGE, "0.05,1.0,0.01"), 0.25);
+	GLOBAL_DEF("rendering/global_illumination/ddgi/light_change_reset", true);
+	GLOBAL_DEF("rendering/global_illumination/ddgi/light_change_reset_log", false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/energy", PROPERTY_HINT_RANGE, "0.0,16.0,0.01"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/bounce_energy", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/debug_view", PROPERTY_HINT_ENUM, "Disabled,Irradiance,Ray Hits,Normals,Probe State,Probe Visibility"), 0);

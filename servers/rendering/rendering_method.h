@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/variant/dictionary.h"
 #include "core/variant/typed_array.h"
 #include "core/variant/variant.h"
 #include "servers/rendering/rendering_server_enums.h"
@@ -137,6 +138,15 @@ public:
 	virtual void sky_set_mode(RID p_sky, RSE::SkyMode p_samples) = 0;
 	virtual void sky_set_material(RID p_sky, RID p_material) = 0;
 	virtual Ref<Image> sky_bake_panorama(RID p_sky, float p_energy, bool p_bake_irradiance, const Size2i &p_size) = 0;
+	virtual Dictionary sky_get_update_stats(RID p_sky) const = 0;
+	virtual int64_t sky_get_radiance_generation(RID p_sky) const = 0;
+	virtual PackedInt64Array sky_debug_get_layer_generations(RID p_sky) const = 0;
+	virtual void sky_set_radiance_update_policy(RID p_sky, RSE::SkyRadianceUpdatePolicy p_policy) = 0;
+	virtual void sky_request_radiance_update(RID p_sky) = 0;
+	virtual void sky_set_sh_enabled(RID p_sky, bool p_enabled) = 0;
+	virtual bool sky_is_sh_enabled(RID p_sky) const = 0;
+	virtual RID sky_get_sh_buffer(RID p_sky) const = 0;
+	virtual Dictionary sky_debug_get_sh(RID p_sky) const = 0;
 
 	/* COMPOSITOR EFFECT API */
 
@@ -173,6 +183,7 @@ public:
 	virtual void environment_set_bg_energy(RID p_env, float p_multiplier, float p_exposure_value) = 0;
 	virtual void environment_set_canvas_max_layer(RID p_env, int p_max_layer) = 0;
 	virtual void environment_set_ambient_light(RID p_env, const Color &p_color, RSE::EnvironmentAmbientSource p_ambient = RSE::ENV_AMBIENT_SOURCE_BG, float p_energy = 1.0, float p_sky_contribution = 0.0, RSE::EnvironmentReflectionSource p_reflection_source = RSE::ENV_REFLECTION_SOURCE_BG) = 0;
+	virtual void environment_set_ambient_sky_sh(RID p_env, bool p_enabled) = 0;
 	virtual void environment_set_camera_feed_id(RID p_env, int p_camera_feed_id) = 0;
 
 	virtual RSE::EnvironmentBG environment_get_background(RID p_Env) const = 0;
@@ -192,6 +203,7 @@ public:
 	// Tonemap
 	virtual void environment_set_tonemap(RID p_env, RSE::EnvironmentToneMapper p_tone_mapper, float p_exposure, float p_white) = 0;
 	virtual void environment_set_tonemap_agx_contrast(RID p_env, float p_agx_contrast) = 0;
+	virtual void environment_set_tonemap_agx_shoulder_start(RID p_env, float p_start) = 0;
 
 	virtual RSE::EnvironmentToneMapper environment_get_tone_mapper(RID p_env) const = 0;
 	virtual float environment_get_exposure(RID p_env) const = 0;

@@ -32,6 +32,7 @@
 
 #include "core/templates/paged_allocator.h"
 #include "servers/rendering/multi_uma_buffer.h"
+#include "servers/rendering/renderer_alpha_sort.h"
 #include "servers/rendering/renderer_rd/cluster_builder_rd.h"
 #include "servers/rendering/renderer_rd/effects/fsr2.h"
 #include "servers/rendering/renderer_rd/effects/motion_vectors_store.h"
@@ -183,6 +184,7 @@ private:
 	virtual void setup_render_buffer_data(Ref<RenderSceneBuffersRD> p_render_buffers) override;
 
 	RID render_base_uniform_set;
+	RID default_sky_sh_buffer;
 
 	uint64_t lightmap_texture_array_version = 0xFFFFFFFF;
 
@@ -750,19 +752,13 @@ private:
 
 		//should eventually be replaced by radix
 
-		struct SortByKey {
-			_FORCE_INLINE_ bool operator()(const GeometryInstanceSurfaceDataCache *A, const GeometryInstanceSurfaceDataCache *B) const {
-				return (A->sort.sort_key2 == B->sort.sort_key2) ? (A->sort.sort_key1 < B->sort.sort_key1) : (A->sort.sort_key2 < B->sort.sort_key2);
-			}
-		};
-
 		void sort_by_key() {
-			SortArray<GeometryInstanceSurfaceDataCache *, SortByKey> sorter;
+			SortArray<GeometryInstanceSurfaceDataCache *, SortByKeyAndOwner<GeometryInstanceSurfaceDataCache>> sorter;
 			sorter.sort(elements.ptr(), elements.size());
 		}
 
 		void sort_by_key_range(uint32_t p_from, uint32_t p_size) {
-			SortArray<GeometryInstanceSurfaceDataCache *, SortByKey> sorter;
+			SortArray<GeometryInstanceSurfaceDataCache *, SortByKeyAndOwner<GeometryInstanceSurfaceDataCache>> sorter;
 			sorter.sort(elements.ptr() + p_from, p_size);
 		}
 
@@ -778,15 +774,9 @@ private:
 			sorter.sort(elements.ptr(), elements.size());
 		}
 
-		struct SortByReverseDepthAndPriority {
-			_FORCE_INLINE_ bool operator()(const GeometryInstanceSurfaceDataCache *A, const GeometryInstanceSurfaceDataCache *B) const {
-				return (A->sort.priority == B->sort.priority) ? (A->owner->depth > B->owner->depth) : (A->sort.priority < B->sort.priority);
-			}
-		};
-
 		void sort_by_reverse_depth_and_priority() { //used for alpha
 
-			SortArray<GeometryInstanceSurfaceDataCache *, SortByReverseDepthAndPriority> sorter;
+			SortArray<GeometryInstanceSurfaceDataCache *, SortByReverseDepthAndPriority<GeometryInstanceSurfaceDataCache>> sorter;
 			sorter.sort(elements.ptr(), elements.size());
 		}
 

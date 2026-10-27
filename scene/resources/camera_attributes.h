@@ -36,6 +36,12 @@
 class CameraAttributes : public Resource {
 	GDCLASS(CameraAttributes, Resource);
 
+public:
+	enum AutoExposureMeter {
+		AUTO_EXPOSURE_METER_MEAN,
+		AUTO_EXPOSURE_METER_LOG_HISTOGRAM,
+	};
+
 private:
 	RID camera_attributes;
 
@@ -52,6 +58,14 @@ protected:
 	float auto_exposure_max = 64.0;
 	float auto_exposure_speed = 0.5;
 	float auto_exposure_scale = 0.4;
+	float auto_exposure_highlight_limit = 0.0;
+	AutoExposureMeter auto_exposure_meter = AUTO_EXPOSURE_METER_MEAN;
+	float auto_exposure_histogram_clip_low = 0.03;
+	float auto_exposure_histogram_clip_high = 0.03;
+	float auto_exposure_center_weight = 0.0;
+	float auto_exposure_adaptation = 1.0;
+	float auto_exposure_adaptation_pivot = 0.0;
+	void _update_auto_exposure_meter();
 	virtual void _update_auto_exposure() {}
 
 public:
@@ -69,10 +83,24 @@ public:
 	float get_auto_exposure_speed() const;
 	void set_auto_exposure_scale(float p_auto_exposure_scale);
 	float get_auto_exposure_scale() const;
+	void set_auto_exposure_highlight_limit(float p_limit);
+	float get_auto_exposure_highlight_limit() const;
+	void set_auto_exposure_meter(AutoExposureMeter p_meter);
+	AutoExposureMeter get_auto_exposure_meter() const;
+	void set_auto_exposure_histogram_clip_low(float p_fraction);
+	float get_auto_exposure_histogram_clip_low() const;
+	void set_auto_exposure_histogram_clip_high(float p_fraction);
+	float get_auto_exposure_histogram_clip_high() const;
+	void set_auto_exposure_center_weight(float p_weight);
+	float get_auto_exposure_center_weight() const;
+	void set_auto_exposure_adaptation(float p_adaptation);
+	float get_auto_exposure_adaptation() const;
 
 	CameraAttributes();
 	~CameraAttributes();
 };
+
+VARIANT_ENUM_CAST(CameraAttributes::AutoExposureMeter);
 
 class CameraAttributesPractical : public CameraAttributes {
 	GDCLASS(CameraAttributesPractical, CameraAttributes);
@@ -118,6 +146,8 @@ public:
 	float get_auto_exposure_min_sensitivity() const;
 	void set_auto_exposure_max_sensitivity(float p_max);
 	float get_auto_exposure_max_sensitivity() const;
+	void set_auto_exposure_adaptation_pivot_sensitivity(float p_pivot);
+	float get_auto_exposure_adaptation_pivot_sensitivity() const;
 
 	virtual float calculate_exposure_normalization() const override;
 
@@ -172,6 +202,8 @@ public:
 	float get_auto_exposure_min_exposure_value() const;
 	void set_auto_exposure_max_exposure_value(float p_max);
 	float get_auto_exposure_max_exposure_value() const;
+	void set_auto_exposure_adaptation_pivot_exposure_value(float p_pivot);
+	float get_auto_exposure_adaptation_pivot_exposure_value() const;
 
 	virtual float calculate_exposure_normalization() const override;
 
