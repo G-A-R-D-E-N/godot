@@ -10,6 +10,7 @@
 #define RAY_SCENE_MATERIAL_TWO_SIDED 1u
 #define RAY_SCENE_MATERIAL_SKIP 2u
 #define RAY_SCENE_MATERIAL_SHADOW_PASS 8u
+#define RAY_SCENE_MATERIAL_SHADOW_ONLY 16u
 
 const vec3 luminance_weights = vec3(0.2126, 0.7152, 0.0722);
 
@@ -123,7 +124,7 @@ bool ray_scene_box(vec3 p_origin, vec3 p_inv_direction, vec3 p_min, vec3 p_max, 
 
 void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, vec3 p_origin, vec3 p_direction, bool p_any, inout RaySceneHit r_hit) {
 	vec3 inv_direction = ray_scene_safe_inverse(p_direction);
-	uint skip_mask = p_any ? (RAY_SCENE_MATERIAL_SKIP | RAY_SCENE_MATERIAL_SHADOW_PASS) : RAY_SCENE_MATERIAL_SKIP;
+	uint skip_mask = RAY_SCENE_MATERIAL_SKIP | (p_any ? RAY_SCENE_MATERIAL_SHADOW_PASS : RAY_SCENE_MATERIAL_SHADOW_ONLY);
 	uint stack[RAY_SCENE_BLAS_STACK_SIZE];
 	uint sp = 0;
 

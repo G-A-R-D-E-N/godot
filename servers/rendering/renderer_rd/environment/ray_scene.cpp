@@ -796,6 +796,12 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		instance.blas_root = mesh->node_offset;
 		instance.material_offset = materials.size();
 		instance.layer_mask = geometry->layer_mask;
+		uint32_t cast_flags = 0;
+		if (geometry->data->cast_shadows == RSE::SHADOW_CASTING_SETTING_OFF) {
+			cast_flags = MATERIAL_FLAG_SHADOW_PASS;
+		} else if (geometry->data->cast_shadows == RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY) {
+			cast_flags = MATERIAL_FLAG_SHADOW_ONLY;
+		}
 
 		for (uint32_t s = 0; s < mesh->surface_count; s++) {
 			RID material = geometry->data->material_override;
@@ -813,6 +819,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 				cached = &material_cache.insert(material, entry)->value;
 			}
 			materials.push_back(cached->entry);
+			materials[materials.size() - 1].flags |= cast_flags;
 			const float factor = MAX(_instance_float(geometry->shader_uniforms_offset, cached->scale_index), 0.0f) * MAX(_instance_float(geometry->shader_uniforms_offset, cached->bounce_index), 0.0f);
 			if (factor != 1.0f) {
 				Material &instance_material = materials[materials.size() - 1];
