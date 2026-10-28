@@ -382,6 +382,9 @@ void RenderForwardMobile::mesh_generate_pipelines(RID p_mesh, bool p_background_
 		}
 
 		void *mesh_surface = mesh_storage->mesh_get_surface(p_mesh, i);
+		if (!mesh_storage->mesh_surface_has_buffers(mesh_surface)) {
+			continue;
+		}
 		void *mesh_surface_shadow = mesh_surface;
 		SceneShaderForwardMobile::MaterialData *material = static_cast<SceneShaderForwardMobile::MaterialData *>(material_storage->material_get_data(materials[i], RendererRD::MaterialStorage::SHADER_TYPE_3D));
 		if (material == nullptr || !material->shader_data->is_valid()) {
@@ -395,7 +398,10 @@ void RenderForwardMobile::mesh_generate_pipelines(RID p_mesh, bool p_background_
 			if (material_shadow != nullptr) {
 				shader_shadow = material_shadow->shader_data;
 				if (shadow_mesh.is_valid()) {
-					mesh_surface_shadow = mesh_storage->mesh_get_surface(shadow_mesh, i);
+					void *shadow_surface = mesh_storage->mesh_get_surface(shadow_mesh, i);
+					if (mesh_storage->mesh_surface_has_buffers(shadow_surface)) {
+						mesh_surface_shadow = shadow_surface;
+					}
 				}
 			}
 		}
@@ -3002,6 +3008,12 @@ void RenderForwardMobile::_update_global_pipeline_data_requirements_from_light_s
 
 void RenderForwardMobile::_geometry_instance_add_surface_with_material(GeometryInstanceForwardMobile *ginstance, uint32_t p_surface, SceneShaderForwardMobile::MaterialData *p_material, uint32_t p_material_id, uint32_t p_shader_id, RID p_mesh) {
 	RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
+	if (!mesh_storage->mesh_surface_has_buffers(mesh_storage->mesh_get_surface(p_mesh, p_surface))) {
+		if (ginstance->data->dirty_dependencies) {
+			RSG::utilities->base_update_dependency(p_mesh, &ginstance->data->dependency_tracker);
+		}
+		return;
+	}
 	uint32_t flags = 0;
 
 	if (p_material->shader_data->uses_sss) {
@@ -3071,6 +3083,9 @@ void RenderForwardMobile::_geometry_instance_add_surface_with_material(GeometryI
 
 		if (shadow_mesh.is_valid()) {
 			surface_shadow = mesh_storage->mesh_get_surface(shadow_mesh, p_surface);
+			if (!mesh_storage->mesh_surface_has_buffers(surface_shadow)) {
+				surface_shadow = nullptr;
+			}
 		}
 
 	} else {

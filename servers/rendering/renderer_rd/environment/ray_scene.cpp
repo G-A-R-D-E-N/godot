@@ -264,6 +264,9 @@ RayScene::MeshEntry *RayScene::_capture_mesh(RID p_mesh) {
 
 void RayScene::_capture_surface(MeshEntry &r_mesh, uint32_t p_surface, const RenderingServerTypes::SurfaceData &p_surface_data) {
 	r_mesh.surface_count = MAX(r_mesh.surface_count, p_surface + 1);
+	if (p_surface_data.vertex_count == 0 && p_surface_data.index_count == 0) {
+		return;
+	}
 	if (r_mesh.built) {
 		r_mesh.built = false;
 		r_mesh.nodes.clear();

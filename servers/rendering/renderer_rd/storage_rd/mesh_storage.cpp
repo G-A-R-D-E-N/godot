@@ -29,6 +29,7 @@
 /**************************************************************************/
 
 #include "mesh_storage.h"
+#include "mesh_surface_buffers.h"
 
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_viewport.h"
@@ -450,7 +451,17 @@ void MeshStorage::mesh_add_surface(RID p_mesh, const RenderingServerTypes::Surfa
 		s->blend_shape_buffer_size = new_surface.blend_shape_data.size();
 	}
 
-	if (use_as_storage) {
+	const MeshSurfaceBufferCheck buffers = mesh_surface_check_buffers(*s);
+	if (!buffers.complete()) {
+		mesh_surface_release_buffers(*s, [](RID p_buffer) { RD::get_singleton()->free_rid(p_buffer); });
+		s->buffers_failed = true;
+		if (!mesh->buffers_failed_reported) {
+			mesh->buffers_failed_reported = true;
+			ERR_PRINT(vformat("Mesh %d '%s': the %s buffer of surface %d could not be created (%d of %d buffers made). The surface is freed and will not be drawn.", p_mesh.get_id(), mesh->path, buffers.first_missing, mesh->surface_count, buffers.made, buffers.wanted));
+		}
+	}
+
+	if (use_as_storage && !s->buffers_failed) {
 		Vector<RD::Uniform> uniforms;
 		{
 			RD::Uniform u;
@@ -502,7 +513,7 @@ void MeshStorage::mesh_add_surface(RID p_mesh, const RenderingServerTypes::Surfa
 	mesh->surfaces[mesh->surface_count] = s;
 	mesh->surface_count++;
 
-	if (RayScene::get_singleton()) {
+	if (RayScene::get_singleton() && !s->buffers_failed) {
 		RayScene::get_singleton()->mesh_surface_added(p_mesh, mesh->surface_count - 1, p_surface);
 	}
 
@@ -580,6 +591,9 @@ void MeshStorage::mesh_surface_update_vertex_region(RID p_mesh, int p_surface, i
 	Mesh *mesh = mesh_owner.get_or_null(p_mesh);
 	ERR_FAIL_NULL(mesh);
 	ERR_FAIL_UNSIGNED_INDEX((uint32_t)p_surface, mesh->surface_count);
+	if (mesh->surfaces[p_surface]->buffers_failed) {
+		return;
+	}
 	ERR_FAIL_COND(mesh->surfaces[p_surface]->vertex_buffer.is_null());
 
 	uint64_t data_size = p_data.size();
@@ -593,6 +607,9 @@ void MeshStorage::mesh_surface_update_attribute_region(RID p_mesh, int p_surface
 	Mesh *mesh = mesh_owner.get_or_null(p_mesh);
 	ERR_FAIL_NULL(mesh);
 	ERR_FAIL_UNSIGNED_INDEX((uint32_t)p_surface, mesh->surface_count);
+	if (mesh->surfaces[p_surface]->buffers_failed) {
+		return;
+	}
 	ERR_FAIL_COND(mesh->surfaces[p_surface]->attribute_buffer.is_null());
 
 	uint64_t data_size = p_data.size();
@@ -606,6 +623,9 @@ void MeshStorage::mesh_surface_update_skin_region(RID p_mesh, int p_surface, int
 	Mesh *mesh = mesh_owner.get_or_null(p_mesh);
 	ERR_FAIL_NULL(mesh);
 	ERR_FAIL_UNSIGNED_INDEX((uint32_t)p_surface, mesh->surface_count);
+	if (mesh->surfaces[p_surface]->buffers_failed) {
+		return;
+	}
 	ERR_FAIL_COND(mesh->surfaces[p_surface]->skin_buffer.is_null());
 
 	uint64_t data_size = p_data.size();
@@ -619,6 +639,9 @@ void RendererRD::MeshStorage::mesh_surface_update_index_region(RID p_mesh, int p
 	Mesh *mesh = mesh_owner.get_or_null(p_mesh);
 	ERR_FAIL_NULL(mesh);
 	ERR_FAIL_UNSIGNED_INDEX((uint32_t)p_surface, mesh->surface_count);
+	if (mesh->surfaces[p_surface]->buffers_failed) {
+		return;
+	}
 	ERR_FAIL_COND(mesh->surfaces[p_surface]->index_buffer.is_null());
 
 	uint64_t data_size = p_data.size();
