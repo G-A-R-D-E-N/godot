@@ -8279,6 +8279,12 @@ uint64_t RenderingDevice::get_memory_usage(MemoryType p_type) const {
 		case MEMORY_TOTAL: {
 			return driver->get_total_memory_used();
 		}
+		case MEMORY_DEVICE_BUDGET: {
+			return driver->get_device_memory_budget().budget;
+		}
+		case MEMORY_DEVICE_USAGE: {
+			return driver->get_device_memory_budget().usage;
+		}
 		default: {
 			DEV_ASSERT(false);
 			return 0;
@@ -10104,6 +10110,8 @@ void RenderingDevice::_bind_methods() {
 	BIND_ENUM_CONSTANT(MEMORY_TEXTURES);
 	BIND_ENUM_CONSTANT(MEMORY_BUFFERS);
 	BIND_ENUM_CONSTANT(MEMORY_TOTAL);
+	BIND_ENUM_CONSTANT(MEMORY_DEVICE_BUDGET);
+	BIND_ENUM_CONSTANT(MEMORY_DEVICE_USAGE);
 
 	BIND_CONSTANT(INVALID_ID);
 	BIND_CONSTANT(INVALID_FORMAT_ID);

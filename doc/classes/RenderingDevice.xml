@@ -2981,6 +2981,12 @@
 		<constant name="MEMORY_TOTAL" value="2" enum="MemoryType">
 			Total memory taken. This is greater than the sum of [constant MEMORY_TEXTURES] and [constant MEMORY_BUFFERS], as it also includes miscellaneous memory usage.
 		</constant>
+		<constant name="MEMORY_DEVICE_BUDGET" value="3" enum="MemoryType">
+			Video memory the operating system currently lets this process use: the largest budget among the device-local memory heaps, since such heaps can share the same video memory. It shrinks when other processes, such as the display, take video memory. Returns [code]0[/code] when the driver cannot report it.
+		</constant>
+		<constant name="MEMORY_DEVICE_USAGE" value="4" enum="MemoryType">
+			Video memory the operating system currently charges to this process, summed over the device-local memory heaps. Compare it with [constant MEMORY_DEVICE_BUDGET]. Returns [code]0[/code] when the driver cannot report it.
+		</constant>
 		<constant name="INVALID_ID" value="-1">
 			Returned by functions that return an ID if a value is invalid.
 		</constant>

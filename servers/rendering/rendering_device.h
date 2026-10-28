@@ -1950,7 +1950,9 @@ public:
 	enum MemoryType {
 		MEMORY_TEXTURES,
 		MEMORY_BUFFERS,
-		MEMORY_TOTAL
+		MEMORY_TOTAL,
+		MEMORY_DEVICE_BUDGET,
+		MEMORY_DEVICE_USAGE
 	};
 
 	uint64_t get_memory_usage(MemoryType p_type) const;
