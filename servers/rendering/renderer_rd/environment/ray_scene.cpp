@@ -534,6 +534,12 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 	}
 	if (!material_storage->material_casts_shadows(p_material)) {
 		r_material.flags |= MATERIAL_FLAG_SKIP;
+	} else if (skip_additive) {
+		const MaterialStorage::ShaderData *shader_data = material_storage->material_get_shader_data(p_material);
+		if (shader_data && shader_data->blends_additively()) {
+			r_material.flags |= MATERIAL_FLAG_SKIP;
+			additive_skipped++;
+		}
 	}
 	const Variant shadow_pass = material_storage->material_get_param(p_material, SNAME("gi_shadow_pass"));
 	if (shadow_pass.get_type() == Variant::BOOL ? bool(shadow_pass) : _param_float(shadow_pass, 0.0f) > 0.5f) {
@@ -758,7 +764,9 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	materials.clear();
 	material_cache.clear();
 	memset(albedo_sources, 0, sizeof(albedo_sources));
+	additive_skipped = 0;
 	emission_scale = _param_float(MaterialStorage::get_singleton()->global_shader_parameter_get_internal(SNAME("openpbr_emission_scale")), 1.0f);
+	skip_additive = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ray_scene/skip_additive_surfaces");
 	LocalVector<BuildPrimitive> primitives;
 	uint32_t signature = HASH_MURMUR3_SEED;
 	for (uint32_t i = 0; i < p_instances.size(); i++) {
@@ -842,6 +850,12 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		_ensure_buffer(instance_buffer, instance_capacity, ordered.size(), sizeof(Instance), "Ray Scene Instances");
 		RD::get_singleton()->buffer_update(tlas_node_buffer, 0, tlas_nodes.size() * sizeof(Node), tlas_nodes.ptr());
 		RD::get_singleton()->buffer_update(instance_buffer, 0, ordered.size() * sizeof(Instance), ordered.ptr());
+	}
+
+	const int64_t additive_state = skip_additive ? int64_t(additive_skipped) : -1;
+	if (additive_state != reported_additive_state) {
+		reported_additive_state = additive_state;
+		print_line(vformat("Ray scene additive skip: %s, %d materials skipped.", skip_additive ? "on" : "off", additive_skipped));
 	}
 
 	if (materials.is_empty()) {

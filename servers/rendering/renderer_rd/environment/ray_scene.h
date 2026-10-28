@@ -192,6 +192,9 @@ private:
 	uint32_t reported_albedo_sources[ALBEDO_SOURCE_MAX] = {};
 	HashSet<RID> albedo_fallback_warned;
 	float emission_scale = 1.0f;
+	bool skip_additive = true;
+	uint32_t additive_skipped = 0;
+	int64_t reported_additive_state = -2;
 	LocalVector<Light> lights;
 	LocalVector<Light> local_lights;
 	LightCensus census;

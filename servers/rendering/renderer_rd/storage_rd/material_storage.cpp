@@ -654,6 +654,10 @@ bool MaterialStorage::ShaderData::is_parameter_texture(const StringName &p_param
 	return uniforms[p_param].is_texture();
 }
 
+bool MaterialStorage::ShaderData::blends_additively() const {
+	return false;
+}
+
 RD::PipelineColorBlendState::Attachment MaterialStorage::ShaderData::blend_mode_to_blend_attachment(BlendMode p_mode) {
 	RD::PipelineColorBlendState::Attachment attachment;
 
