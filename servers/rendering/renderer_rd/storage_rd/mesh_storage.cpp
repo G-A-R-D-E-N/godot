@@ -29,9 +29,9 @@
 /**************************************************************************/
 
 #include "mesh_storage.h"
-#include "mesh_surface_buffers.h"
 
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
+#include "servers/rendering/renderer_rd/storage_rd/mesh_surface_buffers.h"
 #include "servers/rendering/renderer_viewport.h"
 #include "servers/rendering/rendering_server.h"
 #include "servers/rendering/rendering_server_types.h"
