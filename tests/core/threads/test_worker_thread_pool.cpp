@@ -35,6 +35,7 @@ TEST_FORCE_LINK(test_worker_thread_pool)
 #include "core/object/callable_mp.h"
 #include "core/object/worker_thread_pool.h"
 #include "core/os/os.h"
+#include "core/os/thread.h"
 
 namespace TestWorkerThreadPool {
 
@@ -171,6 +172,74 @@ TEST_CASE("[WorkerThreadPool] Run a yielding daemon as the only hope for other t
 		}
 	}
 	CHECK_MESSAGE(all_needed_yield, "All legit tasks should have needed the daemon yielding to run.");
+}
+
+static SafeFlag low_priority_started;
+static SafeFlag low_priority_release;
+static SafeFlag exit_languages_started;
+static SafeFlag exit_languages_done;
+
+static void static_low_priority_blocker(void *p_arg) {
+	low_priority_started.set();
+	while (!low_priority_release.is_set()) {
+		OS::get_singleton()->delay_usec(100);
+	}
+}
+
+static void static_noop_task(void *p_arg) {
+}
+
+static void static_noop_group_task(void *p_arg, uint32_t p_index) {
+}
+
+static void static_exit_languages(void *p_pool) {
+	exit_languages_started.set();
+	((WorkerThreadPool *)p_pool)->exit_languages_threads();
+	exit_languages_done.set();
+}
+
+static bool wait_for_flag(const SafeFlag &p_flag, uint64_t p_usec) {
+	const uint64_t end = OS::get_singleton()->get_ticks_usec() + p_usec;
+	while (!p_flag.is_set() && OS::get_singleton()->get_ticks_usec() < end) {
+		OS::get_singleton()->delay_usec(1000);
+	}
+	return p_flag.is_set();
+}
+
+TEST_CASE("[WorkerThreadPool] Exiting languages ends once queued low priority tasks have run") {
+	low_priority_started.clear();
+	low_priority_release.clear();
+	exit_languages_started.clear();
+	exit_languages_done.clear();
+
+	WorkerThreadPool pool(false);
+	pool.init(4, 0.25);
+
+	pool.add_native_task(static_low_priority_blocker, nullptr, false);
+	for (int i = 0; i < 3; i++) {
+		pool.add_native_task(static_noop_task, nullptr, false);
+	}
+	const bool started = wait_for_flag(low_priority_started, 5000000);
+
+	Thread exiter;
+	exiter.start(static_exit_languages, &pool);
+	wait_for_flag(exit_languages_started, 5000000);
+	OS::get_singleton()->delay_usec(500000);
+	low_priority_release.set();
+
+	const bool exited = wait_for_flag(exit_languages_done, 10000000);
+	WorkerThreadPool::GroupID wake = WorkerThreadPool::INVALID_TASK_ID;
+	if (!exited) {
+		wake = pool.add_native_group_task(static_noop_group_task, nullptr, 4, 4, true);
+	}
+	exiter.wait_to_finish();
+	if (wake != WorkerThreadPool::INVALID_TASK_ID) {
+		pool.wait_for_group_task_completion(wake);
+	}
+	pool.finish();
+
+	CHECK(started);
+	CHECK_MESSAGE(exited, "Every worker should count itself idle once the low priority queue has drained.");
 }
 
 } // namespace TestWorkerThreadPool
