@@ -65,6 +65,22 @@ public:
 		MATERIAL_FLAG_SHADOW_ONLY = 16,
 	};
 
+	static constexpr uint32_t CANDIDATE_FLAGS = MATERIAL_FLAG_SKIP | MATERIAL_FLAG_BLEND | MATERIAL_FLAG_SHADOW_PASS | MATERIAL_FLAG_SHADOW_ONLY;
+
+	enum InstanceClass {
+		INSTANCE_CLASS_OPAQUE,
+		INSTANCE_CLASS_CANDIDATE,
+		INSTANCE_CLASS_SPLIT,
+	};
+
+	static constexpr uint32_t INSTANCE_CLASS_MASK = 3;
+	static constexpr uint32_t INSTANCE_REMAP_SHIFT = 2;
+	static constexpr uint32_t HW_GROUP_COUNT = 7;
+	static constexpr uint32_t HW_BLEND_INSTANCES = 8;
+	static constexpr uint32_t HW_HEADER_WORDS = 9;
+	static constexpr uint32_t HW_ALL_GROUPS = 0x80;
+	static constexpr uint32_t ALL_CASTERS = 0xFFFFFFFF;
+
 	struct Node {
 		float bmin[3];
 		uint32_t left_first;
@@ -113,6 +129,7 @@ public:
 
 	static_assert(sizeof(Light) == 96);
 	static_assert(sizeof(Instance) == 64);
+	static_assert((uint64_t(TLAS_LEAF_SIZE) << TLAS_MAX_DEPTH) <= (uint64_t(1) << 24), "A hardware instance custom index is 24 bits.");
 
 	struct LightCensus {
 		uint32_t candidates = 0;
@@ -148,6 +165,9 @@ public:
 	static float light_energy(float p_energy, float p_intensity, RSE::LightType p_type, bool p_physical_units, float p_exposure, const Vector2 &p_area_size, bool p_area_normalize);
 	static void pack_area(const Basis &p_basis, const Vector2 &p_area_size, Light &r_light);
 	static uint32_t shadow_cast_flags(RSE::ShadowCastingSetting p_setting);
+	static uint64_t surface_candidates(uint32_t p_surface, uint32_t p_flags);
+	static uint32_t instance_class(uint64_t p_candidates, uint64_t p_split);
+	static uint32_t hw_instance_mask(uint32_t p_layer_mask, const uint32_t *p_groups, uint32_t p_group_count);
 
 private:
 	static RayScene *singleton;
