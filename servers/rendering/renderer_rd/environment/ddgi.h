@@ -43,6 +43,8 @@ class RenderSceneBuffersRD;
 
 namespace RendererRD {
 
+class RayScene;
+
 class DDGI {
 public:
 	static constexpr uint32_t MAX_LEVELS = 4;
@@ -219,6 +221,7 @@ private:
 
 	static Vector<String> _trace_modes();
 	bool _ensure_trace_hw();
+	bool _trace_usable(RayScene *p_ray_scene);
 
 	void _dispatch(Mode p_mode, const Ref<Volume> &p_volume, uint32_t p_x_groups, int32_t p_indirect_offset = -1);
 	void _reset_counts(const Ref<Volume> &p_volume, const Vector3 &p_camera_position);

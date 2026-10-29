@@ -262,8 +262,19 @@ bool DDGI::_ensure_trace_hw() {
 		for (int i = 0; i < TRACE_MODE_MAX; i++) {
 			trace_pipelines_hw[i].create_compute_pipeline(trace_shader_hw.version_get_shader(trace_shader_hw_version, i));
 		}
+		for (int i = 0; i < TRACE_MODE_MAX; i++) {
+			trace_hw_valid = trace_hw_valid && trace_pipelines_hw[i].get_rid().is_valid();
+		}
 	}
 	return trace_hw_valid;
+}
+
+bool DDGI::_trace_usable(RayScene *p_ray_scene) {
+	if (!p_ray_scene->uses_hardware() || _ensure_trace_hw()) {
+		return true;
+	}
+	p_ray_scene->refuse_hardware("the hardware trace shader or its pipelines could not be made");
+	return false;
 }
 
 void DDGI::free() {
@@ -439,10 +450,6 @@ void DDGI::_trace(TraceMode p_mode, const Ref<Volume> &p_volume, RID p_output, c
 	TextureStorage *texture_storage = TextureStorage::get_singleton();
 	RayScene *ray_scene = RayScene::get_singleton();
 	const bool hardware = ray_scene->uses_hardware();
-	if (hardware && !_ensure_trace_hw()) {
-		ray_scene->refuse_hardware("the hardware trace shader did not compile");
-		return;
-	}
 	RID shader_rid = hardware ? trace_shader_hw.version_get_shader(trace_shader_hw_version, p_mode) : trace_shader.version_get_shader(trace_shader_version, p_mode);
 
 	RD::Uniform u_ubo(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, p_volume->ubo);
@@ -454,6 +461,7 @@ void DDGI::_trace(TraceMode p_mode, const Ref<Volume> &p_volume, RID p_output, c
 	RD::Uniform u_linear(RD::UNIFORM_TYPE_SAMPLER, 6, material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED));
 
 	LocalVector<RD::Uniform> scene_uniforms;
+	scene_uniforms.reserve(8);
 	ray_scene->append_uniforms(scene_uniforms);
 
 	RID sky_texture = p_volume->sky_texture;
@@ -520,7 +528,7 @@ void DDGI::_fill_sky(TracePushConstant &r_push_constant, RID &r_sky_texture, RID
 
 void DDGI::trace_surfels(const Ref<Volume> &p_volume, const LocalVector<RD::Uniform> &p_surfel_uniforms, RID p_indirect_buffer, uint32_t p_indirect_offset) {
 	RayScene *ray_scene = RayScene::get_singleton();
-	if (!ray_scene || !ray_scene->is_ready()) {
+	if (!ray_scene || !ray_scene->is_ready() || !_trace_usable(ray_scene)) {
 		return;
 	}
 	RD::get_singleton()->draw_command_begin_label("Surfel Trace");
@@ -530,7 +538,7 @@ void DDGI::trace_surfels(const Ref<Volume> &p_volume, const LocalVector<RD::Unif
 
 void DDGI::process(const Ref<Volume> &p_volume, RID p_environment, SkyRD::Sky *p_sky, RID p_camera_attributes, const Projection &p_projection, const Transform3D &p_camera_transform, const Size2i &p_screen_size) {
 	RayScene *ray_scene = RayScene::get_singleton();
-	if (!ray_scene || !ray_scene->is_ready()) {
+	if (!ray_scene || !ray_scene->is_ready() || !_trace_usable(ray_scene)) {
 		return;
 	}
 
