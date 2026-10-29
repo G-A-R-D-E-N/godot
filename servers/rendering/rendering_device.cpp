@@ -351,6 +351,7 @@ void RenderingDevice::_tlas_remove_blas_dependencies(AccelerationStructure *p_tl
 
 RID RenderingDevice::blas_create(Span<AccelerationStructureGeometry> p_geometries, BitField<AccelerationStructureFlagBits> p_flags) {
 	ERR_FAIL_COND_V_MSG(!has_feature(SUPPORTS_RAYTRACING_PIPELINE) && !has_feature(SUPPORTS_RAY_QUERY), RID(), "The current rendering device has neither raytracing pipeline nor ray query support.");
+	ERR_FAIL_COND_V_MSG(p_flags.has_flag(ACCELERATION_STRUCTURE_RAY_QUERY_ONLY_BIT), RID(), "ACCELERATION_STRUCTURE_RAY_QUERY_ONLY_BIT is only valid for a TLAS.");
 
 	thread_local LocalVector<RDD::AccelerationStructureGeometry> rdd_geometries;
 	rdd_geometries.resize(p_geometries.size());
@@ -474,6 +475,7 @@ BitField<RDD::BufferUsageBits> RenderingDevice::_creation_to_usage_bits(BitField
 
 RID RenderingDevice::tlas_create(uint32_t p_max_instance_count, BitField<AccelerationStructureFlagBits> p_flags) {
 	ERR_FAIL_COND_V_MSG(!has_feature(SUPPORTS_RAYTRACING_PIPELINE) && !has_feature(SUPPORTS_RAY_QUERY), RID(), "The current rendering device has neither raytracing pipeline nor ray query support.");
+	ERR_FAIL_COND_V_MSG(p_flags.has_flag(ACCELERATION_STRUCTURE_RAY_QUERY_ONLY_BIT) && !has_feature(SUPPORTS_RAY_QUERY), RID(), "ACCELERATION_STRUCTURE_RAY_QUERY_ONLY_BIT needs ray query support.");
 
 	AccelerationStructure acceleration_structure;
 	acceleration_structure.type = RDD::ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
