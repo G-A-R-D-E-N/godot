@@ -56,6 +56,7 @@ RayScene::RayScene() {
 }
 
 RayScene::~RayScene() {
+	_hw_free();
 	RID *owned[] = { &blas_node_buffer, &triangle_buffer, &instance_buffer, &tlas_node_buffer, &material_buffer, &light_buffer, &scene_data_buffer };
 	for (RID *rid : owned) {
 		if (rid->is_valid()) {
@@ -271,6 +272,7 @@ void RayScene::_capture_surface(MeshEntry &r_mesh, uint32_t p_surface, const Ren
 		r_mesh.built = false;
 		r_mesh.nodes.clear();
 		r_mesh.bvh_triangles.clear();
+		r_mesh.hw_generation = 0;
 		assembly_dirty = true;
 	}
 
@@ -312,6 +314,7 @@ void RayScene::mesh_cleared(RID p_mesh) {
 	if (meshes.erase(p_mesh) && assembled_meshes.has(p_mesh)) {
 		assembly_dirty = true;
 	}
+	_hw_mesh_removed(p_mesh);
 }
 
 void RayScene::_build_blas(MeshEntry &p_mesh) {
@@ -402,6 +405,7 @@ void RayScene::_assemble(const LocalVector<RID> &p_meshes) {
 	_ensure_buffer(triangle_buffer, triangle_capacity, triangles.size(), sizeof(Triangle), "Ray Scene Triangles");
 	RD::get_singleton()->buffer_update(blas_node_buffer, 0, blas_nodes.size() * sizeof(Node), blas_nodes.ptr());
 	RD::get_singleton()->buffer_update(triangle_buffer, 0, triangles.size() * sizeof(Triangle), triangles.ptr());
+	_hw_assembled();
 	assembly_dirty = false;
 }
 
@@ -754,6 +758,7 @@ void RayScene::_print_census() {
 
 void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const Vector<RID> &p_directional_lights, RID p_camera_attributes, const Vector3 &p_camera_position) {
 	MutexLock lock(mesh_mutex);
+	_backend_tick();
 
 	const Vector3 snapped = (p_camera_position / ANCHOR_GRID).floor() * ANCHOR_GRID;
 	const bool anchor_moved = snapped != anchor;
@@ -785,6 +790,9 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	if (need_assembly) {
 		_assemble(referenced);
 	}
+	if (accel) {
+		_hw_begin();
+	}
 
 	MeshStorage *mesh_storage = MeshStorage::get_singleton();
 	instances.clear();
@@ -802,7 +810,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			continue;
 		}
 		const RID mesh_rid = geometry->data->base;
-		const MeshEntry *mesh = meshes.getptr(mesh_rid);
+		MeshEntry *mesh = meshes.getptr(mesh_rid);
 		if (!mesh || !mesh->built || !assembled_meshes.has(mesh_rid)) {
 			continue;
 		}
@@ -820,6 +828,8 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		instance.material_offset = materials.size();
 		instance.layer_mask = geometry->layer_mask;
 		const uint32_t cast_flags = shadow_cast_flags(geometry->data->cast_shadows);
+		uint64_t material_candidates = 0;
+		uint64_t candidates = 0;
 
 		for (uint32_t s = 0; s < mesh->surface_count; s++) {
 			RID material = geometry->data->material_override;
@@ -838,6 +848,8 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			}
 			materials.push_back(cached->entry);
 			materials[materials.size() - 1].flags |= cast_flags;
+			material_candidates |= surface_candidates(s, cached->entry.flags);
+			candidates |= surface_candidates(s, materials[materials.size() - 1].flags);
 			const float factor = MAX(_instance_float(geometry->shader_uniforms_offset, cached->scale_index), 0.0f) * MAX(_instance_float(geometry->shader_uniforms_offset, cached->bounce_index), 0.0f);
 			if (factor != 1.0f) {
 				Material &instance_material = materials[materials.size() - 1];
@@ -845,6 +857,9 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 					instance_material.emission[k] *= factor;
 				}
 			}
+		}
+		if (accel) {
+			_hw_instance(mesh_rid, *mesh, material_candidates, candidates, transform, instance);
 		}
 
 		const AABB bounds = transform.xform(mesh->aabb);
@@ -860,7 +875,8 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		signature = hash_murmur3_buffer(&instance, sizeof(Instance), signature);
 	}
 
-	if (signature != instance_signature || anchor_moved || need_assembly || tlas_node_buffer.is_null()) {
+	const bool rebuilt = signature != instance_signature || anchor_moved || need_assembly || tlas_node_buffer.is_null();
+	if (rebuilt) {
 		instance_signature = signature;
 		if (memcmp(albedo_sources, reported_albedo_sources, sizeof(albedo_sources)) != 0) {
 			memcpy(reported_albedo_sources, albedo_sources, sizeof(albedo_sources));
@@ -913,6 +929,9 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	_ensure_buffer(light_buffer, light_capacity, MAX_LIGHTS, sizeof(Light), "Ray Scene Lights");
 	if (lights.size()) {
 		RD::get_singleton()->buffer_update(light_buffer, 0, lights.size() * sizeof(Light), lights.ptr());
+	}
+	if (accel) {
+		_hw_update(primitives, rebuilt);
 	}
 
 	SceneData scene_data = {};

@@ -3919,6 +3919,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/bounce_energy", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/debug_view", PROPERTY_HINT_ENUM, "Disabled,Irradiance,Ray Hits,Normals,Probe State,Probe Visibility"), 0);
 
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/backend", PROPERTY_HINT_ENUM, "Software,Hardware,Auto"), 0);
 	GLOBAL_DEF("rendering/global_illumination/ray_scene/skip_additive_surfaces", true);
 
 	GLOBAL_DEF("rendering/global_illumination/surfels/enabled", false);

@@ -46,8 +46,16 @@ class RenderGeometryInstance;
 
 namespace RendererRD {
 
+class RayAccel;
+
 class RayScene {
 public:
+	enum Backend {
+		BACKEND_SOFTWARE,
+		BACKEND_HARDWARE,
+		BACKEND_AUTO,
+	};
+
 	static constexpr uint32_t BLAS_LEAF_SIZE = 4;
 	static constexpr uint32_t TLAS_LEAF_SIZE = 1;
 	static constexpr uint32_t BLAS_MAX_DEPTH = 24;
@@ -183,6 +191,11 @@ private:
 		uint32_t node_offset = 0;
 		uint32_t triangle_offset = 0;
 		AABB aabb;
+		uint64_t hw_generation = 0;
+		uint64_t hw_split = 0;
+		uint32_t hw_opaque = 0;
+		uint32_t hw_region = 0;
+		LocalVector<uint32_t> hw_order;
 	};
 
 	Mutex mesh_mutex;
@@ -240,6 +253,25 @@ private:
 	uint32_t material_capacity = 0;
 	uint32_t light_capacity = 0;
 
+	RayAccel *accel = nullptr;
+	int32_t backend_requested = -1;
+	bool backend_warned = false;
+	bool hardware_refused = false;
+	LocalVector<uint32_t> hw_remap;
+	RID hw_remap_buffer;
+	uint32_t hw_remap_capacity = 0;
+	bool hw_remap_dirty = false;
+	uint64_t hw_mesh_generation = 0;
+	LocalVector<uint32_t> hw_order;
+	LocalVector<Transform3D> hw_transforms;
+	LocalVector<RID> hw_meshes;
+	LocalVector<uint32_t> hw_classes;
+	LocalVector<uint8_t> hw_usable;
+	uint32_t hw_skipped_unbuilt = 0;
+	uint32_t hw_skipped_cap = 0;
+	uint32_t hw_groups[HW_GROUP_COUNT] = {};
+	uint32_t hw_group_count = 0;
+
 	MeshEntry *_capture_mesh(RID p_mesh);
 	void _capture_surface(MeshEntry &r_mesh, uint32_t p_surface, const RenderingServerTypes::SurfaceData &p_surface_data);
 	void _build_blas(MeshEntry &p_mesh);
@@ -251,6 +283,14 @@ private:
 	void _select_lights(const Vector3 &p_camera);
 	void _print_census();
 	static void _ensure_buffer(RID &r_buffer, uint32_t &r_capacity, uint32_t p_count, uint32_t p_stride, const char *p_name);
+	void _backend_tick();
+	void _hw_begin();
+	void _hw_instance(RID p_mesh_rid, MeshEntry &r_mesh, uint64_t p_material_candidates, uint64_t p_candidates, const Transform3D &p_transform, Instance &r_instance);
+	void _hw_update(const LocalVector<BuildPrimitive> &p_primitives, bool p_rebuilt);
+	void _hw_assembled();
+	void _hw_mesh_removed(RID p_mesh);
+	void _hw_free();
+	bool _hw_ready() const;
 
 public:
 	static RayScene *get_singleton() { return singleton; }
@@ -260,7 +300,12 @@ public:
 
 	void update(const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const Vector<RID> &p_directional_lights, RID p_camera_attributes, const Vector3 &p_camera_position);
 
-	bool is_ready() const { return scene_data_buffer.is_valid() && blas_node_buffer.is_valid() && tlas_node_buffer.is_valid(); }
+	bool is_ready() const { return scene_data_buffer.is_valid() && blas_node_buffer.is_valid() && tlas_node_buffer.is_valid() && (!accel || _hw_ready()); }
+	bool uses_hardware() const { return accel != nullptr; }
+	void refuse_hardware(const String &p_reason);
+	RID get_tlas() const;
+	RID get_hw_remap_buffer() const { return hw_remap_buffer; }
+	void append_uniforms(LocalVector<RD::Uniform> &r_uniforms) const;
 	Vector3 get_anchor() const { return anchor; }
 	RID get_blas_node_buffer() const { return blas_node_buffer; }
 	RID get_triangle_buffer() const { return triangle_buffer; }
