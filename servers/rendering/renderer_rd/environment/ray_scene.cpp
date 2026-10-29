@@ -550,6 +550,16 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 	}
 }
 
+uint32_t RayScene::shadow_cast_flags(RSE::ShadowCastingSetting p_setting) {
+	if (p_setting == RSE::SHADOW_CASTING_SETTING_OFF) {
+		return MATERIAL_FLAG_SHADOW_PASS;
+	}
+	if (p_setting == RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY) {
+		return MATERIAL_FLAG_SHADOW_ONLY;
+	}
+	return 0;
+}
+
 float RayScene::light_energy(float p_energy, float p_intensity, RSE::LightType p_type, bool p_physical_units, float p_exposure, const Vector2 &p_area_size, bool p_area_normalize) {
 	float energy = LightStorage::light_render_energy(p_energy, p_intensity, p_type, p_physical_units);
 	energy *= p_exposure;
@@ -796,12 +806,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		instance.blas_root = mesh->node_offset;
 		instance.material_offset = materials.size();
 		instance.layer_mask = geometry->layer_mask;
-		uint32_t cast_flags = 0;
-		if (geometry->data->cast_shadows == RSE::SHADOW_CASTING_SETTING_OFF) {
-			cast_flags = MATERIAL_FLAG_SHADOW_PASS;
-		} else if (geometry->data->cast_shadows == RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY) {
-			cast_flags = MATERIAL_FLAG_SHADOW_ONLY;
-		}
+		const uint32_t cast_flags = shadow_cast_flags(geometry->data->cast_shadows);
 
 		for (uint32_t s = 0; s < mesh->surface_count; s++) {
 			RID material = geometry->data->material_override;

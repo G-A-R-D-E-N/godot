@@ -146,6 +146,7 @@ public:
 	static void build_bvh(LocalVector<BuildPrimitive> &p_primitives, uint32_t p_max_leaf, uint32_t p_max_depth, LocalVector<Node> &r_nodes);
 	static float light_energy(float p_energy, float p_intensity, RSE::LightType p_type, bool p_physical_units, float p_exposure, const Vector2 &p_area_size, bool p_area_normalize);
 	static void pack_area(const Basis &p_basis, const Vector2 &p_area_size, Light &r_light);
+	static uint32_t shadow_cast_flags(RSE::ShadowCastingSetting p_setting);
 
 private:
 	static RayScene *singleton;
