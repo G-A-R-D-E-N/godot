@@ -70,10 +70,17 @@ struct RaySceneLight {
 	uint pad;
 };
 
+#ifndef RAY_SCENE_HW
 layout(set = RAY_SCENE_SET, binding = 0, std430) restrict readonly buffer RaySceneBlasNodes {
 	RaySceneNode data[];
 }
 ray_scene_blas_nodes;
+#else
+layout(set = RAY_SCENE_SET, binding = 0, std430) restrict readonly buffer RaySceneHwRemap {
+	uint data[];
+}
+ray_scene_hw_remap;
+#endif
 
 layout(set = RAY_SCENE_SET, binding = 1, std430) restrict readonly buffer RaySceneTriangles {
 	RaySceneTriangle data[];
@@ -85,10 +92,12 @@ layout(set = RAY_SCENE_SET, binding = 2, std430) restrict readonly buffer RaySce
 }
 ray_scene_instances;
 
+#ifndef RAY_SCENE_HW
 layout(set = RAY_SCENE_SET, binding = 3, std430) restrict readonly buffer RaySceneTlasNodes {
 	RaySceneNode data[];
 }
 ray_scene_tlas_nodes;
+#endif
 
 layout(set = RAY_SCENE_SET, binding = 4, std430) restrict readonly buffer RaySceneMaterials {
 	RaySceneMaterial data[];
@@ -109,6 +118,10 @@ layout(set = RAY_SCENE_SET, binding = 6, std140) uniform RaySceneData {
 	uint pad2;
 }
 ray_scene;
+
+#ifdef RAY_SCENE_HW
+layout(set = RAY_SCENE_SET, binding = 7) uniform accelerationStructureEXT ray_scene_tlas;
+#endif
 
 struct RaySceneHit {
 	float t;
@@ -142,6 +155,7 @@ bool ray_scene_box(vec3 p_origin, vec3 p_inv_direction, vec3 p_min, vec3 p_max, 
 	return r_t_near <= t_far;
 }
 
+#ifndef RAY_SCENE_HW
 void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, vec3 p_origin, vec3 p_direction, bool p_any, uint p_skip, uint p_seed, bool p_band, inout RaySceneHit r_hit) {
 	vec3 inv_direction = ray_scene_safe_inverse(p_direction);
 	uint skip_mask = RAY_SCENE_SKIP_MASK(p_any, p_skip);
@@ -307,6 +321,9 @@ bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool
 	}
 	return r_hit.instance != RAY_SCENE_NO_HIT;
 }
+#else
+#include "ray_scene_hw_inc.glsl"
+#endif
 
 bool ray_scene_trace(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, uint p_seed, out RaySceneHit r_hit) {
 	return ray_scene_trace_masked(p_origin, p_direction, p_t_max, p_any, 0u, RAY_SCENE_ALL_CASTERS, p_seed, r_hit);
