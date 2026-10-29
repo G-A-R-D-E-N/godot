@@ -7491,9 +7491,17 @@ bool RenderingDeviceDriverVulkan::has_feature(Features p_feature) {
 		case SUPPORTS_POINT_SIZE:
 			return true;
 		case SUPPORTS_RAY_QUERY:
+#if VULKAN_RAYTRACING_ENABLED
 			return acceleration_structure_capabilities.acceleration_structure_support && ray_query_support;
+#else
+			return false;
+#endif
 		case SUPPORTS_RAYTRACING_PIPELINE:
+#if VULKAN_RAYTRACING_ENABLED
 			return acceleration_structure_capabilities.acceleration_structure_support && raytracing_capabilities.raytracing_pipeline_support;
+#else
+			return false;
+#endif
 		case SUPPORTS_HDR_OUTPUT:
 #if defined(WINDOWS_ENABLED)
 			// When using a Vulkan swapchain on Windows, some configurations

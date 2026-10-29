@@ -1353,6 +1353,7 @@ private:
 
 		// --- Top Level ---
 		uint32_t max_instance_count = 0;
+		bool ray_query_only = false;
 
 		struct InstanceBuffer {
 			RDD::BufferID driver_id;
