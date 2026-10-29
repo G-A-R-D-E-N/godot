@@ -210,7 +210,15 @@ private:
 	DdgiTraceShaderRD trace_shader;
 	RID trace_shader_version;
 	PipelineDeferredRD trace_pipelines[TRACE_MODE_MAX];
+	DdgiTraceShaderRD trace_shader_hw;
+	RID trace_shader_hw_version;
+	PipelineDeferredRD trace_pipelines_hw[TRACE_MODE_MAX];
+	String trace_defines;
+	bool trace_hw_valid = false;
 	bool use_octmap_array = false;
+
+	static Vector<String> _trace_modes();
+	bool _ensure_trace_hw();
 
 	void _dispatch(Mode p_mode, const Ref<Volume> &p_volume, uint32_t p_x_groups, int32_t p_indirect_offset = -1);
 	void _reset_counts(const Ref<Volume> &p_volume, const Vector3 &p_camera_position);
