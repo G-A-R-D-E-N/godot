@@ -848,8 +848,10 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			}
 			materials.push_back(cached->entry);
 			materials[materials.size() - 1].flags |= cast_flags;
-			material_candidates |= surface_candidates(s, cached->entry.flags);
-			candidates |= surface_candidates(s, materials[materials.size() - 1].flags);
+			if (accel) {
+				material_candidates |= surface_candidates(s, cached->entry.flags);
+				candidates |= surface_candidates(s, materials[materials.size() - 1].flags);
+			}
 			const float factor = MAX(_instance_float(geometry->shader_uniforms_offset, cached->scale_index), 0.0f) * MAX(_instance_float(geometry->shader_uniforms_offset, cached->bounce_index), 0.0f);
 			if (factor != 1.0f) {
 				Material &instance_material = materials[materials.size() - 1];
