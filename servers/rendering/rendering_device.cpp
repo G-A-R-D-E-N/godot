@@ -39,6 +39,7 @@
 #include "core/os/os.h"
 #include "core/profiling/profiling.h"
 #include "core/templates/fixed_vector.h"
+#include "servers/rendering/pipeline_cache_temps.h"
 #include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
 #include "servers/rendering/rendering_device_binds.h"
 #include "servers/rendering/rendering_shader_container.h"
@@ -8954,6 +8955,8 @@ void RenderingDevice::_save_pipeline_cache(void *p_data) {
 	if (cache_blob.is_empty()) {
 		return;
 	}
+
+	remove_stale_pipeline_cache_temps(self->pipeline_cache_file_path, (uint64_t)OS::get_singleton()->get_unix_time());
 
 	const String temp_path = self->pipeline_cache_file_path + "." + itos(OS::get_singleton()->get_process_id()) + ".tmp";
 	Ref<DirAccess> dir = DirAccess::create_for_path(temp_path);
