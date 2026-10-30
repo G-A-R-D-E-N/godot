@@ -198,6 +198,7 @@ public:
 		ResourceUsage raytracing_list_usage = RESOURCE_USAGE_NONE;
 		ResourceUsage usage = RESOURCE_USAGE_NONE;
 		BitField<RDD::BarrierAccessBits> usage_access = {};
+		BitField<RDD::PipelineStageBits> usage_stages = {};
 		RDD::BufferID buffer_driver_id;
 		RDD::TextureID texture_driver_id;
 		RDD::AccelerationStructureID acceleration_structure_driver_id;
