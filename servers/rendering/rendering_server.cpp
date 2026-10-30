@@ -3924,6 +3924,12 @@ void RenderingServer::init() {
 	GLOBAL_DEF("rendering/global_illumination/ray_scene/skip_additive_surfaces", true);
 
 	GLOBAL_DEF("rendering/global_illumination/direct/enabled", false);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/entries", PROPERTY_HINT_ENUM, "4:4,6:6,8:8"), 6);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/rays_per_pixel", PROPERTY_HINT_RANGE, "1,2,1"), 1);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/direct/ray_bias", PROPERTY_HINT_RANGE, "0,0.2,0.001"), 0.02);
+	GLOBAL_DEF("rendering/global_illumination/direct/reference", false);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/debug_view", PROPERTY_HINT_ENUM, "Off,First Entry,All Lamps,First Slot,Lamp Count,Samples"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::STRING, "rendering/global_illumination/direct/dump_request", PROPERTY_HINT_GLOBAL_SAVE_FILE, "*.json"), "");
 
 	GLOBAL_DEF("rendering/global_illumination/surfels/enabled", false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/surfels/capacity", PROPERTY_HINT_RANGE, "4096,1048576,1"), 131072);

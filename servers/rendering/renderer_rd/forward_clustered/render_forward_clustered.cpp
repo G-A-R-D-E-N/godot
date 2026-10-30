@@ -1884,7 +1884,7 @@ void RenderForwardClustered::_copy_framebuffer_to_ss_effects(Ref<RenderSceneBuff
 	ss_effects->copy_internal_texture_to_last_frame(p_render_buffers, *copy_effects);
 }
 
-void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, bool p_use_ssao, bool p_use_ssil, bool p_use_ssr, bool p_use_sscs, bool p_use_gi, const RID *p_normal_roughness_slices, RID p_voxel_gi_buffer) {
+void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, bool p_use_ssao, bool p_use_ssil, bool p_use_ssr, bool p_use_sscs, bool p_use_gi, const RID *p_normal_roughness_slices, RID p_voxel_gi_buffer, bool p_use_direct_lights) {
 	// Render shadows while GI is rendering, due to how barriers are handled, this should happen at the same time
 	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
 	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
@@ -2086,6 +2086,30 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 		bool directional_shadows = RendererRD::LightStorage::get_singleton()->has_directional_shadows(directional_light_count);
 		_update_volumetric_fog(rb, p_render_data->environment, p_render_data->camera_attributes, p_render_data->scene_data->cam_projection, p_render_data->scene_data->cam_transform, p_render_data->scene_data->prev_cam_transform.affine_inverse(), p_render_data->shadow_atlas, directional_light_count, directional_shadows, positional_light_count, p_render_data->voxel_gi_count, *p_render_data->fog_volumes);
 	}
+
+	if (rb_data.is_valid() && !(p_use_direct_lights && p_render_data->scene_data->view_count == 1 && p_render_data->cluster_buffer.is_valid())) {
+		direct_shadows->release(rb);
+	} else if (rb_data.is_valid()) {
+		RENDER_TIMESTAMP("Direct Shadows");
+		RD::get_singleton()->draw_command_begin_label("Direct Shadows");
+		RendererRD::DirectShadows::FrameInput input;
+		input.render_buffers = rb;
+		input.depth = rb->get_depth_texture(0);
+		input.normal_roughness = p_normal_roughness_slices[0];
+		input.cluster_buffer = p_render_data->cluster_buffer;
+		input.omni_buffer = light_storage->get_omni_light_buffer();
+		input.spot_buffer = light_storage->get_spot_light_buffer();
+		input.projection = p_render_data->scene_data->get_cam_projection();
+		input.camera = p_render_data->scene_data->cam_transform;
+		input.region_half = ray_scene_get_region(p_render_data->scene_data->cam_transform.origin).size * 0.5;
+		input.cluster_size = p_render_data->cluster_size;
+		input.cluster_max_elements = p_render_data->cluster_max_elements;
+		input.z_far = p_render_data->scene_data->z_far;
+		input.frame = RSG::rasterizer->get_frame_number();
+		input.table_generation = light_storage->get_direct_lights().get_generation();
+		direct_shadows->process(input, light_storage->get_direct_lights());
+		RD::get_singleton()->draw_command_end_label();
+	}
 }
 
 void RenderForwardClustered::_process_sss(Ref<RenderSceneBuffersRD> p_render_buffers, const Projection &p_camera, uint32_t p_taa_frame, bool p_sss_radius_written) {
@@ -2247,7 +2271,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	bool using_sdfgi = false;
 	bool using_voxelgi = false;
 	bool using_ddgi = false;
-	const bool using_direct_lights = !is_reflection_probe && rb_data.is_valid() && get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_UNSHADED && GLOBAL_GET_CACHED(bool, "rendering/global_illumination/direct/enabled");
+	const bool using_direct_lights = !is_reflection_probe && rb_data.is_valid() && get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_UNSHADED && GLOBAL_GET_CACHED(bool, "rendering/global_illumination/direct/enabled") && RendererRD::DDGI::is_enabled();
 	bool reverse_cull = p_render_data->scene_data->cam_transform.basis.determinant() < 0;
 	bool using_ssil = !is_reflection_probe && p_render_data->environment.is_valid() && environment_get_ssil_enabled(p_render_data->environment);
 	bool using_bounce_source = false;
@@ -2632,7 +2656,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			normal_roughness_views[v] = rb_data->get_normal_roughness(v);
 		}
 	}
-	_pre_opaque_render(p_render_data, using_ssao, using_ssil, using_ssr, using_sscs, using_sdfgi || using_voxelgi || using_ddgi, normal_roughness_views, rb_data.is_valid() && rb_data->has_voxelgi() ? rb_data->get_voxelgi() : RID());
+	_pre_opaque_render(p_render_data, using_ssao, using_ssil, using_ssr, using_sscs, using_sdfgi || using_voxelgi || using_ddgi, normal_roughness_views, rb_data.is_valid() && rb_data->has_voxelgi() ? rb_data->get_voxelgi() : RID(), using_direct_lights && depth_pre_pass);
 
 	base_specialization.use_far_shadow = light_storage->has_far_shadow();
 	base_specialization.use_direct_shadow = using_direct_lights && depth_pre_pass;
@@ -3071,6 +3095,15 @@ void RenderForwardClustered::_render_buffers_debug_draw(const RenderDataRD *p_re
 	RendererSceneRenderRD::_render_buffers_debug_draw(p_render_data);
 
 	RID render_target = rb->get_render_target();
+
+	direct_shadows->serve_dump_request(rb);
+	if (GLOBAL_GET_CACHED(int, "rendering/global_illumination/direct/debug_view") != 0) {
+		const RID direct_debug = direct_shadows->get_debug_texture(rb);
+		if (direct_debug.is_valid()) {
+			Size2i rtsize = texture_storage->render_target_get_size(render_target);
+			copy_effects->copy_to_fb_rect(direct_debug, texture_storage->render_target_get_rd_framebuffer(render_target), Rect2i(Vector2(), rtsize), false, false, false, true);
+		}
+	}
 
 	if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SSAO && rb->has_texture(RB_SCOPE_SSAO, RB_FINAL)) {
 		RID final = rb->get_texture_slice(RB_SCOPE_SSAO, RB_FINAL, 0, 0);
@@ -5997,6 +6030,7 @@ RenderForwardClustered::RenderForwardClustered() {
 	taa = memnew(RendererRD::TAA);
 	fsr2_effect = memnew(RendererRD::FSR2Effect);
 	ss_effects = memnew(RendererRD::SSEffects);
+	direct_shadows = memnew(RendererRD::DirectShadows);
 #ifdef METAL_MFXTEMPORAL_ENABLED
 	motion_vectors_store = memnew(RendererRD::MotionVectorsStore);
 	mfx_temporal_effect = memnew(RendererRD::MFXTemporalEffect);
@@ -6009,6 +6043,11 @@ RenderForwardClustered::~RenderForwardClustered() {
 	if (ss_effects != nullptr) {
 		memdelete(ss_effects);
 		ss_effects = nullptr;
+	}
+
+	if (direct_shadows != nullptr) {
+		memdelete(direct_shadows);
+		direct_shadows = nullptr;
 	}
 
 	if (taa != nullptr) {

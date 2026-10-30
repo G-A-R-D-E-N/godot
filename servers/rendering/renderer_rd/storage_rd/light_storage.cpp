@@ -33,6 +33,7 @@
 #include "core/config/project_settings.h"
 #include "core/math/geometry_3d.h"
 #include "core/os/os.h"
+#include "servers/rendering/renderer_rd/environment/ddgi.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
 #include "servers/rendering/rendering_server_globals.h"
@@ -1164,7 +1165,7 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 
 	bool using_forward_ids = forward_id_storage->uses_forward_ids();
 
-	const bool direct_lights_enabled = !using_forward_ids && GLOBAL_GET_CACHED(bool, "rendering/global_illumination/direct/enabled");
+	const bool direct_lights_enabled = !using_forward_ids && GLOBAL_GET_CACHED(bool, "rendering/global_illumination/direct/enabled") && DDGI::is_enabled();
 	const bool track_direct_lights = direct_lights_enabled && p_render_data->reflection_probe.is_null();
 	if (!direct_lights_enabled) {
 		direct_lights.clear();

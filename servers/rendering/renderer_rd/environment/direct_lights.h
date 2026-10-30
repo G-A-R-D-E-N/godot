@@ -69,6 +69,13 @@ public:
 		bool dynamic = false;
 	};
 
+	struct GpuSlot {
+		uint32_t caster_mask = 0;
+		float size = 0.0f;
+		uint32_t reset_frame = 0;
+		uint32_t dynamic = 0;
+	};
+
 	static uint32_t pack_flags(uint32_t p_slot, float p_strength);
 	static float reset_distance(float p_range, float p_movement);
 	static bool owns(bool p_owned, bool p_area, uint32_t p_cull_mask, float p_energy, bool p_projector);
@@ -77,6 +84,8 @@ public:
 	uint32_t observe(RID p_light, const Lamp &p_lamp);
 	State get_state(RID p_light) const;
 	uint32_t slots_in_use() const;
+	void write_slots(LocalVector<GpuSlot> &r_slots) const;
+	uint64_t get_generation() const { return generation; }
 	void clear();
 
 private:
@@ -101,6 +110,7 @@ private:
 	LocalVector<uint32_t> free_slots;
 	uint32_t next_slot = 1;
 	uint64_t frame = 0;
+	uint64_t generation = 0;
 };
 
 } // namespace RendererRD

@@ -3230,7 +3230,25 @@
 			Offset of the sample point towards the camera, in units of probe spacing, to reduce light leaking and self-shadowing.
 		</member>
 		<member name="rendering/global_illumination/direct/enabled" type="bool" setter="" getter="" default="false">
-			If [code]true[/code], prepares for ray-traced direct shadows of local lights in the Forward+ renderer: omni and spot lights get stable slots and change events (see [method RenderingServer.light_set_direct_shadow]), and the depth pre-pass writes normal and roughness. Nothing shades with them yet, so lighting does not change.
+			If [code]true[/code], traces ray-traced direct shadows of local lights in the Forward+ renderer: omni and spot lights get stable slots and change events (see [method RenderingServer.light_set_direct_shadow]), the depth pre-pass writes normal and roughness, and each pixel gets shadow factors. It needs [member rendering/global_illumination/ddgi/enabled] and does nothing while that is off. Nothing shades with the factors yet, so lighting does not change.
+		</member>
+		<member name="rendering/global_illumination/direct/debug_view" type="int" setter="" getter="" default="0">
+			Shows the raw ray-traced direct shadow factors in place of the image. [code]1[/code] is the brightest lamp's factor, [code]2[/code] is the light kept over the light before shadows, [code]3[/code] colors each pixel by its brightest lamp, [code]4[/code] is the number of lamps reaching the pixel, and [code]5[/code] is the brightest lamp's sample count.
+		</member>
+		<member name="rendering/global_illumination/direct/dump_request" type="String" setter="" getter="" default="&quot;&quot;">
+			If not empty, the next frame that has shadow factors writes them to raw files next to this path, a JSON summary at this path, and a [code].done[/code] file after it. Each new path is served once.
+		</member>
+		<member name="rendering/global_illumination/direct/entries" type="int" setter="" getter="" default="6">
+			The number of shadow entries per pixel. One of them is shared by every lamp past the first ones.
+		</member>
+		<member name="rendering/global_illumination/direct/ray_bias" type="float" setter="" getter="" default="0.02">
+			How far shadow rays start from the surface along its normal, in meters.
+		</member>
+		<member name="rendering/global_illumination/direct/rays_per_pixel" type="int" setter="" getter="" default="1">
+			The number of shadow rays traced per pixel per frame, shared between its entries.
+		</member>
+		<member name="rendering/global_illumination/direct/reference" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], traces 16 stratified rays for every entry at every pixel every frame and accumulates them without a limit. This is for checking the shadow factors, not for playing.
 		</member>
 		<member name="rendering/global_illumination/gi/use_half_resolution" type="bool" setter="" getter="" default="false" keywords="size">
 			If [code]true[/code], renders [VoxelGI] and SDFGI ([member Environment.sdfgi_enabled]) buffers at halved resolution (e.g. 960×540 when the viewport size is 1920×1080). This improves performance significantly when VoxelGI or SDFGI is enabled, at the cost of artifacts that may be visible on polygon edges. The loss in quality becomes less noticeable as the viewport resolution increases. [LightmapGI] rendering is not affected by this setting.

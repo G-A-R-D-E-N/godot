@@ -133,7 +133,25 @@ uint32_t DirectLightTable::slots_in_use() const {
 	return records.size();
 }
 
+void DirectLightTable::write_slots(LocalVector<GpuSlot> &r_slots) const {
+	r_slots.resize(next_slot);
+	for (uint32_t i = 0; i < next_slot; i++) {
+		r_slots[i] = GpuSlot();
+	}
+	for (const KeyValue<RID, Record> &entry : records) {
+		const Record &record = entry.value;
+		GpuSlot &slot = r_slots[record.slot];
+		slot.caster_mask = record.lamp.caster_mask;
+		slot.size = record.lamp.size;
+		slot.reset_frame = uint32_t(record.reset_frame);
+		slot.dynamic = frame < record.dynamic_until ? 1 : 0;
+	}
+}
+
 void DirectLightTable::clear() {
+	if (next_slot > 1 || frame != 0) {
+		generation++;
+	}
 	records.clear();
 	retired.clear();
 	free_slots.clear();

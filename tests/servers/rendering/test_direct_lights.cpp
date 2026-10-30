@@ -71,6 +71,58 @@ TEST_CASE("[DirectLights] Flags word layout") {
 	CHECK(((DirectLightTable::pack_flags(7, 2.0f) >> 17) & 0xFFu) == 255u);
 }
 
+TEST_CASE("[DirectLights] Slots written for the GPU follow the table") {
+	DirectLightTable table;
+	LocalVector<DirectLightTable::GpuSlot> slots;
+	table.write_slots(slots);
+	CHECK(slots.size() == 1u);
+	CHECK(slots[0].caster_mask == 0u);
+
+	table.begin_frame(5);
+	DirectLightTable::Lamp lamp = lamp_at(Vector3(1, 2, 3));
+	lamp.caster_mask = 0x1234u;
+	const uint32_t slot = table.observe(light_id(1), lamp);
+	table.write_slots(slots);
+	REQUIRE(slots.size() == slot + 1);
+	CHECK(slots[slot].caster_mask == 0x1234u);
+	CHECK(slots[slot].size == 0.1f);
+	CHECK(slots[slot].reset_frame == 5u);
+	CHECK(slots[slot].dynamic == 0u);
+	CHECK(slots[0].caster_mask == 0u);
+
+	table.begin_frame(6);
+	lamp.position = Vector3(1.1f, 2, 3);
+	table.observe(light_id(1), lamp);
+	table.write_slots(slots);
+	CHECK(slots[slot].reset_frame == 5u);
+	CHECK(slots[slot].dynamic == 1u);
+
+	table.begin_frame(6 + DirectLightTable::DYNAMIC_FRAMES);
+	table.observe(light_id(1), lamp);
+	table.write_slots(slots);
+	CHECK(slots[slot].dynamic == 0u);
+
+	table.begin_frame(7 + DirectLightTable::DYNAMIC_FRAMES);
+	table.begin_frame(8 + DirectLightTable::DYNAMIC_FRAMES);
+	table.write_slots(slots);
+	CHECK(slots[slot].caster_mask == 0u);
+}
+
+TEST_CASE("[DirectLights] Clearing a used table changes its generation once") {
+	DirectLightTable table;
+	const uint64_t empty = table.get_generation();
+	table.clear();
+	CHECK(table.get_generation() == empty);
+
+	table.begin_frame(5);
+	table.observe(light_id(1), lamp_at(Vector3()));
+	CHECK(table.get_generation() == empty);
+	table.clear();
+	CHECK(table.get_generation() == empty + 1);
+	table.clear();
+	CHECK(table.get_generation() == empty + 1);
+}
+
 TEST_CASE("[DirectLights] A light with no setting is owned, unmoving and keeps its own size") {
 	const DirectLightTable::Setting setting;
 	CHECK(setting.owned);
