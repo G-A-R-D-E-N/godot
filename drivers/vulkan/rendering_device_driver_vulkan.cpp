@@ -612,6 +612,7 @@ Error RenderingDeviceDriverVulkan::_initialize_device_extensions() {
 	}
 #endif
 	_register_requested_device_extension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME, false);
+	_register_requested_device_extension(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME, false);
 
 	{
 		// Debug marker extensions.
@@ -1599,6 +1600,10 @@ Error RenderingDeviceDriverVulkan::_initialize_allocator() {
 	}
 	if (buffer_device_address_support) {
 		allocator_info.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+	}
+	memory_budget_support = context_driver->functions_get().GetPhysicalDeviceProperties2 != nullptr && enabled_device_extension_names.has(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+	if (memory_budget_support) {
+		allocator_info.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
 	}
 	VkResult err = vmaCreateAllocator(&allocator_info, &allocator);
 	ERR_FAIL_COND_V_MSG(err, ERR_CANT_CREATE, vformat("Couldn't create Vulkan memory allocator (VkResult error %d).", err));
@@ -7230,7 +7235,7 @@ inline String RenderingDeviceDriverVulkan::get_vulkan_result(VkResult err) {
 /********************/
 
 void RenderingDeviceDriverVulkan::begin_segment(uint32_t p_frame_index, uint32_t p_frames_drawn) {
-	// Per-frame segments are not required in Vulkan.
+	vmaSetCurrentFrameIndex(allocator, p_frames_drawn);
 }
 
 void RenderingDeviceDriverVulkan::end_segment() {
@@ -7347,6 +7352,23 @@ uint64_t RenderingDeviceDriverVulkan::get_total_memory_used() {
 
 uint64_t RenderingDeviceDriverVulkan::get_lazily_memory_used() {
 	return vmaCalculateLazilyAllocatedBytes(allocator);
+}
+
+DeviceMemoryBudget RenderingDeviceDriverVulkan::get_device_memory_budget() {
+	if (!memory_budget_support) {
+		return DeviceMemoryBudget();
+	}
+	const VkPhysicalDeviceMemoryProperties *memory_properties = nullptr;
+	vmaGetMemoryProperties(allocator, &memory_properties);
+
+	VmaBudget *budgets = ALLOCA_ARRAY(VmaBudget, memory_properties->memoryHeapCount);
+	vmaGetHeapBudgets(allocator, budgets);
+
+	return device_memory_budget_from_heaps(memory_properties->memoryHeapCount, [&](uint32_t p_heap, bool &r_device_local, uint64_t &r_usage, uint64_t &r_budget) {
+		r_device_local = (memory_properties->memoryHeaps[p_heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0;
+		r_usage = budgets[p_heap].usage;
+		r_budget = budgets[p_heap].budget;
+	});
 }
 
 uint64_t RenderingDeviceDriverVulkan::limit_get(Limit p_limit) {
