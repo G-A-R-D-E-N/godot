@@ -70,6 +70,12 @@ public partial class ShutdownTrackerProbe : Node
                 tree.Quit();
                 return;
             }
+            if (args.Contains("--zombie-binding"))
+            {
+                ZombieBinding.Run();
+                tree.Quit();
+                return;
+            }
             if (!running)
             {
                 BlockFinalizers();

@@ -38,6 +38,7 @@ OWNERSHIP = {
     "throw-finalizer": "--throw-recover-finalizer",
     "reentrant-throw": "--reentrant-throw-finalizer",
     "owner-api": "--owner-prebase-api",
+    "zombie": "--zombie-binding",
 }
 CONTROL = ["throw-shutdown", "throw-finalizer", "owner-api"]
 READY = {
@@ -46,6 +47,7 @@ READY = {
     "throw-shutdown": "READY throw-shutdown disposal failed before base disposal;",
     "throw-finalizer": "READY throw-finalizer disposal failed before base disposal;",
     "reentrant-throw": "READY reentrant-throw disposal failed before base disposal;",
+    "zombie": "READY zombie binding set up:",
 }
 
 
