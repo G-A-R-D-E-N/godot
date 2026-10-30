@@ -8955,7 +8955,7 @@ void RenderingDevice::_save_pipeline_cache(void *p_data) {
 		return;
 	}
 
-	const String temp_path = self->pipeline_cache_file_path + ".tmp";
+	const String temp_path = self->pipeline_cache_file_path + "." + itos(OS::get_singleton()->get_process_id()) + ".tmp";
 	Ref<DirAccess> dir = DirAccess::create_for_path(temp_path);
 	ERR_FAIL_COND(dir.is_null());
 	bool written = false;
@@ -8969,7 +8969,7 @@ void RenderingDevice::_save_pipeline_cache(void *p_data) {
 	}
 	if (!written || dir->rename(temp_path, self->pipeline_cache_file_path) != OK) {
 		dir->remove(temp_path);
-		WARN_PRINT(vformat("Couldn't save the pipeline cache to '%s'. The previous file is kept if the write failed; on Windows it may be lost if the rename failed.", self->pipeline_cache_file_path));
+		WARN_PRINT(vformat("Couldn't save the pipeline cache to '%s'. The previous file is kept.", self->pipeline_cache_file_path));
 		return;
 	}
 	print_verbose(vformat("Updated PSO cache (%.1f MiB)", cache_blob.size() / (1024.0f * 1024.0f)));

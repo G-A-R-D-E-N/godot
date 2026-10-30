@@ -344,6 +344,17 @@ Error DirAccessWindows::rename(String p_path, String p_new_path) {
 		return MoveFileW((LPCWSTR)tmpfile_utf16.get_data(), (LPCWSTR)(new_path.utf16().get_data())) != 0 ? OK : FAILED;
 
 	} else {
+		if (!dir_exists(path)) {
+			const Char16String from = path.utf16();
+			const Char16String to = new_path.utf16();
+			if (MoveFileExW((LPCWSTR)from.get_data(), (LPCWSTR)to.get_data(), MOVEFILE_REPLACE_EXISTING)) {
+				return OK;
+			}
+			if (GetLastError() != ERROR_NOT_SAME_DEVICE) {
+				return FAILED;
+			}
+		}
+
 		if (file_exists(new_path)) {
 			if (remove(new_path) != OK) {
 				return FAILED;
