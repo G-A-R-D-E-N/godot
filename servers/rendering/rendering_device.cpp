@@ -351,6 +351,7 @@ void RenderingDevice::_tlas_remove_blas_dependencies(AccelerationStructure *p_tl
 
 RID RenderingDevice::blas_create(Span<AccelerationStructureGeometry> p_geometries, BitField<AccelerationStructureFlagBits> p_flags) {
 	ERR_FAIL_COND_V_MSG(!has_feature(SUPPORTS_RAYTRACING_PIPELINE) && !has_feature(SUPPORTS_RAY_QUERY), RID(), "The current rendering device has neither raytracing pipeline nor ray query support.");
+	ERR_FAIL_COND_V_MSG(p_flags.has_flag(ACCELERATION_STRUCTURE_RAY_QUERY_ONLY_BIT), RID(), "ACCELERATION_STRUCTURE_RAY_QUERY_ONLY_BIT is only valid for a TLAS.");
 
 	thread_local LocalVector<RDD::AccelerationStructureGeometry> rdd_geometries;
 	rdd_geometries.resize(p_geometries.size());
@@ -373,6 +374,7 @@ RID RenderingDevice::blas_create(Span<AccelerationStructureGeometry> p_geometrie
 		Buffer *vertex_buffer = vertex_buffer_owner.get_or_null(rd_geometry.vertex_buffer);
 		ERR_FAIL_NULL_V(vertex_buffer, RID());
 
+		ERR_FAIL_COND_V_MSG(!vertex_buffer->usage.has_flag(RDD::BUFFER_USAGE_DEVICE_ADDRESS_BIT) || !vertex_buffer->usage.has_flag(RDD::BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT), RID(), "The vertex buffer of geometry " + itos(i) + " must be created with BUFFER_CREATION_DEVICE_ADDRESS_BIT and BUFFER_CREATION_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT to be used in a BLAS.");
 		ERR_FAIL_COND_V_MSG((rd_geometry.vertex_offset + rd_geometry.vertex_count * rd_geometry.vertex_stride) > vertex_buffer->size, RID(), "The specified vertex offset and count are outside the range of the vertex buffer.");
 		ERR_FAIL_COND_V_MSG(rd_geometry.vertex_format >= DataFormat::DATA_FORMAT_MAX, RID(), "An invalid vertex format was specified.");
 
@@ -394,6 +396,7 @@ RID RenderingDevice::blas_create(Span<AccelerationStructureGeometry> p_geometrie
 			IndexBuffer *index_buffer = index_buffer_owner.get_or_null(rd_geometry.index_buffer);
 			ERR_FAIL_NULL_V(index_buffer, RID());
 
+			ERR_FAIL_COND_V_MSG(!index_buffer->usage.has_flag(RDD::BUFFER_USAGE_DEVICE_ADDRESS_BIT) || !index_buffer->usage.has_flag(RDD::BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT), RID(), "The index buffer of geometry " + itos(i) + " must be created with BUFFER_CREATION_DEVICE_ADDRESS_BIT and BUFFER_CREATION_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT to be used in a BLAS.");
 			uint32_t index_stride = (index_buffer->format == INDEX_BUFFER_FORMAT_UINT32 ? sizeof(uint32_t) : sizeof(uint16_t));
 			ERR_FAIL_COND_V_MSG((rd_geometry.index_offset + rd_geometry.index_count * index_stride) > index_buffer->size, RID(), "The specified index offset and count are outside the range of the index buffer.");
 #ifdef DEBUG_ENABLED
@@ -472,10 +475,14 @@ BitField<RDD::BufferUsageBits> RenderingDevice::_creation_to_usage_bits(BitField
 
 RID RenderingDevice::tlas_create(uint32_t p_max_instance_count, BitField<AccelerationStructureFlagBits> p_flags) {
 	ERR_FAIL_COND_V_MSG(!has_feature(SUPPORTS_RAYTRACING_PIPELINE) && !has_feature(SUPPORTS_RAY_QUERY), RID(), "The current rendering device has neither raytracing pipeline nor ray query support.");
+	ERR_FAIL_COND_V_MSG(p_flags.has_flag(ACCELERATION_STRUCTURE_RAY_QUERY_ONLY_BIT) && !has_feature(SUPPORTS_RAY_QUERY), RID(), "ACCELERATION_STRUCTURE_RAY_QUERY_ONLY_BIT needs ray query support.");
 
 	AccelerationStructure acceleration_structure;
 	acceleration_structure.type = RDD::ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
-	acceleration_structure.driver_id = driver->tlas_create(p_max_instance_count, p_flags);
+	acceleration_structure.ray_query_only = p_flags.has_flag(ACCELERATION_STRUCTURE_RAY_QUERY_ONLY_BIT);
+	BitField<AccelerationStructureFlagBits> driver_flags = p_flags;
+	driver_flags.clear_flag(ACCELERATION_STRUCTURE_RAY_QUERY_ONLY_BIT);
+	acceleration_structure.driver_id = driver->tlas_create(p_max_instance_count, driver_flags);
 	ERR_FAIL_COND_V_MSG(!acceleration_structure.driver_id, RID(), "Failed to create TLAS.");
 
 	acceleration_structure.draw_tracker = RDG::resource_tracker_create();
@@ -586,11 +593,11 @@ Error RenderingDevice::tlas_build(RID p_tlas, Span<AccelerationStructureInstance
 		rdd_instance.transform = rd_instance.transform;
 		rdd_instance.id = rd_instance.id;
 		rdd_instance.mask = rd_instance.mask;
-		rdd_instance.hit_sbt_offset = _decode_hit_sbt_range_offset(rd_instance.hit_sbt_range);
+		rdd_instance.hit_sbt_offset = tlas->ray_query_only ? 0 : _decode_hit_sbt_range_offset(rd_instance.hit_sbt_range);
 		rdd_instance.flags = rd_instance.flags;
 
 		if (rd_instance.blas.is_valid()) {
-			ERR_FAIL_COND_V_MSG(!rd_instance.hit_sbt_range, ERR_INVALID_PARAMETER, "Instance " + itos(i) + " has an invalid hit shader binding table range.");
+			ERR_FAIL_COND_V_MSG(!tlas->ray_query_only && !rd_instance.hit_sbt_range, ERR_INVALID_PARAMETER, "Instance " + itos(i) + " has an invalid hit shader binding table range.");
 
 			AccelerationStructure *blas = acceleration_structure_owner.get_or_null(rd_instance.blas);
 			ERR_FAIL_NULL_V(blas, ERR_INVALID_PARAMETER);
@@ -9893,6 +9900,7 @@ void RenderingDevice::_bind_methods() {
 	BIND_BITFIELD_FLAG(ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT);
 	BIND_BITFIELD_FLAG(ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT);
 	BIND_BITFIELD_FLAG(ACCELERATION_STRUCTURE_LOW_MEMORY_BIT);
+	BIND_BITFIELD_FLAG(ACCELERATION_STRUCTURE_RAY_QUERY_ONLY_BIT);
 
 	BIND_BITFIELD_FLAG(ACCELERATION_STRUCTURE_GEOMETRY_OPAQUE_BIT);
 	BIND_BITFIELD_FLAG(ACCELERATION_STRUCTURE_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT);
