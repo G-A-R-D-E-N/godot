@@ -106,7 +106,8 @@ bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool
 	}
 
 	rayQueryEXT tie_query;
-	rayQueryInitializeEXT(tie_query, ray_scene_tlas, gl_RayFlagsCullOpaqueEXT, cull_mask, p_origin, r_hit.t, p_direction, RAY_SCENE_TIE_REACH(r_hit.t, tie_scale));
+	float tie_floor = max(r_hit.t - RAY_SCENE_TIE_ABS(r_hit.t, tie_scale), 0.0);
+	rayQueryInitializeEXT(tie_query, ray_scene_tlas, gl_RayFlagsCullOpaqueEXT, cull_mask, p_origin, tie_floor, p_direction, RAY_SCENE_TIE_REACH(r_hit.t, tie_scale));
 	while (rayQueryProceedEXT(tie_query)) {
 		uint index = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(tie_query, false));
 		if (!exact && RAY_SCENE_CASTER_SKIPS(ray_scene_instances.data[index].layer_mask, p_caster_mask)) {
