@@ -46,6 +46,7 @@ bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool
 	}
 
 	uint seed = RAY_SCENE_COVERAGE_SEED(p_seed);
+	float tie_scale = RAY_SCENE_TIE_SCALE(p_origin);
 	uint skip_mask = RAY_SCENE_SKIP_MASK(p_any, p_skip);
 	uint cull_mask = ray_scene_hw_cull_mask(p_caster_mask);
 	bool exact = cull_mask != RAY_SCENE_HW_ALL_GROUPS;
@@ -79,7 +80,7 @@ bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool
 			r_hit.instance = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(query, true));
 			r_hit.blend = ray_scene_hw_blend(r_hit.instance, ray_scene_hw_triangle(r_hit.instance, uint(rayQueryGetIntersectionGeometryIndexEXT(query, true)), uint(rayQueryGetIntersectionPrimitiveIndexEXT(query, true))));
 		}
-		RAY_SCENE_TIE_LIMIT(limit, r_hit, blend);
+		RAY_SCENE_TIE_LIMIT(limit, r_hit, blend, tie_scale);
 		if (rayQueryGetIntersectionTEXT(query, false) >= limit) {
 			continue;
 		}
@@ -105,7 +106,7 @@ bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool
 	}
 
 	rayQueryEXT tie_query;
-	rayQueryInitializeEXT(tie_query, ray_scene_tlas, gl_RayFlagsCullOpaqueEXT, cull_mask, p_origin, r_hit.t, p_direction, RAY_SCENE_TIE_REACH(r_hit.t));
+	rayQueryInitializeEXT(tie_query, ray_scene_tlas, gl_RayFlagsCullOpaqueEXT, cull_mask, p_origin, r_hit.t, p_direction, RAY_SCENE_TIE_REACH(r_hit.t, tie_scale));
 	while (rayQueryProceedEXT(tie_query)) {
 		uint index = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(tie_query, false));
 		if (!exact && RAY_SCENE_CASTER_SKIPS(ray_scene_instances.data[index].layer_mask, p_caster_mask)) {
