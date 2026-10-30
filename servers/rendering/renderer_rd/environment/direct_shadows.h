@@ -130,6 +130,7 @@ private:
 	RID counter_buffer;
 	RID debug_unused;
 	LocalVector<DirectLightTable::GpuSlot> lamp_data;
+	LocalVector<float> lamp_dump;
 	String served_request;
 	uint64_t size_frame = 0;
 	Size2i largest_size;

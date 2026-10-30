@@ -148,6 +148,21 @@ void DirectLightTable::write_slots(LocalVector<GpuSlot> &r_slots) const {
 	}
 }
 
+void DirectLightTable::write_lamps(LocalVector<float> &r_values) const {
+	r_values.resize(next_slot * LAMP_VALUES);
+	for (uint32_t i = 0; i < r_values.size(); i++) {
+		r_values[i] = 0.0f;
+	}
+	for (const KeyValue<RID, Record> &entry : records) {
+		const Record &record = entry.value;
+		const uint32_t at = record.slot * LAMP_VALUES;
+		r_values[at + 0] = float(record.lamp.position.x);
+		r_values[at + 1] = float(record.lamp.position.y);
+		r_values[at + 2] = float(record.lamp.position.z);
+		r_values[at + 3] = record.lamp.size;
+	}
+}
+
 void DirectLightTable::clear() {
 	if (next_slot > 1 || frame != 0) {
 		generation++;

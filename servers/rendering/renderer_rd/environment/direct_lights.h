@@ -45,6 +45,7 @@ public:
 	static constexpr uint64_t DYNAMIC_FRAMES = 30;
 	static constexpr float MIN_RESET_DISTANCE = 0.5f;
 	static constexpr float RESET_RANGE_FRACTION = 0.1f;
+	static constexpr uint32_t LAMP_VALUES = 4;
 
 	struct Setting {
 		bool owned = true;
@@ -85,6 +86,7 @@ public:
 	State get_state(RID p_light) const;
 	uint32_t slots_in_use() const;
 	void write_slots(LocalVector<GpuSlot> &r_slots) const;
+	void write_lamps(LocalVector<float> &r_values) const;
 	uint64_t get_generation() const { return generation; }
 	void clear();
 

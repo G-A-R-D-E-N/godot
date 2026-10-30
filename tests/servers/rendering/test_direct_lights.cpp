@@ -108,6 +108,24 @@ TEST_CASE("[DirectLights] Slots written for the GPU follow the table") {
 	CHECK(slots[slot].caster_mask == 0u);
 }
 
+TEST_CASE("[DirectLights] Lamp values written for a dump follow the slots") {
+	DirectLightTable table;
+	LocalVector<float> values;
+	table.write_lamps(values);
+	CHECK(values.size() == DirectLightTable::LAMP_VALUES);
+
+	table.begin_frame(1);
+	table.observe(light_id(1), lamp_at(Vector3(9, 9, 9)));
+	const uint32_t slot = table.observe(light_id(2), lamp_at(Vector3(1, 2, 3)));
+	table.write_lamps(values);
+	REQUIRE(values.size() == (slot + 1) * DirectLightTable::LAMP_VALUES);
+	CHECK(values[slot * 4 + 0] == 1.0f);
+	CHECK(values[slot * 4 + 1] == 2.0f);
+	CHECK(values[slot * 4 + 2] == 3.0f);
+	CHECK(values[slot * 4 + 3] == 0.1f);
+	CHECK(values[0] == 0.0f);
+}
+
 TEST_CASE("[DirectLights] Clearing a used table changes its generation once") {
 	DirectLightTable table;
 	const uint64_t empty = table.get_generation();

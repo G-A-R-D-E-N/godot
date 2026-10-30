@@ -200,6 +200,9 @@ void DirectShadows::process(const FrameInput &p_input, const DirectLightTable &p
 	}
 
 	p_table.write_slots(lamp_data);
+	if (!String(GLOBAL_GET("rendering/global_illumination/direct/dump_request")).is_empty()) {
+		p_table.write_lamps(lamp_dump);
+	}
 	const uint32_t lamp_bytes = lamp_data.size() * sizeof(DirectLightTable::GpuSlot);
 	if (lamp_bytes > lamp_buffer_capacity) {
 		if (lamp_buffer.is_valid()) {
@@ -334,6 +337,14 @@ void DirectShadows::serve_dump_request(const Ref<RenderSceneBuffersRD> &p_render
 		}
 		files[texture.file] = path.get_file();
 	}
+	const String lamps_path = request + ".lamps.bin";
+	Ref<FileAccess> lamps_file = FileAccess::open(lamps_path, FileAccess::WRITE);
+	ok = ok && lamps_file.is_valid();
+	if (lamps_file.is_valid() && !lamp_dump.is_empty()) {
+		ok = lamps_file->store_buffer(reinterpret_cast<const uint8_t *>(lamp_dump.ptr()), lamp_dump.size() * sizeof(float)) && ok;
+	}
+	lamps_file.unref();
+	files["lamps"] = lamps_path.get_file();
 	const Vector<uint8_t> counters = rd->buffer_get_data(counter_buffer);
 	ok = ok && counters.size() >= int(COUNTER_BYTES);
 
@@ -344,6 +355,9 @@ void DirectShadows::serve_dump_request(const Ref<RenderSceneBuffersRD> &p_render
 	report["entries"] = viewport->entries;
 	report["frame"] = viewport->last_frame;
 	report["files"] = files;
+	report["lamp_slots"] = lamp_dump.size() / DirectLightTable::LAMP_VALUES;
+	RayScene *ray_scene = RayScene::get_singleton();
+	report["hardware"] = ray_scene && ray_scene->uses_hardware();
 	if (ok) {
 		const uint32_t *values = reinterpret_cast<const uint32_t *>(counters.ptr());
 		report["lit_pixels"] = values[0];

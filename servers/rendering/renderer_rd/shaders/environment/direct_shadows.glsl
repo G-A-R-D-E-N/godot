@@ -148,6 +148,10 @@ float surface_response(vec3 p_to_light, vec3 p_normal, vec3 p_view, float p_roug
 	return n_dot_l * (1.0 / PI + d * g * f * p_specular);
 }
 
+vec3 rest_sample(uint p_pick, float p_visible) {
+	return p_visible * (rest_pick_target[p_pick] / max(rest_target, vec3(1e-30))) * (rest_total / rest_weight[p_pick]);
+}
+
 void add_rest(uint p_slot, float p_weight, vec3 p_position, vec3 p_target) {
 	rest_total += p_weight;
 	rest_target += p_target;
@@ -374,7 +378,7 @@ void main() {
 		if (has_rest) {
 			for (uint r = 0u; r < REFERENCE_RAYS; r++) {
 				float visible = lamp_ray(vertex, anchored, normal, rest_position[r], rest_slot[r], random_value(), random_value(), rng_state) ? 1.0 : 0.0;
-				rest_accum.rgb += visible * rest_pick_target[r] * rest_total / (rest_weight[r] * max(rest_target, vec3(1e-6)));
+				rest_accum.rgb += rest_sample(r, visible);
 				rest_accum.a += 1.0;
 				traced_rays++;
 			}
@@ -419,7 +423,7 @@ void main() {
 				accum[chosen].y += 1.0;
 			} else {
 				float visible = lamp_ray(vertex, anchored, normal, rest_position[0], rest_slot[0], random_value(), random_value(), rng_state) ? 1.0 : 0.0;
-				rest_accum.rgb += visible * rest_pick_target[0] * rest_total / (rest_weight[0] * max(rest_target, vec3(1e-6)));
+				rest_accum.rgb += rest_sample(0u, visible);
 				rest_accum.a += 1.0;
 			}
 			traced_rays++;
@@ -457,7 +461,7 @@ void main() {
 			for (uint i = 0u; i < own_count; i++) {
 				total_target += own[i].target;
 			}
-			color = clamp((shown + rest_target * rest_mean) / max(total_target, vec3(1e-6)), vec3(0.0), vec3(1.0));
+			color = clamp((shown + rest_target * rest_mean) / max(total_target, vec3(1e-30)), vec3(0.0), vec3(1.0));
 		} else if (params.debug_view == 3u) {
 			color = slot_color(own[0].slot);
 		} else if (params.debug_view == 4u) {
