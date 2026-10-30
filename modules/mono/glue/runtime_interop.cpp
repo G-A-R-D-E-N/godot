@@ -181,13 +181,26 @@ void godotsharp_internal_refcounted_disposed(Object *p_ptr, GCHandleIntPtr p_gch
 				bool delete_owner;
 				bool remove_script_instance;
 
+				// Must leave the resource cache before the guard: a lookup that finds this object during the finalizer's work would get a wrapper that is going away.
+				if (p_is_finalizer) {
+					cs_instance->mono_object_finalizing();
+				}
+
+				// Must hold two references through the finalizer's work: another thread can drop its own at any moment, and that release must never see a count of 1 while a new wrapper ties.
+				bool guarded = p_is_finalizer && rc->reference() && rc->reference();
+
 				cs_instance->mono_object_disposed_baseref(p_gchandle_to_free, p_is_finalizer,
 						delete_owner, remove_script_instance);
 
+				if (remove_script_instance) {
+					rc->set_script_instance(nullptr);
+				}
+				if (guarded) {
+					rc->unreference();
+					delete_owner = rc->unreference();
+				}
 				if (delete_owner) {
 					memdelete(rc);
-				} else if (remove_script_instance) {
-					rc->set_script_instance(nullptr);
 				}
 			}
 			return;

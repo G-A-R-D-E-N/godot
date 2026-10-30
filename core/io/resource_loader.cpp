@@ -559,7 +559,8 @@ void ResourceLoader::_run_load_task(void *p_userdata) {
 			if (was_finished) {
 				// If another thread already finished the entire load wait for it to complete
 				// cache registration, then use their instance.
-				while (!old_res.is_valid()) {
+				// Must not wait forever: their instance can leave the cache again, and nothing would register it a second time.
+				for (int i = 0; i < 100 && old_res.is_null(); i++) {
 					ResourceCache::lock.unlock();
 					OS::get_singleton()->delay_usec(1000);
 					ResourceCache::lock.lock();
