@@ -76,6 +76,12 @@ public partial class ShutdownTrackerProbe : Node
                 tree.Quit();
                 return;
             }
+            if (args.Contains("--zombie-rewrap"))
+            {
+                ZombieBinding.RunRewrap();
+                tree.Quit();
+                return;
+            }
             if (!running)
             {
                 BlockFinalizers();
