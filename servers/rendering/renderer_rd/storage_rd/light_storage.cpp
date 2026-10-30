@@ -350,6 +350,15 @@ void LightStorage::light_set_shadow_caster_mask(RID p_light, uint32_t p_caster_m
 	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
 }
 
+void LightStorage::light_set_direct_shadow(RID p_light, bool p_owned, float p_movement, float p_size) {
+	Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL(light);
+
+	light->direct.owned = p_owned;
+	light->direct.movement = MAX(p_movement, 0.0f);
+	light->direct.size = p_size;
+}
+
 uint32_t LightStorage::light_get_shadow_caster_mask(RID p_light) const {
 	Light *light = light_owner.get_or_null(p_light);
 	ERR_FAIL_NULL_V(light, 0);
@@ -1155,6 +1164,14 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 
 	bool using_forward_ids = forward_id_storage->uses_forward_ids();
 
+	const bool direct_lights_enabled = !using_forward_ids && GLOBAL_GET_CACHED(bool, "rendering/global_illumination/direct/enabled");
+	const bool track_direct_lights = direct_lights_enabled && p_render_data->reflection_probe.is_null();
+	if (!direct_lights_enabled) {
+		direct_lights.clear();
+	} else if (track_direct_lights) {
+		direct_lights.begin_frame(RSG::rasterizer->get_frame_number());
+	}
+
 	for (uint32_t i = 0; i < (omni_light_count + spot_light_count + area_light_count); i++) {
 		uint32_t index;
 		LightData *light_data_ptr;
@@ -1277,6 +1294,18 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 			}
 		}
 		light_data.mask = light->cull_mask;
+
+		light_data.flags = 0;
+		if (track_direct_lights && DirectLightTable::owns(light->direct.owned, type == RSE::LIGHT_AREA, light->cull_mask, energy, light->projector.is_valid())) {
+			DirectLightTable::Lamp lamp;
+			lamp.position = light_transform.origin;
+			lamp.range = radius;
+			lamp.movement = light->direct.movement;
+			lamp.size = light->direct.resolved_size(size);
+			lamp.caster_mask = light->shadow_caster_mask;
+			lamp.type = type;
+			light_data.flags = DirectLightTable::pack_flags(direct_lights.observe(light_instance->self, lamp), shadow_opacity_fade);
+		}
 
 		light_data.sscs_index = 0xffffffff;
 		for (uint32_t j = 0; j < p_render_data->local_contact_shadows.size(); j++) {

@@ -2306,6 +2306,16 @@
 				Sets the cull mask for this 3D light. Lights only affect objects in the selected layers. Equivalent to [member Light3D.light_cull_mask].
 			</description>
 		</method>
+		<method name="light_set_direct_shadow">
+			<return type="void" />
+			<param index="0" name="light" type="RID" />
+			<param index="1" name="owned" type="bool" />
+			<param index="2" name="movement" type="float" />
+			<param index="3" name="size" type="float" />
+			<description>
+				Sets how the ray-traced direct shadows enabled by [member ProjectSettings.rendering/global_illumination/direct/enabled] treat this 3D omni or spot light. [param owned] is [code]false[/code] for a light they should leave out. [param movement] is how far, in meters on each axis, the light flickers around its position; a move within that range is not treated as the light having been moved elsewhere. [param size] is the radius of the light source that shadow rays aim at, in meters; a negative value uses [constant LIGHT_PARAM_SIZE]. A light with no call to this method is owned, with a [param movement] of [code]0.0[/code] and a negative [param size].
+			</description>
+		</method>
 		<method name="light_set_distance_fade" keywords="light_set_lod">
 			<return type="void" />
 			<param index="0" name="decal" type="RID" />

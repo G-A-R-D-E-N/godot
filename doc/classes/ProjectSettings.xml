@@ -3229,6 +3229,9 @@
 		<member name="rendering/global_illumination/ddgi/view_bias" type="float" setter="" getter="" default="0.25">
 			Offset of the sample point towards the camera, in units of probe spacing, to reduce light leaking and self-shadowing.
 		</member>
+		<member name="rendering/global_illumination/direct/enabled" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], prepares for ray-traced direct shadows of local lights in the Forward+ renderer: omni and spot lights get stable slots and change events (see [method RenderingServer.light_set_direct_shadow]), and the depth pre-pass writes normal and roughness. Nothing shades with them yet, so lighting does not change.
+		</member>
 		<member name="rendering/global_illumination/gi/use_half_resolution" type="bool" setter="" getter="" default="false" keywords="size">
 			If [code]true[/code], renders [VoxelGI] and SDFGI ([member Environment.sdfgi_enabled]) buffers at halved resolution (e.g. 960×540 when the viewport size is 1920×1080). This improves performance significantly when VoxelGI or SDFGI is enabled, at the cost of artifacts that may be visible on polygon edges. The loss in quality becomes less noticeable as the viewport resolution increases. [LightmapGI] rendering is not affected by this setting.
 			[b]Note:[/b] This property is only read when the project starts. To set half-resolution GI at run-time, call [method RenderingServer.gi_set_use_half_resolution] instead.

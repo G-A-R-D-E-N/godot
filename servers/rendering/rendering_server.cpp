@@ -2539,6 +2539,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("light_set_distance_fade", "decal", "enabled", "begin", "shadow", "length"), &RenderingServer::light_set_distance_fade);
 	ClassDB::bind_method(D_METHOD("light_set_reverse_cull_face_mode", "light", "enabled"), &RenderingServer::light_set_reverse_cull_face_mode);
 	ClassDB::bind_method(D_METHOD("light_set_shadow_caster_mask", "light", "mask"), &RenderingServer::light_set_shadow_caster_mask);
+	ClassDB::bind_method(D_METHOD("light_set_direct_shadow", "light", "owned", "movement", "size"), &RenderingServer::light_set_direct_shadow);
 	ClassDB::bind_method(D_METHOD("light_set_bake_mode", "light", "bake_mode"), &RenderingServer::light_set_bake_mode);
 	ClassDB::bind_method(D_METHOD("light_set_max_sdfgi_cascade", "light", "cascade"), &RenderingServer::light_set_max_sdfgi_cascade);
 	ClassDB::bind_method(D_METHOD("light_set_allow_contact_shadows", "light", "enable"), &RenderingServer::light_set_allow_contact_shadows);
@@ -3921,6 +3922,8 @@ void RenderingServer::init() {
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/backend", PROPERTY_HINT_ENUM, "Software,Hardware,Auto"), 0);
 	GLOBAL_DEF("rendering/global_illumination/ray_scene/skip_additive_surfaces", true);
+
+	GLOBAL_DEF("rendering/global_illumination/direct/enabled", false);
 
 	GLOBAL_DEF("rendering/global_illumination/surfels/enabled", false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/surfels/capacity", PROPERTY_HINT_RANGE, "4096,1048576,1"), 131072);

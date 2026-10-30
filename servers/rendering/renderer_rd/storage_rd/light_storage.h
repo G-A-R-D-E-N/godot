@@ -33,6 +33,7 @@
 #include "core/templates/paged_array.h"
 #include "core/templates/rid_owner.h"
 #include "servers/rendering/renderer_rd/cluster_builder_rd.h"
+#include "servers/rendering/renderer_rd/environment/direct_lights.h"
 #include "servers/rendering/renderer_rd/environment/sky.h"
 #include "servers/rendering/renderer_rd/storage_rd/forward_id_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_scene_buffers_rd.h"
@@ -97,6 +98,7 @@ private:
 		PackedVector2Array far_shadow_origins;
 		float far_shadow_texel = 0.5;
 		Vector3 far_shadow_direction = Vector3(0, 1, 0);
+		DirectLightTable::Setting direct;
 
 		Dependency dependency;
 	};
@@ -170,7 +172,7 @@ private:
 		float shadow_opacity;
 
 		uint32_t sscs_index;
-		float pad;
+		uint32_t flags;
 		float atlas_rect[4]; // in omni, used for atlas uv, in spot, used for projector uv
 		float shadow_matrix[16];
 		float shadow_bias;
@@ -197,6 +199,7 @@ private:
 	uint32_t omni_light_count = 0;
 	uint32_t spot_light_count = 0;
 	uint32_t area_light_count = 0;
+	DirectLightTable direct_lights;
 	LightData *omni_lights = nullptr;
 	LightData *spot_lights = nullptr;
 	LightData *area_lights = nullptr;
@@ -571,6 +574,7 @@ public:
 	virtual void light_set_reverse_cull_face_mode(RID p_light, bool p_enabled) override;
 	virtual void light_set_shadow_caster_mask(RID p_light, uint32_t p_caster_mask) override;
 	virtual uint32_t light_get_shadow_caster_mask(RID p_light) const override;
+	virtual void light_set_direct_shadow(RID p_light, bool p_owned, float p_movement, float p_size) override;
 	virtual void light_set_bake_mode(RID p_light, RSE::LightBakeMode p_bake_mode) override;
 	virtual void light_set_max_sdfgi_cascade(RID p_light, uint32_t p_cascade) override;
 	virtual void light_set_allow_contact_shadows(RID p_light, bool p_enable) override;
