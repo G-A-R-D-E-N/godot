@@ -36,7 +36,7 @@ internal static class ZombieBinding
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (WeakReference Short, WeakReference Long, IntPtr Native) Prepare()
+    private static (WeakReference Short, WeakReference Long, IntPtr Native, ulong Id) Prepare()
     {
         var mesh = new BoxMesh();
         Check(ResourceSaver.Save(mesh, MeshPath) == Error.Ok, "The mesh was not saved.");
@@ -48,7 +48,7 @@ internal static class ZombieBinding
             Check(ResourceSaver.Save(packed, ScenePath) == Error.Ok, "The scene was not saved.");
         }
         node.Free();
-        return (new WeakReference(mesh, false), new WeakReference(mesh, true), mesh.NativeInstance);
+        return (new WeakReference(mesh, false), new WeakReference(mesh, true), mesh.NativeInstance, mesh.GetInstanceId());
     }
 
     internal static void Run()
@@ -58,7 +58,7 @@ internal static class ZombieBinding
             BlockFinalizers();
             GC.Collect();
             Check(Entered.Wait(TimeSpan.FromSeconds(5)), "The finalizer gate did not start.");
-            var (weak, pending, native) = Prepare();
+            var (weak, pending, native, id) = Prepare();
             GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, true, true);
             Check(!weak.IsAlive && pending.IsAlive, "Expected a cleared short reference and a pending mesh wrapper.");
             Check(AssociatedHandle(native) != IntPtr.Zero, "Expected the mesh binding to keep its weak handle before the reload.");
@@ -71,6 +71,7 @@ internal static class ZombieBinding
             GC.WaitForPendingFinalizers();
             GD.Print("READY zombie binding set up: the scene reload referenced a mesh whose wrapper was collected.");
             scene!.Dispose();
+            Check(!GodotObject.IsInstanceIdValid(id), "Expected the scene to free the mesh.");
             GD.Print("PASS zombie: the scene released the last reference to that mesh.");
         }
         finally
