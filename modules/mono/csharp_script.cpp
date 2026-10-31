@@ -1326,8 +1326,10 @@ void CSharpLanguage::_instance_binding_free_callback(void *, void *, void *p_bin
 		if (script_binding.inited.is_set()) {
 			// Set the native instance field to IntPtr.Zero, if not yet garbage collected.
 			// This is done to avoid trying to dispose the native instance from Dispose(bool).
-			GDMonoCache::managed_callbacks.ScriptManagerBridge_SetGodotObjectPtr(
-					script_binding.gchandle.get_intptr(), nullptr);
+			if (!script_binding.gchandle.is_released()) {
+				GDMonoCache::managed_callbacks.ScriptManagerBridge_SetGodotObjectPtr(
+						script_binding.gchandle.get_intptr(), nullptr);
+			}
 
 			script_binding.gchandle.release();
 			script_binding.inited.clear();
@@ -1398,6 +1400,7 @@ GDExtensionBool CSharpLanguage::_instance_binding_reference_callback(void *p_tok
 					old_gchandle, &new_gchandle, create_weak);
 
 			if (!target_alive) {
+				script_binding.inited.clear();
 				return false; // Called after the managed side was collected, so nothing to do here
 			}
 
@@ -1422,6 +1425,7 @@ GDExtensionBool CSharpLanguage::_instance_binding_reference_callback(void *p_tok
 					old_gchandle, &new_gchandle, create_weak);
 
 			if (!target_alive) {
+				script_binding.inited.clear();
 				return refcount == 0; // Called after the managed side was collected, so nothing to do here
 			}
 

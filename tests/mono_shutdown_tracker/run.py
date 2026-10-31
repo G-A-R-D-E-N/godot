@@ -20,6 +20,11 @@ GODOT_PACKAGES = ["godot.net.sdk", "godotsharp", "godot.sourcegenerators", "godo
 # fifteen-second gates that print a FAIL of their own when they expire, so the short budget
 # only backstops them.
 GATED_CASE_ELAPSED_LIMIT = 15
+GATED_CASE_TIMEOUT = 40
+LONG_GATE_CASES = {"zombie", "zombie-rewrap"}
+# Must exceed the sixty-second gates in ZombieBinding.cs.
+LONG_GATE_ELAPSED_LIMIT = 75
+LONG_GATE_TIMEOUT = 90
 STRESS_CASE = "race"
 STRESS_CASE_ELAPSED_LIMIT = 300
 STRESS_CASE_TIMEOUT = 360
@@ -38,6 +43,8 @@ OWNERSHIP = {
     "throw-finalizer": "--throw-recover-finalizer",
     "reentrant-throw": "--reentrant-throw-finalizer",
     "owner-api": "--owner-prebase-api",
+    "zombie": "--zombie-binding",
+    "zombie-rewrap": "--zombie-rewrap",
 }
 CONTROL = ["throw-shutdown", "throw-finalizer", "owner-api"]
 READY = {
@@ -46,6 +53,8 @@ READY = {
     "throw-shutdown": "READY throw-shutdown disposal failed before base disposal;",
     "throw-finalizer": "READY throw-finalizer disposal failed before base disposal;",
     "reentrant-throw": "READY reentrant-throw disposal failed before base disposal;",
+    "zombie": "READY zombie binding set up:",
+    "zombie-rewrap": "READY zombie rewrap set up:",
 }
 
 
@@ -137,7 +146,15 @@ def cases(version):
 
 
 def case_elapsed_limit(case):
+    if case in LONG_GATE_CASES:
+        return LONG_GATE_ELAPSED_LIMIT
     return STRESS_CASE_ELAPSED_LIMIT if case == STRESS_CASE else GATED_CASE_ELAPSED_LIMIT
+
+
+def case_timeout(case):
+    if case in LONG_GATE_CASES:
+        return LONG_GATE_TIMEOUT
+    return STRESS_CASE_TIMEOUT if case == STRESS_CASE else GATED_CASE_TIMEOUT
 
 
 def judge(version, case, result, elapsed, output, engine):
@@ -256,7 +273,7 @@ def main():
                 [str(engine), "--headless", "--verbose", "--path", str(project), "--", *user_args],
                 capture_output=True,
                 text=True,
-                timeout=STRESS_CASE_TIMEOUT if case == STRESS_CASE else 40,
+                timeout=case_timeout(case),
                 creationflags=flags,
             )
             elapsed = time.monotonic() - started
