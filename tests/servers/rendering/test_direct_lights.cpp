@@ -256,6 +256,23 @@ TEST_CASE("[DirectLights] A lamp that comes on gets a hard reset, and one that g
 	CHECK(table.get_state(light_id(1)).hard_reset);
 }
 
+TEST_CASE("[DirectLights] Counters count hard resets of a running lamp and frames it stays dynamic") {
+	DirectLightTable table;
+	table.begin_frame(1);
+	table.observe(light_id(1), lamp_at(Vector3()));
+	CHECK(table.get_hard_resets() == 0);
+	CHECK(table.get_dynamic_lamp_frames() == 0);
+
+	table.begin_frame(2);
+	table.observe(light_id(1), lamp_at(Vector3(0.1f, 0, 0)));
+	CHECK(table.get_hard_resets() == 0);
+
+	table.begin_frame(3);
+	CHECK(table.get_dynamic_lamp_frames() == 1);
+	table.observe(light_id(1), lamp_at(Vector3(5.0f, 0, 0)));
+	CHECK(table.get_hard_resets() == 1);
+}
+
 TEST_CASE("[DirectLights] 10,000 frames at the flicker cap give no hard reset") {
 	DirectLightTable table;
 	const float m = 0.3f;

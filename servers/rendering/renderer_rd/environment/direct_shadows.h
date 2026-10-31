@@ -183,6 +183,8 @@ private:
 	RID debug_unused;
 	LocalVector<DirectLightTable::GpuSlot> lamp_data;
 	LocalVector<float> lamp_dump;
+	uint64_t dump_hard_resets = 0;
+	uint64_t dump_dynamic_lamp_frames = 0;
 	String served_request;
 	uint64_t moved_signature = 0;
 	Vector3 moved_anchor;

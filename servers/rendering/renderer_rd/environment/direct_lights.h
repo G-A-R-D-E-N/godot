@@ -90,6 +90,8 @@ public:
 	void write_slots(LocalVector<GpuSlot> &r_slots) const;
 	void write_lamps(LocalVector<float> &r_values) const;
 	uint64_t get_generation() const { return generation; }
+	uint64_t get_hard_resets() const { return hard_resets; }
+	uint64_t get_dynamic_lamp_frames() const { return dynamic_lamp_frames; }
 	void clear();
 
 private:
@@ -115,6 +117,8 @@ private:
 	uint32_t next_slot = 1;
 	uint64_t frame = 0;
 	uint64_t generation = 0;
+	uint64_t hard_resets = 0;
+	uint64_t dynamic_lamp_frames = 0;
 };
 
 } // namespace RendererRD

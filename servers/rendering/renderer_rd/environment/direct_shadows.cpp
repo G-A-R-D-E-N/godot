@@ -244,6 +244,8 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	p_table.write_slots(lamp_data);
 	if (!String(GLOBAL_GET("rendering/global_illumination/direct/dump_request")).is_empty()) {
 		p_table.write_lamps(lamp_dump);
+		dump_hard_resets = p_table.get_hard_resets();
+		dump_dynamic_lamp_frames = p_table.get_dynamic_lamp_frames();
 	}
 	const uint32_t lamp_bytes = lamp_data.size() * sizeof(DirectLightTable::GpuSlot);
 	if (lamp_bytes > lamp_buffer_capacity) {
@@ -488,6 +490,8 @@ void DirectShadows::serve_dump_request(const Ref<RenderSceneBuffersRD> &p_render
 	report["precise"] = viewport->precise;
 	report["files"] = files;
 	report["lamp_slots"] = lamp_dump.size() / DirectLightTable::LAMP_VALUES;
+	report["hard_resets"] = dump_hard_resets;
+	report["dynamic_lamp_frames"] = dump_dynamic_lamp_frames;
 	RayScene *ray_scene = RayScene::get_singleton();
 	report["hardware"] = ray_scene && ray_scene->uses_hardware();
 	if (ok) {

@@ -58,6 +58,8 @@ void DirectLightTable::begin_frame(uint64_t p_frame) {
 	for (const KeyValue<RID, Record> &entry : records) {
 		if (entry.value.last_seen != frame) {
 			gone.push_back(entry.key);
+		} else if (frame < entry.value.dynamic_until) {
+			dynamic_lamp_frames++;
 		}
 	}
 	for (const RID &id : gone) {
@@ -113,6 +115,7 @@ uint32_t DirectLightTable::observe(RID p_light, const Lamp &p_lamp) {
 	if (record->lamp.caster_mask != p_lamp.caster_mask || record->lamp.size != p_lamp.size || record->lamp.type != p_lamp.type || record->reset_position.distance_to(p_lamp.position) > reset_distance(p_lamp.range, p_lamp.movement)) {
 		record->reset_frame = frame;
 		record->reset_position = p_lamp.position;
+		hard_resets++;
 	}
 	record->lamp = p_lamp;
 	return record->slot;
