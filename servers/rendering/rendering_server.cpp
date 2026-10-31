@@ -3928,7 +3928,13 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/rays_per_pixel", PROPERTY_HINT_RANGE, "1,2,1"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/direct/ray_bias", PROPERTY_HINT_RANGE, "0,0.2,0.001"), 0.02);
 	GLOBAL_DEF("rendering/global_illumination/direct/reference", false);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/debug_view", PROPERTY_HINT_ENUM, "Off,First Entry,All Lamps,First Slot,Lamp Count,Samples"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/debug_view", PROPERTY_HINT_ENUM, "Off,First Entry,All Lamps,First Slot,Lamp Count,Samples,Filtered First Entry"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/estimator", PROPERTY_HINT_ENUM, "Plain,Ratio"), 1);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/history_cap", PROPERTY_HINT_RANGE, "0,256,1"), 32);
+	GLOBAL_DEF("rendering/global_illumination/direct/filter", true);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/direct/filter_kernel_scale", PROPERTY_HINT_RANGE, "0,4,0.01"), 1.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/direct/clamp_sigmas", PROPERTY_HINT_RANGE, "0,8,0.1"), 3.0);
+	GLOBAL_DEF("rendering/global_illumination/direct/force_factor_one", false);
 	GLOBAL_DEF(PropertyInfo(Variant::STRING, "rendering/global_illumination/direct/dump_request", PROPERTY_HINT_GLOBAL_SAVE_FILE, "*.json"), "");
 
 	GLOBAL_DEF("rendering/global_illumination/surfels/enabled", false);

@@ -3229,14 +3229,32 @@
 		<member name="rendering/global_illumination/ddgi/view_bias" type="float" setter="" getter="" default="0.25">
 			Offset of the sample point towards the camera, in units of probe spacing, to reduce light leaking and self-shadowing.
 		</member>
+		<member name="rendering/global_illumination/direct/clamp_sigmas" type="float" setter="" getter="" default="3.0">
+			How far, in standard deviations of the rays nearby, a lamp's history may stay from those rays before it is pulled back, while that lamp or something in its range has moved recently. [code]0[/code] turns the clamp off.
+		</member>
 		<member name="rendering/global_illumination/direct/enabled" type="bool" setter="" getter="" default="false">
-			If [code]true[/code], traces ray-traced direct shadows of local lights in the Forward+ renderer: omni and spot lights get stable slots and change events (see [method RenderingServer.light_set_direct_shadow]), the depth pre-pass writes normal and roughness, and each pixel gets shadow factors. It needs [member rendering/global_illumination/ddgi/enabled] and does nothing while that is off. Nothing shades with the factors yet, so lighting does not change.
+			If [code]true[/code], traces ray-traced direct shadows of local lights in the Forward+ renderer: omni and spot lights get stable slots and change events (see [method RenderingServer.light_set_direct_shadow]), the depth pre-pass writes normal and roughness, and each pixel gets shadow factors. It needs [member rendering/global_illumination/ddgi/enabled] and does nothing while that is off. Owned lights with a ray entry use it in place of their shadow map and contact shadow in the opaque pass; transparent objects keep the shadow map.
 		</member>
 		<member name="rendering/global_illumination/direct/debug_view" type="int" setter="" getter="" default="0">
-			Shows the raw ray-traced direct shadow factors in place of the image. [code]1[/code] is the brightest lamp's factor, [code]2[/code] is the light kept over the light before shadows, [code]3[/code] colors each pixel by its brightest lamp, [code]4[/code] is the number of lamps reaching the pixel, and [code]5[/code] is the brightest lamp's sample count.
+			Shows the raw ray-traced direct shadow factors in place of the image. [code]1[/code] is the brightest lamp's factor, [code]2[/code] is the light kept over the light before shadows, [code]3[/code] colors each pixel by its brightest lamp, [code]4[/code] is the number of lamps reaching the pixel, [code]5[/code] is the brightest lamp's sample count, and [code]6[/code] is the brightest lamp's filtered factor.
 		</member>
 		<member name="rendering/global_illumination/direct/dump_request" type="String" setter="" getter="" default="&quot;&quot;">
 			If not empty, the next frame that has shadow factors writes them to raw files next to this path, a JSON summary at this path, and a [code].done[/code] file after it. Each new path is served once.
+		</member>
+		<member name="rendering/global_illumination/direct/estimator" type="int" setter="" getter="" default="1">
+			How a lamp's rays add up to its shadow factor. Ratio weights each ray by the inverse of the share it was traced under. Plain counts each ray once, and keeps a known pull toward the middle where the share follows the factor.
+		</member>
+		<member name="rendering/global_illumination/direct/filter" type="bool" setter="" getter="" default="true">
+			Runs the neighbourhood clamp and the spatial filter over the shadow factors. Off, the opaque pass reads the temporal factors as they are. Always off in the reference mode and with a history cap of [code]0[/code].
+		</member>
+		<member name="rendering/global_illumination/direct/filter_kernel_scale" type="float" setter="" getter="" default="1.0">
+			Scales the spatial filter's width against a lamp's size over the pixel's footprint.
+		</member>
+		<member name="rendering/global_illumination/direct/force_factor_one" type="bool" setter="" getter="" default="false">
+			Debug: writes every shadow factor as [code]1[/code], so owned lamps with a matching entry shade as unshadowed.
+		</member>
+		<member name="rendering/global_illumination/direct/history_cap" type="int" setter="" getter="" default="32">
+			Samples kept in a lamp's history per pixel, cut to [code]4[/code] while the lamp is dynamic. [code]0[/code] keeps every sample and uses the larger history format, for long-run measurements.
 		</member>
 		<member name="rendering/global_illumination/direct/entries" type="int" setter="" getter="" default="6">
 			The number of shadow entries per pixel. One of them is shared by every lamp past the first ones.

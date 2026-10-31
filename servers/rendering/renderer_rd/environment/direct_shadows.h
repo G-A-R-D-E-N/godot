@@ -36,15 +36,23 @@
 #include "servers/rendering/renderer_rd/environment/direct_lights.h"
 #include "servers/rendering/renderer_rd/pipeline_deferred_rd.h"
 #include "servers/rendering/renderer_rd/shaders/environment/direct_shadows.glsl.gen.h"
+#include "servers/rendering/renderer_rd/shaders/environment/direct_shadows_filter.glsl.gen.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_buffer_custom_data_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_scene_buffers_rd.h"
 
 #define RB_SCOPE_DIRECT_SHADOWS SNAME("rb_direct_shadows")
 
 #define RB_DIRECT_SLOTS SNAME("slots")
-#define RB_DIRECT_FACTORS SNAME("factors")
+#define RB_DIRECT_SLOTS_OTHER SNAME("slots_other")
 #define RB_DIRECT_ACCUM SNAME("accum")
+#define RB_DIRECT_ACCUM_OTHER SNAME("accum_other")
 #define RB_DIRECT_REST SNAME("rest")
+#define RB_DIRECT_REST_OTHER SNAME("rest_other")
+#define RB_DIRECT_GUIDE SNAME("guide")
+#define RB_DIRECT_GUIDE_OTHER SNAME("guide_other")
+#define RB_DIRECT_FACTORS SNAME("factors")
+#define RB_DIRECT_SCRATCH SNAME("scratch")
+#define RB_DIRECT_RAY SNAME("ray")
 #define RB_DIRECT_DEBUG SNAME("debug")
 
 namespace RendererRD {
@@ -73,6 +81,16 @@ public:
 		uint32_t rays = 1;
 		bool reference = false;
 		uint32_t debug_view = 0;
+		bool ratio = true;
+		bool filter = true;
+		bool force_one = false;
+		uint32_t history_cap = 32;
+		float clamp_sigmas = 3.0f;
+		float kernel_scale = 1.0f;
+		float kernel_floor = 0.6f;
+
+		bool precise() const { return reference || history_cap == 0; }
+		bool filtered() const { return filter && !precise(); }
 	};
 
 	static Settings get_project_settings();
@@ -85,8 +103,12 @@ private:
 	public:
 		uint32_t entries = 0;
 		Size2i size;
+		bool precise = false;
+		bool flip = false;
 		uint64_t last_frame = 0;
 		uint64_t table_generation = 0;
+		Transform3D last_camera;
+		Projection last_projection;
 
 		virtual void configure(RenderSceneBuffersRD *p_render_buffers) override {}
 		virtual void free_data() override {}
@@ -94,6 +116,8 @@ private:
 
 	struct Params {
 		float inv_projection[16];
+		float prev_view_from_view[16];
+		float prev_projection[16];
 		float camera_basis[12];
 		float region_half[3];
 		float bias;
@@ -110,18 +134,44 @@ private:
 		uint32_t rays;
 		uint32_t reference;
 		uint32_t debug_view;
-		uint32_t pad;
+		uint32_t history_valid;
+		uint32_t estimator;
+		uint32_t filter_on;
+		uint32_t force_one;
+		float history_cap;
+		float clamp_sigmas;
+		float clamp_min_rays;
+		float kernel_scale;
+		float kernel_floor;
+		float world_per_pixel;
+		uint32_t pad[3];
 	};
 
 	static constexpr uint32_t COUNTER_BYTES = 32;
 
+	enum TraceMode {
+		TRACE_CAPPED,
+		TRACE_PRECISE,
+		TRACE_MAX,
+	};
+
+	enum FilterMode {
+		FILTER_CLAMP,
+		FILTER_FIRST,
+		FILTER_SECOND,
+		FILTER_MAX,
+	};
+
 	DirectShadowsShaderRD shader;
 	RID shader_version;
-	PipelineDeferredRD pipeline;
+	PipelineDeferredRD pipeline[TRACE_MAX];
 	DirectShadowsShaderRD shader_hw;
 	RID shader_hw_version;
-	PipelineDeferredRD pipeline_hw;
+	PipelineDeferredRD pipeline_hw[TRACE_MAX];
 	bool hw_valid = false;
+	DirectShadowsFilterShaderRD filter_shader;
+	RID filter_shader_version;
+	PipelineDeferredRD filter_pipeline[FILTER_MAX];
 	String defines;
 
 	RID params_buffer;
@@ -132,17 +182,26 @@ private:
 	LocalVector<DirectLightTable::GpuSlot> lamp_data;
 	LocalVector<float> lamp_dump;
 	String served_request;
+	uint64_t moved_signature = 0;
+	Vector3 moved_anchor;
+	HashMap<uint64_t, AABB> moved_known;
+	LocalVector<AABB> moved;
+	uint64_t moved_frame = 0;
 	uint64_t size_frame = 0;
 	Size2i largest_size;
 	Size2i largest_size_before;
 
+	static Vector<String> _trace_modes();
 	bool _ensure_hw();
+	void _filter(const Ref<RenderSceneBuffersRD> &p_render_buffers, Ref<ViewportData> p_viewport, const Settings &p_settings);
 	RID _debug_target(const Ref<RenderSceneBuffersRD> &p_render_buffers, const Settings &p_settings);
 	void _ensure_textures(const Ref<RenderSceneBuffersRD> &p_render_buffers, Ref<ViewportData> p_viewport, const Settings &p_settings);
 	Ref<ViewportData> _viewport(const Ref<RenderSceneBuffersRD> &p_render_buffers);
 
 public:
-	void process(const FrameInput &p_input, const DirectLightTable &p_table);
+	bool process(const FrameInput &p_input, DirectLightTable &p_table);
+	RID get_slots(const Ref<RenderSceneBuffersRD> &p_render_buffers) const;
+	RID get_factors(const Ref<RenderSceneBuffersRD> &p_render_buffers) const;
 	void release(const Ref<RenderSceneBuffersRD> &p_render_buffers);
 	RID get_debug_texture(const Ref<RenderSceneBuffersRD> &p_render_buffers) const;
 	void serve_dump_request(const Ref<RenderSceneBuffersRD> &p_render_buffers);

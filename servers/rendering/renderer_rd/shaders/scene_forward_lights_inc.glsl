@@ -530,6 +530,30 @@ half light_contact_shadow(uint p_sscs_index, vec2 p_screen_uv) {
 }
 #endif
 
+#ifndef USING_MOBILE_RENDERER
+bool direct_shadow_factor(uint p_flags, vec3 p_color, bool p_use_rest, inout half r_shadow) {
+	ivec2 pixel = ivec2(gl_FragCoord.xy);
+	int own = textureSize(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), 0).z - 1;
+	float slot = float((p_flags >> 1) & 0xFFFFu);
+	half strength = half(float((p_flags >> 17) & 0xFFu) / 255.0);
+	for (int i = 0; i < own; i++) {
+		if (round(texelFetch(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), ivec3(pixel, i), 0).r * 65535.0) == slot) {
+			r_shadow = mix(half(1.0), half(texelFetch(sampler2DArray(direct_shadow_factors, SAMPLER_NEAREST_CLAMP), ivec3(pixel, i), 0).r), strength);
+			return true;
+		}
+	}
+	if (p_use_rest && texelFetch(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), ivec3(pixel, own), 0).r > 0.0) {
+		vec3 ratio;
+		for (int c = 0; c < 3; c++) {
+			ratio[c] = texelFetch(sampler2DArray(direct_shadow_factors, SAMPLER_NEAREST_CLAMP), ivec3(pixel, own + c), 0).r;
+		}
+		r_shadow = mix(half(1.0), half(dot(ratio, p_color) / max(p_color.r + p_color.g + p_color.b, 1e-6)), strength);
+		return true;
+	}
+	return false;
+}
+#endif
+
 half get_omni_attenuation(float distance, float inv_range, float decay) {
 	float nd = distance * inv_range;
 	nd *= nd;
@@ -573,9 +597,15 @@ void light_process_omni(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 	}
 
 	half shadow = half(1.0);
+	bool direct_shadowed = false;
 #ifndef SHADOWS_DISABLED
+#ifndef USING_MOBILE_RENDERER
+	if (sc_use_direct_shadow() && omni_attenuation > HALF_FLT_MIN && (omni_lights.data[idx].flags & 1u) != 0u) {
+		direct_shadowed = direct_shadow_factor(omni_lights.data[idx].flags, omni_lights.data[idx].color, omni_lights.data[idx].shadow_opacity <= 0.001 && dot(vec3(normal), light_rel_vec) > 0.0, shadow);
+	}
+#endif
 	// Omni light shadow.
-	if (omni_attenuation > HALF_FLT_MIN && omni_lights.data[idx].shadow_opacity > 0.001) {
+	if (!direct_shadowed && omni_attenuation > HALF_FLT_MIN && omni_lights.data[idx].shadow_opacity > 0.001) {
 		// there is a shadowmap
 		vec2 texel_size = scene_data_block.data.shadow_atlas_pixel_size;
 		vec4 base_uv_rect = omni_lights.data[idx].atlas_rect;
@@ -703,7 +733,7 @@ void light_process_omni(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 		}
 	}
 #ifndef USING_MOBILE_RENDERER
-	if (omni_attenuation > HALF_FLT_MIN && bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSCS) && omni_lights.data[idx].sscs_index != 0xFFFFFFFFu) {
+	if (!direct_shadowed && omni_attenuation > HALF_FLT_MIN && bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSCS) && omni_lights.data[idx].sscs_index != 0xFFFFFFFFu) {
 		shadow = min(shadow, light_contact_shadow(omni_lights.data[idx].sscs_index, screen_uv));
 	}
 #endif
@@ -888,9 +918,15 @@ void light_process_spot(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 	}
 
 	half shadow = half(1.0);
+	bool direct_shadowed = false;
 #ifndef SHADOWS_DISABLED
+#ifndef USING_MOBILE_RENDERER
+	if (sc_use_direct_shadow() && spot_attenuation > HALF_FLT_MIN && (spot_lights.data[idx].flags & 1u) != 0u) {
+		direct_shadowed = direct_shadow_factor(spot_lights.data[idx].flags, spot_lights.data[idx].color, spot_lights.data[idx].shadow_opacity <= 0.001 && dot(vec3(normal), light_rel_vec) > 0.0, shadow);
+	}
+#endif
 	// Spot light shadow.
-	if (spot_attenuation > HALF_FLT_MIN && spot_lights.data[idx].shadow_opacity > 0.001) {
+	if (!direct_shadowed && spot_attenuation > HALF_FLT_MIN && spot_lights.data[idx].shadow_opacity > 0.001) {
 		vec3 normal_bias = vec3(normal) * light_length * spot_lights.data[idx].shadow_normal_bias * (1.0 - abs(dot(normal, light_rel_vec_norm)));
 
 		//there is a shadowmap
@@ -962,7 +998,7 @@ void light_process_spot(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 		}
 	}
 #ifndef USING_MOBILE_RENDERER
-	if (spot_attenuation > HALF_FLT_MIN && bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSCS) && spot_lights.data[idx].sscs_index != 0xFFFFFFFFu) {
+	if (!direct_shadowed && spot_attenuation > HALF_FLT_MIN && bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSCS) && spot_lights.data[idx].sscs_index != 0xFFFFFFFFu) {
 		shadow = min(shadow, light_contact_shadow(spot_lights.data[idx].sscs_index, screen_uv));
 	}
 #endif

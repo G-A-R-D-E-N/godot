@@ -372,6 +372,38 @@ TEST_CASE("[DirectLights] Which lights DI owns") {
 	CHECK_FALSE(DirectLightTable::owns(true, false, 1u, 1.0f, true));
 }
 
+TEST_CASE("[DirectLights] A moved instance makes only the lamps it can reach dynamic") {
+	DirectLightTable table;
+	table.begin_frame(1);
+	DirectLightTable::Lamp lamp = lamp_at(Vector3());
+	lamp.range = 3.0f;
+	DirectLightTable::Lamp far_lamp = lamp_at(Vector3(100, 0, 0));
+	far_lamp.range = 3.0f;
+	table.observe(light_id(1), lamp);
+	table.observe(light_id(2), far_lamp);
+
+	table.begin_frame(2);
+	table.observe(light_id(1), lamp);
+	table.observe(light_id(2), far_lamp);
+	CHECK_FALSE(table.get_state(light_id(1)).dynamic);
+
+	LocalVector<AABB> moved;
+	table.mark_moved(moved);
+	CHECK_FALSE(table.get_state(light_id(1)).dynamic);
+
+	moved.push_back(AABB(Vector3(2, 0, 0), Vector3(1, 1, 1)));
+	table.mark_moved(moved);
+	CHECK(table.get_state(light_id(1)).dynamic);
+	CHECK_FALSE(table.get_state(light_id(2)).dynamic);
+
+	moved.clear();
+	moved.push_back(AABB(Vector3(4, 0, 0), Vector3(1, 1, 1)));
+	table.begin_frame(2 + DirectLightTable::DYNAMIC_FRAMES);
+	table.observe(light_id(1), lamp);
+	table.mark_moved(moved);
+	CHECK_FALSE(table.get_state(light_id(1)).dynamic);
+}
+
 TEST_CASE("[DirectLights] Clear starts over") {
 	DirectLightTable table;
 	table.begin_frame(1);

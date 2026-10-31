@@ -796,6 +796,8 @@ private:
 	RendererRD::FSR2Effect *fsr2_effect = nullptr;
 	RendererRD::SSEffects *ss_effects = nullptr;
 	RendererRD::DirectShadows *direct_shadows = nullptr;
+	RID direct_shadow_slots;
+	RID direct_shadow_factors;
 
 #ifdef METAL_MFXTEMPORAL_ENABLED
 	RendererRD::MFXTemporalEffect *mfx_temporal_effect = nullptr;

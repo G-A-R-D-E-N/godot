@@ -35,6 +35,56 @@
 
 using namespace RendererRD;
 
+void RayScene::collect_moved_instances(uint64_t &r_signature, Vector3 &r_anchor, HashMap<uint64_t, AABB> &r_known, LocalVector<AABB> &r_moved) const {
+	r_moved.clear();
+	if (r_signature == instance_signature) {
+		return;
+	}
+	const bool report = !r_known.is_empty() && r_anchor == anchor;
+	MutexLock lock(mesh_mutex);
+	HashMap<uint32_t, AABB> mesh_bounds;
+	for (const RID &rid : assembled_meshes) {
+		const MeshEntry *mesh = meshes.getptr(rid);
+		if (mesh) {
+			mesh_bounds.insert(uses_hardware() ? mesh->triangle_offset : mesh->node_offset, mesh->aabb);
+		}
+	}
+	HashMap<uint64_t, AABB> current;
+	current.reserve(instances.size());
+	for (const Instance &instance : instances) {
+		const AABB *mesh_box = mesh_bounds.getptr(instance.blas_root);
+		const AABB box = mesh_box ? *mesh_box : AABB();
+		const uint32_t seed = hash_murmur3_buffer(&box, sizeof(AABB));
+		const uint64_t key = (uint64_t(hash_murmur3_buffer(instance.world_to_object, sizeof(instance.world_to_object), seed)) << 32) | hash_murmur3_buffer(instance.world_to_object, sizeof(instance.world_to_object), ~seed);
+		if (current.has(key)) {
+			continue;
+		}
+		const AABB *known = r_known.getptr(key);
+		if (known) {
+			current.insert(key, *known);
+			continue;
+		}
+		const float *m = instance.world_to_object;
+		const Transform3D world_to_object(m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10], m[3], m[7], m[11]);
+		AABB bounds = world_to_object.affine_inverse().xform(box);
+		bounds.position += anchor;
+		current.insert(key, bounds);
+		if (report) {
+			r_moved.push_back(bounds);
+		}
+	}
+	if (report) {
+		for (const KeyValue<uint64_t, AABB> &entry : r_known) {
+			if (!current.has(entry.key)) {
+				r_moved.push_back(entry.value);
+			}
+		}
+	}
+	r_known = current;
+	r_anchor = anchor;
+	r_signature = instance_signature;
+}
+
 uint64_t RayScene::surface_candidates(uint32_t p_surface, uint32_t p_flags) {
 	if ((p_flags & CANDIDATE_FLAGS) == 0) {
 		return 0;

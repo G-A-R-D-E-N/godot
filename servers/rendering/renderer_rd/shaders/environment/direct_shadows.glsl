@@ -7,6 +7,7 @@
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 #include "../light_data_inc.glsl"
+#include "direct_shadows_params_inc.glsl"
 
 #define MAX_ENTRIES 8
 #define REFERENCE_RAYS 16u
@@ -27,47 +28,31 @@ layout(set = 0, binding = 2, std430) restrict readonly buffer SpotLights {
 }
 spot_lights;
 
-struct DirectLamp {
-	uint caster_mask;
-	float size;
-	uint reset_frame;
-	uint dynamic;
-};
-
 layout(set = 0, binding = 3, std430) restrict readonly buffer DirectLamps {
 	DirectLamp data[];
 }
 direct_lamps;
 
-layout(set = 0, binding = 4, std140) uniform Params {
-	mat4 inv_projection;
-	vec4 camera_basis[3];
-	vec3 region_half;
-	float bias;
-	ivec2 size;
-	vec2 pixel_size;
-	uint cluster_shift;
-	uint cluster_width;
-	uint cluster_type_size;
-	uint max_cluster_element_count_div_32;
-	float z_far;
-	uint frame;
-	uint last_frame;
-	uint entries;
-	uint rays;
-	uint reference;
-	uint debug_view;
-	uint pad;
-}
-params;
-
 layout(set = 0, binding = 5) uniform sampler2D depth_buffer;
 layout(set = 0, binding = 6) uniform sampler2D normal_roughness_buffer;
-layout(r16, set = 0, binding = 7) uniform restrict image2DArray slot_image;
+layout(r16, set = 0, binding = 7) uniform restrict writeonly image2DArray slot_image;
 layout(r16, set = 0, binding = 8) uniform restrict writeonly image2DArray factor_image;
-layout(rg32f, set = 0, binding = 9) uniform restrict image2DArray accum_image;
-layout(rgba32f, set = 0, binding = 10) uniform restrict image2D rest_image;
+#ifdef PRECISE_HISTORY
+layout(rg32f, set = 0, binding = 9) uniform restrict writeonly image2DArray accum_image;
+layout(rgba32f, set = 0, binding = 10) uniform restrict writeonly image2D rest_image;
+layout(rg32f, set = 0, binding = 14) uniform restrict readonly image2DArray history_accum;
+layout(rgba32f, set = 0, binding = 15) uniform restrict readonly image2D history_rest;
+#else
+layout(rg16f, set = 0, binding = 9) uniform restrict writeonly image2DArray accum_image;
+layout(rgba16f, set = 0, binding = 10) uniform restrict writeonly image2D rest_image;
+layout(rg16f, set = 0, binding = 14) uniform restrict readonly image2DArray history_accum;
+layout(rgba16f, set = 0, binding = 15) uniform restrict readonly image2D history_rest;
+#endif
 layout(rgba16f, set = 0, binding = 11) uniform restrict writeonly image2D debug_image;
+layout(r16, set = 0, binding = 13) uniform restrict readonly image2DArray history_slots;
+layout(rg32ui, set = 0, binding = 16) uniform restrict readonly uimage2D history_guide;
+layout(rg32ui, set = 0, binding = 17) uniform restrict writeonly uimage2D guide_image;
+layout(r32ui, set = 0, binding = 18) uniform restrict writeonly uimage2D ray_image;
 
 layout(set = 0, binding = 12, std430) restrict buffer Counters {
 	uint lit_pixels;
@@ -98,6 +83,7 @@ vec3 rest_target = vec3(0.0);
 uint rest_key = 0u;
 uint rest_count = 0u;
 bool rest_reset = false;
+bool rest_dynamic = false;
 uint rest_slot[REFERENCE_RAYS];
 float rest_weight[REFERENCE_RAYS];
 vec3 rest_position[REFERENCE_RAYS];
@@ -158,6 +144,7 @@ void add_rest(uint p_slot, float p_weight, vec3 p_position, vec3 p_target) {
 	rest_key += ray_scene_hash(p_slot);
 	rest_count++;
 	rest_reset = rest_reset || direct_lamps.data[p_slot].reset_frame > params.last_frame;
+	rest_dynamic = rest_dynamic || direct_lamps.data[p_slot].dynamic != 0u;
 	for (uint i = 0u; i < rest_picks; i++) {
 		if (random_value() * rest_total <= p_weight) {
 			rest_slot[i] = p_slot;
@@ -267,15 +254,56 @@ vec3 slot_color(uint p_slot) {
 	return p_slot == 0u ? vec3(0.0) : vec3(float(h & 255u), float((h >> 8u) & 255u), float((h >> 16u) & 255u)) / 255.0;
 }
 
+bool find_history(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal, vec3 p_view, out ivec2 r_pixel) {
+	r_pixel = p_pixel;
+	if (params.history_valid == 0u) {
+		return false;
+	}
+	if (params.reference != 0u) {
+		return true;
+	}
+	vec4 prev_view = params.prev_view_from_view * vec4(p_vertex, 1.0);
+	vec4 prev_clip = params.prev_projection * prev_view;
+	if (prev_clip.w <= 0.0) {
+		return false;
+	}
+	r_pixel = ivec2(floor((prev_clip.xy / prev_clip.w * 0.5 + 0.5) * vec2(params.size)));
+	if (any(lessThan(r_pixel, ivec2(0))) || any(greaterThanEqual(r_pixel, params.size))) {
+		return false;
+	}
+	uvec2 guide = imageLoad(history_guide, r_pixel).xy;
+	if (guide.x == 0u) {
+		return false;
+	}
+	float expected = -prev_view.z;
+	float tolerance = expected * (0.01 + 0.02 / max(dot(p_normal, p_view), 0.05));
+	if (abs(uintBitsToFloat(guide.x) - expected) > tolerance) {
+		return false;
+	}
+	return dot(mat3(params.prev_view_from_view) * p_normal, direct_oct_decode(unpackSnorm2x16(guide.y))) >= 0.9;
+}
+
+float history_limit(float p_share, bool p_dynamic) {
+	if (params.history_cap <= 0.0 || params.reference != 0u) {
+		return 1e30;
+	}
+	float cap = p_dynamic ? min(params.history_cap, 4.0) : params.history_cap;
+	return params.estimator == DIRECT_ESTIMATOR_RATIO ? cap / max(float(params.rays) * p_share, 1e-6) : cap;
+}
+
 void write_empty(ivec2 p_pixel, uint p_factor_layers) {
 	for (uint i = 0u; i < params.entries; i++) {
 		imageStore(slot_image, ivec3(p_pixel, int(i)), vec4(0.0));
-		imageStore(accum_image, ivec3(p_pixel, int(i)), vec4(0.0));
+	}
+	for (int i = 0; i < imageSize(accum_image).z; i++) {
+		imageStore(accum_image, ivec3(p_pixel, i), vec4(0.0));
 	}
 	for (uint i = 0u; i < p_factor_layers; i++) {
 		imageStore(factor_image, ivec3(p_pixel, int(i)), vec4(1.0));
 	}
 	imageStore(rest_image, p_pixel, vec4(0.0));
+	imageStore(guide_image, p_pixel, uvec4(0u));
+	imageStore(ray_image, p_pixel, uvec4(0u));
 	if (params.debug_view != 0u) {
 		imageStore(debug_image, p_pixel, vec4(0.0, 0.0, 0.0, 1.0));
 	}
@@ -329,11 +357,14 @@ void main() {
 	atomicAdd(counters.lit_pixels, 1u);
 	atomicMax(counters.most_lamps, own_count + rest_count);
 
+	ivec2 history_pixel;
+	bool has_history = find_history(pixel, vertex, normal, view, history_pixel);
+	imageStore(guide_image, pixel, uvec4(floatBitsToUint(-vertex.z), packSnorm2x16(direct_oct_encode(normal)), 0u, 0u));
 	uint old_slots[MAX_ENTRIES];
 	vec2 old_accum[MAX_ENTRIES];
 	for (uint i = 0u; i < own_limit; i++) {
-		old_slots[i] = uint(round(imageLoad(slot_image, ivec3(pixel, int(i))).r * 65535.0));
-		old_accum[i] = imageLoad(accum_image, ivec3(pixel, int(i))).rg;
+		old_slots[i] = has_history ? uint(round(imageLoad(history_slots, ivec3(history_pixel, int(i))).r * 65535.0)) : 0u;
+		old_accum[i] = has_history ? imageLoad(history_accum, ivec3(history_pixel, int(i))).rg : vec2(0.0);
 	}
 	vec2 accum[MAX_ENTRIES];
 	for (uint i = 0u; i < own_count; i++) {
@@ -350,18 +381,18 @@ void main() {
 	}
 
 	vec4 rest_accum = vec4(0.0);
-	float rest_stored_key = imageLoad(accum_image, ivec3(pixel, int(own_limit))).r;
 	bool has_rest = rest_count > 0u;
-	float rest_key_value = float(rest_key & 0xFFFFFFu);
+	uint rest_key_value = max(rest_key & 0xFFFFu, 1u);
 	if (has_rest) {
 		atomicAdd(counters.rest_pixels, 1u);
-		if (rest_stored_key == rest_key_value && !rest_reset) {
-			rest_accum = imageLoad(rest_image, pixel);
+		if (has_history && !rest_reset && uint(round(imageLoad(history_slots, ivec3(history_pixel, int(own_limit))).r * 65535.0)) == rest_key_value) {
+			rest_accum = imageLoad(history_rest, history_pixel);
 		}
 	}
 
 	vec3 anchored = relative + ray_scene.camera_to_anchor;
 	uint traced_rays = 0u;
+	uint ray_record = 0u;
 
 	if (params.reference != 0u) {
 		for (uint i = 0u; i < own_count; i++) {
@@ -388,26 +419,35 @@ void main() {
 		uint pick_count = own_count + (has_rest ? 1u : 0u);
 		float floor_share = 1.0 / (4.0 * float(pick_count));
 		float total = 0.0;
+		float weight_total = has_rest ? rest_total : 0.0;
+		for (uint i = 0u; i < own_count; i++) {
+			weight_total += own[i].weight;
+		}
+		float samples_per_count = params.estimator == DIRECT_ESTIMATOR_RATIO ? float(params.rays) / max(weight_total, 1e-20) : 0.0;
 		for (uint i = 0u; i < own_count; i++) {
 			float count = accum[i].y;
+			float samples = samples_per_count > 0.0 ? count * samples_per_count * own[i].weight : count;
 			float mean = count > 0.0 ? accum[i].x / count : 0.5;
-			float doubt = count < 8.0 ? 1.0 : 4.0 * mean * (1.0 - mean) + 0.05;
+			float doubt = samples < 8.0 ? 1.0 : 4.0 * mean * (1.0 - mean) + 0.05;
 			pick[i] = own[i].weight * doubt;
 			total += pick[i];
 		}
 		if (has_rest) {
-			float count = rest_accum.a;
-			pick[own_count] = rest_total * (count < 8.0 ? 1.0 : 0.5);
+			float samples = samples_per_count > 0.0 ? rest_accum.a * samples_per_count * rest_total : rest_accum.a;
+			pick[own_count] = rest_total * (samples < 8.0 ? 1.0 : 0.5);
 			total += pick[own_count];
 		}
 		float share_total = 0.0;
 		for (uint i = 0u; i < pick_count; i++) {
-			bool dynamic = i < own_count && direct_lamps.data[own[i].slot].dynamic != 0u;
+			bool dynamic = i < own_count ? direct_lamps.data[own[i].slot].dynamic != 0u : rest_dynamic;
 			pick[i] = max(pick[i] / max(total, 1e-20), dynamic ? 1.0 / float(pick_count) : floor_share);
 			share_total += pick[i];
 		}
+		for (uint i = 0u; i < pick_count; i++) {
+			pick[i] /= share_total;
+		}
 		for (uint r = 0u; r < params.rays; r++) {
-			float choice = random_value() * share_total;
+			float choice = random_value();
 			uint chosen = pick_count - 1u;
 			for (uint i = 0u; i < pick_count; i++) {
 				choice -= pick[i];
@@ -416,19 +456,37 @@ void main() {
 					break;
 				}
 			}
+			float sample_weight = params.estimator == DIRECT_ESTIMATOR_RATIO ? 1.0 / (float(params.rays) * pick[chosen]) : 1.0;
 			if (chosen < own_count) {
-				if (lamp_ray(vertex, anchored, normal, own[chosen].position, own[chosen].slot, random_value(), random_value(), rng_state)) {
-					accum[chosen].x += 1.0;
+				bool hit = lamp_ray(vertex, anchored, normal, own[chosen].position, own[chosen].slot, random_value(), random_value(), rng_state);
+				if (hit) {
+					accum[chosen].x += sample_weight;
 				}
-				accum[chosen].y += 1.0;
+				accum[chosen].y += sample_weight;
+				ray_record = (own[chosen].slot << 16u) | (hit ? 1u : 0u);
 			} else {
 				float visible = lamp_ray(vertex, anchored, normal, rest_position[0], rest_slot[0], random_value(), random_value(), rng_state) ? 1.0 : 0.0;
-				rest_accum.rgb += rest_sample(0u, visible);
-				rest_accum.a += 1.0;
+				rest_accum.rgb += sample_weight * rest_sample(0u, visible);
+				rest_accum.a += sample_weight;
 			}
 			traced_rays++;
 		}
+		for (uint i = 0u; i < pick_count; i++) {
+			bool dynamic = i < own_count ? direct_lamps.data[own[i].slot].dynamic != 0u : rest_dynamic;
+			float limit = history_limit(pick[i], dynamic);
+			if (i < own_count) {
+				if (accum[i].y > limit) {
+					accum[i] *= limit / accum[i].y;
+				}
+			} else if (rest_accum.a > limit) {
+				rest_accum *= limit / rest_accum.a;
+			}
+		}
+#ifndef PRECISE_HISTORY
+		rest_accum.rgb = min(rest_accum.rgb, vec3(4.0 * rest_accum.a));
+#endif
 	}
+	imageStore(ray_image, pixel, uvec4(ray_record));
 	atomicAdd(counters.rays, traced_rays);
 
 	vec3 shown = vec3(0.0);
@@ -438,18 +496,21 @@ void main() {
 		float mean = used && accum[i].y > 0.0 ? accum[i].x / accum[i].y : 1.0;
 		imageStore(slot_image, ivec3(pixel, int(i)), vec4(used ? float(own[i].slot) / 65535.0 : 0.0));
 		imageStore(accum_image, ivec3(pixel, int(i)), vec4(used ? accum[i] : vec2(0.0), 0.0, 0.0));
-		imageStore(factor_image, ivec3(pixel, int(i)), vec4(mean));
+		if (params.filter_on == 0u) {
+			imageStore(factor_image, ivec3(pixel, int(i)), vec4(params.force_one != 0u ? 1.0 : mean));
+		}
 		if (used) {
 			shown += own[i].target * mean;
 			shown_weight += own[i].weight;
 		}
 	}
 	vec3 rest_mean = rest_accum.a > 0.0 ? clamp(rest_accum.rgb / rest_accum.a, vec3(0.0), vec3(1.0)) : vec3(1.0);
-	imageStore(slot_image, ivec3(pixel, int(own_limit)), vec4(has_rest ? 1.0 : 0.0));
-	imageStore(accum_image, ivec3(pixel, int(own_limit)), vec4(has_rest ? rest_key_value : 0.0, float(rest_count), 0.0, 0.0));
+	imageStore(slot_image, ivec3(pixel, int(own_limit)), vec4(has_rest ? float(rest_key_value) / 65535.0 : 0.0));
 	imageStore(rest_image, pixel, has_rest ? rest_accum : vec4(0.0));
-	for (uint c = 0u; c < 3u; c++) {
-		imageStore(factor_image, ivec3(pixel, int(own_limit + c)), vec4(rest_mean[c]));
+	if (params.filter_on == 0u) {
+		for (uint c = 0u; c < 3u; c++) {
+			imageStore(factor_image, ivec3(pixel, int(own_limit + c)), vec4(params.force_one != 0u ? 1.0 : rest_mean[c]));
+		}
 	}
 
 	if (params.debug_view != 0u) {

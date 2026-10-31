@@ -2087,6 +2087,8 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 		_update_volumetric_fog(rb, p_render_data->environment, p_render_data->camera_attributes, p_render_data->scene_data->cam_projection, p_render_data->scene_data->cam_transform, p_render_data->scene_data->prev_cam_transform.affine_inverse(), p_render_data->shadow_atlas, directional_light_count, directional_shadows, positional_light_count, p_render_data->voxel_gi_count, *p_render_data->fog_volumes);
 	}
 
+	direct_shadow_slots = RID();
+	direct_shadow_factors = RID();
 	if (rb_data.is_valid() && !(p_use_direct_lights && p_render_data->scene_data->view_count == 1 && p_render_data->cluster_buffer.is_valid())) {
 		direct_shadows->release(rb);
 	} else if (rb_data.is_valid()) {
@@ -2107,7 +2109,10 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 		input.z_far = p_render_data->scene_data->z_far;
 		input.frame = RSG::rasterizer->get_frame_number();
 		input.table_generation = light_storage->get_direct_lights().get_generation();
-		direct_shadows->process(input, light_storage->get_direct_lights());
+		if (direct_shadows->process(input, light_storage->get_direct_lights())) {
+			direct_shadow_slots = direct_shadows->get_slots(rb);
+			direct_shadow_factors = direct_shadows->get_factors(rb);
+		}
 		RD::get_singleton()->draw_command_end_label();
 	}
 }
@@ -2659,7 +2664,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	_pre_opaque_render(p_render_data, using_ssao, using_ssil, using_ssr, using_sscs, using_sdfgi || using_voxelgi || using_ddgi, normal_roughness_views, rb_data.is_valid() && rb_data->has_voxelgi() ? rb_data->get_voxelgi() : RID(), using_direct_lights && depth_pre_pass);
 
 	base_specialization.use_far_shadow = light_storage->has_far_shadow();
-	base_specialization.use_direct_shadow = using_direct_lights && depth_pre_pass;
+	base_specialization.use_direct_shadow = direct_shadow_factors.is_valid();
 	if (current_cluster_builder) {
 		base_specialization.cluster_has_area_light = current_cluster_builder->get_cluster_count_by_type(ClusterBuilderRD::ELEMENT_TYPE_AREA_LIGHT) != 0;
 	}
@@ -4439,8 +4444,9 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 	}
 	{
 		const RID black = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_BLACK);
-		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 52, black));
-		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 53, black));
+		const bool direct_bound = p_render_data && p_render_list != RENDER_LIST_ALPHA && direct_shadow_factors.is_valid();
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 52, direct_bound ? direct_shadow_slots : black));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 53, direct_bound ? direct_shadow_factors : black));
 	}
 
 	return UniformSetCacheRD::get_singleton()->get_cache_vec(scene_shader.get_default_shader_rd(is_multiview), RENDER_PASS_UNIFORM_SET, uniforms);

@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/math/aabb.h"
 #include "core/math/vector3.h"
 #include "core/templates/hash_map.h"
 #include "core/templates/local_vector.h"
@@ -83,6 +84,7 @@ public:
 
 	void begin_frame(uint64_t p_frame);
 	uint32_t observe(RID p_light, const Lamp &p_lamp);
+	void mark_moved(const LocalVector<AABB> &p_moved);
 	State get_state(RID p_light) const;
 	uint32_t slots_in_use() const;
 	void write_slots(LocalVector<GpuSlot> &r_slots) const;

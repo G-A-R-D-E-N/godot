@@ -530,7 +530,7 @@ private:
 public:
 	static LightStorage *get_singleton();
 	static float light_render_energy(float p_energy, float p_intensity, RSE::LightType p_type, bool p_physical_units);
-	const DirectLightTable &get_direct_lights() const { return direct_lights; }
+	DirectLightTable &get_direct_lights() { return direct_lights; }
 
 	LightStorage();
 	virtual ~LightStorage();

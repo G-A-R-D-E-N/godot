@@ -133,6 +133,23 @@ uint32_t DirectLightTable::slots_in_use() const {
 	return records.size();
 }
 
+void DirectLightTable::mark_moved(const LocalVector<AABB> &p_moved) {
+	if (p_moved.is_empty()) {
+		return;
+	}
+	for (KeyValue<RID, Record> &entry : records) {
+		Record &record = entry.value;
+		const real_t range_squared = record.lamp.range * record.lamp.range;
+		for (const AABB &bounds : p_moved) {
+			const Vector3 nearest = record.lamp.position.clamp(bounds.position, bounds.get_end());
+			if (nearest.distance_squared_to(record.lamp.position) <= range_squared) {
+				record.dynamic_until = frame + DYNAMIC_FRAMES;
+				break;
+			}
+		}
+	}
+}
+
 void DirectLightTable::write_slots(LocalVector<GpuSlot> &r_slots) const {
 	r_slots.resize(next_slot);
 	for (uint32_t i = 0; i < next_slot; i++) {

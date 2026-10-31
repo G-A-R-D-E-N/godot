@@ -46,16 +46,38 @@ DirectShadows::Settings DirectShadows::get_project_settings() {
 	settings.rays = CLAMP(int(GLOBAL_GET("rendering/global_illumination/direct/rays_per_pixel")), 1, 2);
 	settings.reference = GLOBAL_GET("rendering/global_illumination/direct/reference");
 	settings.debug_view = MAX(int(GLOBAL_GET("rendering/global_illumination/direct/debug_view")), 0);
+	settings.ratio = int(GLOBAL_GET("rendering/global_illumination/direct/estimator")) != 0;
+	settings.filter = GLOBAL_GET("rendering/global_illumination/direct/filter");
+	settings.force_one = GLOBAL_GET("rendering/global_illumination/direct/force_factor_one");
+	settings.history_cap = MAX(int(GLOBAL_GET("rendering/global_illumination/direct/history_cap")), 0);
+	settings.clamp_sigmas = GLOBAL_GET("rendering/global_illumination/direct/clamp_sigmas");
+	settings.kernel_scale = GLOBAL_GET("rendering/global_illumination/direct/filter_kernel_scale");
 	return settings;
+}
+
+Vector<String> DirectShadows::_trace_modes() {
+	Vector<String> modes;
+	modes.push_back("\n");
+	modes.push_back("\n#define PRECISE_HISTORY\n");
+	return modes;
 }
 
 DirectShadows::DirectShadows() {
 	defines = vformat("\n#define RAY_SCENE_BLAS_STACK_SIZE %d\n#define RAY_SCENE_TLAS_STACK_SIZE %d\n", RayScene::BLAS_MAX_DEPTH, RayScene::TLAS_MAX_DEPTH);
-	Vector<String> modes;
-	modes.push_back("\n");
-	shader.initialize(modes, defines);
+	shader.initialize(_trace_modes(), defines);
 	shader_version = shader.version_create();
-	pipeline.create_compute_pipeline(shader.version_get_shader(shader_version, 0));
+	for (int i = 0; i < TRACE_MAX; i++) {
+		pipeline[i].create_compute_pipeline(shader.version_get_shader(shader_version, i));
+	}
+	Vector<String> filter_modes;
+	filter_modes.push_back("\n#define MODE_CLAMP\n");
+	filter_modes.push_back("\n#define MODE_FIRST\n");
+	filter_modes.push_back("\n#define MODE_SECOND\n");
+	filter_shader.initialize(filter_modes);
+	filter_shader_version = filter_shader.version_create();
+	for (int i = 0; i < FILTER_MAX; i++) {
+		filter_pipeline[i].create_compute_pipeline(filter_shader.version_get_shader(filter_shader_version, i));
+	}
 	params_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(Params));
 	counter_buffer = RD::get_singleton()->storage_buffer_create(COUNTER_BYTES);
 	RD::TextureFormat format;
@@ -69,8 +91,16 @@ DirectShadows::DirectShadows() {
 
 DirectShadows::~DirectShadows() {
 	RD *rd = RD::get_singleton();
-	pipeline.free();
-	pipeline_hw.free();
+	for (int i = 0; i < TRACE_MAX; i++) {
+		pipeline[i].free();
+		pipeline_hw[i].free();
+	}
+	for (int i = 0; i < FILTER_MAX; i++) {
+		filter_pipeline[i].free();
+	}
+	if (filter_shader_version.is_valid()) {
+		filter_shader.version_free(filter_shader_version);
+	}
 	if (shader_version.is_valid()) {
 		shader.version_free(shader_version);
 	}
@@ -95,14 +125,12 @@ bool DirectShadows::_ensure_hw() {
 	if (shader_hw_version.is_valid()) {
 		return hw_valid;
 	}
-	Vector<String> modes;
-	modes.push_back("\n");
-	shader_hw.initialize(modes, defines + "\n#define SHADER_GLSL_VERSION_460\n#extension GL_EXT_ray_query : require\n#define RAY_SCENE_HW\n");
+	shader_hw.initialize(_trace_modes(), defines + "\n#define SHADER_GLSL_VERSION_460\n#extension GL_EXT_ray_query : require\n#define RAY_SCENE_HW\n");
 	shader_hw_version = shader_hw.version_create();
 	hw_valid = shader_hw.version_is_valid(shader_hw_version);
-	if (hw_valid) {
-		pipeline_hw.create_compute_pipeline(shader_hw.version_get_shader(shader_hw_version, 0));
-		hw_valid = pipeline_hw.get_rid().is_valid();
+	for (int i = 0; hw_valid && i < TRACE_MAX; i++) {
+		pipeline_hw[i].create_compute_pipeline(shader_hw.version_get_shader(shader_hw_version, i));
+		hw_valid = pipeline_hw[i].get_rid().is_valid();
 	}
 	return hw_valid;
 }
@@ -119,25 +147,36 @@ Ref<DirectShadows::ViewportData> DirectShadows::_viewport(const Ref<RenderSceneB
 
 void DirectShadows::_ensure_textures(const Ref<RenderSceneBuffersRD> &p_render_buffers, Ref<ViewportData> p_viewport, const Settings &p_settings) {
 	const Size2i size = p_render_buffers->get_internal_size();
-	if (p_viewport->entries == p_settings.entries && p_viewport->size == size && p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SLOTS)) {
+	if (p_viewport->entries == p_settings.entries && p_viewport->size == size && p_viewport->precise == p_settings.precise() && p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SLOTS)) {
 		return;
 	}
 	p_render_buffers->clear_context(RB_SCOPE_DIRECT_SHADOWS);
 	p_viewport->entries = p_settings.entries;
 	p_viewport->size = size;
+	p_viewport->precise = p_settings.precise();
+	p_viewport->flip = false;
 	p_viewport->last_frame = 0;
 
 	RD *rd = RD::get_singleton();
 	const uint32_t usage = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
 	const uint32_t layers = factor_layers(p_settings.entries);
-	const RID slots = p_render_buffers->create_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SLOTS, RD::DATA_FORMAT_R16_UNORM, usage, RD::TEXTURE_SAMPLES_1, size, p_settings.entries, 1, true);
+	const uint32_t accum_layers = p_viewport->precise ? p_settings.entries : p_settings.entries - 1;
+	const RD::DataFormat accum_format = p_viewport->precise ? RD::DATA_FORMAT_R32G32_SFLOAT : RD::DATA_FORMAT_R16G16_SFLOAT;
+	const RD::DataFormat rest_format = p_viewport->precise ? RD::DATA_FORMAT_R32G32B32A32_SFLOAT : RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
+	const StringName slots[2] = { RB_DIRECT_SLOTS, RB_DIRECT_SLOTS_OTHER };
+	const StringName accums[2] = { RB_DIRECT_ACCUM, RB_DIRECT_ACCUM_OTHER };
+	const StringName rests[2] = { RB_DIRECT_REST, RB_DIRECT_REST_OTHER };
+	const StringName guides[2] = { RB_DIRECT_GUIDE, RB_DIRECT_GUIDE_OTHER };
+	for (int i = 0; i < 2; i++) {
+		rd->texture_clear(p_render_buffers->create_texture(RB_SCOPE_DIRECT_SHADOWS, slots[i], RD::DATA_FORMAT_R16_UNORM, usage, RD::TEXTURE_SAMPLES_1, size, p_settings.entries, 1, true), Color(0, 0, 0, 0), 0, 1, 0, p_settings.entries);
+		rd->texture_clear(p_render_buffers->create_texture(RB_SCOPE_DIRECT_SHADOWS, accums[i], accum_format, usage, RD::TEXTURE_SAMPLES_1, size, accum_layers, 1, true), Color(0, 0, 0, 0), 0, 1, 0, accum_layers);
+		rd->texture_clear(p_render_buffers->create_texture(RB_SCOPE_DIRECT_SHADOWS, rests[i], rest_format, usage, RD::TEXTURE_SAMPLES_1, size, 1, 1, true), Color(0, 0, 0, 0), 0, 1, 0, 1);
+		rd->texture_clear(p_render_buffers->create_texture(RB_SCOPE_DIRECT_SHADOWS, guides[i], RD::DATA_FORMAT_R32G32_UINT, usage, RD::TEXTURE_SAMPLES_1, size, 1, 1, true), Color(0, 0, 0, 0), 0, 1, 0, 1);
+	}
 	const RID factors = p_render_buffers->create_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_FACTORS, RD::DATA_FORMAT_R16_UNORM, usage, RD::TEXTURE_SAMPLES_1, size, layers, 1, true);
-	const RID accum = p_render_buffers->create_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_ACCUM, RD::DATA_FORMAT_R32G32_SFLOAT, usage, RD::TEXTURE_SAMPLES_1, size, p_settings.entries, 1, true);
-	const RID rest = p_render_buffers->create_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_REST, RD::DATA_FORMAT_R32G32B32A32_SFLOAT, usage, RD::TEXTURE_SAMPLES_1, size, 1, 1, true);
-	rd->texture_clear(slots, Color(0, 0, 0, 0), 0, 1, 0, p_settings.entries);
 	rd->texture_clear(factors, Color(1, 1, 1, 1), 0, 1, 0, layers);
-	rd->texture_clear(accum, Color(0, 0, 0, 0), 0, 1, 0, p_settings.entries);
-	rd->texture_clear(rest, Color(0, 0, 0, 0), 0, 1, 0, 1);
+	p_render_buffers->create_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SCRATCH, RD::DATA_FORMAT_R16_UNORM, usage, RD::TEXTURE_SAMPLES_1, size, layers, 1, true);
+	p_render_buffers->create_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_RAY, RD::DATA_FORMAT_R32_UINT, usage, RD::TEXTURE_SAMPLES_1, size, 1, 1, true);
 }
 
 RID DirectShadows::_debug_target(const Ref<RenderSceneBuffersRD> &p_render_buffers, const Settings &p_settings) {
@@ -165,15 +204,15 @@ void DirectShadows::release(const Ref<RenderSceneBuffersRD> &p_render_buffers) {
 	viewport->last_frame = 0;
 }
 
-void DirectShadows::process(const FrameInput &p_input, const DirectLightTable &p_table) {
+bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table) {
 	RayScene *ray_scene = RayScene::get_singleton();
 	if (!ray_scene || !ray_scene->is_ready()) {
-		return;
+		return false;
 	}
 	const bool hardware = ray_scene->uses_hardware();
 	if (hardware && !_ensure_hw()) {
 		ray_scene->refuse_hardware("the direct shadow shader or its pipeline could not be made");
-		return;
+		return false;
 	}
 
 	RD *rd = RD::get_singleton();
@@ -193,12 +232,14 @@ void DirectShadows::process(const FrameInput &p_input, const DirectLightTable &p
 	if (viewport->table_generation != p_input.table_generation) {
 		viewport->table_generation = p_input.table_generation;
 		viewport->last_frame = 0;
-		const uint32_t layers = settings.entries;
-		rd->texture_clear(p_input.render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SLOTS), Color(0, 0, 0, 0), 0, 1, 0, layers);
-		rd->texture_clear(p_input.render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_ACCUM), Color(0, 0, 0, 0), 0, 1, 0, layers);
-		rd->texture_clear(p_input.render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_REST), Color(0, 0, 0, 0), 0, 1, 0, 1);
 	}
+	viewport->flip = !viewport->flip;
 
+	if (p_input.frame != moved_frame) {
+		moved_frame = p_input.frame;
+		ray_scene->collect_moved_instances(moved_signature, moved_anchor, moved_known, moved);
+		p_table.mark_moved(moved);
+	}
 	p_table.write_slots(lamp_data);
 	if (!String(GLOBAL_GET("rendering/global_illumination/direct/dump_request")).is_empty()) {
 		p_table.write_lamps(lamp_dump);
@@ -218,11 +259,14 @@ void DirectShadows::process(const FrameInput &p_input, const DirectLightTable &p
 
 	const Size2i size = p_input.render_buffers->get_internal_size();
 	const Projection inverse = p_input.projection.inverse();
+	const Projection prev_view_from_view = Projection(viewport->last_camera.affine_inverse() * p_input.camera);
 
 	Params params = {};
 	for (int c = 0; c < 4; c++) {
 		for (int r = 0; r < 4; r++) {
 			params.inv_projection[c * 4 + r] = float(inverse.columns[c][r]);
+			params.prev_view_from_view[c * 4 + r] = float(prev_view_from_view.columns[c][r]);
+			params.prev_projection[c * 4 + r] = float(viewport->last_projection.columns[c][r]);
 		}
 	}
 	for (int r = 0; r < 3; r++) {
@@ -249,11 +293,24 @@ void DirectShadows::process(const FrameInput &p_input, const DirectLightTable &p
 	params.rays = settings.rays;
 	params.reference = settings.reference ? 1 : 0;
 	params.debug_view = settings.debug_view;
+	params.history_valid = viewport->last_frame != 0 ? 1 : 0;
+	params.estimator = settings.ratio ? 1 : 0;
+	params.filter_on = settings.filtered() ? 1 : 0;
+	params.force_one = settings.force_one ? 1 : 0;
+	params.history_cap = float(settings.history_cap);
+	params.clamp_sigmas = settings.clamp_sigmas;
+	params.clamp_min_rays = 4.0f;
+	params.kernel_scale = settings.kernel_scale;
+	params.kernel_floor = settings.kernel_floor;
+	params.world_per_pixel = 2.0f * Math::abs(float(inverse.columns[1][1])) / float(size.y);
 	rd->buffer_update(params_buffer, 0, sizeof(Params), &params);
 	rd->buffer_clear(counter_buffer, 0, COUNTER_BYTES);
 
 	RID sampler = MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
-	RID shader_rid = hardware ? shader_hw.version_get_shader(shader_hw_version, 0) : shader.version_get_shader(shader_version, 0);
+	const int trace_mode = viewport->precise ? TRACE_PRECISE : TRACE_CAPPED;
+	RID shader_rid = hardware ? shader_hw.version_get_shader(shader_hw_version, trace_mode) : shader.version_get_shader(shader_version, trace_mode);
+	const Ref<RenderSceneBuffersRD> &rb = p_input.render_buffers;
+	const bool flip = viewport->flip;
 
 	UniformSetCacheRD *cache = UniformSetCacheRD::get_singleton();
 	LocalVector<RD::Uniform> uniforms;
@@ -264,25 +321,96 @@ void DirectShadows::process(const FrameInput &p_input, const DirectLightTable &p
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 4, params_buffer));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, Vector<RID>{ sampler, p_input.depth }));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, Vector<RID>{ sampler, p_input.normal_roughness }));
-	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 7, p_input.render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SLOTS)));
-	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 8, p_input.render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_FACTORS)));
-	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 9, p_input.render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_ACCUM)));
-	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, p_input.render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_REST)));
-	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 11, _debug_target(p_input.render_buffers, settings)));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 7, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_SLOTS_OTHER : RB_DIRECT_SLOTS)));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 8, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_FACTORS)));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 9, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_ACCUM_OTHER : RB_DIRECT_ACCUM)));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_REST_OTHER : RB_DIRECT_REST)));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 11, _debug_target(rb, settings)));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 12, counter_buffer));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 13, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_SLOTS : RB_DIRECT_SLOTS_OTHER)));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 14, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_ACCUM : RB_DIRECT_ACCUM_OTHER)));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 15, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_REST : RB_DIRECT_REST_OTHER)));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 16, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_GUIDE : RB_DIRECT_GUIDE_OTHER)));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 17, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_GUIDE_OTHER : RB_DIRECT_GUIDE)));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 18, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_RAY)));
 
 	LocalVector<RD::Uniform> scene_uniforms;
 	scene_uniforms.reserve(8);
 	ray_scene->append_uniforms(scene_uniforms);
 
 	RD::ComputeListID list = rd->compute_list_begin();
-	rd->compute_list_bind_compute_pipeline(list, (hardware ? pipeline_hw : pipeline).get_rid());
+	rd->compute_list_bind_compute_pipeline(list, (hardware ? pipeline_hw[trace_mode] : pipeline[trace_mode]).get_rid());
 	rd->compute_list_bind_uniform_set(list, cache->get_cache_vec(shader_rid, 0, uniforms), 0);
 	rd->compute_list_bind_uniform_set(list, cache->get_cache_vec(shader_rid, 1, scene_uniforms), 1);
 	rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
 	rd->compute_list_end();
 
+	if (settings.filtered()) {
+		_filter(rb, viewport, settings);
+	}
+
 	viewport->last_frame = p_input.frame;
+	viewport->last_camera = p_input.camera;
+	viewport->last_projection = p_input.projection;
+	return true;
+}
+
+void DirectShadows::_filter(const Ref<RenderSceneBuffersRD> &p_render_buffers, Ref<ViewportData> p_viewport, const Settings &p_settings) {
+	RD *rd = RD::get_singleton();
+	UniformSetCacheRD *cache = UniformSetCacheRD::get_singleton();
+	const bool flip = p_viewport->flip;
+	const RID slots = p_render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_SLOTS_OTHER : RB_DIRECT_SLOTS);
+	const RID accum = p_render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_ACCUM_OTHER : RB_DIRECT_ACCUM);
+	const RID rest = p_render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_REST_OTHER : RB_DIRECT_REST);
+	const RID guide = p_render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_GUIDE_OTHER : RB_DIRECT_GUIDE);
+	const RID ray = p_render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_RAY);
+	const RID scratch = p_render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SCRATCH);
+	const RID factors = p_render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_FACTORS);
+	const uint32_t groups_x = Math::division_round_up(uint32_t(p_viewport->size.x), 8u);
+	const uint32_t groups_y = Math::division_round_up(uint32_t(p_viewport->size.y), 8u);
+
+	const auto run = [&](FilterMode p_mode, LocalVector<RD::Uniform> &p_uniforms) {
+		p_uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 3, lamp_buffer));
+		p_uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 4, params_buffer));
+		p_uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 7, slots));
+		p_uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 17, guide));
+		const RID shader_rid = filter_shader.version_get_shader(filter_shader_version, p_mode);
+		RD::ComputeListID list = rd->compute_list_begin();
+		rd->compute_list_bind_compute_pipeline(list, filter_pipeline[p_mode].get_rid());
+		rd->compute_list_bind_uniform_set(list, cache->get_cache_vec(shader_rid, 0, p_uniforms), 0);
+		rd->compute_list_dispatch(list, groups_x, groups_y, 1);
+		rd->compute_list_end();
+	};
+
+	if (p_settings.clamp_sigmas > 0.0f) {
+		LocalVector<RD::Uniform> uniforms;
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 9, accum));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 18, ray));
+		run(FILTER_CLAMP, uniforms);
+	}
+	{
+		LocalVector<RD::Uniform> uniforms;
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 8, scratch));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 9, accum));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, rest));
+		run(FILTER_FIRST, uniforms);
+	}
+	{
+		LocalVector<RD::Uniform> uniforms;
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 8, factors));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 11, _debug_target(p_render_buffers, p_settings)));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 19, scratch));
+		run(FILTER_SECOND, uniforms);
+	}
+}
+
+RID DirectShadows::get_slots(const Ref<RenderSceneBuffersRD> &p_render_buffers) const {
+	Ref<ViewportData> viewport = p_render_buffers->get_custom_data(RB_SCOPE_DIRECT_SHADOWS);
+	return p_render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, viewport->flip ? RB_DIRECT_SLOTS_OTHER : RB_DIRECT_SLOTS);
+}
+
+RID DirectShadows::get_factors(const Ref<RenderSceneBuffersRD> &p_render_buffers) const {
+	return p_render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_FACTORS);
 }
 
 RID DirectShadows::get_debug_texture(const Ref<RenderSceneBuffersRD> &p_render_buffers) const {
@@ -317,10 +445,10 @@ void DirectShadows::serve_dump_request(const Ref<RenderSceneBuffersRD> &p_render
 		uint32_t layers;
 	};
 	const Layered textures[] = {
-		{ RB_DIRECT_SLOTS, "slots", viewport->entries },
+		{ viewport->flip ? RB_DIRECT_SLOTS_OTHER : RB_DIRECT_SLOTS, "slots", viewport->entries },
 		{ RB_DIRECT_FACTORS, "factors", factor_layers(viewport->entries) },
-		{ RB_DIRECT_ACCUM, "accum", viewport->entries },
-		{ RB_DIRECT_REST, "rest", 1 },
+		{ viewport->flip ? RB_DIRECT_ACCUM_OTHER : RB_DIRECT_ACCUM, "accum", viewport->precise ? viewport->entries : viewport->entries - 1 },
+		{ viewport->flip ? RB_DIRECT_REST_OTHER : RB_DIRECT_REST, "rest", 1 },
 	};
 	Dictionary files;
 	bool ok = true;
@@ -354,6 +482,7 @@ void DirectShadows::serve_dump_request(const Ref<RenderSceneBuffersRD> &p_render
 	report["height"] = viewport->size.y;
 	report["entries"] = viewport->entries;
 	report["frame"] = viewport->last_frame;
+	report["precise"] = viewport->precise;
 	report["files"] = files;
 	report["lamp_slots"] = lamp_dump.size() / DirectLightTable::LAMP_VALUES;
 	RayScene *ray_scene = RayScene::get_singleton();
