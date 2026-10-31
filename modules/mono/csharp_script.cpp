@@ -2004,6 +2004,12 @@ bool CSharpInstance::_unreference_owner_unsafe() {
 	return static_cast<RefCounted *>(owner)->unreference();
 }
 
+static void _drop_from_resource_cache(Object *p_owner) {
+	if (Resource *resource = Object::cast_to<Resource>(p_owner)) {
+		resource->Resource::set_path(String());
+	}
+}
+
 bool CSharpInstance::_internal_new_managed() {
 	CSharpLanguage::get_singleton()->release_script_gchandle(gchandle);
 
@@ -2038,10 +2044,17 @@ void CSharpInstance::mono_object_disposed(GCHandleIntPtr p_gchandle_to_free) {
 	CSharpLanguage::get_singleton()->release_script_gchandle_thread_safe(p_gchandle_to_free, gchandle);
 }
 
+void CSharpInstance::mono_object_finalizing() {
+	GDMono *mono = GDMono::get_singleton();
+	if (mono && !mono->is_finalizing_scripts_domain()) {
+		_drop_from_resource_cache(owner);
+	}
+}
+
 void CSharpInstance::mono_object_disposed_baseref(GCHandleIntPtr p_gchandle_to_free, bool p_is_finalizer, bool &r_delete_owner, bool &r_remove_script_instance) {
 #ifdef DEBUG_ENABLED
 	CRASH_COND(!base_ref_counted);
-	CRASH_COND(gchandle.is_released());
+	CRASH_COND(gchandle.is_released() && !unsafe_referenced);
 #endif // DEBUG_ENABLED
 
 	// Must make sure event signals are not left dangling
@@ -2061,13 +2074,16 @@ void CSharpInstance::mono_object_disposed_baseref(GCHandleIntPtr p_gchandle_to_f
 			// (instead of the finalizer), then we remove the script instance.
 			r_remove_script_instance = true;
 			// TODO: Last usage of 'is_finalizing_scripts_domain'. It should be replaced with a check to determine if the load context is being unloaded.
-		} else if (!GDMono::get_singleton()->is_finalizing_scripts_domain()) {
+			// Must count past the two references godotsharp_internal_refcounted_disposed holds here.
+		} else if (static_cast<RefCounted *>(owner)->get_reference_count() > 2 && !GDMono::get_singleton()->is_finalizing_scripts_domain()) {
 			// If the native instance is still alive and this is called from the finalizer,
 			// then it was referenced from another thread before the finalizer could
 			// unreference and delete it, so we want to keep it.
 			// GC.ReRegisterForFinalize(this) is not safe because the objects referenced by 'this'
 			// could have already been collected. Instead we will create a new managed instance here.
-			if (!_internal_new_managed()) {
+			if (_internal_new_managed()) {
+				WARN_PRINT(vformat("An object of the C# script '%s' was still referenced when its managed instance was finalized. Its new managed instance has default values.", script->get_path()));
+			} else {
 				r_remove_script_instance = true;
 			}
 		}
@@ -2106,6 +2122,10 @@ void CSharpInstance::refcount_incremented() {
 	CRASH_COND(owner == nullptr);
 #endif // DEBUG_ENABLED
 
+	if (gchandle.is_released()) {
+		return;
+	}
+
 	RefCounted *rc_owner = Object::cast_to<RefCounted>(owner);
 
 	if (rc_owner->get_reference_count() > 1 && gchandle.is_weak()) { // The managed side also holds a reference, hence 1 instead of 0
@@ -2124,6 +2144,7 @@ void CSharpInstance::refcount_incremented() {
 				old_gchandle, &new_gchandle, create_weak);
 
 		if (!target_alive) {
+			_drop_from_resource_cache(rc_owner);
 			return; // Called after the managed side was collected, so nothing to do here
 		}
 

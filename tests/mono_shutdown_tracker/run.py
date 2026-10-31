@@ -21,7 +21,26 @@ GODOT_PACKAGES = ["godot.net.sdk", "godotsharp", "godot.sourcegenerators", "godo
 # only backstops them.
 GATED_CASE_ELAPSED_LIMIT = 15
 GATED_CASE_TIMEOUT = 40
-LONG_GATE_CASES = {"zombie", "zombie-rewrap"}
+LONG_GATE_CASES = {
+    "zombie",
+    "zombie-rewrap",
+    "zombie-scripted",
+    "zombie-scripted-child",
+    "zombie-scripted-held",
+    "zombie-scripted-ignore",
+    "zombie-scripted-replace",
+    "zombie-scripted-replace-child",
+    "zombie-scripted-stress",
+}
+EXPECTED_WARNING = {
+    "zombie-scripted-held": "Its new managed instance has default values.",
+    "zombie-scripted-ignore": "Its new managed instance has default values.",
+}
+TOLERATED_WARNING = {
+    "zombie-scripted-stress": "Its new managed instance has default values.",
+}
+# Must stay rare: many of these lines mean the finalizer is rebuilding wrappers nobody holds.
+TOLERATED_WARNING_LIMIT = 10
 # Must exceed the sixty-second gates in ZombieBinding.cs.
 LONG_GATE_ELAPSED_LIMIT = 75
 LONG_GATE_TIMEOUT = 90
@@ -45,6 +64,13 @@ OWNERSHIP = {
     "owner-api": "--owner-prebase-api",
     "zombie": "--zombie-binding",
     "zombie-rewrap": "--zombie-rewrap",
+    "zombie-scripted": "--zombie-scripted",
+    "zombie-scripted-child": "--zombie-scripted-child",
+    "zombie-scripted-held": "--zombie-scripted-held",
+    "zombie-scripted-ignore": "--zombie-scripted-ignore",
+    "zombie-scripted-replace": "--zombie-scripted-replace",
+    "zombie-scripted-replace-child": "--zombie-scripted-replace-child",
+    "zombie-scripted-stress": "--zombie-scripted-stress",
 }
 CONTROL = ["throw-shutdown", "throw-finalizer", "owner-api"]
 READY = {
@@ -55,6 +81,13 @@ READY = {
     "reentrant-throw": "READY reentrant-throw disposal failed before base disposal;",
     "zombie": "READY zombie binding set up:",
     "zombie-rewrap": "READY zombie rewrap set up:",
+    "zombie-scripted": "READY zombie scripted set up:",
+    "zombie-scripted-child": "READY zombie scripted child set up:",
+    "zombie-scripted-held": "READY zombie scripted held set up:",
+    "zombie-scripted-ignore": "READY zombie scripted ignore set up:",
+    "zombie-scripted-replace": "READY zombie scripted replace set up:",
+    "zombie-scripted-replace-child": "READY zombie scripted replace child set up:",
+    "zombie-scripted-stress": "READY zombie scripted stress set up:",
 }
 
 
@@ -159,10 +192,13 @@ def case_timeout(case):
 
 def judge(version, case, result, elapsed, output, engine):
     assembly_lines = [line[9:] for line in output.splitlines() if line.startswith("ASSEMBLY ")]
+    tolerated = case in TOLERATED_WARNING and output.count(TOLERATED_WARNING[case]) <= TOLERATED_WARNING_LIMIT
     diagnostics = [
         line
         for line in output.splitlines()
         if any(token in line.lower() for token in ["error:", "warning:", "leaked", "fail ", "crashed", "fatal:"])
+        and not (case in EXPECTED_WARNING and EXPECTED_WARNING[case] in line)
+        and not (tolerated and TOLERATED_WARNING[case] in line)
     ]
     owned = case in OWNERSHIP
     running = case.startswith("running")
@@ -171,7 +207,8 @@ def judge(version, case, result, elapsed, output, engine):
     passed &= Path(assembly_lines[0]).resolve().is_relative_to(engine.parent) if assembly_lines else False
     if owned:
         ready = READY.get(case, "") in output
-        success = result.returncode == 0 and ready and f"PASS {case}:" in output and not diagnostics
+        warned = EXPECTED_WARNING.get(case, "") in output
+        success = result.returncode == 0 and ready and warned and f"PASS {case}:" in output and not diagnostics
         if version == "control":
             failed = f"FAIL {case}:" in output or result.returncode != 0
             return passed and failed and f"PASS {case}:" not in output, diagnostics, assembly_lines

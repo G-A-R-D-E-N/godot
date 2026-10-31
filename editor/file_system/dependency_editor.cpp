@@ -811,8 +811,8 @@ void DependencyRemoveDialog::ok_pressed() {
 	for (const KeyValue<String, String> &E : all_remove_files) {
 		String file = E.key;
 
-		if (ResourceCache::has(file)) {
-			Ref<Resource> res = ResourceCache::get_ref(file);
+		Ref<Resource> res = ResourceCache::get_ref(file);
+		if (res.is_valid()) {
 			emit_signal(SNAME("resource_removed"), res);
 			res->set_path("");
 		}

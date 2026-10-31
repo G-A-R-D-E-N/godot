@@ -420,6 +420,7 @@ public:
 	void raise_event_signal(const StringName &p_event_signal_name, const Variant **p_args, int p_argcount, Callable::CallError &r_error) const;
 
 	void mono_object_disposed(GCHandleIntPtr p_gchandle_to_free);
+	void mono_object_finalizing();
 
 	/*
 	 * If 'r_delete_owner' is set to true, the caller must memdelete the script instance's owner. Otherwise, if

@@ -503,8 +503,8 @@ String ServersDebugger::_get_resource_type_from_path(const String &p_path) {
 		return "";
 	}
 
-	if (ResourceCache::has(p_path)) {
-		Ref<Resource> resource = ResourceCache::get_ref(p_path);
+	Ref<Resource> resource = ResourceCache::get_ref(p_path);
+	if (resource.is_valid()) {
 		return resource->get_class();
 	} else {
 		// This doesn't work all the time for embedded resources.
