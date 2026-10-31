@@ -85,6 +85,7 @@ public:
 		bool filter = true;
 		bool force_one = false;
 		uint32_t history_cap = 32;
+		uint32_t dynamic_history_cap = 4;
 		float clamp_sigmas = 3.0f;
 		float kernel_scale = 1.0f;
 		float kernel_floor = 0.6f;
@@ -146,7 +147,8 @@ private:
 		float kernel_floor;
 		float world_per_pixel;
 		float range_scale;
-		uint32_t pad[2];
+		float dynamic_cap;
+		uint32_t pad;
 	};
 
 	static constexpr uint32_t COUNTER_BYTES = 32;

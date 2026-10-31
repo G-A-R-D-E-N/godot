@@ -287,7 +287,7 @@ float history_limit(float p_share, bool p_dynamic) {
 	if (params.history_cap <= 0.0 || params.reference != 0u) {
 		return 1e30;
 	}
-	float cap = p_dynamic ? min(params.history_cap, 4.0) : params.history_cap;
+	float cap = p_dynamic ? min(params.history_cap, params.dynamic_cap) : params.history_cap;
 	return params.estimator == DIRECT_ESTIMATOR_RATIO ? cap / max(float(params.rays) * p_share, 1e-6) : cap;
 }
 

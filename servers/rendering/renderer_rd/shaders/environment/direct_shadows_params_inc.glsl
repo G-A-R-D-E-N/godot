@@ -36,7 +36,7 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	float kernel_floor;
 	float world_per_pixel;
 	float range_scale;
-	uint pad1;
+	float dynamic_cap;
 	uint pad2;
 }
 params;
