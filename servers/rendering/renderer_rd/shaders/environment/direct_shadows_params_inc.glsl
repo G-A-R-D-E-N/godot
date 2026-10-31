@@ -26,7 +26,6 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	uint reference;
 	uint debug_view;
 	uint history_valid;
-	uint estimator;
 	uint filter_on;
 	uint force_one;
 	float history_cap;
@@ -37,11 +36,10 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	float world_per_pixel;
 	float range_scale;
 	float dynamic_cap;
+	uint pad1;
 	uint pad2;
 }
 params;
-
-#define DIRECT_ESTIMATOR_RATIO 1u
 
 vec2 direct_oct_encode(vec3 p_normal) {
 	vec2 folded = p_normal.xy / (abs(p_normal.x) + abs(p_normal.y) + abs(p_normal.z));

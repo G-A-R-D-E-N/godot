@@ -283,12 +283,11 @@ bool find_history(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal, vec3 p_view, out 
 	return dot(mat3(params.prev_view_from_view) * p_normal, direct_oct_decode(unpackSnorm2x16(guide.y))) >= 0.9;
 }
 
-float history_limit(float p_share, bool p_dynamic) {
+float history_limit(bool p_dynamic) {
 	if (params.history_cap <= 0.0 || params.reference != 0u) {
 		return 1e30;
 	}
-	float cap = p_dynamic ? min(params.history_cap, params.dynamic_cap) : params.history_cap;
-	return params.estimator == DIRECT_ESTIMATOR_RATIO ? cap / max(float(params.rays) * p_share, 1e-6) : cap;
+	return p_dynamic ? min(params.history_cap, params.dynamic_cap) : params.history_cap;
 }
 
 void write_empty(ivec2 p_pixel, uint p_factor_layers) {
@@ -419,22 +418,15 @@ void main() {
 		uint pick_count = own_count + (has_rest ? 1u : 0u);
 		float floor_share = 1.0 / (4.0 * float(pick_count));
 		float total = 0.0;
-		float weight_total = has_rest ? rest_total : 0.0;
-		for (uint i = 0u; i < own_count; i++) {
-			weight_total += own[i].weight;
-		}
-		float samples_per_count = params.estimator == DIRECT_ESTIMATOR_RATIO ? float(params.rays) / max(weight_total, 1e-20) : 0.0;
 		for (uint i = 0u; i < own_count; i++) {
 			float count = accum[i].y;
-			float samples = samples_per_count > 0.0 ? count * samples_per_count * own[i].weight : count;
 			float mean = count > 0.0 ? accum[i].x / count : 0.5;
-			float doubt = samples < 8.0 ? 1.0 : 4.0 * mean * (1.0 - mean) + 0.05;
+			float doubt = count < 8.0 ? 1.0 : 4.0 * mean * (1.0 - mean) + 0.05;
 			pick[i] = own[i].weight * doubt;
 			total += pick[i];
 		}
 		if (has_rest) {
-			float samples = samples_per_count > 0.0 ? rest_accum.a * samples_per_count * rest_total : rest_accum.a;
-			pick[own_count] = rest_total * (samples < 8.0 ? 1.0 : 0.5);
+			pick[own_count] = rest_total * (rest_accum.a < 8.0 ? 1.0 : 0.5);
 			total += pick[own_count];
 		}
 		float share_total = 0.0;
@@ -456,24 +448,23 @@ void main() {
 					break;
 				}
 			}
-			float sample_weight = params.estimator == DIRECT_ESTIMATOR_RATIO ? 1.0 / (float(params.rays) * pick[chosen]) : 1.0;
 			if (chosen < own_count) {
 				bool hit = lamp_ray(vertex, anchored, normal, own[chosen].position, own[chosen].slot, random_value(), random_value(), rng_state);
 				if (hit) {
-					accum[chosen].x += sample_weight;
+					accum[chosen].x += 1.0;
 				}
-				accum[chosen].y += sample_weight;
+				accum[chosen].y += 1.0;
 				ray_record = (own[chosen].slot << 16u) | (hit ? 1u : 0u);
 			} else {
 				float visible = lamp_ray(vertex, anchored, normal, rest_position[0], rest_slot[0], random_value(), random_value(), rng_state) ? 1.0 : 0.0;
-				rest_accum.rgb += sample_weight * rest_sample(0u, visible);
-				rest_accum.a += sample_weight;
+				rest_accum.rgb += rest_sample(0u, visible);
+				rest_accum.a += 1.0;
 			}
 			traced_rays++;
 		}
 		for (uint i = 0u; i < pick_count; i++) {
 			bool dynamic = i < own_count ? direct_lamps.data[own[i].slot].dynamic != 0u : rest_dynamic;
-			float limit = history_limit(pick[i], dynamic);
+			float limit = history_limit(dynamic);
 			if (i < own_count) {
 				if (accum[i].y > limit) {
 					accum[i] *= limit / accum[i].y;

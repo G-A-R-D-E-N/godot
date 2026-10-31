@@ -3929,7 +3929,6 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/direct/ray_bias", PROPERTY_HINT_RANGE, "0,0.2,0.001"), 0.02);
 	GLOBAL_DEF("rendering/global_illumination/direct/reference", false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/debug_view", PROPERTY_HINT_ENUM, "Off,First Entry,All Lamps,First Slot,Lamp Count,Samples,Filtered First Entry"), 0);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/estimator", PROPERTY_HINT_ENUM, "Plain,Ratio"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/history_cap", PROPERTY_HINT_RANGE, "0,256,1"), 32);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/dynamic_history_cap", PROPERTY_HINT_RANGE, "1,256,1"), 4);
 	GLOBAL_DEF("rendering/global_illumination/direct/filter", true);

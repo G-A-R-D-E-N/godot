@@ -3241,9 +3241,6 @@
 		<member name="rendering/global_illumination/direct/dump_request" type="String" setter="" getter="" default="&quot;&quot;">
 			If not empty, the next frame that has shadow factors writes them to raw files next to this path, a JSON summary at this path, and a [code].done[/code] file after it. Each new path is served once.
 		</member>
-		<member name="rendering/global_illumination/direct/estimator" type="int" setter="" getter="" default="1">
-			How a lamp's rays add up to its shadow factor. Ratio weights each ray by the inverse of the share it was traced under. Plain counts each ray once, and keeps a known pull toward the middle where the share follows the factor.
-		</member>
 		<member name="rendering/global_illumination/direct/filter" type="bool" setter="" getter="" default="true">
 			Runs the neighbourhood clamp and the spatial filter over the shadow factors. Off, the opaque pass reads the temporal factors as they are. Always off in the reference mode and with a history cap of [code]0[/code].
 		</member>

@@ -46,7 +46,6 @@ DirectShadows::Settings DirectShadows::get_project_settings() {
 	settings.rays = CLAMP(int(GLOBAL_GET("rendering/global_illumination/direct/rays_per_pixel")), 1, 2);
 	settings.reference = GLOBAL_GET("rendering/global_illumination/direct/reference");
 	settings.debug_view = MAX(int(GLOBAL_GET("rendering/global_illumination/direct/debug_view")), 0);
-	settings.ratio = int(GLOBAL_GET("rendering/global_illumination/direct/estimator")) != 0;
 	settings.filter = GLOBAL_GET("rendering/global_illumination/direct/filter");
 	settings.force_one = GLOBAL_GET("rendering/global_illumination/direct/force_factor_one");
 	settings.history_cap = MAX(int(GLOBAL_GET("rendering/global_illumination/direct/history_cap")), 0);
@@ -298,7 +297,6 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	params.reference = settings.reference ? 1 : 0;
 	params.debug_view = settings.debug_view;
 	params.history_valid = viewport->last_frame != 0 ? 1 : 0;
-	params.estimator = settings.ratio ? 1 : 0;
 	params.filter_on = settings.filtered() ? 1 : 0;
 	params.force_one = settings.force_one ? 1 : 0;
 	params.history_cap = float(settings.history_cap);

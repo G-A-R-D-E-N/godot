@@ -81,7 +81,6 @@ public:
 		uint32_t rays = 1;
 		bool reference = false;
 		uint32_t debug_view = 0;
-		bool ratio = true;
 		bool filter = true;
 		bool force_one = false;
 		uint32_t history_cap = 32;
@@ -137,7 +136,6 @@ private:
 		uint32_t reference;
 		uint32_t debug_view;
 		uint32_t history_valid;
-		uint32_t estimator;
 		uint32_t filter_on;
 		uint32_t force_one;
 		float history_cap;
@@ -148,7 +146,7 @@ private:
 		float world_per_pixel;
 		float range_scale;
 		float dynamic_cap;
-		uint32_t pad;
+		uint32_t pad[2];
 	};
 
 	static constexpr uint32_t COUNTER_BYTES = 32;
