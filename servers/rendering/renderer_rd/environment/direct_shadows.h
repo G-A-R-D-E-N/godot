@@ -88,6 +88,7 @@ public:
 		float clamp_sigmas = 3.0f;
 		float kernel_scale = 1.0f;
 		float kernel_floor = 0.6f;
+		float range_sigmas = 1.5f;
 
 		bool precise() const { return reference || history_cap == 0; }
 		bool filtered() const { return filter && !precise(); }
@@ -144,7 +145,8 @@ private:
 		float kernel_scale;
 		float kernel_floor;
 		float world_per_pixel;
-		uint32_t pad[3];
+		float range_scale;
+		uint32_t pad[2];
 	};
 
 	static constexpr uint32_t COUNTER_BYTES = 32;

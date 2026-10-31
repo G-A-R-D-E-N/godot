@@ -3250,6 +3250,9 @@
 		<member name="rendering/global_illumination/direct/filter_kernel_scale" type="float" setter="" getter="" default="1.0">
 			Scales the spatial filter's width against a lamp's size over the pixel's footprint.
 		</member>
+		<member name="rendering/global_illumination/direct/filter_range_sigmas" type="float" setter="" getter="" default="1.5">
+			How far a neighbour's shadow factor may sit from the pixel's own before the spatial filter stops using it, in standard errors of the two pixels' sample counts. Keeps hard shadow edges from bleeding. [code]0[/code] turns the test off.
+		</member>
 		<member name="rendering/global_illumination/direct/force_factor_one" type="bool" setter="" getter="" default="false">
 			Debug: writes every shadow factor as [code]1[/code], so owned lamps with a matching entry shade as unshadowed.
 		</member>

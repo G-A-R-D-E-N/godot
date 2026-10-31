@@ -506,6 +506,9 @@ void main() {
 	}
 	vec3 rest_mean = rest_accum.a > 0.0 ? clamp(rest_accum.rgb / rest_accum.a, vec3(0.0), vec3(1.0)) : vec3(1.0);
 	imageStore(slot_image, ivec3(pixel, int(own_limit)), vec4(has_rest ? float(rest_key_value) / 65535.0 : 0.0));
+#ifdef PRECISE_HISTORY
+	imageStore(accum_image, ivec3(pixel, int(own_limit)), vec4(0.0, float(rest_count), 0.0, 0.0));
+#endif
 	imageStore(rest_image, pixel, has_rest ? rest_accum : vec4(0.0));
 	if (params.filter_on == 0u) {
 		for (uint c = 0u; c < 3u; c++) {

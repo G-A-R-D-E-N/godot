@@ -35,7 +35,7 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	float kernel_scale;
 	float kernel_floor;
 	float world_per_pixel;
-	uint pad0;
+	float range_scale;
 	uint pad1;
 	uint pad2;
 }

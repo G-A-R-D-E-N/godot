@@ -52,6 +52,7 @@ DirectShadows::Settings DirectShadows::get_project_settings() {
 	settings.history_cap = MAX(int(GLOBAL_GET("rendering/global_illumination/direct/history_cap")), 0);
 	settings.clamp_sigmas = GLOBAL_GET("rendering/global_illumination/direct/clamp_sigmas");
 	settings.kernel_scale = GLOBAL_GET("rendering/global_illumination/direct/filter_kernel_scale");
+	settings.range_sigmas = GLOBAL_GET("rendering/global_illumination/direct/filter_range_sigmas");
 	return settings;
 }
 
@@ -302,6 +303,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	params.clamp_min_rays = 4.0f;
 	params.kernel_scale = settings.kernel_scale;
 	params.kernel_floor = settings.kernel_floor;
+	params.range_scale = settings.range_sigmas > 0.0f ? 0.5f / (settings.range_sigmas * settings.range_sigmas) : 0.0f;
 	params.world_per_pixel = 2.0f * Math::abs(float(inverse.columns[1][1])) / float(size.y);
 	rd->buffer_update(params_buffer, 0, sizeof(Params), &params);
 	rd->buffer_clear(counter_buffer, 0, COUNTER_BYTES);
@@ -398,6 +400,7 @@ void DirectShadows::_filter(const Ref<RenderSceneBuffersRD> &p_render_buffers, R
 	{
 		LocalVector<RD::Uniform> uniforms;
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 8, factors));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 9, accum));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 11, _debug_target(p_render_buffers, p_settings)));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 19, scratch));
 		run(FILTER_SECOND, uniforms);

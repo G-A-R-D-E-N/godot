@@ -32,6 +32,7 @@ layout(r16, set = 0, binding = 8) uniform restrict writeonly image2DArray out_im
 #endif
 
 #ifdef MODE_SECOND
+layout(rg16f, set = 0, binding = 9) uniform restrict readonly image2DArray accum_image;
 layout(r16, set = 0, binding = 19) uniform restrict readonly image2DArray in_image;
 layout(r16, set = 0, binding = 8) uniform restrict writeonly image2DArray out_image;
 layout(rgba16f, set = 0, binding = 11) uniform restrict writeonly image2D debug_image;
@@ -131,6 +132,17 @@ void main() {
 }
 #else
 
+float sampling_noise(vec2 p_accum) {
+	float count = max(min(p_accum.y, params.history_cap), 1e-3);
+	float mean = p_accum.y > 0.0 ? p_accum.x / p_accum.y : 0.5;
+	return mean * (1.0 - mean) / count + 1.0 / (count * count);
+}
+
+float range_weight(float p_own, float p_other, float p_noise) {
+	float gap = p_own - p_other;
+	return exp(-gap * gap * params.range_scale / p_noise);
+}
+
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 	if (any(greaterThanEqual(pixel, params.size))) {
@@ -147,6 +159,8 @@ void main() {
 	}
 	uint slots[MAX_ENTRIES];
 	float inv_two_sigma[MAX_ENTRIES];
+	float own_value[MAX_ENTRIES];
+	float own_noise[MAX_ENTRIES];
 	float sum[MAX_ENTRIES + 2];
 	float total[MAX_ENTRIES + 2];
 	for (uint i = 0u; i < own_limit; i++) {
@@ -157,6 +171,15 @@ void main() {
 			sigma = max(sigma, params.kernel_scale * direct_lamps.data[slots[i]].size / max(reach * params.world_per_pixel, 1e-6));
 		}
 		inv_two_sigma[i] = 1.0 / (2.0 * sigma * sigma);
+		vec2 own_accum = imageLoad(accum_image, ivec3(pixel, int(i))).rg;
+		own_noise[i] = sampling_noise(own_accum);
+		own_value[i] = own_accum.y > 0.0 ? own_accum.x / own_accum.y : 0.5;
+#ifdef MODE_SECOND
+		float own_seen = imageLoad(in_image, ivec3(pixel, int(i))).r;
+		if (own_seen > 0.0) {
+			own_value[i] = (own_seen - NO_EVIDENCE_GAP) / (1.0 - NO_EVIDENCE_GAP);
+		}
+#endif
 	}
 	for (uint i = 0u; i < layers; i++) {
 		sum[i] = 0.0;
@@ -196,15 +219,18 @@ void main() {
 #ifdef MODE_FIRST
 					vec2 accum = imageLoad(accum_image, ivec3(at, int(j))).rg;
 					if (accum.y > 0.0) {
-						float evidence = weight * min(accum.y, params.history_cap);
-						sum[i] += evidence * accum.x / accum.y;
+						float value = accum.x / accum.y;
+						float evidence = weight * min(accum.y, params.history_cap) * range_weight(own_value[i], value, own_noise[i] + sampling_noise(accum));
+						sum[i] += evidence * value;
 						total[i] += evidence;
 					}
 #else
 					float seen = imageLoad(in_image, ivec3(at, int(j))).r;
 					if (seen > 0.0) {
-						sum[i] += weight * (seen - NO_EVIDENCE_GAP) / (1.0 - NO_EVIDENCE_GAP);
-						total[i] += weight;
+						float value = (seen - NO_EVIDENCE_GAP) / (1.0 - NO_EVIDENCE_GAP);
+						float kept = weight * range_weight(own_value[i], value, own_noise[i] + sampling_noise(imageLoad(accum_image, ivec3(at, int(j))).rg));
+						sum[i] += kept * value;
+						total[i] += kept;
 					}
 #endif
 					break;
