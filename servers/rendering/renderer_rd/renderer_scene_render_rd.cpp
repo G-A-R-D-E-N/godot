@@ -1746,7 +1746,7 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 
 	Color clear_color;
 	if (p_render_buffers.is_valid() && p_reflection_probe.is_null()) {
-		if (is_dynamic_gi_supported()) {
+		if (is_dynamic_gi_supported() && get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_UNSHADED) {
 			ddgi.update(rb, p_camera_data->main_transform.origin);
 			surfel_gi.update(rb, RendererRD::RayScene::get_singleton()->get_anchor(), p_camera_data->main_projection, p_camera_data->main_transform, rb->get_internal_size());
 		}
