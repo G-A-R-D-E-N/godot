@@ -84,7 +84,7 @@ public:
 		bool filter = true;
 		bool force_one = false;
 		uint32_t history_cap = 32;
-		uint32_t dynamic_history_cap = 4;
+		uint32_t dynamic_history_cap = 2;
 		float clamp_sigmas = 3.0f;
 		float kernel_scale = 1.0f;
 		float kernel_floor = 0.6f;

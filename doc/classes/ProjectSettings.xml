@@ -3254,7 +3254,10 @@
 			Debug: writes every shadow factor as [code]1[/code], so owned lamps with a matching entry shade as unshadowed.
 		</member>
 		<member name="rendering/global_illumination/direct/history_cap" type="int" setter="" getter="" default="32">
-			Samples kept in a lamp's history per pixel, cut to [code]4[/code] while the lamp is dynamic. [code]0[/code] keeps every sample and uses the larger history format, for long-run measurements.
+			Samples kept in a lamp's history per pixel, cut to [member rendering/global_illumination/direct/dynamic_history_cap] while the lamp is dynamic. [code]0[/code] keeps every sample and uses the larger history format, for long-run measurements.
+		</member>
+		<member name="rendering/global_illumination/direct/dynamic_history_cap" type="int" setter="" getter="" default="2">
+			Samples kept in a lamp's history per pixel while the lamp has moved, or a shadow caster has moved in its range, within the last 30 frames. It counts rays, so a lamp that gets only a share of a pixel's rays takes longer to clear in frames.
 		</member>
 		<member name="rendering/global_illumination/direct/entries" type="int" setter="" getter="" default="6">
 			The number of shadow entries per pixel. One of them is shared by every lamp past the first ones.
