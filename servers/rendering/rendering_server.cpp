@@ -3826,6 +3826,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF("rendering/environment/gtao/half_size", true);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/gtao/denoise_passes", PROPERTY_HINT_RANGE, "0,4,1"), 2);
 	GLOBAL_DEF("rendering/environment/gtao/bent_normals", false);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/gtao/thin_occluder_compensation", PROPERTY_HINT_RANGE, "0.0,0.7,0.01"), 0.0);
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/quality", PROPERTY_HINT_ENUM, "Very Low (Fast),Low (Fast),Medium (Average),High (Slow),Ultra (Custom)"), 2);
 	GLOBAL_DEF("rendering/environment/ssil/half_size", true);

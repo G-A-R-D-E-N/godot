@@ -1723,7 +1723,7 @@ void SSEffects::generate_gtao(Ref<RenderSceneBuffersRD> p_render_buffers, GTAORe
 	push_constant.final_value_power = MAX(2.2f * (p_settings.power / 1.5f) * (p_settings.intensity / 2.0f), 0.01f);
 	push_constant.denoise_blur_beta = p_settings.denoise_passes == 0 ? 1e4f : 1.2f;
 	push_constant.sample_distribution_power = 2.0f;
-	push_constant.thin_occluder_compensation = 0.0f;
+	push_constant.thin_occluder_compensation = CLAMP(GLOBAL_GET_CACHED(float, "rendering/environment/gtao/thin_occluder_compensation"), 0.0f, 0.7f);
 	push_constant.depth_mip_sampling_offset = 3.30f;
 	push_constant.noise_index = p_settings.denoise_passes > 0 ? int32_t(p_settings.noise_index % 64) : 0;
 
