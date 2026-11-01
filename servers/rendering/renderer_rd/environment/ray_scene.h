@@ -205,7 +205,7 @@ public:
 	static bool feed_frame_overflow(bool p_raw_overflow, bool p_baseline) { return p_raw_overflow || p_baseline; }
 	static bool feed_frame_needs_epoch(uint32_t p_changes, bool p_raw_overflow, bool p_epoch_moved) { return (p_changes > 0 || p_raw_overflow) && !p_epoch_moved; }
 	static uint32_t feed_surface_state(uint32_t p_state, uint32_t p_flags, float p_coverage) { return hash_murmur3_one_float(p_coverage, hash_murmur3_one_32(p_flags, p_state)); }
-	static uint32_t shadow_cast_flags(RSE::ShadowCastingSetting p_setting);
+	static uint32_t shadow_cast_flags(RSE::ShadowCastingSetting p_setting, bool p_occluder = false);
 	static uint64_t surface_candidates(uint32_t p_surface, uint32_t p_flags);
 	static uint32_t instance_class(uint64_t p_candidates, uint64_t p_split);
 	static uint32_t hw_instance_mask(uint32_t p_layer_mask, const uint32_t *p_groups, uint32_t p_group_count);

@@ -588,9 +588,9 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 	}
 }
 
-uint32_t RayScene::shadow_cast_flags(RSE::ShadowCastingSetting p_setting) {
+uint32_t RayScene::shadow_cast_flags(RSE::ShadowCastingSetting p_setting, bool p_occluder) {
 	if (p_setting == RSE::SHADOW_CASTING_SETTING_OFF) {
-		return MATERIAL_FLAG_SHADOW_PASS;
+		return p_occluder ? 0 : MATERIAL_FLAG_SHADOW_PASS;
 	}
 	if (p_setting == RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY) {
 		return MATERIAL_FLAG_SHADOW_ONLY;
@@ -899,7 +899,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 				shell_ranges.insert(*shell, range);
 			}
 		}
-		const uint32_t cast_flags = shadow_cast_flags(geometry->data->cast_shadows);
+		const uint32_t cast_flags = shadow_cast_flags(geometry->data->cast_shadows, geometry->data->ray_scene_occluder);
 		uint64_t material_candidates = 0;
 		uint64_t candidates = 0;
 		uint32_t feed_state = hash_murmur3_one_32(geometry->layer_mask);
