@@ -624,9 +624,6 @@ void RayScene::_pack_light(RID p_light_instance, bool p_physical_units, float p_
 	}
 	const RID light = light_storage->light_instance_get_base_light(p_light_instance);
 	const RSE::LightType type = light_storage->light_get_type(light);
-	if (light_storage->light_get_bake_mode(light) == RSE::LIGHT_BAKE_DISABLED) {
-		return;
-	}
 	const Vector2 area_size = type == RSE::LIGHT_AREA ? light_storage->light_area_get_size(light) : Vector2();
 	if (type == RSE::LIGHT_AREA && !(area_size.x > 0.0f && area_size.y > 0.0f)) {
 		return;
