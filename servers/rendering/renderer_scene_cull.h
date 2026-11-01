@@ -421,6 +421,7 @@ public:
 
 		bool ignore_occlusion_culling;
 		bool ray_scene_only = false;
+		bool ray_scene_occluder = false;
 		bool ignore_all_culling;
 
 		Vector<RID> materials;
