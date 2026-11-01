@@ -73,11 +73,12 @@ void RayScene::watch_needed() {
 
 RayScene::RayScene() {
 	singleton = this;
+	alpha_enabled = GLOBAL_GET("rendering/global_illumination/ray_scene/alpha_test");
 }
 
 RayScene::~RayScene() {
 	_hw_free();
-	RID *owned[] = { &blas_node_buffer, &triangle_buffer, &instance_buffer, &tlas_node_buffer, &material_buffer, &light_buffer, &scene_data_buffer };
+	RID *owned[] = { &blas_node_buffer, &triangle_buffer, &instance_buffer, &tlas_node_buffer, &material_buffer, &light_buffer, &scene_data_buffer, &triangle_uv_buffer };
 	for (RID *rid : owned) {
 		if (rid->is_valid()) {
 			RD::get_singleton()->free_rid(*rid);
@@ -262,6 +263,44 @@ void RayScene::build_bvh(LocalVector<BuildPrimitive> &p_primitives, uint32_t p_m
 	}
 }
 
+static uint32_t _float_to_half(float p_value) {
+	uint32_t bits;
+	memcpy(&bits, &p_value, sizeof(uint32_t));
+	const uint32_t sign = (bits >> 16) & 0x8000u;
+	const uint32_t magnitude = bits & 0x7FFFFFFFu;
+	if (magnitude >= 0x7F800000u) {
+		return sign | (magnitude > 0x7F800000u ? 0x7E00u : 0x7C00u);
+	}
+	if (magnitude >= 0x477FF000u) {
+		return sign | 0x7BFFu;
+	}
+	if (magnitude <= 0x33000000u) {
+		return sign;
+	}
+	const uint32_t exponent = magnitude >> 23;
+	if (exponent < 113u) {
+		const uint32_t mantissa = (magnitude & 0x007FFFFFu) | 0x00800000u;
+		const uint32_t shift = 126u - exponent;
+		uint32_t half = mantissa >> shift;
+		const uint32_t remainder = mantissa & ((1u << shift) - 1u);
+		const uint32_t halfway = 1u << (shift - 1u);
+		if (remainder > halfway || (remainder == halfway && (half & 1u))) {
+			half++;
+		}
+		return sign | half;
+	}
+	uint32_t half = ((exponent - 112u) << 10) | ((magnitude & 0x007FFFFFu) >> 13);
+	const uint32_t remainder = magnitude & 0x1FFFu;
+	if (remainder > 0x1000u || (remainder == 0x1000u && (half & 1u))) {
+		half++;
+	}
+	return sign | half;
+}
+
+static uint32_t _pack_half2(float p_x, float p_y) {
+	return _float_to_half(p_x) | (_float_to_half(p_y) << 16);
+}
+
 void RayScene::mesh_surface_added(RID p_mesh, uint32_t p_surface, const RenderingServerTypes::SurfaceData &p_surface_data) {
 	MutexLock lock(mesh_mutex);
 	if (!meshes.has(p_mesh) && (p_surface != 0 || !is_needed())) {
@@ -292,6 +331,7 @@ void RayScene::_capture_surface(MeshEntry &r_mesh, uint32_t p_surface, const Ren
 		r_mesh.built = false;
 		r_mesh.nodes.clear();
 		r_mesh.bvh_triangles.clear();
+		r_mesh.bvh_uvs.clear();
 		r_mesh.hw_generation = 0;
 		assembly_dirty = true;
 	}
@@ -319,6 +359,19 @@ void RayScene::_capture_surface(MeshEntry &r_mesh, uint32_t p_surface, const Ren
 	}
 
 	const uint32_t vertex_count = vertices.size();
+	if (alpha_enabled) {
+		const PackedVector2Array uv_array = arrays[RSE::ARRAY_TEX_UV];
+		float uv_extent = 0.0f;
+		for (uint32_t v = 0; v < vertex_count; v++) {
+			const Vector2 uv = v < uint32_t(uv_array.size()) ? uv_array[v] : Vector2();
+			uv_extent = MAX(uv_extent, MAX(Math::abs(float(uv.x)), Math::abs(float(uv.y))));
+			r_mesh.uvs.push_back(_pack_half2(float(uv.x), float(uv.y)));
+		}
+		while (r_mesh.surface_uv_extent.size() <= p_surface) {
+			r_mesh.surface_uv_extent.push_back(0.0f);
+		}
+		r_mesh.surface_uv_extent[p_surface] = uv_extent;
+	}
 	const uint32_t index_count = index_array.is_empty() ? vertex_count : uint32_t(index_array.size());
 	for (uint32_t i = 0; i + 2 < index_count; i += 3) {
 		for (uint32_t k = 0; k < 3; k++) {
@@ -363,6 +416,10 @@ void RayScene::_build_blas(MeshEntry &p_mesh) {
 	build_bvh(primitives, BLAS_LEAF_SIZE, BLAS_MAX_DEPTH, p_mesh.nodes);
 
 	p_mesh.bvh_triangles.resize(triangle_count);
+	p_mesh.bvh_uvs.clear();
+	if (alpha_enabled) {
+		p_mesh.bvh_uvs.resize(triangle_count);
+	}
 	for (uint32_t i = 0; i < triangle_count; i++) {
 		const uint32_t t = primitives[i].index;
 		const Vector3 p0 = p_mesh.positions[p_mesh.indices[t * 3 + 0]];
@@ -377,6 +434,12 @@ void RayScene::_build_blas(MeshEntry &p_mesh) {
 		triangle.e1[3] = 0.0f;
 		triangle.e2[3] = 0.0f;
 		triangle.surface = p_mesh.triangle_surface[t];
+		if (alpha_enabled) {
+			for (uint32_t v = 0; v < 3; v++) {
+				const uint32_t index = p_mesh.indices[t * 3 + v];
+				p_mesh.bvh_uvs[i].uv[v] = index < p_mesh.uvs.size() ? p_mesh.uvs[index] : 0u;
+			}
+		}
 	}
 	p_mesh.built = true;
 	p_mesh.build_serial = ++next_build_serial;
@@ -398,6 +461,7 @@ void RayScene::_assemble(const LocalVector<RID> &p_meshes) {
 	blas_nodes.clear();
 	triangles.clear();
 	assembled_meshes.clear();
+	LocalVector<TriangleUv> triangle_uvs;
 	for (const RID &rid : p_meshes) {
 		MeshEntry *mesh = meshes.getptr(rid);
 		if (!mesh || assembled_meshes.has(rid)) {
@@ -413,6 +477,11 @@ void RayScene::_assemble(const LocalVector<RID> &p_meshes) {
 		for (const Triangle &triangle : mesh->bvh_triangles) {
 			triangles.push_back(triangle);
 		}
+		if (alpha_enabled) {
+			for (uint32_t i = 0; i < mesh->bvh_triangles.size(); i++) {
+				triangle_uvs.push_back(i < mesh->bvh_uvs.size() ? mesh->bvh_uvs[i] : TriangleUv());
+			}
+		}
 		assembled_meshes.insert(rid);
 	}
 	if (blas_nodes.is_empty()) {
@@ -426,6 +495,13 @@ void RayScene::_assemble(const LocalVector<RID> &p_meshes) {
 	_ensure_buffer(triangle_buffer, triangle_capacity, triangles.size(), sizeof(Triangle), "Ray Scene Triangles");
 	RD::get_singleton()->buffer_update(blas_node_buffer, 0, blas_nodes.size() * sizeof(Node), blas_nodes.ptr());
 	RD::get_singleton()->buffer_update(triangle_buffer, 0, triangles.size() * sizeof(Triangle), triangles.ptr());
+	if (alpha_enabled) {
+		if (triangle_uvs.is_empty()) {
+			triangle_uvs.push_back(TriangleUv());
+		}
+		_ensure_buffer(triangle_uv_buffer, triangle_uv_capacity, triangle_uvs.size(), sizeof(TriangleUv), "Ray Scene Triangle UVs");
+		RD::get_singleton()->buffer_update(triangle_uv_buffer, 0, triangle_uvs.size() * sizeof(TriangleUv), triangle_uvs.ptr());
+	}
 	_hw_assembled();
 	assembly_dirty = false;
 }

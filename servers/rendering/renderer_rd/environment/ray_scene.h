@@ -132,6 +132,10 @@ public:
 		float e2[4];
 	};
 
+	struct TriangleUv {
+		uint32_t uv[3];
+	};
+
 	struct Instance {
 		float world_to_object[12];
 		uint32_t blas_root;
@@ -166,6 +170,7 @@ public:
 
 	static_assert(sizeof(Light) == 96);
 	static_assert(sizeof(Instance) == 64);
+	static_assert(sizeof(TriangleUv) == 12);
 	static_assert((uint64_t(TLAS_LEAF_SIZE) << TLAS_MAX_DEPTH) <= (uint64_t(1) << 24), "A hardware instance custom index is 24 bits.");
 
 	struct LightCensus {
@@ -217,11 +222,14 @@ private:
 
 	struct MeshEntry {
 		LocalVector<Vector3> positions;
+		LocalVector<uint32_t> uvs;
 		LocalVector<uint32_t> indices;
 		LocalVector<uint32_t> triangle_surface;
+		LocalVector<float> surface_uv_extent;
 		uint32_t surface_count = 0;
 		LocalVector<Node> nodes;
 		LocalVector<Triangle> bvh_triangles;
+		LocalVector<TriangleUv> bvh_uvs;
 		bool built = false;
 		uint32_t build_serial = 0;
 		uint32_t node_offset = 0;
@@ -321,8 +329,11 @@ private:
 	RID material_buffer;
 	RID light_buffer;
 	RID scene_data_buffer;
+	RID triangle_uv_buffer;
 	uint32_t blas_node_capacity = 0;
 	uint32_t triangle_capacity = 0;
+	uint32_t triangle_uv_capacity = 0;
+	bool alpha_enabled = false;
 	uint32_t instance_capacity = 0;
 	uint32_t tlas_node_capacity = 0;
 	uint32_t material_capacity = 0;
@@ -404,6 +415,8 @@ public:
 	RID get_material_buffer() const { return material_buffer; }
 	RID get_light_buffer() const { return light_buffer; }
 	RID get_scene_data_buffer() const { return scene_data_buffer; }
+	RID get_triangle_uv_buffer() const { return triangle_uv_buffer; }
+	bool is_alpha_enabled() const { return alpha_enabled; }
 
 	RayScene();
 	~RayScene();
