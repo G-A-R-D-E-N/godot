@@ -79,6 +79,7 @@ public:
 	RID get_table_buffer() const { return table_buffer; }
 	uint32_t get_layer_size() const { return layer_size; }
 	const TableEntry &get_entry(uint32_t p_index) const { return entries[p_index]; }
+	uint32_t get_entry_count() const { return entries.size(); }
 	uint32_t get_max_layers() const { return max_layers; }
 	const Stats &get_stats() const { return stats; }
 
