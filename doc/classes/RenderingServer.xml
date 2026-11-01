@@ -6329,7 +6329,10 @@
 		<constant name="INSTANCE_FLAG_RAY_SCENE_OCCLUDER" value="5" enum="InstanceFlags">
 			Makes a mesh instance with shadow casting off still block global illumination shadow rays, so it gives ray traced shadows without raster shadows. Other shadow casting settings are unchanged, and a material's [code]gi_shadow_pass[/code] still lets shadow rays through. Mesh instances only; set the base first. Off by default.
 		</constant>
-		<constant name="INSTANCE_FLAG_MAX" value="6" enum="InstanceFlags">
+		<constant name="INSTANCE_FLAG_RAY_SCENE_EXCLUDE" value="6" enum="InstanceFlags">
+			Keeps a mesh instance out of the global illumination ray scene while the camera still draws it, so it neither blocks nor bounces global illumination rays. Raster shadows are unchanged. With [constant INSTANCE_FLAG_RAY_SCENE_ONLY] also set the instance is in neither. Mesh instances only; set the base first. Off by default.
+		</constant>
+		<constant name="INSTANCE_FLAG_MAX" value="7" enum="InstanceFlags">
 			Represents the size of the [enum InstanceFlags] enum.
 		</constant>
 		<constant name="SHADOW_CASTING_SETTING_OFF" value="0" enum="ShadowCastingSetting">
