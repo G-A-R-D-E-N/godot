@@ -77,6 +77,7 @@ RayScene::RayScene() {
 }
 
 RayScene::~RayScene() {
+	_print_tlas_rebuilds(true);
 	_hw_free();
 	RID *owned[] = { &blas_node_buffer, &triangle_buffer, &instance_buffer, &tlas_node_buffer, &material_buffer, &light_buffer, &scene_data_buffer, &triangle_uv_buffer };
 	for (RID *rid : owned) {
@@ -809,9 +810,23 @@ void RayScene::_print_alpha() {
 		return;
 	}
 	reported_alpha_counts = alpha_counts;
-	print_line(vformat("Ray scene alpha: %d cut-out materials (solid: %d no texture, %d custom0, %d degenerate, %d cutoff 0, %d store full; %d vertex alpha ignored), surfaces %d live, %d pending, %d unsafe UVs, layers %d ready of %d, %d table entries, %d TLAS rebuilds.",
+	print_line(vformat("Ray scene alpha: %d cut-out materials (solid: %d no texture, %d custom0, %d degenerate, %d cutoff 0, %d store full; %d vertex alpha ignored), surfaces %d live, %d pending, %d unsafe UVs, layers %d ready of %d, %d table entries.",
 			alpha_counts.cutout_materials, alpha_counts.solid_no_texture, alpha_counts.solid_custom0, alpha_counts.solid_degenerate, alpha_counts.solid_always, alpha_counts.solid_refused, alpha_counts.vertex_alpha_ignored,
-			alpha_counts.live_surfaces, alpha_counts.pending_surfaces, alpha_counts.solid_unsafe_uv, alpha_counts.layers_ready, alpha_counts.layers, alpha_counts.table_entries, tlas_rebuilds));
+			alpha_counts.live_surfaces, alpha_counts.pending_surfaces, alpha_counts.solid_unsafe_uv, alpha_counts.layers_ready, alpha_counts.layers, alpha_counts.table_entries));
+}
+
+void RayScene::_print_tlas_rebuilds(bool p_final) {
+	if (tlas_rebuilds == reported_tlas_rebuilds && hw_tlas_builds == reported_hw_tlas_builds) {
+		return;
+	}
+	const uint64_t now = OS::get_singleton()->get_ticks_msec();
+	if (!p_final && (reported_tlas_rebuilds != 0 || reported_hw_tlas_builds != 0) && now - tlas_report_msec < 1000) {
+		return;
+	}
+	tlas_report_msec = now;
+	reported_tlas_rebuilds = tlas_rebuilds;
+	reported_hw_tlas_builds = hw_tlas_builds;
+	print_line(vformat("RAYSCENE_TLAS rebuilds %d hw_builds %d%s", tlas_rebuilds, hw_tlas_builds, p_final ? " final" : ""));
 }
 
 uint32_t RayScene::shadow_cast_flags(RSE::ShadowCastingSetting p_setting, bool p_occluder) {
@@ -1241,6 +1256,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	if (accel) {
 		_hw_update(primitives, rebuilt);
 	}
+	_print_tlas_rebuilds(false);
 
 	SceneData scene_data = {};
 	const Vector3 camera_to_anchor = p_camera_position - anchor;

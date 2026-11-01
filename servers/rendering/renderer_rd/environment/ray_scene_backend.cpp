@@ -356,7 +356,9 @@ void RayScene::_hw_update(const LocalVector<BuildPrimitive> &p_primitives, bool 
 		record.instance_class = hw_classes[i];
 		records.push_back(record);
 	}
-	accel->update_tlas(records, p_rebuilt || groups_changed, hw_skipped_cap, hw_skipped_unbuilt);
+	if (accel->update_tlas(records, p_rebuilt || groups_changed, hw_skipped_cap, hw_skipped_unbuilt)) {
+		hw_tlas_builds++;
+	}
 	if (!accel->is_ready()) {
 		refuse_hardware("the TLAS could not be built");
 	}

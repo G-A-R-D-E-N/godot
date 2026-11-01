@@ -256,6 +256,10 @@ private:
 	AlphaCounts alpha_counts;
 	AlphaCounts reported_alpha_counts;
 	uint64_t tlas_rebuilds = 0;
+	uint64_t hw_tlas_builds = 0;
+	uint64_t reported_tlas_rebuilds = 0;
+	uint64_t reported_hw_tlas_builds = 0;
+	uint64_t tlas_report_msec = 0;
 	enum AlbedoSource {
 		ALBEDO_GI,
 		ALBEDO_GI_CAPPED,
@@ -330,6 +334,7 @@ private:
 	bool _alpha_ready() const;
 	void _alpha_instance(const MeshEntry &p_mesh, uint32_t p_surface, Material &r_material);
 	void _print_alpha();
+	void _print_tlas_rebuilds(bool p_final);
 	void _warn_albedo_fallback(RID p_material, RID p_texture, RID p_mesh, uint32_t p_surface);
 	void _instance_slots(RID p_material, CachedMaterial &r_cached) const;
 	void _pack_light(RID p_light_instance, bool p_physical_units, float p_exposure, uint32_t p_limit, LocalVector<Light> &r_lights);
@@ -378,7 +383,6 @@ public:
 	RID get_alpha_table_buffer() const { return alpha_store.get_table_buffer(); }
 	RID get_alpha_layer_texture() const { return alpha_store.get_layer_texture(); }
 	const RayAlphaStore &get_alpha_store() const { return alpha_store; }
-	uint64_t get_tlas_rebuilds() const { return tlas_rebuilds; }
 
 	RayScene();
 	~RayScene();
