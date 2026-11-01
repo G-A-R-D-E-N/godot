@@ -111,7 +111,7 @@ private:
 	LocalVector<TableEntry> entries;
 	HashMap<uint64_t, uint32_t> entry_map;
 	bool table_dirty = true;
-	RaySceneAlphaFillShaderRD fill_shader;
+	RaySceneAlphaFillShaderRD *fill_shader = nullptr;
 	RID fill_version;
 	RID fill_pipeline;
 	bool fill_created = false;

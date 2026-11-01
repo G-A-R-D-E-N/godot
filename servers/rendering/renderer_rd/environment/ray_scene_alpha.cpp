@@ -100,7 +100,9 @@ void RayAlphaStore::release() {
 			RD::get_singleton()->free_rid(fill_pipeline);
 			fill_pipeline = RID();
 		}
-		fill_shader.version_free(fill_version);
+		fill_shader->version_free(fill_version);
+		memdelete(fill_shader);
+		fill_shader = nullptr;
 		fill_version = RID();
 		fill_created = false;
 	}
@@ -119,11 +121,12 @@ bool RayAlphaStore::_ensure_pipeline() {
 		return fill_pipeline.is_valid();
 	}
 	fill_created = true;
+	fill_shader = memnew(RaySceneAlphaFillShaderRD);
 	Vector<String> modes;
 	modes.push_back("\n");
-	fill_shader.initialize(modes, "");
-	fill_version = fill_shader.version_create();
-	RID shader = fill_shader.version_get_shader(fill_version, 0);
+	fill_shader->initialize(modes, "");
+	fill_version = fill_shader->version_create();
+	RID shader = fill_shader->version_get_shader(fill_version, 0);
 	if (shader.is_valid()) {
 		fill_pipeline = RD::get_singleton()->compute_pipeline_create(shader);
 	}
@@ -252,7 +255,7 @@ void RayAlphaStore::update() {
 	}
 
 	if (!pending.is_empty() && _ensure_pipeline()) {
-		RID shader = fill_shader.version_get_shader(fill_version, 0);
+		RID shader = fill_shader->version_get_shader(fill_version, 0);
 		RID sampler = MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_ENABLED);
 		RD::ComputeListID list = RD::get_singleton()->compute_list_begin();
 		RD::get_singleton()->compute_list_bind_compute_pipeline(list, fill_pipeline);

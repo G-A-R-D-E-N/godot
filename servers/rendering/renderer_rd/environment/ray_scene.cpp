@@ -264,7 +264,7 @@ void RayScene::build_bvh(LocalVector<BuildPrimitive> &p_primitives, uint32_t p_m
 	}
 }
 
-static uint32_t _float_to_half(float p_value) {
+uint32_t RayScene::float_to_half(float p_value) {
 	uint32_t bits;
 	memcpy(&bits, &p_value, sizeof(uint32_t));
 	const uint32_t sign = (bits >> 16) & 0x8000u;
@@ -298,8 +298,8 @@ static uint32_t _float_to_half(float p_value) {
 	return sign | half;
 }
 
-static uint32_t _pack_half2(float p_x, float p_y) {
-	return _float_to_half(p_x) | (_float_to_half(p_y) << 16);
+uint32_t RayScene::pack_half2(float p_x, float p_y) {
+	return float_to_half(p_x) | (float_to_half(p_y) << 16);
 }
 
 void RayScene::mesh_surface_added(RID p_mesh, uint32_t p_surface, const RenderingServerTypes::SurfaceData &p_surface_data) {
@@ -366,7 +366,7 @@ void RayScene::_capture_surface(MeshEntry &r_mesh, uint32_t p_surface, const Ren
 		for (uint32_t v = 0; v < vertex_count; v++) {
 			const Vector2 uv = v < uint32_t(uv_array.size()) ? uv_array[v] : Vector2();
 			uv_extent = MAX(uv_extent, MAX(Math::abs(float(uv.x)), Math::abs(float(uv.y))));
-			r_mesh.uvs.push_back(_pack_half2(float(uv.x), float(uv.y)));
+			r_mesh.uvs.push_back(pack_half2(float(uv.x), float(uv.y)));
 		}
 		while (r_mesh.surface_uv_extent.size() <= p_surface) {
 			r_mesh.surface_uv_extent.push_back(0.0f);
@@ -764,9 +764,15 @@ bool RayScene::_surface_uv_unsafe(const MeshEntry &p_mesh, uint32_t p_surface, u
 		return true;
 	}
 	const RayAlphaStore::TableEntry &entry = alpha_store.get_entry(p_entry);
-	const float scale = MAX(Math::abs(entry.scale[0]), Math::abs(entry.scale[1]));
-	const float spacing = Math::pow(2.0f, Math::floor(Math::log2(MAX(extent, 6.103515625e-5f))) - 10.0f);
-	return spacing * scale > 1.0f / float(alpha_store.get_layer_size());
+	return alpha_uv_unsafe(extent, MAX(Math::abs(entry.scale[0]), Math::abs(entry.scale[1])), alpha_store.get_layer_size());
+}
+
+bool RayScene::alpha_uv_unsafe(float p_extent, float p_scale, uint32_t p_layer_size) {
+	if (p_extent >= 65504.0f) {
+		return true;
+	}
+	const float spacing = Math::pow(2.0f, Math::floor(Math::log2(MAX(p_extent, 6.103515625e-5f))) - 10.0f);
+	return spacing * p_scale > 1.0f / float(p_layer_size);
 }
 
 bool RayScene::_alpha_live(uint32_t p_flags) const {
