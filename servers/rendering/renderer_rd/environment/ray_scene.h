@@ -186,6 +186,9 @@ public:
 	static uint64_t surface_candidates(uint32_t p_surface, uint32_t p_flags);
 	static uint32_t instance_class(uint64_t p_candidates, uint64_t p_split);
 	static uint32_t hw_instance_mask(uint32_t p_layer_mask, const uint32_t *p_groups, uint32_t p_group_count);
+	static uint32_t float_to_half(float p_value);
+	static uint32_t pack_half2(float p_x, float p_y);
+	static bool alpha_uv_unsafe(float p_extent, float p_scale, uint32_t p_layer_size);
 
 private:
 	static RayScene *singleton;
