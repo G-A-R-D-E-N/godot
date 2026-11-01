@@ -40,6 +40,7 @@
 #include "core/templates/paged_array.h"
 #include "core/templates/safe_refcount.h"
 #include "servers/rendering/renderer_rd/environment/gi_epochs.h"
+#include "servers/rendering/renderer_rd/environment/ray_scene_alpha.h"
 #include "servers/rendering/rendering_device.h"
 #include "servers/rendering/rendering_server_enums.h"
 #include "servers/rendering/rendering_server_types.h"
@@ -75,7 +76,9 @@ public:
 		MATERIAL_FLAG_SHADOW_ONLY = 16,
 	};
 
-	static constexpr uint32_t CANDIDATE_FLAGS = MATERIAL_FLAG_SKIP | MATERIAL_FLAG_BLEND | MATERIAL_FLAG_SHADOW_PASS | MATERIAL_FLAG_SHADOW_ONLY;
+	static constexpr uint32_t MATERIAL_ALPHA_SHIFT = 8;
+	static constexpr uint32_t MATERIAL_ALPHA_MASK = 0xFFFFFF00;
+	static constexpr uint32_t CANDIDATE_FLAGS = MATERIAL_FLAG_SKIP | MATERIAL_FLAG_BLEND | MATERIAL_FLAG_SHADOW_PASS | MATERIAL_FLAG_SHADOW_ONLY | MATERIAL_ALPHA_MASK;
 
 	enum InstanceClass {
 		INSTANCE_CLASS_OPAQUE,
@@ -231,8 +234,28 @@ private:
 		int32_t bounce_index = -1;
 	};
 
+	struct AlphaCounts {
+		uint32_t cutout_materials = 0;
+		uint32_t solid_no_texture = 0;
+		uint32_t solid_custom0 = 0;
+		uint32_t solid_degenerate = 0;
+		uint32_t solid_always = 0;
+		uint32_t solid_refused = 0;
+		uint32_t vertex_alpha_ignored = 0;
+		uint32_t live_surfaces = 0;
+		uint32_t pending_surfaces = 0;
+		uint32_t solid_unsafe_uv = 0;
+		uint32_t layers = 0;
+		uint32_t layers_ready = 0;
+		uint32_t table_entries = 0;
+	};
+
 	LocalVector<Material> materials;
 	HashMap<RID, CachedMaterial> material_cache;
+	RayAlphaStore alpha_store;
+	AlphaCounts alpha_counts;
+	AlphaCounts reported_alpha_counts;
+	uint64_t tlas_rebuilds = 0;
 	enum AlbedoSource {
 		ALBEDO_GI,
 		ALBEDO_GI_CAPPED,
@@ -300,7 +323,12 @@ private:
 	void _capture_surface(MeshEntry &r_mesh, uint32_t p_surface, const RenderingServerTypes::SurfaceData &p_surface_data);
 	void _build_blas(MeshEntry &p_mesh);
 	void _assemble(const LocalVector<RID> &p_meshes);
-	void _material_entry(RID p_material, RID p_mesh, uint32_t p_surface, Material &r_material);
+	void _material_entry(RID p_material, RID p_mesh, uint32_t p_surface, Material &r_material, float &r_alpha_threshold);
+	void _alpha_entry(RID p_material, Material &r_material, float p_alpha_threshold);
+	bool _surface_uv_unsafe(const MeshEntry &p_mesh, uint32_t p_surface, uint32_t p_entry) const;
+	bool _alpha_live(uint32_t p_flags) const;
+	void _alpha_instance(const MeshEntry &p_mesh, uint32_t p_surface, Material &r_material);
+	void _print_alpha();
 	void _warn_albedo_fallback(RID p_material, RID p_texture, RID p_mesh, uint32_t p_surface);
 	void _instance_slots(RID p_material, CachedMaterial &r_cached) const;
 	void _pack_light(RID p_light_instance, bool p_physical_units, float p_exposure, uint32_t p_limit, LocalVector<Light> &r_lights);
@@ -345,6 +373,10 @@ public:
 	RID get_scene_data_buffer() const { return scene_data_buffer; }
 	RID get_triangle_uv_buffer() const { return triangle_uv_buffer; }
 	bool is_alpha_enabled() const { return alpha_enabled; }
+	RID get_alpha_table_buffer() const { return alpha_store.get_table_buffer(); }
+	RID get_alpha_layer_texture() const { return alpha_store.get_layer_texture(); }
+	const RayAlphaStore &get_alpha_store() const { return alpha_store; }
+	uint64_t get_tlas_rebuilds() const { return tlas_rebuilds; }
 
 	RayScene();
 	~RayScene();

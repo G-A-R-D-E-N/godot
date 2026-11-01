@@ -577,9 +577,10 @@ void RayScene::_warn_albedo_fallback(RID p_material, RID p_texture, RID p_mesh, 
 	WARN_PRINT(vformat("Ray scene: a material without gi_albedo takes the texture-mean albedo fallback (mesh \"%s\", surface %d, texture \"%s\").", MeshStorage::get_singleton()->mesh_get_path(p_mesh), p_surface, TextureStorage::get_singleton()->texture_get_path(p_texture)));
 }
 
-void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, Material &r_material) {
+void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, Material &r_material, float &r_alpha_threshold) {
 	r_material = {};
 	r_material.albedo[0] = r_material.albedo[1] = r_material.albedo[2] = 0.48f;
+	r_alpha_threshold = -1.0f;
 	if (p_material.is_null()) {
 		albedo_sources[ALBEDO_DEFAULT]++;
 		return;
@@ -662,6 +663,140 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 	if (shadow_pass.get_type() == Variant::BOOL ? bool(shadow_pass) : _param_float(shadow_pass, 0.0f) > 0.5f) {
 		r_material.flags |= MATERIAL_FLAG_SHADOW_PASS;
 	}
+	if (alpha_enabled) {
+		const Variant scissor = material_storage->material_get_declared_param(p_material, SNAME("alpha_scissor_threshold"));
+		const Variant body_alpha_test = material_storage->material_get_declared_param(p_material, SNAME("alpha_test"));
+		if (scissor.get_type() != Variant::NIL) {
+			r_alpha_threshold = _param_float(scissor, 0.5f);
+		} else if (body_alpha_test.get_type() == Variant::BOOL && bool(body_alpha_test)) {
+			r_alpha_threshold = _param_float(material_storage->material_get_declared_param(p_material, SNAME("alpha_threshold")), 0.5f);
+		}
+	}
+}
+
+static bool _param_bool(const Variant &p_value) {
+	return p_value.get_type() == Variant::BOOL && bool(p_value);
+}
+
+void RayScene::_alpha_entry(RID p_material, Material &r_material, float p_alpha_threshold) {
+	MaterialStorage *material_storage = MaterialStorage::get_singleton();
+	Variant texture_value;
+	Vector2 scale(1.0f, 1.0f);
+	Vector2 offset(0.0f, 0.0f);
+	float cutoff = 0.0f;
+	if (_param_bool(material_storage->material_get_declared_param(p_material, SNAME("use_base_color_opacity_texture")))) {
+		texture_value = material_storage->material_get_declared_param(p_material, SNAME("base_color_opacity_texture"));
+		const float opacity = _param_float(material_storage->material_get_declared_param(p_material, SNAME("geometry_opacity")), 1.0f);
+		if (_param_bool(material_storage->material_get_declared_param(p_material, SNAME("base_color_opacity_custom0")))) {
+			alpha_counts.solid_custom0++;
+			return;
+		}
+		if (_param_bool(material_storage->material_get_declared_param(p_material, SNAME("use_vertex_alpha")))) {
+			alpha_counts.vertex_alpha_ignored++;
+		}
+		const Variant scale_value = material_storage->material_get_declared_param(p_material, SNAME("uv_scale"));
+		if (scale_value.get_type() == Variant::VECTOR2) {
+			scale = scale_value;
+		}
+		const Variant offset_value = material_storage->material_get_declared_param(p_material, SNAME("uv_offset"));
+		if (offset_value.get_type() == Variant::VECTOR2) {
+			offset = offset_value;
+		}
+		if (_param_bool(material_storage->material_get_declared_param(p_material, SNAME("use_texture_ranges")))) {
+			Vector2 range(0.0f, 1.0f);
+			const Variant range_value = material_storage->material_get_declared_param(p_material, SNAME("geometry_opacity_texture_range"));
+			if (range_value.get_type() == Variant::VECTOR2) {
+				range = range_value;
+			}
+			const float span = float(range.y - range.x);
+			if (Math::abs(span) < 1e-6f) {
+				alpha_counts.solid_degenerate++;
+				return;
+			}
+			cutoff = (p_alpha_threshold - float(range.x)) / span;
+		} else {
+			if (opacity <= 0.0f) {
+				alpha_counts.solid_degenerate++;
+				return;
+			}
+			cutoff = p_alpha_threshold / opacity;
+		}
+	} else if (_param_bool(material_storage->material_get_declared_param(p_material, SNAME("has_albedo")))) {
+		texture_value = material_storage->material_get_declared_param(p_material, SNAME("albedo_tex"));
+		const float mat_alpha = _param_float(material_storage->material_get_declared_param(p_material, SNAME("mat_alpha")), 1.0f);
+		if (mat_alpha <= 0.0f) {
+			alpha_counts.solid_degenerate++;
+			return;
+		}
+		cutoff = p_alpha_threshold / mat_alpha;
+	} else {
+		texture_value = material_storage->material_get_declared_param(p_material, SNAME("texture_albedo"));
+		Color albedo;
+		if (!_param_color(material_storage->material_get_declared_param(p_material, SNAME("albedo")), albedo) || albedo.a <= 0.0f) {
+			alpha_counts.solid_degenerate++;
+			return;
+		}
+		cutoff = p_alpha_threshold / albedo.a;
+	}
+	if (texture_value.get_type() != Variant::RID || RID(texture_value).is_null()) {
+		alpha_counts.solid_no_texture++;
+		return;
+	}
+	cutoff = CLAMP(cutoff, 0.0f, 1.0f);
+	const uint32_t cutoff_k = uint32_t(Math::ceil(cutoff * 255.0f));
+	if (cutoff_k == 0) {
+		alpha_counts.solid_always++;
+		return;
+	}
+	const uint32_t index = alpha_store.acquire(RID(texture_value), cutoff_k, scale, offset);
+	if (index == 0) {
+		alpha_counts.solid_refused++;
+		return;
+	}
+	r_material.flags |= index << MATERIAL_ALPHA_SHIFT;
+	alpha_counts.cutout_materials++;
+}
+
+bool RayScene::_surface_uv_unsafe(const MeshEntry &p_mesh, uint32_t p_surface, uint32_t p_entry) const {
+	const float extent = p_surface < p_mesh.surface_uv_extent.size() ? p_mesh.surface_uv_extent[p_surface] : 0.0f;
+	if (extent >= 65504.0f) {
+		return true;
+	}
+	const RayAlphaStore::TableEntry &entry = alpha_store.get_entry(p_entry);
+	const float scale = MAX(Math::abs(entry.scale[0]), Math::abs(entry.scale[1]));
+	const float spacing = Math::pow(2.0f, Math::floor(Math::log2(MAX(extent, 6.103515625e-5f))) - 10.0f);
+	return spacing * scale > 1.0f / float(alpha_store.get_layer_size());
+}
+
+bool RayScene::_alpha_live(uint32_t p_flags) const {
+	const uint32_t index = p_flags >> MATERIAL_ALPHA_SHIFT;
+	return index != 0 && index < alpha_store.get_entry_count() && alpha_store.get_entry(index).state == RayAlphaStore::LAYER_READY;
+}
+
+void RayScene::_alpha_instance(const MeshEntry &p_mesh, uint32_t p_surface, Material &r_material) {
+	if (_surface_uv_unsafe(p_mesh, p_surface, r_material.flags >> MATERIAL_ALPHA_SHIFT)) {
+		r_material.flags &= ~MATERIAL_ALPHA_MASK;
+		alpha_counts.solid_unsafe_uv++;
+	} else if (!_alpha_live(r_material.flags)) {
+		r_material.flags &= ~MATERIAL_ALPHA_MASK;
+		alpha_counts.pending_surfaces++;
+	} else {
+		alpha_counts.live_surfaces++;
+	}
+}
+
+void RayScene::_print_alpha() {
+	const RayAlphaStore::Stats &stats = alpha_store.get_stats();
+	alpha_counts.layers = stats.layers;
+	alpha_counts.layers_ready = stats.layers_ready;
+	alpha_counts.table_entries = stats.table_entries;
+	if (memcmp(&alpha_counts, &reported_alpha_counts, sizeof(AlphaCounts)) == 0) {
+		return;
+	}
+	reported_alpha_counts = alpha_counts;
+	print_line(vformat("Ray scene alpha: %d cut-out materials (solid: %d no texture, %d custom0, %d degenerate, %d cutoff 0, %d store full; %d vertex alpha ignored), surfaces %d live, %d pending, %d unsafe UVs, layers %d ready of %d, %d table entries, %d TLAS rebuilds.",
+			alpha_counts.cutout_materials, alpha_counts.solid_no_texture, alpha_counts.solid_custom0, alpha_counts.solid_degenerate, alpha_counts.solid_always, alpha_counts.solid_refused, alpha_counts.vertex_alpha_ignored,
+			alpha_counts.live_surfaces, alpha_counts.pending_surfaces, alpha_counts.solid_unsafe_uv, alpha_counts.layers_ready, alpha_counts.layers, alpha_counts.table_entries, tlas_rebuilds));
 }
 
 uint32_t RayScene::shadow_cast_flags(RSE::ShadowCastingSetting p_setting, bool p_occluder) {
@@ -920,6 +1055,10 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			}
 		}
 	}
+	alpha_counts = AlphaCounts();
+	if (alpha_enabled) {
+		alpha_store.configure(uint32_t(GLOBAL_GET_CACHED(int, "rendering/global_illumination/ray_scene/max_alpha_layers")), uint32_t(GLOBAL_GET_CACHED(int, "rendering/global_illumination/ray_scene/alpha_layer_size")), uint64_t(GLOBAL_GET_CACHED(int, "rendering/global_illumination/ray_scene/alpha_fill_texels_per_frame")));
+	}
 	LocalVector<BuildPrimitive> primitives;
 	uint32_t signature = HASH_MURMUR3_SEED;
 	uint64_t scene_signature = 0;
@@ -971,11 +1110,18 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			CachedMaterial *cached = material_cache.getptr(material);
 			if (!cached) {
 				CachedMaterial entry;
-				_material_entry(material, mesh_rid, s, entry.entry);
+				float alpha_threshold = -1.0f;
+				_material_entry(material, mesh_rid, s, entry.entry, alpha_threshold);
+				if (alpha_threshold >= 0.0f && (entry.entry.flags & MATERIAL_FLAG_SKIP) == 0) {
+					_alpha_entry(material, entry.entry, alpha_threshold);
+				}
 				_instance_slots(material, entry);
 				cached = &material_cache.insert(material, entry)->value;
 			}
 			materials.push_back(cached->entry);
+			if ((cached->entry.flags & MATERIAL_ALPHA_MASK) != 0) {
+				_alpha_instance(*mesh, s, materials[materials.size() - 1]);
+			}
 			materials[materials.size() - 1].flags |= cast_flags;
 			if (accel) {
 				material_candidates |= surface_candidates(s, cached->entry.flags);
@@ -1014,10 +1160,17 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		scene_members.push_back(GISceneTracker::member_key(p_instances[i], mesh_rid.get_id()));
 	}
 	GIEpochs::get_singleton()->apply(scene_tracker.update(scene_signature, scene_members));
+	if (alpha_enabled) {
+		alpha_store.update();
+	}
 
 	const bool rebuilt = signature != instance_signature || anchor_moved || need_assembly || tlas_node_buffer.is_null();
 	if (rebuilt) {
 		instance_signature = signature;
+		tlas_rebuilds++;
+		if (alpha_enabled) {
+			_print_alpha();
+		}
 		if (memcmp(albedo_sources, reported_albedo_sources, sizeof(albedo_sources)) != 0) {
 			memcpy(reported_albedo_sources, albedo_sources, sizeof(albedo_sources));
 			print_line(vformat("Ray scene albedo: gi_albedo %d (%d capped at 0.9), textured fallback %d, untextured %d, standard %d, default %d.", albedo_sources[ALBEDO_GI], albedo_sources[ALBEDO_GI_CAPPED], albedo_sources[ALBEDO_TEXTURED], albedo_sources[ALBEDO_UNTEXTURED], albedo_sources[ALBEDO_STANDARD], albedo_sources[ALBEDO_DEFAULT]));
