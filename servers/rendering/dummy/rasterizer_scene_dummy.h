@@ -67,6 +67,7 @@ public:
 		virtual void set_instance_shader_uniforms_offset(int32_t p_offset) override {}
 		virtual void set_cast_double_sided_shadows(bool p_enable) override {}
 		virtual void set_cast_shadows_setting(RSE::ShadowCastingSetting p_setting) override {}
+		virtual void set_ray_scene_occluder(bool p_enable) override {}
 
 		virtual Transform3D get_transform() override { return Transform3D(); }
 		virtual AABB get_aabb() override { return AABB(); }

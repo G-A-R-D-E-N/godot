@@ -85,11 +85,13 @@ TEST_CASE("[RayScene] Instance class known answers") {
 
 TEST_CASE("[RayScene] A surface is opaque to hardware only when every software ray accepts it outright") {
 	for (RSE::ShadowCastingSetting setting : SETTINGS) {
-		for (uint32_t flags = 0; flags < FLAG_COMBINATIONS; flags++) {
-			const uint32_t final_flags = flags | RayScene::shadow_cast_flags(setting);
-			INFO("setting ", int(setting), " flags ", flags);
-			for (const uint32_t surface : { 0u, 5u, 63u }) {
-				CHECK((RayScene::surface_candidates(surface, final_flags) == 0) == always_accepted(final_flags));
+		for (const bool occluder : { false, true }) {
+			for (uint32_t flags = 0; flags < FLAG_COMBINATIONS; flags++) {
+				const uint32_t final_flags = flags | RayScene::shadow_cast_flags(setting, occluder);
+				INFO("setting ", int(setting), " occluder ", occluder, " flags ", flags);
+				for (const uint32_t surface : { 0u, 5u, 63u }) {
+					CHECK((RayScene::surface_candidates(surface, final_flags) == 0) == always_accepted(final_flags));
+				}
 			}
 		}
 	}
