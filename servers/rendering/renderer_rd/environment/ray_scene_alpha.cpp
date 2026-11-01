@@ -242,7 +242,7 @@ void RayAlphaStore::update() {
 		layer.width = format.width;
 		layer.height = format.height;
 		layer.signature = _signature(rd, format.width, format.height);
-		if (layer.signature != layer.filled_signature || layer.state == LAYER_EMPTY) {
+		if (layer.signature != layer.filled_signature || layer.state != LAYER_READY) {
 			if (layer.state != LAYER_PENDING) {
 				layer.state = LAYER_PENDING;
 				table_dirty = true;
