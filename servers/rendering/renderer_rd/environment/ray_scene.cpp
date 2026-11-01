@@ -1192,15 +1192,13 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	GIEpochs::get_singleton()->apply(scene_tracker.update(scene_signature, scene_members));
 	if (alpha_enabled) {
 		alpha_store.update();
+		_print_alpha();
 	}
 
 	const bool rebuilt = signature != instance_signature || anchor_moved || need_assembly || tlas_node_buffer.is_null();
 	if (rebuilt) {
 		instance_signature = signature;
 		tlas_rebuilds++;
-		if (alpha_enabled) {
-			_print_alpha();
-		}
 		if (memcmp(albedo_sources, reported_albedo_sources, sizeof(albedo_sources)) != 0) {
 			memcpy(reported_albedo_sources, albedo_sources, sizeof(albedo_sources));
 			print_line(vformat("Ray scene albedo: gi_albedo %d (%d capped at 0.9), textured fallback %d, untextured %d, standard %d, default %d.", albedo_sources[ALBEDO_GI], albedo_sources[ALBEDO_GI_CAPPED], albedo_sources[ALBEDO_TEXTURED], albedo_sources[ALBEDO_UNTEXTURED], albedo_sources[ALBEDO_STANDARD], albedo_sources[ALBEDO_DEFAULT]));
