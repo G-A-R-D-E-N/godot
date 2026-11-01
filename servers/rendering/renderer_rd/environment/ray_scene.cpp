@@ -773,6 +773,21 @@ bool RayScene::_alpha_live(uint32_t p_flags) const {
 	return index != 0 && index < alpha_store.get_entry_count() && alpha_store.get_entry(index).state == RayAlphaStore::LAYER_READY;
 }
 
+bool RayScene::_alpha_ready() const {
+	return triangle_uv_buffer.is_valid() && alpha_store.get_table_buffer().is_valid() && alpha_store.get_layer_texture().is_valid();
+}
+
+String RayScene::alpha_shader_defines() {
+	if (!singleton || !singleton->alpha_enabled) {
+		return String();
+	}
+	String defines = "\n#define RAY_SCENE_ALPHA\n";
+	if (int(GLOBAL_GET("rendering/global_illumination/ray_scene/alpha_mode")) == 1) {
+		defines += "\n#define RAY_SCENE_ALPHA_THRESHOLD\n";
+	}
+	return defines;
+}
+
 void RayScene::_alpha_instance(const MeshEntry &p_mesh, uint32_t p_surface, Material &r_material) {
 	if (_surface_uv_unsafe(p_mesh, p_surface, r_material.flags >> MATERIAL_ALPHA_SHIFT)) {
 		r_material.flags &= ~MATERIAL_ALPHA_MASK;

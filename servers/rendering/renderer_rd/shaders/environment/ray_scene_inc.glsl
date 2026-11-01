@@ -127,6 +127,30 @@ ray_scene;
 layout(set = RAY_SCENE_SET, binding = 7) uniform accelerationStructureEXT ray_scene_tlas;
 #endif
 
+#ifdef RAY_SCENE_ALPHA
+#define RAY_SCENE_ALPHA_SHIFT 8u
+#define RAY_SCENE_ALPHA_STATE_READY 2u
+
+layout(set = RAY_SCENE_SET, binding = 9, std430) restrict readonly buffer RaySceneTriangleUvs {
+	uint data[];
+}
+ray_scene_triangle_uvs;
+
+struct RaySceneAlphaEntry {
+	uint layer;
+	uint state;
+	vec2 scale;
+	vec2 offset;
+};
+
+layout(set = RAY_SCENE_SET, binding = 13, std430) restrict readonly buffer RaySceneAlphaTable {
+	RaySceneAlphaEntry data[];
+}
+ray_scene_alpha_table;
+
+layout(set = RAY_SCENE_SET, binding = 14) uniform sampler2DArray ray_scene_alpha_layers;
+#endif
+
 struct RaySceneHit {
 	float t;
 	uint instance;
@@ -191,6 +215,29 @@ bool ray_scene_race_step(inout float r_key, inout uint r_id, uint p_seed_hash, u
 #define RAY_SCENE_PICKS(m_stream, m_race) (m_stream)
 #endif
 
+#ifdef RAY_SCENE_ALPHA
+bool ray_scene_alpha_passes(uint p_flags, uint p_triangle, uint p_instance, vec2 p_bary, uint p_seed) {
+	uint index = p_flags >> RAY_SCENE_ALPHA_SHIFT;
+	if (index == 0u) {
+		return true;
+	}
+	RaySceneAlphaEntry entry = ray_scene_alpha_table.data[index];
+	if (entry.state != RAY_SCENE_ALPHA_STATE_READY) {
+		return true;
+	}
+	uint base = p_triangle * 3u;
+	float w0 = 1.0 - p_bary.x - p_bary.y;
+	vec2 uv = unpackHalf2x16(ray_scene_triangle_uvs.data[base]) * w0 + unpackHalf2x16(ray_scene_triangle_uvs.data[base + 1u]) * p_bary.x + unpackHalf2x16(ray_scene_triangle_uvs.data[base + 2u]) * p_bary.y;
+	uv = uv * entry.scale + entry.offset;
+	float coverage = textureLod(ray_scene_alpha_layers, vec3(uv, float(entry.layer)), 0.0).r;
+#ifdef RAY_SCENE_ALPHA_THRESHOLD
+	return coverage >= 0.5;
+#else
+	return coverage > float(ray_scene_hash(ray_scene_hash(p_seed ^ (p_triangle * 0x9e3779b9u)) + p_instance) >> 8u) / 16777216.0;
+#endif
+}
+#endif
+
 vec3 ray_scene_safe_inverse(vec3 p_direction) {
 	vec3 safe = mix(vec3(1e-20), abs(p_direction), greaterThan(abs(p_direction), vec3(1e-20)));
 	return 1.0 / (safe * mix(vec3(-1.0), vec3(1.0), greaterThanEqual(p_direction, vec3(0.0))));
@@ -253,6 +300,11 @@ void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, 
 					if ((flags & skip_mask) != 0u) {
 						continue;
 					}
+#ifdef RAY_SCENE_ALPHA
+					if (!ray_scene_alpha_passes(flags, triangle_index, p_instance, vec2(u, v), p_seed)) {
+						continue;
+					}
+#endif
 					bool blend = (flags & RAY_SCENE_MATERIAL_BLEND) != 0u;
 					if (band && !blend) {
 						continue;

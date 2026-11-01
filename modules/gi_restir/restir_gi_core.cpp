@@ -359,7 +359,7 @@ String RestirGiCore::_defines(Variant p_variant) const {
 	if (p_variant == VARIANT_NONE) {
 		return String();
 	}
-	String defines = vformat("\n#define RAY_SCENE_BLAS_STACK_SIZE %d\n#define RAY_SCENE_TLAS_STACK_SIZE %d\n#define RESTIR_RAYS\n", RayScene::BLAS_MAX_DEPTH, RayScene::TLAS_MAX_DEPTH);
+	String defines = vformat("\n#define RAY_SCENE_BLAS_STACK_SIZE %d\n#define RAY_SCENE_TLAS_STACK_SIZE %d\n#define RESTIR_RAYS\n", RayScene::BLAS_MAX_DEPTH, RayScene::TLAS_MAX_DEPTH) + RayScene::alpha_shader_defines();
 	if (p_variant == VARIANT_HW) {
 		defines += "\n#define SHADER_GLSL_VERSION_460\n#extension GL_EXT_ray_query : require\n#define RAY_SCENE_HW\n";
 	}

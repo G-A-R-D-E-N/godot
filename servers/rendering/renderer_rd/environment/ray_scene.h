@@ -394,6 +394,7 @@ private:
 	void _alpha_entry(RID p_material, Material &r_material, float p_alpha_threshold);
 	bool _surface_uv_unsafe(const MeshEntry &p_mesh, uint32_t p_surface, uint32_t p_entry) const;
 	bool _alpha_live(uint32_t p_flags) const;
+	bool _alpha_ready() const;
 	void _alpha_instance(const MeshEntry &p_mesh, uint32_t p_surface, Material &r_material);
 	void _print_alpha();
 	void _warn_albedo_fallback(RID p_material, RID p_texture, RID p_mesh, uint32_t p_surface);
@@ -427,7 +428,7 @@ public:
 	const DirtyFeed &get_dirty_feed() const { return feed; }
 	uint32_t get_structure_generation() const { return structure_generation; }
 
-	bool is_ready() const { return scene_data_buffer.is_valid() && blas_node_buffer.is_valid() && tlas_node_buffer.is_valid() && (!accel || _hw_ready()); }
+	bool is_ready() const { return scene_data_buffer.is_valid() && blas_node_buffer.is_valid() && tlas_node_buffer.is_valid() && (!accel || _hw_ready()) && (!alpha_enabled || _alpha_ready()); }
 	bool uses_hardware() const { return accel != nullptr; }
 	void refuse_hardware(const String &p_reason);
 	RID get_tlas() const;
@@ -445,6 +446,7 @@ public:
 	RID get_scene_data_buffer() const { return scene_data_buffer; }
 	RID get_triangle_uv_buffer() const { return triangle_uv_buffer; }
 	bool is_alpha_enabled() const { return alpha_enabled; }
+	static String alpha_shader_defines();
 	RID get_alpha_table_buffer() const { return alpha_store.get_table_buffer(); }
 	RID get_alpha_layer_texture() const { return alpha_store.get_layer_texture(); }
 	const RayAlphaStore &get_alpha_store() const { return alpha_store; }
