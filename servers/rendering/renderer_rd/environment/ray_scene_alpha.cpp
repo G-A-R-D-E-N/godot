@@ -1,0 +1,307 @@
+/**************************************************************************/
+/*  ray_scene_alpha.cpp                                                   */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                 */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
+
+#include "ray_scene_alpha.h"
+
+#include "core/templates/hashfuncs.h"
+#include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
+#include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
+#include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
+
+using namespace RendererRD;
+
+namespace {
+
+struct FillParams {
+	uint32_t layer;
+	uint32_t layer_size;
+	uint32_t source_width;
+	uint32_t source_height;
+	uint32_t cutoff;
+	uint32_t pad0;
+	uint32_t pad1;
+	uint32_t pad2;
+};
+
+uint64_t _signature(RID p_rd, uint32_t p_width, uint32_t p_height) {
+	return (p_rd.get_id() * 1000003ULL) ^ (uint64_t(p_width) << 40) ^ (uint64_t(p_height) << 20);
+}
+
+uint64_t _entry_hash(uint32_t p_layer, const Vector2 &p_scale, const Vector2 &p_offset) {
+	const float values[4] = { float(p_scale.x), float(p_scale.y), float(p_offset.x), float(p_offset.y) };
+	return hash_murmur3_buffer(values, sizeof(values), hash_murmur3_one_32(p_layer)) | (uint64_t(p_layer) << 32);
+}
+
+} // namespace
+
+RayAlphaStore::RayAlphaStore() {
+}
+
+RayAlphaStore::~RayAlphaStore() {
+	release();
+}
+
+void RayAlphaStore::configure(uint32_t p_max_layers, uint32_t p_layer_size, uint64_t p_texels_per_frame) {
+	const uint32_t layers_wanted = CLAMP(p_max_layers, 16u, 2048u);
+	const uint32_t size_wanted = p_layer_size >= 512u ? 512u : 256u;
+	if (max_layers == layers_wanted && layer_size == size_wanted) {
+		texels_per_frame = p_texels_per_frame;
+		return;
+	}
+	release();
+	max_layers = layers_wanted;
+	layer_size = size_wanted;
+	texels_per_frame = p_texels_per_frame;
+	entries.clear();
+	entries.push_back(TableEntry());
+	entries[0].layer = 0;
+	entries[0].state = LAYER_EMPTY;
+	table_dirty = true;
+}
+
+void RayAlphaStore::release() {
+	if (layer_texture.is_valid()) {
+		RD::get_singleton()->free_rid(layer_texture);
+		layer_texture = RID();
+	}
+	if (table_buffer.is_valid()) {
+		RD::get_singleton()->free_rid(table_buffer);
+		table_buffer = RID();
+	}
+	if (fill_created) {
+		if (fill_pipeline.is_valid()) {
+			RD::get_singleton()->free_rid(fill_pipeline);
+			fill_pipeline = RID();
+		}
+		fill_shader.version_free(fill_version);
+		fill_version = RID();
+		fill_created = false;
+	}
+	max_layers = 0;
+	table_capacity = 0;
+	layers.clear();
+	layer_map.clear();
+	entries.clear();
+	entry_map.clear();
+	table_dirty = true;
+	stats = Stats();
+}
+
+bool RayAlphaStore::_ensure_pipeline() {
+	if (fill_created) {
+		return fill_pipeline.is_valid();
+	}
+	fill_created = true;
+	Vector<String> modes;
+	modes.push_back("\n");
+	fill_shader.initialize(modes, "");
+	fill_version = fill_shader.version_create();
+	RID shader = fill_shader.version_get_shader(fill_version, 0);
+	if (shader.is_valid()) {
+		fill_pipeline = RD::get_singleton()->compute_pipeline_create(shader);
+	}
+	return fill_pipeline.is_valid();
+}
+
+bool RayAlphaStore::_ensure_texture() {
+	if (layer_texture.is_valid()) {
+		return true;
+	}
+	RD::TextureFormat format;
+	format.format = RD::DATA_FORMAT_R8_UNORM;
+	format.texture_type = RD::TEXTURE_TYPE_2D_ARRAY;
+	format.width = layer_size;
+	format.height = layer_size;
+	format.depth = 1;
+	format.array_layers = max_layers;
+	format.mipmaps = 1;
+	format.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
+	layer_texture = RD::get_singleton()->texture_create(format, RD::TextureView());
+	if (layer_texture.is_valid()) {
+		RD::get_singleton()->set_resource_name(layer_texture, "Ray Scene Alpha Layers");
+	}
+	return layer_texture.is_valid();
+}
+
+void RayAlphaStore::_ensure_table_capacity(uint32_t p_count) {
+	if (table_buffer.is_valid() && table_capacity >= p_count) {
+		return;
+	}
+	if (table_buffer.is_valid()) {
+		RD::get_singleton()->free_rid(table_buffer);
+	}
+	table_capacity = MAX(MAX(p_count, table_capacity * 2), 64u);
+	table_buffer = RD::get_singleton()->storage_buffer_create(table_capacity * sizeof(TableEntry));
+	RD::get_singleton()->set_resource_name(table_buffer, "Ray Scene Alpha Table");
+}
+
+void RayAlphaStore::_upload_table() {
+	_ensure_table_capacity(entries.size());
+	RD::get_singleton()->buffer_update(table_buffer, 0, entries.size() * sizeof(TableEntry), entries.ptr());
+	table_dirty = false;
+}
+
+uint32_t RayAlphaStore::acquire(RID p_source, uint32_t p_cutoff, const Vector2 &p_scale, const Vector2 &p_offset) {
+	if (max_layers == 0 || p_source.is_null() || p_cutoff == 0 || p_cutoff > 255) {
+		return 0;
+	}
+	const uint64_t layer_key = (p_source.get_id() << 9) | uint64_t(p_cutoff);
+	uint32_t layer_index = 0;
+	if (const uint32_t *found = layer_map.getptr(layer_key)) {
+		layer_index = *found;
+	} else {
+		if (layers.size() >= max_layers) {
+			stats.layers_refused++;
+			return 0;
+		}
+		layer_index = layers.size();
+		Layer layer;
+		layer.source = p_source;
+		layer.cutoff = p_cutoff;
+		layers.push_back(layer);
+		layer_map.insert(layer_key, layer_index);
+	}
+
+	const uint64_t entry_key = _entry_hash(layer_index, p_scale, p_offset);
+	if (const uint32_t *found = entry_map.getptr(entry_key)) {
+		const TableEntry &existing = entries[*found];
+		if (existing.layer == layer_index && existing.scale[0] == float(p_scale.x) && existing.scale[1] == float(p_scale.y) && existing.offset[0] == float(p_offset.x) && existing.offset[1] == float(p_offset.y)) {
+			return *found;
+		}
+	}
+	TableEntry entry;
+	entry.layer = layer_index;
+	entry.state = layers[layer_index].state;
+	entry.scale[0] = float(p_scale.x);
+	entry.scale[1] = float(p_scale.y);
+	entry.offset[0] = float(p_offset.x);
+	entry.offset[1] = float(p_offset.y);
+	entries.push_back(entry);
+	const uint32_t index = entries.size() - 1;
+	if (!entry_map.has(entry_key)) {
+		entry_map.insert(entry_key, index);
+	}
+	table_dirty = true;
+	return index;
+}
+
+void RayAlphaStore::update() {
+	if (max_layers == 0) {
+		return;
+	}
+	stats.fills_this_frame = 0;
+	stats.fill_texels_this_frame = 0;
+	stats.layers_refused = 0;
+	stats.source_missing_frames = 0;
+	if (!_ensure_texture()) {
+		return;
+	}
+
+	TextureStorage *texture_storage = TextureStorage::get_singleton();
+	LocalVector<uint32_t> pending;
+	for (uint32_t i = 0; i < layers.size(); i++) {
+		Layer &layer = layers[i];
+		const RID rd = texture_storage->texture_get_rd_texture(layer.source, false);
+		if (rd.is_null()) {
+			if (layer.state != LAYER_PENDING) {
+				layer.state = LAYER_PENDING;
+				table_dirty = true;
+			}
+			stats.source_missing_frames++;
+			continue;
+		}
+		const RD::TextureFormat format = RD::get_singleton()->texture_get_format(rd);
+		layer.source_rd = rd;
+		layer.width = format.width;
+		layer.height = format.height;
+		layer.signature = _signature(rd, format.width, format.height);
+		if (layer.signature != layer.filled_signature || layer.state == LAYER_EMPTY) {
+			if (layer.state != LAYER_PENDING) {
+				layer.state = LAYER_PENDING;
+				table_dirty = true;
+			}
+			pending.push_back(i);
+		}
+	}
+
+	if (!pending.is_empty() && _ensure_pipeline()) {
+		RID shader = fill_shader.version_get_shader(fill_version, 0);
+		RID sampler = MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_ENABLED);
+		RD::ComputeListID list = RD::get_singleton()->compute_list_begin();
+		RD::get_singleton()->compute_list_bind_compute_pipeline(list, fill_pipeline);
+		for (uint32_t index : pending) {
+			Layer &layer = layers[index];
+			const uint64_t texels = uint64_t(layer.width) * uint64_t(layer.height);
+			if (stats.fills_this_frame > 0 && stats.fill_texels_this_frame + texels > texels_per_frame) {
+				break;
+			}
+			RD::Uniform u_source(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ sampler, layer.source_rd }));
+			RD::Uniform u_layers(RD::UNIFORM_TYPE_IMAGE, 1, layer_texture);
+			RID set = UniformSetCacheRD::get_singleton()->get_cache(shader, 0, u_source, u_layers);
+			RD::get_singleton()->compute_list_bind_uniform_set(list, set, 0);
+			FillParams params = {};
+			params.layer = index;
+			params.layer_size = layer_size;
+			params.source_width = layer.width;
+			params.source_height = layer.height;
+			params.cutoff = layer.cutoff;
+			RD::get_singleton()->compute_list_set_push_constant(list, &params, sizeof(params));
+			const uint32_t groups = layer_size / 8u;
+			RD::get_singleton()->compute_list_dispatch(list, groups, groups, 1);
+			layer.filled_signature = layer.signature;
+			layer.state = LAYER_READY;
+			table_dirty = true;
+			stats.fills_this_frame++;
+			stats.fill_texels_this_frame += texels;
+			stats.fills_total++;
+			stats.fill_texels_total += texels;
+		}
+		RD::get_singleton()->compute_list_end();
+	}
+
+	stats.layers = layers.size();
+	stats.layers_ready = 0;
+	stats.layers_pending = 0;
+	for (const Layer &layer : layers) {
+		stats.layers_ready += layer.state == LAYER_READY ? 1 : 0;
+		stats.layers_pending += layer.state != LAYER_READY ? 1 : 0;
+	}
+	stats.table_entries = entries.size();
+
+	for (TableEntry &entry : entries) {
+		if (entry.layer < layers.size() && entry.state != layers[entry.layer].state) {
+			entry.state = layers[entry.layer].state;
+			table_dirty = true;
+		}
+	}
+	if (table_dirty) {
+		_upload_table();
+	}
+}
