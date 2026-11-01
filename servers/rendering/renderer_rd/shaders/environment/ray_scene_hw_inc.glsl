@@ -84,6 +84,11 @@ bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool
 		if (rayQueryGetIntersectionTEXT(query, false) >= limit) {
 			continue;
 		}
+#ifdef RAY_SCENE_ALPHA
+		if (!ray_scene_alpha_passes(material.flags, triangle, index, rayQueryGetIntersectionBarycentricsEXT(query, false).yx, seed)) {
+			continue;
+		}
+#endif
 		if (blend && RAY_SCENE_COVERAGE_MISSES(seed, triangle, index, material.coverage)) {
 			continue;
 		}
@@ -118,6 +123,11 @@ bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool
 		if ((material.flags & skip_mask) != 0u || (material.flags & RAY_SCENE_MATERIAL_BLEND) == 0u) {
 			continue;
 		}
+#ifdef RAY_SCENE_ALPHA
+		if (!ray_scene_alpha_passes(material.flags, triangle, index, rayQueryGetIntersectionBarycentricsEXT(tie_query, false).yx, seed)) {
+			continue;
+		}
+#endif
 		if (RAY_SCENE_COVERAGE_MISSES(seed, triangle, index, material.coverage)) {
 			continue;
 		}
