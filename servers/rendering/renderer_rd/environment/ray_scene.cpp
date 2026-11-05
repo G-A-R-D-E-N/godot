@@ -71,9 +71,16 @@ void RayScene::watch_needed() {
 	}
 }
 
+static bool _alpha_texture_live(RID p_texture) {
+	return TextureStorage::get_singleton()->owns_texture(p_texture);
+}
+
 RayScene::RayScene() {
 	singleton = this;
 	alpha_enabled = GLOBAL_GET("rendering/global_illumination/ray_scene/alpha_test");
+	if (alpha_enabled) {
+		alpha_store.set_liveness(&_alpha_texture_live);
+	}
 }
 
 RayScene::~RayScene() {
@@ -812,13 +819,15 @@ void RayScene::_print_alpha() {
 	alpha_counts.layers = stats.layers;
 	alpha_counts.layers_ready = stats.layers_ready;
 	alpha_counts.table_entries = stats.table_entries;
+	alpha_counts.layers_released = uint32_t(stats.layers_released_total);
+	alpha_counts.layers_evicted = uint32_t(stats.layers_evicted_total);
 	if (memcmp(&alpha_counts, &reported_alpha_counts, sizeof(AlphaCounts)) == 0) {
 		return;
 	}
 	reported_alpha_counts = alpha_counts;
-	print_line(vformat("Ray scene alpha: %d cut-out materials (solid: %d no texture, %d custom0, %d degenerate, %d cutoff 0, %d store full; %d vertex alpha ignored), surfaces %d live, %d pending, %d unsafe UVs, layers %d ready of %d, %d table entries.",
+	print_line(vformat("Ray scene alpha: %d cut-out materials (solid: %d no texture, %d custom0, %d degenerate, %d cutoff 0, %d store full; %d vertex alpha ignored), surfaces %d live, %d pending, %d unsafe UVs, layers %d ready of %d, %d table entries, %d layers released, %d evicted.",
 			alpha_counts.cutout_materials, alpha_counts.solid_no_texture, alpha_counts.solid_custom0, alpha_counts.solid_degenerate, alpha_counts.solid_always, alpha_counts.solid_refused, alpha_counts.vertex_alpha_ignored,
-			alpha_counts.live_surfaces, alpha_counts.pending_surfaces, alpha_counts.solid_unsafe_uv, alpha_counts.layers_ready, alpha_counts.layers, alpha_counts.table_entries));
+			alpha_counts.live_surfaces, alpha_counts.pending_surfaces, alpha_counts.solid_unsafe_uv, alpha_counts.layers_ready, alpha_counts.layers, alpha_counts.table_entries, alpha_counts.layers_released, alpha_counts.layers_evicted));
 }
 
 void RayScene::_print_tlas_rebuilds(bool p_final) {
@@ -1113,6 +1122,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	alpha_counts = AlphaCounts();
 	if (alpha_enabled) {
 		alpha_store.configure(uint32_t(GLOBAL_GET_CACHED(int, "rendering/global_illumination/ray_scene/max_alpha_layers")), uint32_t(GLOBAL_GET_CACHED(int, "rendering/global_illumination/ray_scene/alpha_layer_size")), uint64_t(GLOBAL_GET_CACHED(int, "rendering/global_illumination/ray_scene/alpha_fill_texels_per_frame")));
+		alpha_store.begin_update(RSG::rasterizer->get_frame_number());
 	}
 	LocalVector<BuildPrimitive> primitives;
 	uint32_t signature = HASH_MURMUR3_SEED;

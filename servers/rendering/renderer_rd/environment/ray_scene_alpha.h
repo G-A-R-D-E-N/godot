@@ -45,6 +45,8 @@ public:
 		LAYER_READY = 2,
 	};
 
+	static constexpr uint32_t ENTRY_RETIRED = 0xFFFFFFFF;
+
 	struct TableEntry {
 		uint32_t layer;
 		uint32_t state;
@@ -63,7 +65,15 @@ public:
 		uint64_t fills_total = 0;
 		uint64_t fill_texels_total = 0;
 		uint64_t source_missing_frames = 0;
+		uint32_t layer_slots = 0;
+		uint32_t entries_free = 0;
+		uint32_t dead_sources_refused = 0;
+		uint64_t layers_released_total = 0;
+		uint64_t layers_evicted_total = 0;
+		uint64_t entries_retired_total = 0;
 	};
+
+	typedef bool (*LivenessFunc)(RID p_texture);
 
 	RayAlphaStore();
 	~RayAlphaStore();
@@ -71,8 +81,12 @@ public:
 	void configure(uint32_t p_max_layers, uint32_t p_layer_size, uint64_t p_texels_per_frame);
 	void release();
 
+	void set_liveness(LivenessFunc p_liveness) { liveness = p_liveness; }
+	void begin_update(uint64_t p_frame);
 	uint32_t acquire(RID p_source, uint32_t p_cutoff, const Vector2 &p_scale, const Vector2 &p_offset);
 	void update();
+	void commit_fill(uint32_t p_layer, uint64_t p_signature);
+	void sync_entries();
 
 	bool is_configured() const { return max_layers > 0; }
 	RID get_layer_texture() const { return layer_texture; }
@@ -80,6 +94,14 @@ public:
 	uint32_t get_layer_size() const { return layer_size; }
 	const TableEntry &get_entry(uint32_t p_index) const { return entries[p_index]; }
 	uint32_t get_entry_count() const { return entries.size(); }
+	uint32_t get_entry_generation(uint32_t p_index) const { return entry_meta[p_index].generation; }
+	uint32_t get_free_entry_count() const { return free_entries.size(); }
+	uint32_t get_layer_count() const { return layers.size(); }
+	uint32_t get_live_layer_count() const { return layers.size() - free_layers.size(); }
+	RID get_layer_source(uint32_t p_layer) const { return layers[p_layer].source; }
+	uint32_t get_layer_cutoff(uint32_t p_layer) const { return layers[p_layer].cutoff; }
+	uint32_t get_layer_state(uint32_t p_layer) const { return layers[p_layer].state; }
+	uint32_t get_layer_generation(uint32_t p_layer) const { return layers[p_layer].generation; }
 	uint32_t get_max_layers() const { return max_layers; }
 	const Stats &get_stats() const { return stats; }
 
@@ -93,8 +115,32 @@ private:
 		uint32_t height = 0;
 		uint64_t signature = 0;
 		uint64_t filled_signature = 0;
+		uint32_t generation = 0;
+		uint64_t last_used = 0;
 	};
 
+	struct LayerKey {
+		uint64_t id = 0;
+		uint32_t cutoff = 0;
+
+		bool operator==(const LayerKey &p_other) const { return id == p_other.id && cutoff == p_other.cutoff; }
+	};
+
+	struct LayerKeyHasher {
+		static _FORCE_INLINE_ uint32_t hash(const LayerKey &p_key) { return hash_fmix32(hash_murmur3_one_32(p_key.cutoff, hash_murmur3_one_64(p_key.id))); }
+	};
+
+	struct EntryMeta {
+		uint32_t generation = 0;
+		uint64_t last_used = 0;
+		uint64_t key = 0;
+	};
+
+	static constexpr uint32_t NO_LAYER = 0xFFFFFFFF;
+
+	uint32_t _find_victim() const;
+	void _release_layer(uint32_t p_layer);
+	void _retire_entry(uint32_t p_entry);
 	bool _ensure_pipeline();
 	bool _ensure_texture();
 	void _ensure_table_capacity(uint32_t p_count);
@@ -107,9 +153,14 @@ private:
 	RID table_buffer;
 	uint32_t table_capacity = 0;
 	LocalVector<Layer> layers;
-	HashMap<uint64_t, uint32_t> layer_map;
+	HashMap<LayerKey, uint32_t, LayerKeyHasher> layer_map;
+	LocalVector<uint32_t> free_layers;
 	LocalVector<TableEntry> entries;
+	LocalVector<EntryMeta> entry_meta;
+	LocalVector<uint32_t> free_entries;
 	HashMap<uint64_t, uint32_t> entry_map;
+	uint64_t frame = 0;
+	LivenessFunc liveness = nullptr;
 	bool table_dirty = true;
 	RaySceneAlphaFillShaderRD *fill_shader = nullptr;
 	RID fill_version;

@@ -313,6 +313,8 @@ private:
 		uint32_t layers = 0;
 		uint32_t layers_ready = 0;
 		uint32_t table_entries = 0;
+		uint32_t layers_released = 0;
+		uint32_t layers_evicted = 0;
 	};
 
 	LocalVector<Material> materials;
