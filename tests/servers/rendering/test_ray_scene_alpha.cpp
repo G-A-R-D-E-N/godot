@@ -34,8 +34,11 @@ TEST_FORCE_LINK(test_ray_scene_alpha)
 
 #ifdef RD_ENABLED
 
+#include "core/io/file_access.h"
 #include "core/math/vector2.h"
 #include "core/math/vector3.h"
+#include "core/os/os.h"
+#include "core/templates/hash_map.h"
 #include "core/templates/hash_set.h"
 #include "core/templates/local_vector.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
@@ -894,6 +897,198 @@ TEST_CASE("[RayScene] Alpha fill keeps a grate's open share in stochastic mode")
 	CHECK(Math::abs(stored_open - mip0_open) <= 0.5 / 255.0);
 	CHECK(Math::abs(double(sampled_open) / texels - mip0_open) < 0.01);
 	CHECK(Math::abs(double(threshold_open) / texels - mip0_open) > 0.1);
+}
+
+struct GratePoint {
+	String fixture;
+	String texture;
+	Vector2 corner[3];
+	double bary_u = 0.0;
+	double bary_v = 0.0;
+	float threshold = 0.5f;
+	float opacity = 1.0f;
+	bool ranges = false;
+	Vector2 range = Vector2(0.0f, 1.0f);
+	Vector2 scale = Vector2(1.0f, 1.0f);
+	Vector2 offset;
+	float cast_alpha = 0.0f;
+};
+
+Vector2 parse_pair(const String &p_text) {
+	const PackedStringArray parts = p_text.strip_edges().trim_prefix("(").trim_suffix(")").split(",");
+	return parts.size() == 2 ? Vector2(parts[0].to_float(), parts[1].to_float()) : Vector2();
+}
+
+uint32_t grate_cutoff(const GratePoint &p_point) {
+	float cutoff = 0.0f;
+	if (p_point.ranges) {
+		cutoff = (p_point.threshold - float(p_point.range.x)) / float(p_point.range.y - p_point.range.x);
+	} else {
+		cutoff = p_point.threshold / p_point.opacity;
+	}
+	cutoff = CLAMP(cutoff, 0.0f, 1.0f);
+	return uint32_t(Math::ceil(cutoff * 255.0f));
+}
+
+float sample_linear_repeat(const LocalVector<float> &p_layer, uint32_t p_size, const Uv &p_uv) {
+	const float x = p_uv.x * float(p_size) - 0.5f;
+	const float y = p_uv.y * float(p_size) - 0.5f;
+	const float x_floor = Math::floor(x);
+	const float y_floor = Math::floor(y);
+	const float ax = x - x_floor;
+	const float ay = y - y_floor;
+	const int64_t size = int64_t(p_size);
+	const int64_t x0 = int64_t(x_floor);
+	const int64_t y0 = int64_t(y_floor);
+	const auto at = [&](int64_t p_x, int64_t p_y) {
+		return p_layer[uint32_t(((p_y % size) + size) % size) * p_size + uint32_t(((p_x % size) + size) % size)];
+	};
+	return at(x0, y0) * (1.0f - ax) * (1.0f - ay) + at(x0 + 1, y0) * ax * (1.0f - ay) + at(x0, y0 + 1) * (1.0f - ax) * ay + at(x0 + 1, y0 + 1) * ax * ay;
+}
+
+TEST_CASE("[RayScene] Alpha store keeps Vault111Cryo's grate footprint open: 256 box fill and linear sample, against a 512 nearest cast") {
+	const String dir = OS::get_singleton()->get_environment("GARDEN_RAY_SCENE_GRATE_DIR");
+	if (dir.is_empty()) {
+		MESSAGE("SKIP: GARDEN_RAY_SCENE_GRATE_DIR is not set; the grate known-answer test needs converted game data, so nothing was checked.");
+		return;
+	}
+	const Ref<FileAccess> table = FileAccess::open(dir.path_join("grate_points.tsv"), FileAccess::READ);
+	REQUIRE(table.is_valid());
+	const PackedStringArray header = table->get_line().split("\t");
+	HashMap<String, int> column;
+	for (int i = 0; i < header.size(); i++) {
+		column[header[i]] = i;
+	}
+	for (const char *name : { "fixture", "kind", "tex", "thr", "opa", "uv_scale", "uv_offset", "alpha_nn", "t0", "t1", "t2", "bu", "bv", "ranges", "rng" }) {
+		REQUIRE(column.has(name));
+	}
+	LocalVector<GratePoint> points;
+	uint32_t other = 0;
+	while (!table->eof_reached()) {
+		const String line = table->get_line();
+		if (line.strip_edges().is_empty()) {
+			continue;
+		}
+		const PackedStringArray f = line.split("\t");
+		REQUIRE(f.size() == header.size());
+		if (f[column["kind"]] != "grate") {
+			other++;
+			continue;
+		}
+		GratePoint point;
+		point.fixture = f[column["fixture"]];
+		point.texture = f[column["tex"]];
+		point.corner[0] = parse_pair(f[column["t0"]]);
+		point.corner[1] = parse_pair(f[column["t1"]]);
+		point.corner[2] = parse_pair(f[column["t2"]]);
+		point.bary_u = f[column["bu"]].to_float();
+		point.bary_v = f[column["bv"]].to_float();
+		point.threshold = f[column["thr"]].is_empty() || f[column["thr"]] == "None" ? 0.5f : f[column["thr"]].to_float();
+		point.opacity = f[column["opa"]].is_empty() || f[column["opa"]] == "None" ? 1.0f : f[column["opa"]].to_float();
+		point.ranges = f[column["ranges"]] == "True";
+		if (point.ranges) {
+			point.range = parse_pair(f[column["rng"]]);
+			REQUIRE(Math::abs(point.range.y - point.range.x) > 1e-6);
+		}
+		point.scale = parse_pair(f[column["uv_scale"]]);
+		point.offset = parse_pair(f[column["uv_offset"]]);
+		point.cast_alpha = f[column["alpha_nn"]].to_float();
+		points.push_back(point);
+	}
+	REQUIRE(other == 0);
+	REQUIRE(points.size() == 5500);
+
+	constexpr uint32_t source_size = 512;
+	constexpr uint32_t layer_size = 256;
+	HashMap<String, LocalVector<uint8_t>> sources;
+	HashMap<String, LocalVector<float>> layers;
+	for (const GratePoint &point : points) {
+		const uint32_t cutoff = grate_cutoff(point);
+		REQUIRE(cutoff > 0);
+		const String layer_key = point.texture + "|" + itos(cutoff);
+		if (layers.has(layer_key)) {
+			continue;
+		}
+		if (!sources.has(point.texture)) {
+			const Ref<FileAccess> plane = FileAccess::open(dir.path_join(point.texture + ".alpha0.512x512.r8"), FileAccess::READ);
+			REQUIRE(plane.is_valid());
+			REQUIRE(plane->get_length() == source_size * source_size);
+			LocalVector<uint8_t> loaded;
+			loaded.resize(source_size * source_size);
+			plane->get_buffer(loaded.ptr(), loaded.size());
+			sources[point.texture] = loaded;
+		}
+		const LocalVector<uint8_t> &source = sources[point.texture];
+		LocalVector<float> layer;
+		layer.resize(layer_size * layer_size);
+		for (uint32_t y = 0; y < layer_size; y++) {
+			for (uint32_t x = 0; x < layer_size; x++) {
+				layer[y * layer_size + x] = Math::round(fill_texel(source, source_size, source_size, layer_size, cutoff, x, y) * 255.0f) / 255.0f;
+			}
+		}
+		layers[layer_key] = layer;
+	}
+
+	LocalVector<String> order;
+	HashMap<String, double> engine_open;
+	HashMap<String, double> threshold_open;
+	HashMap<String, uint32_t> cast_open;
+	HashMap<String, uint32_t> count;
+	uint32_t cast_mismatches = 0;
+	LocalVector<RayScene::TriangleUv> uvs;
+	uvs.resize(1);
+	for (const GratePoint &point : points) {
+		if (!count.has(point.fixture)) {
+			order.push_back(point.fixture);
+			engine_open[point.fixture] = 0.0;
+			threshold_open[point.fixture] = 0.0;
+			cast_open[point.fixture] = 0;
+			count[point.fixture] = 0;
+		}
+		for (uint32_t i = 0; i < 3; i++) {
+			uvs[0].uv[i] = RayScene::pack_half2(point.corner[i].x, point.corner[i].y);
+		}
+		const RayAlphaStore::TableEntry entry = make_entry(0, RayAlphaStore::LAYER_READY, point.scale.x, point.scale.y, point.offset.x, point.offset.y);
+		const float coverage = sample_linear_repeat(layers[point.texture + "|" + itos(grate_cutoff(point))], layer_size, interpolate_uv(uvs, 0, float(point.bary_u), float(point.bary_v), entry));
+		engine_open[point.fixture] += 1.0 - stochastic_pass_probability(coverage);
+		threshold_open[point.fixture] += coverage >= 0.5f ? 0.0 : 1.0;
+
+		const double w0 = 1.0 - point.bary_u - point.bary_v;
+		const double u = (w0 * point.corner[0].x + point.bary_u * point.corner[1].x + point.bary_v * point.corner[2].x) * point.scale.x + point.offset.x;
+		const double v = (w0 * point.corner[0].y + point.bary_u * point.corner[1].y + point.bary_v * point.corner[2].y) * point.scale.y + point.offset.y;
+		const int64_t size = int64_t(source_size);
+		const int64_t tx = ((int64_t(Math::floor(u * double(source_size))) % size) + size) % size;
+		const int64_t ty = ((int64_t(Math::floor(v * double(source_size))) % size) + size) % size;
+		const float nearest = float(sources[point.texture][uint32_t(ty) * source_size + uint32_t(tx)]) / 255.0f;
+		cast_mismatches += nearest == point.cast_alpha ? 0u : 1u;
+		cast_open[point.fixture] += nearest * point.opacity < point.threshold ? 1u : 0u;
+		count[point.fixture]++;
+	}
+	CHECK(cast_mismatches == 0);
+	REQUIRE(order.size() == 22);
+
+	double engine_mean = 0.0;
+	double cast_mean = 0.0;
+	double threshold_mean = 0.0;
+	for (const String &fixture : order) {
+		REQUIRE(count[fixture] == 250);
+		const double engine = engine_open[fixture] / double(count[fixture]);
+		const double threshold = threshold_open[fixture] / double(count[fixture]);
+		const double cast = double(cast_open[fixture]) / double(count[fixture]);
+		MESSAGE(vformat("%s: engine stochastic open %.4f, threshold mode %.4f, cast %.4f", fixture, engine, threshold, cast));
+		engine_mean += engine;
+		cast_mean += cast;
+		threshold_mean += threshold;
+	}
+	engine_mean /= double(order.size());
+	cast_mean /= double(order.size());
+	threshold_mean /= double(order.size());
+	MESSAGE(vformat("grate footprint mean over %d fixtures: engine stochastic %.4f, threshold mode %.4f, cast %.4f", int(order.size()), engine_mean, threshold_mean, cast_mean));
+	CHECK(Math::abs(cast_mean - 0.3438) < 0.0005);
+	CHECK(engine_mean >= 0.308);
+	CHECK(engine_mean <= 0.368);
+	CHECK(Math::abs(engine_mean - cast_mean) < 0.01);
+	CHECK(Math::abs(engine_mean - 0.3469) < 0.001);
 }
 
 } // namespace TestRaySceneAlpha
