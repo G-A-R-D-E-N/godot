@@ -36,6 +36,7 @@ TEST_FORCE_LINK(test_ray_scene_alpha)
 
 #include "core/math/vector2.h"
 #include "core/math/vector3.h"
+#include "core/templates/hash_set.h"
 #include "core/templates/local_vector.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene_alpha.h"
@@ -322,6 +323,436 @@ TEST_CASE("[RayScene] Alpha store keys, entries and clamps need no device") {
 	CHECK(store.get_layer_size() == 512);
 	CHECK(store.get_entry_count() == 1);
 	CHECK(store.acquire(grate, 128, one, zero) == 1);
+}
+
+LocalVector<uint64_t> live_ids;
+
+bool test_texture_live(RID p_texture) {
+	for (const uint64_t id : live_ids) {
+		if (id == p_texture.get_id()) {
+			return true;
+		}
+	}
+	return false;
+}
+
+RID make_live(uint64_t p_id) {
+	live_ids.push_back(p_id);
+	return RID::from_uint64(p_id);
+}
+
+void kill_texture(uint64_t p_id) {
+	for (uint32_t i = 0; i < live_ids.size(); i++) {
+		if (live_ids[i] == p_id) {
+			live_ids.remove_at_unordered(i);
+			return;
+		}
+	}
+}
+
+uint32_t live_entry_count(const RayAlphaStore &p_store) {
+	uint32_t count = 0;
+	for (uint32_t i = 1; i < p_store.get_entry_count(); i++) {
+		count += p_store.get_entry(i).layer != RayAlphaStore::ENTRY_RETIRED ? 1 : 0;
+	}
+	return count;
+}
+
+bool holds_layer(const RayAlphaStore &p_store, RID p_source, uint32_t p_cutoff) {
+	for (uint32_t i = 0; i < p_store.get_layer_count(); i++) {
+		if (p_store.get_layer_source(i) == p_source && p_store.get_layer_cutoff(i) == p_cutoff) {
+			return true;
+		}
+	}
+	return false;
+}
+
+TEST_CASE("[RayScene] Alpha store keys layers by the whole RID") {
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	const Vector2 one(1.0f, 1.0f);
+	const Vector2 zero(0.0f, 0.0f);
+	const uint64_t slot = 7;
+	const uint64_t validator = 0x1234;
+	const RID first = RID::from_uint64((validator << 32) | slot);
+	const RID second = RID::from_uint64(((validator + (1ull << 23)) << 32) | slot);
+	CHECK(first != second);
+	CHECK(((first.get_id() << 9) | 128u) == ((second.get_id() << 9) | 128u));
+
+	const uint32_t a = store.acquire(first, 128, one, zero);
+	const uint32_t b = store.acquire(second, 128, one, zero);
+	REQUIRE(a != 0);
+	REQUIRE(b != 0);
+	CHECK(store.get_entry(a).layer != store.get_entry(b).layer);
+	CHECK(store.get_layer_source(store.get_entry(a).layer) == first);
+	CHECK(store.get_layer_source(store.get_entry(b).layer) == second);
+	CHECK(store.get_live_layer_count() == 2);
+}
+
+TEST_CASE("[RayScene] Alpha store refuses a texture that is already freed") {
+	live_ids.clear();
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	store.set_liveness(&test_texture_live);
+	store.begin_update(1);
+	const RID dead = RID::from_uint64(0x500000001ull);
+	CHECK(store.acquire(dead, 128, Vector2(1.0f, 1.0f), Vector2()) == 0);
+	CHECK(store.get_layer_count() == 0);
+	CHECK(store.get_entry_count() == 1);
+	CHECK(store.get_stats().dead_sources_refused == 1);
+	CHECK(store.get_stats().layers_refused == 0);
+	store.begin_update(2);
+	CHECK(store.get_stats().dead_sources_refused == 0);
+}
+
+TEST_CASE("[RayScene] Alpha store releases the layers of freed textures") {
+	live_ids.clear();
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	store.set_liveness(&test_texture_live);
+	const Vector2 one(1.0f, 1.0f);
+	const Vector2 zero(0.0f, 0.0f);
+	store.begin_update(1);
+	RID textures[4];
+	uint32_t indices[4];
+	for (uint32_t i = 0; i < 4; i++) {
+		textures[i] = make_live(0x100000010ull + i);
+		indices[i] = store.acquire(textures[i], 128, one, zero);
+		REQUIRE(indices[i] == i + 1);
+		REQUIRE(store.get_entry(indices[i]).layer == i);
+	}
+	CHECK(store.get_live_layer_count() == 4);
+
+	kill_texture(textures[1].get_id());
+	kill_texture(textures[3].get_id());
+	store.begin_update(2);
+	CHECK(store.get_live_layer_count() == 2);
+	CHECK(store.get_layer_count() == 4);
+	CHECK(store.get_stats().layers_released_total == 2);
+	CHECK(store.get_layer_source(1).is_null());
+	CHECK(store.get_layer_source(3).is_null());
+	CHECK(store.get_layer_generation(1) == 1);
+	CHECK(store.get_layer_generation(3) == 1);
+	CHECK(store.get_layer_generation(0) == 0);
+	for (const uint32_t i : { 1u, 3u }) {
+		INFO("texture ", i);
+		CHECK(store.get_entry(indices[i]).layer == RayAlphaStore::ENTRY_RETIRED);
+		CHECK(store.get_entry(indices[i]).state == RayAlphaStore::LAYER_EMPTY);
+	}
+	CHECK(store.get_entry(indices[0]).layer == 0);
+	CHECK(store.get_entry(indices[2]).layer == 2);
+	CHECK(store.get_free_entry_count() == 2);
+
+	const RID fresh = make_live(0x100000020ull);
+	const uint32_t index = store.acquire(fresh, 128, one, zero);
+	REQUIRE(index != 0);
+	CHECK((index == indices[1] || index == indices[3]));
+	const uint32_t layer = store.get_entry(index).layer;
+	CHECK((layer == 1 || layer == 3));
+	CHECK(store.get_layer_source(layer) == fresh);
+	CHECK(store.get_layer_generation(layer) == 1);
+	CHECK(store.get_layer_state(layer) == RayAlphaStore::LAYER_EMPTY);
+	CHECK(store.get_entry(index).state == RayAlphaStore::LAYER_EMPTY);
+	CHECK(store.get_entry_generation(index) == store.get_layer_generation(layer));
+	CHECK(store.get_layer_count() == 4);
+	CHECK(store.get_entry_count() == 5);
+	CHECK(store.get_free_entry_count() == 1);
+}
+
+TEST_CASE("[RayScene] Alpha store never hands a new texture the old texture's entry") {
+	live_ids.clear();
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	store.set_liveness(&test_texture_live);
+	const Vector2 one(1.0f, 1.0f);
+	const Vector2 zero(0.0f, 0.0f);
+	store.begin_update(1);
+	const RID old = make_live(0x100000001ull);
+	const uint32_t old_index = store.acquire(old, 128, one, zero);
+	REQUIRE(old_index != 0);
+	const uint32_t layer = store.get_entry(old_index).layer;
+	store.commit_fill(layer, 42);
+	store.sync_entries();
+	CHECK(store.get_entry(old_index).state == RayAlphaStore::LAYER_READY);
+
+	kill_texture(old.get_id());
+	store.begin_update(2);
+	CHECK(store.get_entry(old_index).layer == RayAlphaStore::ENTRY_RETIRED);
+	const RID next = make_live(0x200000001ull);
+	const uint32_t index = store.acquire(next, 128, one, zero);
+	REQUIRE(index != 0);
+	CHECK(store.get_entry(index).layer == layer);
+	CHECK(store.get_layer_source(layer) == next);
+	CHECK(store.get_layer_state(layer) == RayAlphaStore::LAYER_EMPTY);
+	CHECK(store.get_entry(index).state == RayAlphaStore::LAYER_EMPTY);
+	CHECK(store.acquire(next, 128, one, zero) == index);
+	store.sync_entries();
+	CHECK(store.get_entry(index).state == RayAlphaStore::LAYER_EMPTY);
+
+	store.commit_fill(layer, 43);
+	store.sync_entries();
+	CHECK(store.get_entry(index).state == RayAlphaStore::LAYER_READY);
+	if (index != old_index) {
+		CHECK(store.get_entry(old_index).layer == RayAlphaStore::ENTRY_RETIRED);
+	}
+	CHECK(store.get_entry_count() == 2);
+}
+
+TEST_CASE("[RayScene] Alpha store evicts the least recently used layer at the cap") {
+	live_ids.clear();
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	store.set_liveness(&test_texture_live);
+	const Vector2 one(1.0f, 1.0f);
+	const Vector2 zero(0.0f, 0.0f);
+	store.begin_update(1);
+	RID textures[16];
+	for (uint32_t i = 0; i < 16; i++) {
+		textures[i] = make_live(0x100000000ull | (100 + i));
+		REQUIRE(store.acquire(textures[i], 128, one, zero) != 0);
+	}
+	CHECK(store.get_live_layer_count() == 16);
+
+	store.begin_update(2);
+	for (uint32_t i = 0; i < 10; i++) {
+		CHECK(store.acquire(textures[i], 128, one, zero) != 0);
+	}
+	const RID extra = make_live(0x100000000ull | 500);
+	CHECK(store.acquire(extra, 128, one, zero) == 0);
+	CHECK(store.get_stats().layers_refused == 1);
+	CHECK(store.get_stats().layers_evicted_total == 0);
+
+	store.begin_update(3);
+	for (uint32_t i = 0; i < 10; i++) {
+		CHECK(store.acquire(textures[i], 128, one, zero) != 0);
+	}
+	const uint32_t got = store.acquire(extra, 128, one, zero);
+	REQUIRE(got != 0);
+	CHECK(store.get_stats().layers_evicted_total == 1);
+	CHECK(store.get_entry(got).layer == 10);
+	CHECK(store.get_layer_source(10) == extra);
+
+	store.commit_fill(11, 7);
+	store.commit_fill(12, 7);
+	const RID extra2 = make_live(0x100000000ull | 501);
+	const uint32_t got2 = store.acquire(extra2, 128, one, zero);
+	REQUIRE(got2 != 0);
+	CHECK(store.get_entry(got2).layer == 11);
+	CHECK(store.get_stats().layers_evicted_total == 2);
+	for (uint32_t i = 0; i < 10; i++) {
+		INFO("texture ", i);
+		CHECK(store.get_layer_source(i) == textures[i]);
+	}
+	CHECK(store.get_layer_source(12) == textures[12]);
+	CHECK(store.get_stats().layers_refused == 0);
+}
+
+TEST_CASE("[RayScene] Alpha store keeps layers used earlier in the same frame") {
+	live_ids.clear();
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	store.set_liveness(&test_texture_live);
+	const Vector2 one(1.0f, 1.0f);
+	const Vector2 zero(0.0f, 0.0f);
+	store.begin_update(1);
+	for (uint32_t i = 0; i < 16; i++) {
+		REQUIRE(store.acquire(make_live(0x100000000ull | (100 + i)), 128, one, zero) != 0);
+	}
+	LocalVector<RID> set_a;
+	LocalVector<RID> set_b;
+	LocalVector<RID> set_c;
+	for (uint32_t i = 0; i < 8; i++) {
+		set_a.push_back(make_live(0x100000000ull | (200 + i)));
+		set_b.push_back(make_live(0x100000000ull | (300 + i)));
+		set_c.push_back(make_live(0x100000000ull | (400 + i)));
+	}
+
+	store.begin_update(5);
+	for (const RID &texture : set_a) {
+		CHECK(store.acquire(texture, 128, one, zero) != 0);
+	}
+	store.begin_update(5);
+	for (const RID &texture : set_b) {
+		CHECK(store.acquire(texture, 128, one, zero) != 0);
+	}
+	CHECK(store.get_stats().layers_evicted_total == 16);
+	store.begin_update(5);
+	for (const RID &texture : set_c) {
+		CHECK(store.acquire(texture, 128, one, zero) == 0);
+	}
+	CHECK(store.get_stats().layers_refused == 8);
+	for (uint32_t i = 0; i < 8; i++) {
+		INFO("texture ", i);
+		CHECK(holds_layer(store, set_a[i], 128));
+		CHECK(holds_layer(store, set_b[i], 128));
+		CHECK_FALSE(holds_layer(store, set_c[i], 128));
+	}
+}
+
+TEST_CASE("[RayScene] Alpha store ages out entries no material uses") {
+	live_ids.clear();
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	store.set_liveness(&test_texture_live);
+	const Vector2 one(1.0f, 1.0f);
+	const RID moving = make_live(0x100000001ull);
+	uint32_t refused = 0;
+	uint32_t worst_live = 0;
+	for (uint64_t f = 1; f <= 1000; f++) {
+		store.begin_update(f);
+		refused += store.acquire(moving, 128, one, Vector2(float(f) * 0.001f, 0.0f)) == 0 ? 1 : 0;
+		worst_live = MAX(worst_live, live_entry_count(store));
+	}
+	CHECK(refused == 0);
+	CHECK(worst_live == 2);
+	CHECK(store.get_entry_count() == 3);
+	CHECK(store.get_live_layer_count() == 1);
+	CHECK(store.get_stats().entries_retired_total == 998);
+
+	const float nan = float(Math::NaN);
+	const float inf = float(Math::INF);
+	const uint32_t before = store.get_entry_count();
+	CHECK(store.acquire(moving, 128, one, Vector2(nan, 0.0f)) == 0);
+	CHECK(store.acquire(moving, 128, Vector2(nan, 1.0f), Vector2()) == 0);
+	CHECK(store.acquire(moving, 128, one, Vector2(0.0f, inf)) == 0);
+	CHECK(store.acquire(moving, 128, Vector2(1.0f, -inf), Vector2()) == 0);
+	CHECK(store.get_entry_count() == before);
+}
+
+struct StreamMaterial {
+	uint32_t texture = 0;
+	uint32_t cutoff = 0;
+	Vector2 offset;
+};
+
+void run_stream_cycles(bool p_kill) {
+	live_ids.clear();
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	store.set_liveness(&test_texture_live);
+	const Vector2 one(1.0f, 1.0f);
+	const uint32_t texture_count = 18;
+	const uint32_t first_in_phase[3] = { 0, 6, 10 };
+	const uint32_t end_in_phase[3] = { 10, 18, 18 };
+	uint64_t ids[texture_count];
+	bool dead[texture_count];
+	uint64_t next_validator = 1;
+	for (uint32_t t = 0; t < texture_count; t++) {
+		ids[t] = make_live((next_validator++ << 32) | uint64_t(t + 1)).get_id();
+		dead[t] = false;
+	}
+	LocalVector<StreamMaterial> materials;
+	for (uint32_t t = 0; t < 6; t++) {
+		for (const uint32_t cutoff : { 96u, 192u }) {
+			for (const float offset : { 0.0f, 0.25f }) {
+				materials.push_back({ t, cutoff, Vector2(offset, 0.0f) });
+			}
+		}
+	}
+	for (uint32_t t = 6; t < texture_count; t++) {
+		materials.push_back({ t, 128u, Vector2() });
+	}
+	LocalVector<uint32_t> fill_generation;
+	fill_generation.resize(16);
+	for (uint32_t &g : fill_generation) {
+		g = 0xFFFFFFFF;
+	}
+	HashSet<uint64_t> used_before;
+	uint32_t wrong_entry = 0;
+	uint32_t dead_layers = 0;
+	uint32_t stale_entries = 0;
+	uint32_t refusals_with_room = 0;
+	uint32_t over_cap = 0;
+	uint32_t worst_entries = 0;
+	uint64_t frame = 1;
+	for (uint32_t cycle = 0; cycle < 200; cycle++) {
+		for (uint32_t phase = 0; phase < 3; phase++) {
+			const uint32_t previous = (phase + 2) % 3;
+			for (uint32_t t = 0; t < texture_count; t++) {
+				const bool was = t >= first_in_phase[previous] && t < end_in_phase[previous];
+				const bool is = t >= first_in_phase[phase] && t < end_in_phase[phase];
+				if (was && !is && p_kill && (cycle & 1) && (t & 1) == 0) {
+					kill_texture(ids[t]);
+					dead[t] = true;
+				}
+				if (is && dead[t]) {
+					ids[t] = make_live((next_validator++ << 32) | uint64_t(t + 1)).get_id();
+					dead[t] = false;
+				}
+			}
+			for (uint32_t step = 0; step < 3; step++, frame++) {
+				store.begin_update(frame);
+				for (uint32_t i = 0; i < store.get_layer_count(); i++) {
+					const RID source = store.get_layer_source(i);
+					dead_layers += source.is_valid() && !test_texture_live(source) ? 1 : 0;
+				}
+				HashSet<uint64_t> used_now;
+				for (const StreamMaterial &m : materials) {
+					if (m.texture < first_in_phase[phase] || m.texture >= end_in_phase[phase]) {
+						continue;
+					}
+					const RID source = RID::from_uint64(ids[m.texture]);
+					used_now.insert((uint64_t(m.texture) << 8) | m.cutoff);
+					const uint32_t index = store.acquire(source, m.cutoff, one, m.offset);
+					if (index == 0) {
+						continue;
+					}
+					const RayAlphaStore::TableEntry &entry = store.get_entry(index);
+					if (entry.layer >= store.get_layer_count() || store.get_layer_source(entry.layer) != source || store.get_layer_cutoff(entry.layer) != m.cutoff || store.get_entry_generation(index) != store.get_layer_generation(entry.layer) || entry.scale[0] != 1.0f || entry.offset[0] != m.offset.x) {
+						wrong_entry++;
+					}
+				}
+				HashSet<uint64_t> protected_pairs = used_now;
+				for (const uint64_t key : used_before) {
+					protected_pairs.insert(key);
+				}
+				if (protected_pairs.size() <= 16 && store.get_stats().layers_refused != 0) {
+					refusals_with_room++;
+				}
+				used_before = used_now;
+				for (uint32_t i = 0; i < store.get_layer_count(); i++) {
+					if (store.get_layer_source(i).is_valid() && store.get_layer_state(i) != RayAlphaStore::LAYER_READY) {
+						store.commit_fill(i, frame);
+						fill_generation[i] = store.get_layer_generation(i);
+					}
+				}
+				store.sync_entries();
+				for (uint32_t i = 1; i < store.get_entry_count(); i++) {
+					const RayAlphaStore::TableEntry &entry = store.get_entry(i);
+					if (entry.layer == RayAlphaStore::ENTRY_RETIRED) {
+						stale_entries += entry.state != RayAlphaStore::LAYER_EMPTY ? 1 : 0;
+						continue;
+					}
+					if (entry.layer >= store.get_layer_count() || store.get_layer_source(entry.layer).is_null() || store.get_entry_generation(i) != store.get_layer_generation(entry.layer) || (entry.state == RayAlphaStore::LAYER_READY && fill_generation[entry.layer] != store.get_layer_generation(entry.layer))) {
+						stale_entries++;
+					}
+				}
+				over_cap += store.get_live_layer_count() > 16 || store.get_layer_count() > 16 ? 1 : 0;
+				worst_entries = MAX(worst_entries, store.get_entry_count());
+			}
+		}
+	}
+	CHECK(frame == 1801);
+	CHECK(wrong_entry == 0);
+	CHECK(dead_layers == 0);
+	CHECK(stale_entries == 0);
+	CHECK(refusals_with_room == 0);
+	CHECK(over_cap == 0);
+	CHECK(worst_entries <= 37);
+	CHECK(store.get_stats().layers_evicted_total > 0);
+	if (p_kill) {
+		CHECK(store.get_stats().layers_released_total > 0);
+	} else {
+		CHECK(store.get_stats().layers_released_total == 0);
+	}
+}
+
+TEST_CASE("[RayScene] Alpha store streams cells out and in 200 times with textures freed") {
+	run_stream_cycles(true);
+}
+
+TEST_CASE("[RayScene] Alpha store streams cells out and in 200 times with textures kept alive") {
+	run_stream_cycles(false);
 }
 
 TEST_CASE("[RayScene] Alpha accept rule known answers") {
