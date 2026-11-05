@@ -459,7 +459,7 @@ TEST_CASE("[RayScene] Alpha store releases the layers of freed textures") {
 	CHECK(store.get_free_entry_count() == 1);
 }
 
-TEST_CASE("[RayScene] Alpha store never hands a new texture the old texture's entry") {
+TEST_CASE("[RayScene] Alpha store resets the old texture's entry before a new texture reuses it") {
 	live_ids.clear();
 	RayAlphaStore store;
 	store.configure(16, 256, 1u << 20);
@@ -492,9 +492,8 @@ TEST_CASE("[RayScene] Alpha store never hands a new texture the old texture's en
 	store.commit_fill(layer, 43);
 	store.sync_entries();
 	CHECK(store.get_entry(index).state == RayAlphaStore::LAYER_READY);
-	if (index != old_index) {
-		CHECK(store.get_entry(old_index).layer == RayAlphaStore::ENTRY_RETIRED);
-	}
+	CHECK(index == old_index);
+	CHECK(store.get_entry_generation(index) == store.get_layer_generation(layer));
 	CHECK(store.get_entry_count() == 2);
 }
 
@@ -702,7 +701,7 @@ void run_stream_cycles(bool p_kill) {
 						wrong_entry++;
 					}
 				}
-				HashSet<uint64_t> protected_pairs = used_now;
+				HashSet<uint64_t> protected_pairs(used_now);
 				for (const uint64_t key : used_before) {
 					protected_pairs.insert(key);
 				}
