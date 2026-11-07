@@ -610,6 +610,7 @@ void RayScene::_pack_light(RID p_light_instance, bool p_physical_units, float p_
 	packed.cos_spot_angle = Math::cos(Math::deg_to_rad(light_storage->light_get_param(light, RSE::LIGHT_PARAM_SPOT_ANGLE)));
 	packed.inv_spot_attenuation = 1.0f / MAX(0.0001f, light_storage->light_get_param(light, RSE::LIGHT_PARAM_SPOT_ATTENUATION));
 	packed.caster_mask = light_storage->light_get_shadow_caster_mask(light);
+	packed.pad = p_light_instance.get_local_index();
 	if (type == RSE::LIGHT_AREA) {
 		pack_area(transform.basis, area_size, packed);
 	}
