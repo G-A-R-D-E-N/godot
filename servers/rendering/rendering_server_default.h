@@ -501,6 +501,7 @@ public:
 	FUNC2(light_set_reverse_cull_face_mode, RID, bool)
 	FUNC2(light_set_shadow_caster_mask, RID, uint32_t)
 	FUNC7(light_set_direct_shadow, RID, bool, float, float, float, const TypedArray<RID> &, const PackedInt32Array &)
+	FUNC2(light_set_direct_mean_energy, RID, float)
 	FUNC2(light_set_bake_mode, RID, RSE::LightBakeMode)
 	FUNC2(light_set_max_sdfgi_cascade, RID, uint32_t)
 	FUNC2(light_set_allow_contact_shadows, RID, bool)

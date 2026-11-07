@@ -336,6 +336,7 @@ public:
 	virtual void light_set_shadow_caster_mask(RID p_light, uint32_t p_caster_mask) override;
 	virtual uint32_t light_get_shadow_caster_mask(RID p_light) const override;
 	virtual void light_set_direct_shadow(RID p_light, bool p_owned, float p_movement, float p_size, float p_clearance, const TypedArray<RID> &p_shells, const PackedInt32Array &p_surfaces) override {}
+	virtual void light_set_direct_mean_energy(RID p_light, float p_energy) override {}
 	virtual void light_set_bake_mode(RID p_light, RSE::LightBakeMode p_bake_mode) override;
 	virtual void light_set_max_sdfgi_cascade(RID p_light, uint32_t p_cascade) override {}
 	virtual void light_set_allow_contact_shadows(RID p_light, bool p_enable) override {}

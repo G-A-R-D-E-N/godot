@@ -5,6 +5,12 @@ struct DirectLamp {
 	uint dynamic;
 	float clearance;
 	uint exclude;
+	float anchor_offset_x;
+	float anchor_offset_y;
+	float anchor_offset_z;
+	float mean_r;
+	float mean_g;
+	float mean_b;
 };
 
 layout(set = 0, binding = 4, std140) uniform Params {
@@ -39,7 +45,7 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	float range_scale;
 	float dynamic_cap;
 	uint count;
-	uint pad2;
+	uint head_entries;
 }
 params;
 

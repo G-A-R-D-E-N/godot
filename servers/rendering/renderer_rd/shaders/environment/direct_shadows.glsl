@@ -71,6 +71,10 @@ layout(set = 0, binding = 19, std430) restrict readonly buffer DirectExcludes {
 }
 direct_excludes;
 
+#ifdef EXTERNAL_ENTRIES
+layout(r32ui, set = 0, binding = 20) uniform restrict readonly uimage2DArray entry_image;
+#endif
+
 #define RAY_SCENE_EXCLUDE
 uint exclude_first = 0u;
 uint exclude_count = 0u;
@@ -98,6 +102,19 @@ struct Entry {
 Entry own[MAX_ENTRIES];
 uint own_count = 0u;
 uint own_limit = 0u;
+uint rest_layer = 0u;
+
+#ifdef EXTERNAL_ENTRIES
+uint head_slots[MAX_ENTRIES];
+uint tail_count = 0u;
+uint tail_slot[MAX_ENTRIES];
+float tail_share[MAX_ENTRIES];
+vec3 tail_scale[MAX_ENTRIES];
+vec3 tail_position[MAX_ENTRIES];
+bool tail_seen[MAX_ENTRIES];
+float tail_hits[MAX_ENTRIES];
+float tail_rays[MAX_ENTRIES];
+#endif
 
 float rest_total = 0.0;
 vec3 rest_target = vec3(0.0);
@@ -160,13 +177,17 @@ vec3 rest_sample(uint p_pick, float p_visible) {
 	return p_visible * (rest_pick_target[p_pick] / max(rest_target, vec3(1e-30))) * (rest_total / rest_weight[p_pick]);
 }
 
-void add_rest(uint p_slot, float p_weight, vec3 p_position, vec3 p_target) {
+void count_rest(uint p_slot, float p_weight, vec3 p_target) {
 	rest_total += p_weight;
 	rest_target += p_target;
 	rest_key += ray_scene_hash(p_slot);
 	rest_count++;
 	rest_reset = rest_reset || direct_lamps.data[p_slot].reset_frame > params.last_frame;
 	rest_dynamic = rest_dynamic || direct_lamps.data[p_slot].dynamic != 0u;
+}
+
+void add_rest(uint p_slot, float p_weight, vec3 p_position, vec3 p_target) {
+	count_rest(p_slot, p_weight, p_target);
 	for (uint i = 0u; i < rest_picks; i++) {
 		if (random_value() * rest_total <= p_weight) {
 			rest_slot[i] = p_slot;
@@ -201,6 +222,45 @@ void add_lamp(uint p_slot, float p_weight, vec3 p_position, vec3 p_target) {
 	own_count++;
 }
 
+#ifdef EXTERNAL_ENTRIES
+void add_external(uint p_slot, float p_weight, vec3 p_position, vec3 p_target) {
+	for (uint k = 0u; k < tail_count; k++) {
+		if (tail_slot[k] == p_slot) {
+			tail_position[k] = p_position;
+			tail_seen[k] = true;
+		}
+	}
+	if (p_weight <= 0.0) {
+		return;
+	}
+	for (uint i = 0u; i < own_limit; i++) {
+		if (head_slots[i] == p_slot) {
+			add_lamp(p_slot, p_weight, p_position, p_target);
+			return;
+		}
+	}
+	count_rest(p_slot, p_weight, p_target);
+}
+
+void read_entries(ivec2 p_pixel) {
+	for (uint i = 0u; i < own_limit; i++) {
+		head_slots[i] = imageLoad(entry_image, ivec3(p_pixel, int(i))).r & 0xFFFFu;
+	}
+	tail_count = rest_layer - own_limit;
+	for (uint k = 0u; k < tail_count; k++) {
+		uint base = own_limit + 3u * k;
+		uint packed = imageLoad(entry_image, ivec3(p_pixel, int(base))).r;
+		tail_slot[k] = packed & 0xFFFFu;
+		tail_share[k] = uintBitsToFloat(imageLoad(entry_image, ivec3(p_pixel, int(base + 1u))).r);
+		tail_scale[k] = vec3(unpackHalf2x16(imageLoad(entry_image, ivec3(p_pixel, int(base + 2u))).r), unpackHalf2x16(packed >> 16u).x);
+		tail_position[k] = vec3(0.0);
+		tail_seen[k] = false;
+		tail_hits[k] = 0.0;
+		tail_rays[k] = 0.0;
+	}
+}
+#endif
+
 void consider(LightData p_light, bool p_spot, vec3 p_vertex, vec3 p_normal, vec3 p_view, float p_roughness) {
 	if ((p_light.flags & 1u) == 0u) {
 		return;
@@ -223,10 +283,14 @@ void consider(LightData p_light, bool p_spot, vec3 p_vertex, vec3 p_normal, vec3
 	float response = surface_response(to_light, p_normal, p_view, p_roughness, p_light.specular_amount);
 	vec3 target = p_light.color * attenuation * response;
 	float weight = luminance(target);
+#ifdef EXTERNAL_ENTRIES
+	add_external((p_light.flags >> 1) & 0xFFFFu, max(weight, 0.0), p_light.position, target);
+#else
 	if (weight <= 0.0) {
 		return;
 	}
 	add_lamp((p_light.flags >> 1) & 0xFFFFu, weight, p_light.position, target);
+#endif
 }
 
 void walk_cluster(uint p_cluster_offset, uint p_cluster_z, bool p_spot, vec3 p_vertex, vec3 p_normal, vec3 p_view, float p_roughness) {
@@ -342,8 +406,9 @@ void main() {
 	if (any(greaterThanEqual(pixel, params.size))) {
 		return;
 	}
-	own_limit = params.entries - 1u;
-	uint factor_layers = own_limit + 3u;
+	own_limit = params.head_entries;
+	rest_layer = params.entries - 1u;
+	uint factor_layers = rest_layer + 3u;
 
 	float depth = texelFetch(depth_buffer, pixel, 0).r;
 	if (depth <= 0.0) {
@@ -373,6 +438,9 @@ void main() {
 
 	rng_state = ray_scene_hash(uint(pixel.y) * 65537u + uint(pixel.x)) ^ ray_scene_hash(params.frame);
 	rest_picks = params.reference != 0u ? REFERENCE_RAYS : 1u;
+#ifdef EXTERNAL_ENTRIES
+	read_entries(pixel);
+#endif
 
 	uvec2 cluster_pos = uvec2(pixel) >> params.cluster_shift;
 	uint cluster_offset = (params.cluster_width * cluster_pos.y + cluster_pos.x) * (params.max_cluster_element_count_div_32 + 32u);
@@ -384,7 +452,15 @@ void main() {
 		atomicMax(counters.most_walked, walked);
 	}
 
+#ifdef EXTERNAL_ENTRIES
+	bool tail_lit = false;
+	for (uint k = 0u; k < tail_count; k++) {
+		tail_lit = tail_lit || tail_seen[k];
+	}
+	if (own_count + rest_count == 0u && !tail_lit) {
+#else
 	if (own_count + rest_count == 0u) {
+#endif
 		write_empty(pixel, factor_layers);
 		return;
 	}
@@ -424,7 +500,7 @@ void main() {
 		if (params.count != 0u) {
 			atomicAdd(counters.rest_pixels, 1u);
 		}
-		if (has_history && !rest_reset && uint(round(imageLoad(history_slots, ivec3(history_pixel, int(own_limit))).r * 65535.0)) == rest_key_value) {
+		if (has_history && !rest_reset && uint(round(imageLoad(history_slots, ivec3(history_pixel, int(rest_layer))).r * 65535.0)) == rest_key_value) {
 			rest_accum = imageLoad(history_rest, history_pixel);
 		}
 	}
@@ -445,6 +521,21 @@ void main() {
 				traced_rays++;
 			}
 		}
+#ifdef EXTERNAL_ENTRIES
+		for (uint k = 0u; k < tail_count; k++) {
+			if (!tail_seen[k]) {
+				continue;
+			}
+			for (uint r = 0u; r < REFERENCE_RAYS; r++) {
+				float visible = lamp_ray(vertex, anchored, normal, tail_position[k], tail_slot[k], random_value(), random_value(), rng_state) ? 1.0 : 0.0;
+				tail_hits[k] += visible;
+				tail_rays[k] += 1.0;
+				rest_accum.rgb += visible * tail_scale[k];
+				rest_accum.a += 1.0;
+				traced_rays++;
+			}
+		}
+#else
 		if (has_rest) {
 			for (uint r = 0u; r < REFERENCE_RAYS; r++) {
 				float visible = lamp_ray(vertex, anchored, normal, rest_position[r], rest_slot[r], random_value(), random_value(), rng_state) ? 1.0 : 0.0;
@@ -453,9 +544,24 @@ void main() {
 				traced_rays++;
 			}
 		}
+#endif
 	} else {
 		float pick[MAX_ENTRIES];
+#ifdef EXTERNAL_ENTRIES
+		uint tail_of_pick[MAX_ENTRIES];
+		uint tail_picks = 0u;
+		bool tail_dynamic = false;
+		for (uint k = 0u; k < tail_count; k++) {
+			if (tail_seen[k] && tail_share[k] > 0.0) {
+				tail_of_pick[tail_picks] = k;
+				tail_picks++;
+				tail_dynamic = tail_dynamic || direct_lamps.data[tail_slot[k]].dynamic != 0u;
+			}
+		}
+		uint pick_count = own_count + tail_picks;
+#else
 		uint pick_count = own_count + (has_rest ? 1u : 0u);
+#endif
 		float floor_share = 1.0 / (4.0 * float(pick_count));
 		float total = 0.0;
 		for (uint i = 0u; i < own_count; i++) {
@@ -465,20 +571,31 @@ void main() {
 			pick[i] = own[i].weight * doubt;
 			total += pick[i];
 		}
+#ifdef EXTERNAL_ENTRIES
+		for (uint t = 0u; t < tail_picks; t++) {
+			pick[own_count + t] = tail_share[tail_of_pick[t]] * (rest_accum.a < 8.0 ? 1.0 : 0.5);
+			total += pick[own_count + t];
+		}
+#else
 		if (has_rest) {
 			pick[own_count] = rest_total * (rest_accum.a < 8.0 ? 1.0 : 0.5);
 			total += pick[own_count];
 		}
+#endif
 		float share_total = 0.0;
 		for (uint i = 0u; i < pick_count; i++) {
+#ifdef EXTERNAL_ENTRIES
+			bool dynamic = i < own_count ? direct_lamps.data[own[i].slot].dynamic != 0u : tail_dynamic;
+#else
 			bool dynamic = i < own_count ? direct_lamps.data[own[i].slot].dynamic != 0u : rest_dynamic;
+#endif
 			pick[i] = max(pick[i] / max(total, 1e-20), dynamic ? 1.0 / float(pick_count) : floor_share);
 			share_total += pick[i];
 		}
 		for (uint i = 0u; i < pick_count; i++) {
 			pick[i] /= share_total;
 		}
-		for (uint r = 0u; r < params.rays; r++) {
+		for (uint r = 0u; r < params.rays && pick_count > 0u; r++) {
 			float choice = random_value();
 			uint chosen = pick_count - 1u;
 			for (uint i = 0u; i < pick_count; i++) {
@@ -496,8 +613,16 @@ void main() {
 				accum[chosen].y += 1.0;
 				ray_record = (own[chosen].slot << 16u) | (hit ? 1u : 0u);
 			} else {
+#ifdef EXTERNAL_ENTRIES
+				uint k = tail_of_pick[chosen - own_count];
+				float visible = lamp_ray(vertex, anchored, normal, tail_position[k], tail_slot[k], random_value(), random_value(), rng_state) ? 1.0 : 0.0;
+				tail_hits[k] += visible;
+				tail_rays[k] += 1.0;
+				rest_accum.rgb += visible * tail_scale[k];
+#else
 				float visible = lamp_ray(vertex, anchored, normal, rest_position[0], rest_slot[0], random_value(), random_value(), rng_state) ? 1.0 : 0.0;
 				rest_accum.rgb += rest_sample(0u, visible);
+#endif
 				rest_accum.a += 1.0;
 			}
 			traced_rays++;
@@ -538,14 +663,31 @@ void main() {
 		}
 	}
 	vec3 rest_mean = rest_accum.a > 0.0 ? clamp(rest_accum.rgb / rest_accum.a, vec3(0.0), vec3(1.0)) : vec3(1.0);
-	imageStore(slot_image, ivec3(pixel, int(own_limit)), vec4(has_rest ? float(rest_key_value) / 65535.0 : 0.0));
+#ifdef EXTERNAL_ENTRIES
+	for (uint k = 0u; k < tail_count; k++) {
+		float visible = 1.0;
+		if (tail_rays[k] > 0.0) {
+			visible = tail_hits[k] / tail_rays[k];
+		} else if (tail_seen[k]) {
+			DirectLamp lamp = direct_lamps.data[tail_slot[k]];
+			vec3 mean_color = vec3(lamp.mean_r, lamp.mean_g, lamp.mean_b);
+			visible = dot(rest_mean, mean_color) / max(mean_color.r + mean_color.g + mean_color.b, 1e-6);
+		}
+		imageStore(slot_image, ivec3(pixel, int(own_limit + k)), vec4(0.0));
+		imageStore(accum_image, ivec3(pixel, int(own_limit + k)), vec4(visible, 1.0, 0.0, 0.0));
+		if (params.filter_on == 0u) {
+			imageStore(factor_image, ivec3(pixel, int(own_limit + k)), vec4(params.force_one != 0u ? 1.0 : visible));
+		}
+	}
+#endif
+	imageStore(slot_image, ivec3(pixel, int(rest_layer)), vec4(has_rest ? float(rest_key_value) / 65535.0 : 0.0));
 #ifdef PRECISE_HISTORY
-	imageStore(accum_image, ivec3(pixel, int(own_limit)), vec4(0.0, float(rest_count), 0.0, 0.0));
+	imageStore(accum_image, ivec3(pixel, int(rest_layer)), vec4(0.0, float(rest_count), 0.0, 0.0));
 #endif
 	imageStore(rest_image, pixel, has_rest ? rest_accum : vec4(0.0));
 	if (params.filter_on == 0u) {
 		for (uint c = 0u; c < 3u; c++) {
-			imageStore(factor_image, ivec3(pixel, int(own_limit + c)), vec4(params.force_one != 0u ? 1.0 : rest_mean[c]));
+			imageStore(factor_image, ivec3(pixel, int(rest_layer + c)), vec4(params.force_one != 0u ? 1.0 : rest_mean[c]));
 		}
 	}
 

@@ -74,6 +74,9 @@ public:
 		float z_far = 1.0f;
 		uint64_t frame = 0;
 		uint64_t table_generation = 0;
+		RID entries;
+		uint32_t head_entries = 0;
+		uint32_t tail_samples = 0;
 	};
 
 	struct Settings {
@@ -149,7 +152,7 @@ private:
 		float range_scale;
 		float dynamic_cap;
 		uint32_t count;
-		uint32_t pad;
+		uint32_t head_entries;
 	};
 
 	static constexpr uint32_t COUNTER_BYTES = 32;
@@ -157,6 +160,8 @@ private:
 	enum TraceMode {
 		TRACE_CAPPED,
 		TRACE_PRECISE,
+		TRACE_CAPPED_EXTERNAL,
+		TRACE_PRECISE_EXTERNAL,
 		TRACE_MAX,
 	};
 
@@ -186,6 +191,9 @@ private:
 	uint32_t exclude_buffer_capacity = 0;
 	RID counter_buffer;
 	RID debug_unused;
+	RID resampled_dummy;
+	bool lamps_prepared = false;
+	String lamps_dump_request;
 	LocalVector<DirectLightTable::GpuSlot> lamp_data;
 	LocalVector<DirectLightTable::GpuExclude> exclude_data;
 	LocalVector<float> lamp_dump;
@@ -209,7 +217,13 @@ private:
 	Ref<ViewportData> _viewport(const Ref<RenderSceneBuffersRD> &p_render_buffers);
 
 public:
+	bool prepare_lamps(const FrameInput &p_input, DirectLightTable &p_table);
 	bool process(const FrameInput &p_input, DirectLightTable &p_table);
+	RID get_lamp_buffer() const { return lamp_buffer; }
+	RID get_history_slots(const Ref<RenderSceneBuffersRD> &p_render_buffers) const;
+	RID get_history_factors(const Ref<RenderSceneBuffersRD> &p_render_buffers) const;
+	bool get_history_view(const Ref<RenderSceneBuffersRD> &p_render_buffers, uint64_t p_table_generation, Transform3D &r_camera, Projection &r_projection, RID &r_guide) const;
+	RID get_resampled_dummy() const { return resampled_dummy; }
 	RID get_slots(const Ref<RenderSceneBuffersRD> &p_render_buffers) const;
 	RID get_factors(const Ref<RenderSceneBuffersRD> &p_render_buffers) const;
 	void release(const Ref<RenderSceneBuffersRD> &p_render_buffers);

@@ -37,6 +37,7 @@
 #include "servers/rendering/renderer_rd/effects/fsr2.h"
 #include "servers/rendering/renderer_rd/effects/motion_vectors_store.h"
 #include "servers/rendering/renderer_rd/effects/ss_effects.h"
+#include "servers/rendering/renderer_rd/environment/direct_resampler_hooks.h"
 #include "servers/rendering/renderer_rd/environment/direct_shadows.h"
 #include "servers/rendering/renderer_rd/effects/taa.h"
 #include "servers/rendering/renderer_rd/forward_clustered/scene_shader_forward_clustered.h"
@@ -798,6 +799,7 @@ private:
 	RendererRD::DirectShadows *direct_shadows = nullptr;
 	RID direct_shadow_slots;
 	RID direct_shadow_factors;
+	RID direct_resampled;
 
 #ifdef METAL_MFXTEMPORAL_ENABLED
 	RendererRD::MFXTemporalEffect *mfx_temporal_effect = nullptr;

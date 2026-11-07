@@ -170,6 +170,10 @@ bool sc_use_direct_shadow() {
 	return ((sc_packed_1() >> 14) & 1U) != 0;
 }
 
+bool sc_use_direct_resampled() {
+	return ((sc_packed_1() >> 15) & 1U) != 0;
+}
+
 float sc_luminance_multiplier() {
 	// Not used in clustered renderer but we share some code with the mobile renderer that requires this.
 	return 1.0;
@@ -549,6 +553,31 @@ layout(set = 1, binding = 51) uniform texture2DArray far_shadow_terrain[FAR_SHAD
 
 layout(set = 1, binding = 52) uniform texture2DArray direct_shadow_slots;
 layout(set = 1, binding = 53) uniform texture2DArray direct_shadow_factors;
+layout(set = 1, binding = 54) uniform utexture2DArray direct_resampled;
+
+struct DirectSlotData {
+	uint caster_mask;
+	float size;
+	uint reset_frame;
+	uint dynamic;
+	float clearance;
+	uint exclude;
+	float anchor_offset_x;
+	float anchor_offset_y;
+	float anchor_offset_z;
+	float mean_r;
+	float mean_g;
+	float mean_b;
+};
+
+layout(set = 1, binding = 55, std430) restrict readonly buffer DirectSlots {
+	DirectSlotData data[];
+}
+direct_slots;
+
+int direct_head_layer = -1;
+int direct_tail_layer = -1;
+vec3 direct_tail_color = vec3(0.0);
 
 layout(set = 1, binding = 43, std430) buffer restrict readonly SkySHBuffer {
 	vec4 coefficients[9];

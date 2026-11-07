@@ -1229,6 +1229,94 @@ uint cluster_get_range_clip_mask(uint i, uint z_min, uint z_max) {
 	return bitfieldInsert(uint(0), uint(0xFFFFFFFF), local_min, mask_width);
 }
 
+#if !defined(USE_SHADOW_TO_OPACITY) && !defined(USE_VERTEX_LIGHTING) && !defined(USE_MULTIVIEW) && !defined(MODE_RENDER_DEPTH)
+#define DIRECT_RESAMPLED_ROUTE
+#include "../environment/di_sampler_inc.glsl"
+
+bool direct_record_ok = false;
+vec3 direct_record_vertex = vec3(0.0);
+vec3 direct_record_normal = vec3(0.0);
+int direct_record_tails = 0;
+int direct_record_heads = 0;
+
+void direct_record_begin(in SceneData scene_data, vec3 p_vertex) {
+	direct_record_ok = false;
+	if (!sc_use_direct_resampled()) {
+		return;
+	}
+	ivec2 pixel = ivec2(gl_FragCoord.xy);
+	int layers = textureSize(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), 0).z;
+	if (layers < 2) {
+		return;
+	}
+	uvec2 head = texelFetch(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), ivec3(pixel, 0), 0).xy;
+	float depth = uintBitsToFloat(head.y);
+	if (!(depth > 0.0)) {
+		return;
+	}
+	vec2 uv = (vec2(pixel) + 0.5) * scene_data.screen_pixel_size;
+	vec4 view_h = inv_projection_matrix * vec4(uv * 2.0 - 1.0, depth, 1.0);
+	direct_record_vertex = view_h.xyz / view_h.w;
+	float record_depth = max(-direct_record_vertex.z, 1e-4);
+	if (abs(-p_vertex.z - record_depth) > 0.01 * record_depth) {
+		return;
+	}
+	direct_record_normal = di_oct_decode(unpackSnorm2x16(head.x));
+	direct_record_tails = layers - 1;
+	direct_record_heads = textureSize(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), 0).z - 1 - direct_record_tails;
+	direct_record_ok = direct_record_heads >= 0;
+}
+
+int direct_route(uint p_flags, vec3 p_position, float p_inv_radius, float p_decay, bool p_spot, vec3 p_direction, float p_cos_angle, float p_cone_attenuation) {
+	direct_head_layer = -1;
+	direct_tail_layer = -1;
+	if (!direct_record_ok || (p_flags & 1u) == 0u) {
+		return -1;
+	}
+	DiGeometry geometry = di_geometry(p_position, p_inv_radius, p_decay, p_spot, p_direction, p_cos_angle, p_cone_attenuation, direct_record_vertex);
+	if (!di_in_set(geometry, direct_record_normal)) {
+		return -1;
+	}
+	uint slot = (p_flags >> 1) & 0xFFFFu;
+	ivec2 pixel = ivec2(gl_FragCoord.xy);
+	for (int i = 0; i < direct_record_heads; i++) {
+		if (round(texelFetch(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), ivec3(pixel, i), 0).r * 65535.0) == float(slot)) {
+			direct_head_layer = i;
+			return -1;
+		}
+	}
+	int passes = 0;
+	for (int k = 0; k < direct_record_tails; k++) {
+		if (texelFetch(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), ivec3(pixel, k + 1), 0).x == slot) {
+			passes++;
+		}
+	}
+	return passes;
+}
+
+float direct_tail_pass(uint p_flags, vec3 p_live_color, int p_pass) {
+	uint slot = (p_flags >> 1) & 0xFFFFu;
+	ivec2 pixel = ivec2(gl_FragCoord.xy);
+	int seen = 0;
+	for (int k = 0; k < direct_record_tails; k++) {
+		uvec2 entry = texelFetch(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), ivec3(pixel, k + 1), 0).xy;
+		if (entry.x != slot) {
+			continue;
+		}
+		if (seen == p_pass) {
+			direct_tail_layer = direct_record_heads + k;
+			float weight = uintBitsToFloat(entry.y);
+			DirectSlotData data = direct_slots.data[slot];
+			direct_tail_color = weight < 0.0 ? p_live_color : vec3(data.mean_r, data.mean_g, data.mean_b);
+			return abs(weight) / float(direct_record_tails);
+		}
+		seen++;
+	}
+	direct_tail_layer = -1;
+	return 0.0;
+}
+#endif
+
 float specular_occlusion_cone(float p_ao, float p_roughness, vec3 p_bent_normal, vec3 p_reflection) {
 	float cos_a_v = sqrt(1.0 - p_ao);
 	float limited_roughness = max(p_roughness, 0.01);
@@ -3205,6 +3293,9 @@ void fragment_shader(in SceneData scene_data) {
 	}
 
 #ifndef USE_VERTEX_LIGHTING
+#ifdef DIRECT_RESAMPLED_ROUTE
+	direct_record_begin(scene_data, vertex);
+#endif
 	{ //omni lights
 
 		uint cluster_omni_offset = cluster_offset;
@@ -3242,6 +3333,16 @@ void fragment_shader(in SceneData scene_data) {
 					continue; // Statically baked light and object uses lightmap, skip
 				}
 
+#ifdef DIRECT_RESAMPLED_ROUTE
+				int direct_passes = direct_route(omni_lights.data[light_index].flags, omni_lights.data[light_index].position, omni_lights.data[light_index].inv_radius, omni_lights.data[light_index].attenuation, false, vec3(0.0), 0.0, 1.0);
+				if (direct_passes == 0) {
+					continue;
+				}
+				for (int direct_pass = 0; direct_pass < max(direct_passes, 1); direct_pass++) {
+					float direct_scale = direct_passes > 0 ? direct_tail_pass(omni_lights.data[light_index].flags, omni_lights.data[light_index].color, direct_pass) : 1.0;
+					hvec3 lamp_diffuse = direct_passes > 0 ? hvec3(0.0) : diffuse_light;
+					hvec3 lamp_specular = direct_passes > 0 ? hvec3(0.0) : direct_specular_light;
+#endif
 				light_process_omni(light_index, vertex, view, normal, vertex_ddx, vertex_ddy, f0, roughness, metallic, scene_data.taa_frame_count, albedo, alpha, screen_uv, energy_compensation,
 #ifdef LIGHT_BACKLIGHT_USED
 						backlight,
@@ -3261,7 +3362,21 @@ void fragment_shader(in SceneData scene_data) {
 #ifdef LIGHT_ANISOTROPY_USED
 						binormal, tangent, anisotropy,
 #endif
+#ifdef DIRECT_RESAMPLED_ROUTE
+						lamp_diffuse, lamp_specular);
+					if (direct_passes > 0) {
+						diffuse_light += hvec3(vec3(lamp_diffuse) * direct_scale);
+						direct_specular_light += hvec3(vec3(lamp_specular) * direct_scale);
+					} else {
+						diffuse_light = lamp_diffuse;
+						direct_specular_light = lamp_specular;
+					}
+				}
+				direct_head_layer = -1;
+				direct_tail_layer = -1;
+#else
 						diffuse_light, direct_specular_light);
+#endif
 			}
 		}
 	}
@@ -3303,6 +3418,16 @@ void fragment_shader(in SceneData scene_data) {
 					continue; // Statically baked light and object uses lightmap, skip
 				}
 
+#ifdef DIRECT_RESAMPLED_ROUTE
+				int direct_passes = direct_route(spot_lights.data[light_index].flags, spot_lights.data[light_index].position, spot_lights.data[light_index].inv_radius, spot_lights.data[light_index].attenuation, true, spot_lights.data[light_index].direction, spot_lights.data[light_index].cone_angle, spot_lights.data[light_index].cone_attenuation);
+				if (direct_passes == 0) {
+					continue;
+				}
+				for (int direct_pass = 0; direct_pass < max(direct_passes, 1); direct_pass++) {
+					float direct_scale = direct_passes > 0 ? direct_tail_pass(spot_lights.data[light_index].flags, spot_lights.data[light_index].color, direct_pass) : 1.0;
+					hvec3 lamp_diffuse = direct_passes > 0 ? hvec3(0.0) : diffuse_light;
+					hvec3 lamp_specular = direct_passes > 0 ? hvec3(0.0) : direct_specular_light;
+#endif
 				light_process_spot(light_index, vertex, view, normal, vertex_ddx, vertex_ddy, f0, roughness, metallic, scene_data.taa_frame_count, albedo, alpha, screen_uv, energy_compensation,
 #ifdef LIGHT_BACKLIGHT_USED
 						backlight,
@@ -3322,7 +3447,21 @@ void fragment_shader(in SceneData scene_data) {
 #ifdef LIGHT_ANISOTROPY_USED
 						binormal, tangent, anisotropy,
 #endif
+#ifdef DIRECT_RESAMPLED_ROUTE
+						lamp_diffuse, lamp_specular);
+					if (direct_passes > 0) {
+						diffuse_light += hvec3(vec3(lamp_diffuse) * direct_scale);
+						direct_specular_light += hvec3(vec3(lamp_specular) * direct_scale);
+					} else {
+						diffuse_light = lamp_diffuse;
+						direct_specular_light = lamp_specular;
+					}
+				}
+				direct_head_layer = -1;
+				direct_tail_layer = -1;
+#else
 						diffuse_light, direct_specular_light);
+#endif
 			}
 		}
 	}
