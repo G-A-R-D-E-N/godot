@@ -8300,7 +8300,7 @@ uint64_t RenderingDevice::get_memory_usage(MemoryType p_type) const {
 	}
 }
 
-void RenderingDevice::_begin_frame(bool p_presented) {
+void RenderingDevice::_begin_frame(bool p_presented, bool p_mid_frame) {
 	GodotProfileZoneGroupedFirst(_profile_zone, "_stall_for_frame");
 	// Before writing to this frame, wait for it to be finished.
 	_stall_for_frame(frame);
@@ -8342,16 +8342,34 @@ void RenderingDevice::_begin_frame(bool p_presented) {
 		download_staging_buffers.used = false;
 	}
 
-	if (frames[frame].timestamp_count) {
-		driver->timestamp_query_pool_get_results(frames[frame].timestamp_pool, frames[frame].timestamp_count, frames[frame].timestamp_result_values.ptr());
-		driver->command_timestamp_query_pool_reset(frames[frame].command_buffer, frames[frame].timestamp_pool, frames[frame].timestamp_count);
-		SWAP(frames[frame].timestamp_names, frames[frame].timestamp_result_names);
-		SWAP(frames[frame].timestamp_cpu_values, frames[frame].timestamp_cpu_result_values);
+	Frame &f = frames[frame];
+	if (f.timestamp_count) {
+		const uint32_t carry = f.timestamp_carry_count;
+		const uint32_t take = MIN(f.timestamp_count, max_timestamp_query_elements - carry);
+		if (take) {
+			driver->timestamp_query_pool_get_results(f.timestamp_pool, take, f.timestamp_carry_values.ptr() + carry);
+		}
+		driver->command_timestamp_query_pool_reset(f.command_buffer, f.timestamp_pool, f.timestamp_count);
+		for (uint32_t i = 0; i < take; i++) {
+			f.timestamp_carry_names[carry + i] = f.timestamp_names[i];
+			f.timestamp_carry_cpu_values[carry + i] = f.timestamp_cpu_values[i];
+		}
+		if (take < f.timestamp_count) {
+			ERR_PRINT_ONCE(vformat("Timestamps captured in one frame across mid-frame flushes exceed %d; the rest of them are dropped.", max_timestamp_query_elements));
+		}
+		f.timestamp_carry_count = carry + take;
+	}
+	f.timestamp_count = 0;
+	if (p_mid_frame) {
+		return;
 	}
 
-	frames[frame].timestamp_result_count = frames[frame].timestamp_count;
-	frames[frame].timestamp_count = 0;
-	frames[frame].index = Engine::get_singleton()->get_frames_drawn();
+	SWAP(f.timestamp_carry_names, f.timestamp_result_names);
+	SWAP(f.timestamp_carry_cpu_values, f.timestamp_cpu_result_values);
+	SWAP(f.timestamp_carry_values, f.timestamp_result_values);
+	f.timestamp_result_count = f.timestamp_carry_count;
+	f.timestamp_carry_count = 0;
+	f.index = Engine::get_singleton()->get_frames_drawn();
 }
 
 void RenderingDevice::_end_frame() {
@@ -8574,7 +8592,7 @@ void RenderingDevice::_flush_and_stall_for_all_frames(bool p_begin_frame) {
 	_execute_frame(false);
 
 	if (p_begin_frame) {
-		_begin_frame();
+		_begin_frame(false, true);
 	} else {
 		_stall_for_frame(frame);
 	}
@@ -8742,6 +8760,10 @@ Error RenderingDevice::initialize(RenderingContextDriver *p_context, DisplayServ
 		frames[i].timestamp_cpu_result_values.resize(max_timestamp_query_elements);
 		frames[i].timestamp_result_values.resize(max_timestamp_query_elements);
 		frames[i].timestamp_result_count = 0;
+		frames[i].timestamp_carry_names.resize(max_timestamp_query_elements);
+		frames[i].timestamp_carry_cpu_values.resize(max_timestamp_query_elements);
+		frames[i].timestamp_carry_values.resize(max_timestamp_query_elements);
+		frames[i].timestamp_carry_count = 0;
 
 		// Assign the main queue family and command pool to the command buffer pool.
 		frames[i].command_buffer_pool.pool = frames[i].command_pool;
