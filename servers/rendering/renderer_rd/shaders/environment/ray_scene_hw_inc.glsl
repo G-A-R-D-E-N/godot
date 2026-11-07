@@ -50,6 +50,11 @@ bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool
 	uint cull_mask = ray_scene_hw_cull_mask(p_caster_mask);
 	bool exact = cull_mask != RAY_SCENE_HW_ALL_GROUPS;
 	uint ray_flags = (p_any ? gl_RayFlagsTerminateOnFirstHitEXT : gl_RayFlagsNoneEXT) | (exact ? gl_RayFlagsNoneEXT : gl_RayFlagsNoOpaqueEXT);
+#ifdef RAY_SCENE_EXCLUDE
+	if (exclude_count != 0u) {
+		ray_flags |= gl_RayFlagsNoOpaqueEXT;
+	}
+#endif
 
 	rayQueryEXT query;
 	rayQueryInitializeEXT(query, ray_scene_tlas, ray_flags, cull_mask, p_origin, 0.0, p_direction, p_t_max);
@@ -59,6 +64,11 @@ bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool
 			continue;
 		}
 		uint triangle = ray_scene_hw_triangle(index, uint(rayQueryGetIntersectionGeometryIndexEXT(query, false)), uint(rayQueryGetIntersectionPrimitiveIndexEXT(query, false)));
+#ifdef RAY_SCENE_EXCLUDE
+		if (exclude_count != 0u && ray_scene_excluded(ray_scene_hw_material(index, triangle))) {
+			continue;
+		}
+#endif
 		RaySceneMaterial material = ray_scene_materials.data[ray_scene_hw_material(index, triangle)];
 		if ((material.flags & skip_mask) != 0u) {
 			continue;

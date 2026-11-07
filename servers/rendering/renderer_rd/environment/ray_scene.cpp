@@ -42,6 +42,7 @@
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/mesh_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
+#include "servers/rendering/rendering_method.h"
 #include "servers/rendering/rendering_server.h"
 #include "servers/rendering/rendering_server_globals.h"
 
@@ -756,6 +757,16 @@ void RayScene::_print_census() {
 	}
 }
 
+bool RayScene::shell_material_range(RID p_instance, uint32_t &r_offset, uint32_t &r_count) const {
+	const ShellRange *range = shell_ranges.getptr(p_instance);
+	if (!range || range->count == 0) {
+		return false;
+	}
+	r_offset = range->offset;
+	r_count = range->count;
+	return true;
+}
+
 void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const Vector<RID> &p_directional_lights, RID p_camera_attributes, const Vector3 &p_camera_position) {
 	MutexLock lock(mesh_mutex);
 	_backend_tick();
@@ -802,6 +813,17 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	additive_skipped = 0;
 	emission_scale = _param_float(MaterialStorage::get_singleton()->global_shader_parameter_get_internal(SNAME("openpbr_emission_scale")), 1.0f);
 	skip_additive = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ray_scene/skip_additive_surfaces");
+	shell_ranges.clear();
+	HashMap<RenderGeometryInstance *, RID> shell_geometry;
+	const HashMap<RID, uint32_t> &shells = LightStorage::get_singleton()->get_direct_shells();
+	if (!shells.is_empty()) {
+		for (const KeyValue<RID, uint32_t> &shell : shells) {
+			RenderGeometryInstance *geometry = RSG::scene->instance_get_geometry_instance(shell.key);
+			if (geometry) {
+				shell_geometry.insert(geometry, shell.key);
+			}
+		}
+	}
 	LocalVector<BuildPrimitive> primitives;
 	uint32_t signature = HASH_MURMUR3_SEED;
 	for (uint32_t i = 0; i < p_instances.size(); i++) {
@@ -827,6 +849,15 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		instance.blas_root = mesh->node_offset;
 		instance.material_offset = materials.size();
 		instance.layer_mask = geometry->layer_mask;
+		if (!shell_geometry.is_empty()) {
+			const RID *shell = shell_geometry.getptr(p_instances[i]);
+			if (shell) {
+				ShellRange range;
+				range.offset = instance.material_offset;
+				range.count = mesh->surface_count;
+				shell_ranges.insert(*shell, range);
+			}
+		}
 		const uint32_t cast_flags = shadow_cast_flags(geometry->data->cast_shadows);
 		uint64_t material_candidates = 0;
 		uint64_t candidates = 0;

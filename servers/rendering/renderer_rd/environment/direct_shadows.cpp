@@ -117,6 +117,9 @@ DirectShadows::~DirectShadows() {
 	if (lamp_buffer.is_valid()) {
 		rd->free_rid(lamp_buffer);
 	}
+	if (exclude_buffer.is_valid()) {
+		rd->free_rid(exclude_buffer);
+	}
 	if (debug_unused.is_valid()) {
 		rd->free_rid(debug_unused);
 	}
@@ -241,7 +244,15 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 		ray_scene->collect_moved_instances(moved_signature, moved_anchor, moved_known, moved);
 		p_table.mark_moved(moved);
 	}
-	p_table.write_slots(lamp_data);
+	struct Shells : public DirectLightTable::ShellResolver {
+		const RayScene *scene = nullptr;
+		virtual bool shell_material_range(RID p_instance, uint32_t &r_offset, uint32_t &r_count) const override {
+			return scene->shell_material_range(p_instance, r_offset, r_count);
+		}
+	};
+	Shells shells;
+	shells.scene = ray_scene;
+	p_table.write_slots(lamp_data, exclude_data, &shells);
 	if (!String(GLOBAL_GET("rendering/global_illumination/direct/dump_request")).is_empty()) {
 		p_table.write_lamps(lamp_dump);
 		dump_hard_resets = p_table.get_hard_resets();
@@ -258,6 +269,18 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	}
 	if (lamp_bytes > 0) {
 		rd->buffer_update(lamp_buffer, 0, lamp_bytes, lamp_data.ptr());
+	}
+	const uint32_t exclude_bytes = exclude_data.size() * sizeof(DirectLightTable::GpuExclude);
+	if (exclude_buffer.is_null() || exclude_bytes > exclude_buffer_capacity) {
+		if (exclude_buffer.is_valid()) {
+			rd->free_rid(exclude_buffer);
+		}
+		exclude_buffer_capacity = MAX(exclude_bytes * 2, uint32_t(16));
+		exclude_buffer = rd->storage_buffer_create(exclude_buffer_capacity);
+		rd->set_resource_name(exclude_buffer, "Direct Shadows Excludes");
+	}
+	if (exclude_bytes > 0) {
+		rd->buffer_update(exclude_buffer, 0, exclude_bytes, exclude_data.ptr());
 	}
 
 	const Size2i size = p_input.render_buffers->get_internal_size();
@@ -337,6 +360,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 16, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_GUIDE : RB_DIRECT_GUIDE_OTHER)));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 17, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_GUIDE_OTHER : RB_DIRECT_GUIDE)));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 18, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_RAY)));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 19, exclude_buffer));
 
 	LocalVector<RD::Uniform> scene_uniforms;
 	scene_uniforms.reserve(8);

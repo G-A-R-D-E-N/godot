@@ -207,6 +207,11 @@ private:
 	LocalVector<Triangle> triangles;
 
 	LocalVector<Instance> instances;
+	struct ShellRange {
+		uint32_t offset = 0;
+		uint32_t count = 0;
+	};
+	HashMap<RID, ShellRange> shell_ranges;
 	struct CachedMaterial {
 		Material entry;
 		int32_t scale_index = -1;
@@ -307,6 +312,7 @@ public:
 	RID get_hw_remap_buffer() const { return hw_remap_buffer; }
 	void append_uniforms(LocalVector<RD::Uniform> &r_uniforms) const;
 	Vector3 get_anchor() const { return anchor; }
+	bool shell_material_range(RID p_instance, uint32_t &r_offset, uint32_t &r_count) const;
 	void collect_moved_instances(uint64_t &r_signature, Vector3 &r_anchor, HashMap<uint64_t, AABB> &r_known, LocalVector<AABB> &r_moved) const;
 	RID get_blas_node_buffer() const { return blas_node_buffer; }
 	RID get_triangle_buffer() const { return triangle_buffer; }

@@ -47,11 +47,21 @@ public:
 	static constexpr float MIN_RESET_DISTANCE = 0.5f;
 	static constexpr float RESET_RANGE_FRACTION = 0.1f;
 	static constexpr uint32_t LAMP_VALUES = 4;
+	static constexpr uint32_t MAX_SHELLS = 7;
+	static constexpr uint32_t EXCLUDE_SHIFT = 3;
+	static constexpr uint32_t EXCLUDE_COUNT_MASK = (1u << EXCLUDE_SHIFT) - 1;
+	static constexpr int32_t WHOLE_SHELL = -1;
+
+	static_assert(MAX_SHELLS <= EXCLUDE_COUNT_MASK);
 
 	struct Setting {
 		bool owned = true;
 		float movement = 0.0f;
 		float size = -1.0f;
+		float clearance = 0.0f;
+		uint32_t shell_count = 0;
+		RID shell_instance[MAX_SHELLS];
+		int32_t shell_surface[MAX_SHELLS] = {};
 
 		float resolved_size(float p_light_size) const { return size < 0.0f ? p_light_size : size; }
 	};
@@ -63,6 +73,13 @@ public:
 		float size = 0.0f;
 		uint32_t caster_mask = 0xFFFFFFFF;
 		uint32_t type = 0;
+		float clearance = 0.0f;
+		uint32_t shell_count = 0;
+		uint32_t resolved = 0;
+		RID shell_instance[MAX_SHELLS];
+		int32_t shell_surface[MAX_SHELLS] = {};
+
+		bool same_shells(const Lamp &p_other) const;
 	};
 
 	struct State {
@@ -76,18 +93,36 @@ public:
 		float size = 0.0f;
 		uint32_t reset_frame = 0;
 		uint32_t dynamic = 0;
+		float clearance = 0.0f;
+		uint32_t exclude = 0;
+	};
+
+	static_assert(sizeof(GpuSlot) == 24);
+
+	struct GpuExclude {
+		uint32_t first = 0;
+		uint32_t span = 0;
+	};
+
+	static_assert(sizeof(GpuExclude) == 8);
+
+	class ShellResolver {
+	public:
+		virtual bool shell_material_range(RID p_instance, uint32_t &r_offset, uint32_t &r_count) const = 0;
+		virtual ~ShellResolver() {}
 	};
 
 	static uint32_t pack_flags(uint32_t p_slot, float p_strength);
 	static float reset_distance(float p_range, float p_movement);
 	static bool owns(bool p_owned, bool p_area, uint32_t p_cull_mask, float p_energy, bool p_projector);
+	static bool shell_exclude(const ShellResolver &p_resolver, RID p_instance, int32_t p_surface, GpuExclude &r_exclude);
 
 	void begin_frame(uint64_t p_frame);
 	uint32_t observe(RID p_light, const Lamp &p_lamp);
 	void mark_moved(const LocalVector<AABB> &p_moved);
 	State get_state(RID p_light) const;
 	uint32_t slots_in_use() const;
-	void write_slots(LocalVector<GpuSlot> &r_slots) const;
+	void write_slots(LocalVector<GpuSlot> &r_slots, LocalVector<GpuExclude> &r_excludes, const ShellResolver *p_resolver) const;
 	void write_lamps(LocalVector<float> &r_values) const;
 	uint64_t get_generation() const { return generation; }
 	uint64_t get_hard_resets() const { return hard_resets; }

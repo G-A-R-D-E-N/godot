@@ -193,6 +193,11 @@ void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, 
 				float t = dot(triangle.e2.xyz, q) * inv_det;
 				if (t > 0.0 && t < RAY_SCENE_TIE_REACH(r_hit.t)) {
 					uint material_index = p_material_offset + triangle.surface;
+#ifdef RAY_SCENE_EXCLUDE
+					if (exclude_count != 0u && ray_scene_excluded(material_index)) {
+						continue;
+					}
+#endif
 					uint flags = ray_scene_materials.data[material_index].flags;
 					if ((flags & skip_mask) != 0u) {
 						continue;

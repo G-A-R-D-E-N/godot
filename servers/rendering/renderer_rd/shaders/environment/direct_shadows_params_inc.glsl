@@ -3,6 +3,8 @@ struct DirectLamp {
 	float size;
 	uint reset_frame;
 	uint dynamic;
+	float clearance;
+	uint exclude;
 };
 
 layout(set = 0, binding = 4, std140) uniform Params {

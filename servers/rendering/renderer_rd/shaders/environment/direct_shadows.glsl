@@ -64,6 +64,25 @@ layout(set = 0, binding = 12, std430) restrict buffer Counters {
 }
 counters;
 
+layout(set = 0, binding = 19, std430) restrict readonly buffer DirectExcludes {
+	uvec2 data[];
+}
+direct_excludes;
+
+#define RAY_SCENE_EXCLUDE
+uint exclude_first = 0u;
+uint exclude_count = 0u;
+
+bool ray_scene_excluded(uint p_material) {
+	for (uint i = 0u; i < exclude_count; i++) {
+		uvec2 entry = direct_excludes.data[exclude_first + i];
+		if (p_material - entry.x < entry.y) {
+			return true;
+		}
+	}
+	return false;
+}
+
 #define RAY_SCENE_SET 1
 #include "ray_scene_inc.glsl"
 
@@ -230,12 +249,13 @@ bool lamp_ray(vec3 p_vertex, vec3 p_anchored, vec3 p_normal, vec3 p_lamp, uint p
 	float distance = length(rel);
 	vec3 axis = rel / max(distance, 1e-5);
 	float radius = max(lamp.size, 0.0);
+	float clear = max(lamp.clearance, radius);
+	if (clear > 0.0 && distance <= clear) {
+		return true;
+	}
 	vec3 direction = axis;
-	float reach = distance;
+	float reach = distance - clear;
 	if (radius > 0.0) {
-		if (distance <= radius) {
-			return true;
-		}
 		float sin_max = radius / distance;
 		float cos_max = sqrt(max(1.0 - sin_max * sin_max, 0.0));
 		float cos_theta = mix(cos_max, 1.0, p_u);
@@ -244,8 +264,10 @@ bool lamp_ray(vec3 p_vertex, vec3 p_anchored, vec3 p_normal, vec3 p_lamp, uint p
 		vec3 side = abs(axis.y) < 0.99 ? normalize(cross(axis, vec3(0.0, 1.0, 0.0))) : normalize(cross(axis, vec3(1.0, 0.0, 0.0)));
 		vec3 up = cross(axis, side);
 		direction = normalize(side * cos(phi) * sin_theta + up * sin(phi) * sin_theta + axis * cos_theta);
-		reach = distance * cos_theta - sqrt(max(radius * radius - distance * distance * sin_theta * sin_theta, 0.0));
+		reach = distance * cos_theta - sqrt(max(clear * clear - distance * distance * sin_theta * sin_theta, 0.0));
 	}
+	exclude_first = lamp.exclude >> 3u;
+	exclude_count = lamp.exclude & 7u;
 	return ray_scene_unshadowed(p_anchored, to_world(p_normal), params.bias, to_world(direction), reach, lamp.caster_mask, p_seed);
 }
 

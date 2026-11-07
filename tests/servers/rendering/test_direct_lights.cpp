@@ -34,7 +34,10 @@ TEST_FORCE_LINK(test_direct_lights)
 
 #ifdef RD_ENABLED
 
+#include "core/math/vector2i.h"
 #include "servers/rendering/renderer_rd/environment/direct_lights.h"
+
+#include <cstddef>
 
 namespace TestDirectLights {
 
@@ -51,6 +54,26 @@ DirectLightTable::Lamp lamp_at(const Vector3 &p_position, float p_range = 3.0f, 
 	lamp.movement = p_movement;
 	lamp.size = 0.1f;
 	return lamp;
+}
+
+struct TestShells : public DirectLightTable::ShellResolver {
+	HashMap<RID, Vector2i> ranges;
+
+	virtual bool shell_material_range(RID p_instance, uint32_t &r_offset, uint32_t &r_count) const override {
+		const Vector2i *range = ranges.getptr(p_instance);
+		if (!range) {
+			return false;
+		}
+		r_offset = range->x;
+		r_count = range->y;
+		return true;
+	}
+};
+
+void add_shell(DirectLightTable::Lamp &r_lamp, RID p_instance, int32_t p_surface) {
+	r_lamp.shell_instance[r_lamp.shell_count] = p_instance;
+	r_lamp.shell_surface[r_lamp.shell_count] = p_surface;
+	r_lamp.shell_count++;
 }
 
 TEST_CASE("[DirectLights] Flags word layout") {
@@ -74,7 +97,8 @@ TEST_CASE("[DirectLights] Flags word layout") {
 TEST_CASE("[DirectLights] Slots written for the GPU follow the table") {
 	DirectLightTable table;
 	LocalVector<DirectLightTable::GpuSlot> slots;
-	table.write_slots(slots);
+	LocalVector<DirectLightTable::GpuExclude> excludes;
+	table.write_slots(slots, excludes, nullptr);
 	CHECK(slots.size() == 1u);
 	CHECK(slots[0].caster_mask == 0u);
 
@@ -82,7 +106,7 @@ TEST_CASE("[DirectLights] Slots written for the GPU follow the table") {
 	DirectLightTable::Lamp lamp = lamp_at(Vector3(1, 2, 3));
 	lamp.caster_mask = 0x1234u;
 	const uint32_t slot = table.observe(light_id(1), lamp);
-	table.write_slots(slots);
+	table.write_slots(slots, excludes, nullptr);
 	REQUIRE(slots.size() == slot + 1);
 	CHECK(slots[slot].caster_mask == 0x1234u);
 	CHECK(slots[slot].size == 0.1f);
@@ -93,18 +117,18 @@ TEST_CASE("[DirectLights] Slots written for the GPU follow the table") {
 	table.begin_frame(6);
 	lamp.position = Vector3(1.1f, 2, 3);
 	table.observe(light_id(1), lamp);
-	table.write_slots(slots);
+	table.write_slots(slots, excludes, nullptr);
 	CHECK(slots[slot].reset_frame == 5u);
 	CHECK(slots[slot].dynamic == 1u);
 
 	table.begin_frame(6 + DirectLightTable::DYNAMIC_FRAMES);
 	table.observe(light_id(1), lamp);
-	table.write_slots(slots);
+	table.write_slots(slots, excludes, nullptr);
 	CHECK(slots[slot].dynamic == 0u);
 
 	table.begin_frame(7 + DirectLightTable::DYNAMIC_FRAMES);
 	table.begin_frame(8 + DirectLightTable::DYNAMIC_FRAMES);
-	table.write_slots(slots);
+	table.write_slots(slots, excludes, nullptr);
 	CHECK(slots[slot].caster_mask == 0u);
 }
 
@@ -429,6 +453,170 @@ TEST_CASE("[DirectLights] Clear starts over") {
 	CHECK(table.slots_in_use() == 0);
 	table.begin_frame(1);
 	CHECK(table.observe(light_id(2), lamp_at(Vector3())) == a);
+}
+
+TEST_CASE("[DirectLights] GPU slot is 24 bytes with the new fields last") {
+	CHECK(sizeof(DirectLightTable::GpuSlot) == 24);
+	CHECK(offsetof(DirectLightTable::GpuSlot, caster_mask) == 0);
+	CHECK(offsetof(DirectLightTable::GpuSlot, size) == 4);
+	CHECK(offsetof(DirectLightTable::GpuSlot, reset_frame) == 8);
+	CHECK(offsetof(DirectLightTable::GpuSlot, dynamic) == 12);
+	CHECK(offsetof(DirectLightTable::GpuSlot, clearance) == 16);
+	CHECK(offsetof(DirectLightTable::GpuSlot, exclude) == 20);
+	CHECK(sizeof(DirectLightTable::GpuExclude) == 8);
+	CHECK(offsetof(DirectLightTable::GpuExclude, first) == 0);
+	CHECK(offsetof(DirectLightTable::GpuExclude, span) == 4);
+}
+
+TEST_CASE("[DirectLights] Clearance is carried to the slot") {
+	DirectLightTable table;
+	LocalVector<DirectLightTable::GpuSlot> slots;
+	LocalVector<DirectLightTable::GpuExclude> excludes;
+	table.begin_frame(1);
+	DirectLightTable::Lamp lamp = lamp_at(Vector3());
+	lamp.clearance = 0.25f;
+	const uint32_t slot = table.observe(light_id(1), lamp);
+	const uint32_t other = table.observe(light_id(2), lamp_at(Vector3(1, 0, 0)));
+	table.write_slots(slots, excludes, nullptr);
+	CHECK(slots[slot].clearance == 0.25f);
+	CHECK(slots[other].clearance == 0.0f);
+	CHECK(slots[slot].exclude == 0u);
+	CHECK(excludes.is_empty());
+}
+
+TEST_CASE("[DirectLights] Excludes pack a surface as one material and a whole instance as its span") {
+	TestShells shells;
+	shells.ranges.insert(light_id(100), Vector2i(10, 3));
+	shells.ranges.insert(light_id(101), Vector2i(20, 2));
+
+	DirectLightTable table;
+	table.begin_frame(1);
+	DirectLightTable::Lamp lamp = lamp_at(Vector3());
+	add_shell(lamp, light_id(100), 1);
+	add_shell(lamp, light_id(101), DirectLightTable::WHOLE_SHELL);
+	const uint32_t slot = table.observe(light_id(1), lamp);
+	DirectLightTable::Lamp second = lamp_at(Vector3(1, 0, 0));
+	add_shell(second, light_id(100), 2);
+	const uint32_t second_slot = table.observe(light_id(2), second);
+
+	LocalVector<DirectLightTable::GpuSlot> slots;
+	LocalVector<DirectLightTable::GpuExclude> excludes;
+	table.write_slots(slots, excludes, &shells);
+	REQUIRE(excludes.size() == 3u);
+
+	const uint32_t first = slots[slot].exclude >> DirectLightTable::EXCLUDE_SHIFT;
+	REQUIRE((slots[slot].exclude & DirectLightTable::EXCLUDE_COUNT_MASK) == 2u);
+	REQUIRE(first + 2 <= excludes.size());
+	CHECK(excludes[first].first == 11u);
+	CHECK(excludes[first].span == 1u);
+	CHECK(excludes[first + 1].first == 20u);
+	CHECK(excludes[first + 1].span == 2u);
+
+	const uint32_t second_first = slots[second_slot].exclude >> DirectLightTable::EXCLUDE_SHIFT;
+	REQUIRE((slots[second_slot].exclude & DirectLightTable::EXCLUDE_COUNT_MASK) == 1u);
+	REQUIRE(second_first < excludes.size());
+	CHECK(excludes[second_first].first == 12u);
+	CHECK(excludes[second_first].span == 1u);
+
+	table.write_slots(slots, excludes, nullptr);
+	CHECK(excludes.is_empty());
+	CHECK(slots[slot].exclude == 0u);
+}
+
+TEST_CASE("[DirectLights] A shell with no range or a surface past its count gives no entry") {
+	TestShells shells;
+	shells.ranges.insert(light_id(100), Vector2i(10, 3));
+
+	DirectLightTable table;
+	table.begin_frame(1);
+	DirectLightTable::Lamp lamp = lamp_at(Vector3());
+	add_shell(lamp, light_id(200), 0);
+	add_shell(lamp, light_id(100), 3);
+	const uint32_t slot = table.observe(light_id(1), lamp);
+
+	LocalVector<DirectLightTable::GpuSlot> slots;
+	LocalVector<DirectLightTable::GpuExclude> excludes;
+	table.write_slots(slots, excludes, &shells);
+	CHECK(excludes.is_empty());
+	CHECK(slots[slot].exclude == 0u);
+
+	DirectLightTable::GpuExclude exclude;
+	CHECK_FALSE(DirectLightTable::shell_exclude(shells, light_id(200), DirectLightTable::WHOLE_SHELL, exclude));
+	CHECK_FALSE(DirectLightTable::shell_exclude(shells, light_id(100), -2, exclude));
+	CHECK(DirectLightTable::shell_exclude(shells, light_id(100), 2, exclude));
+	CHECK(exclude.first == 12u);
+	CHECK(exclude.span == 1u);
+
+	shells.ranges.insert(light_id(101), Vector2i(30, 0));
+	CHECK_FALSE(DirectLightTable::shell_exclude(shells, light_id(101), DirectLightTable::WHOLE_SHELL, exclude));
+	CHECK_FALSE(DirectLightTable::shell_exclude(shells, light_id(101), 0, exclude));
+}
+
+TEST_CASE("[DirectLights] Excludes stop at MAX_SHELLS and a missing resolver keeps only the clearance") {
+	TestShells shells;
+	DirectLightTable::Lamp lamp = lamp_at(Vector3());
+	lamp.clearance = 0.5f;
+	for (uint32_t i = 0; i < DirectLightTable::MAX_SHELLS; i++) {
+		shells.ranges.insert(light_id(100 + i), Vector2i(int32_t(10 * i), 2));
+		add_shell(lamp, light_id(100 + i), DirectLightTable::WHOLE_SHELL);
+	}
+	lamp.shell_count = DirectLightTable::MAX_SHELLS + 1;
+
+	DirectLightTable table;
+	table.begin_frame(1);
+	const uint32_t slot = table.observe(light_id(1), lamp);
+
+	LocalVector<DirectLightTable::GpuSlot> slots;
+	LocalVector<DirectLightTable::GpuExclude> excludes;
+	table.write_slots(slots, excludes, &shells);
+	CHECK(excludes.size() == DirectLightTable::MAX_SHELLS);
+	CHECK((slots[slot].exclude & DirectLightTable::EXCLUDE_COUNT_MASK) == DirectLightTable::MAX_SHELLS);
+	CHECK((slots[slot].exclude >> DirectLightTable::EXCLUDE_SHIFT) == 0u);
+	CHECK(slots[slot].clearance == 0.5f);
+
+	table.write_slots(slots, excludes, nullptr);
+	CHECK(excludes.is_empty());
+	CHECK(slots[slot].exclude == 0u);
+	CHECK(slots[slot].clearance == 0.5f);
+}
+
+TEST_CASE("[DirectLights] Clearance, shells, surfaces and the resolved set each give one hard reset") {
+	DirectLightTable table;
+	DirectLightTable::Lamp lamp = lamp_at(Vector3());
+	add_shell(lamp, light_id(100), 0);
+	lamp.resolved = 1;
+	table.begin_frame(1);
+	table.observe(light_id(1), lamp);
+	table.begin_frame(2);
+	table.observe(light_id(1), lamp);
+	CHECK_FALSE(table.get_state(light_id(1)).hard_reset);
+
+	uint64_t frame = 3;
+	const auto changes = [&](const DirectLightTable::Lamp &p_lamp) {
+		table.begin_frame(frame++);
+		table.observe(light_id(1), p_lamp);
+		const bool reset = table.get_state(light_id(1)).hard_reset;
+		table.begin_frame(frame++);
+		table.observe(light_id(1), p_lamp);
+		return reset && !table.get_state(light_id(1)).hard_reset;
+	};
+
+	lamp.clearance = 0.3f;
+	CHECK(changes(lamp));
+	lamp.shell_instance[0] = light_id(101);
+	CHECK(changes(lamp));
+	lamp.shell_surface[0] = DirectLightTable::WHOLE_SHELL;
+	CHECK(changes(lamp));
+	lamp.resolved = 0;
+	CHECK(changes(lamp));
+	add_shell(lamp, light_id(102), 1);
+	CHECK(changes(lamp));
+	CHECK(table.get_hard_resets() == 5);
+
+	table.begin_frame(frame++);
+	table.observe(light_id(1), lamp);
+	CHECK_FALSE(table.get_state(light_id(1)).hard_reset);
+	CHECK(table.get_hard_resets() == 5);
 }
 
 } // namespace TestDirectLights

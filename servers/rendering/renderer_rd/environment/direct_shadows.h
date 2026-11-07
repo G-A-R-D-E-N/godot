@@ -179,9 +179,12 @@ private:
 	RID params_buffer;
 	RID lamp_buffer;
 	uint32_t lamp_buffer_capacity = 0;
+	RID exclude_buffer;
+	uint32_t exclude_buffer_capacity = 0;
 	RID counter_buffer;
 	RID debug_unused;
 	LocalVector<DirectLightTable::GpuSlot> lamp_data;
+	LocalVector<DirectLightTable::GpuExclude> exclude_data;
 	LocalVector<float> lamp_dump;
 	uint64_t dump_hard_resets = 0;
 	uint64_t dump_dynamic_lamp_frames = 0;

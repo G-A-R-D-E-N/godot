@@ -1631,6 +1631,14 @@ Variant RendererSceneCull::instance_geometry_get_shader_parameter_default_value(
 	return instance->instance_uniforms.get_default(p_parameter);
 }
 
+RenderGeometryInstance *RendererSceneCull::instance_get_geometry_instance(RID p_instance) const {
+	const Instance *instance = instance_owner.get_or_null(p_instance);
+	if (!instance || instance->base_type != RSE::INSTANCE_MESH || !instance->base_data) {
+		return nullptr;
+	}
+	return static_cast<const InstanceGeometryData *>(instance->base_data)->geometry_instance;
+}
+
 void RendererSceneCull::mesh_generate_pipelines(RID p_mesh, bool p_background_compilation) {
 	scene_render->mesh_generate_pipelines(p_mesh, p_background_compilation);
 }
