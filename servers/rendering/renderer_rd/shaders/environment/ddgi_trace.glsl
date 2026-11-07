@@ -549,8 +549,9 @@ void main() {
 	uint normal_packed = 0u;
 	uint flags = 0u;
 	float hit_distance = DDGI_MISS_DISTANCE;
-	if (ray_scene_trace(origin, direction, ddgi.max_distance, false, hit)) {
-		vec4 shaded = shade_hit(origin, direction, hit, ray_scene_hash(uint(pixel.y) * 65537u + uint(pixel.x) + rtgi.frame * 6271u));
+	uint seed = ray_scene_hash(uint(pixel.y) * 65537u + uint(pixel.x) + rtgi.frame * 6271u);
+	if (ray_scene_trace(origin, direction, ddgi.max_distance, false, seed, hit)) {
+		vec4 shaded = shade_hit(origin, direction, hit, seed);
 		radiance = shaded.rgb;
 		hit_distance = hit.t;
 		point = origin + direction * hit.t;
