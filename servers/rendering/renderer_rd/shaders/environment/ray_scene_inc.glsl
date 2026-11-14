@@ -173,6 +173,9 @@ float ray_scene_race_exponential(uint p_seed_hash, uint p_id) {
 
 bool ray_scene_race_step(inout float r_key, inout uint r_id, uint p_seed_hash, uint p_id, float p_weight) {
 	float key = ray_scene_precise_divide(ray_scene_race_exponential(p_seed_hash, p_id), p_weight);
+	if (isnan(key)) {
+		key = uintBitsToFloat(0x7f800000u);
+	}
 	if (key < r_key || (key == r_key && p_id < r_id)) {
 		r_key = key;
 		r_id = p_id;
