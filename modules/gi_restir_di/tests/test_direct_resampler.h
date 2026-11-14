@@ -172,4 +172,16 @@ TEST_CASE("[DirectResampler] The frame counter steps by one on a continuous fram
 	}
 }
 
+TEST_CASE("[DirectResampler] The lab mass bound is the registered one at the gated settings") {
+	DirectResamplerRD::Settings settings;
+	settings.c_full = 8;
+	settings.m_temporal_cap = 20;
+	settings.m_stored_cap = 255;
+	settings.spatial_neighbors = 4;
+	CHECK(DirectResamplerRD::lab_mass_bound(settings) == 1076);
+	settings.c_full = 255;
+	CHECK(DirectResamplerRD::lab_mass_bound(settings) == 1570);
+	CHECK(DirectResamplerRD::lab_settings_text(settings).ends_with(" mass_bound=1570"));
+}
+
 } // namespace TestDirectResampler

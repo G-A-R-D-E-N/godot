@@ -56,6 +56,7 @@ void DirectResamplerRD::register_settings() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("debug/tail_visibility"), PROPERTY_HINT_ENUM, "Traced,Visible,Hashed"), 0);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("debug/stale_prior"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::STRING, DI_RESAMPLED_SETTING("debug/log"), PROPERTY_HINT_GLOBAL_SAVE_FILE, "*.txt"), String());
+	GLOBAL_DEF(PropertyInfo(Variant::STRING, DI_RESAMPLED_SETTING("debug/lab_log"), PROPERTY_HINT_GLOBAL_SAVE_FILE, "*.txt"), String());
 	DirectSamplerLab::register_settings();
 }
 
@@ -94,8 +95,39 @@ DirectResamplerRD::Settings DirectResamplerRD::get_project_settings() {
 	settings.tail_visibility = uint32_t(CLAMP(int(GLOBAL_GET(DI_RESAMPLED_SETTING("debug/tail_visibility"))), 0, 2));
 	settings.stale_prior = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/stale_prior"));
 	settings.debug_log = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/log"));
+	settings.lab_log = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/lab_log"));
 	clamp_reservoir_settings(settings, GLOBAL_GET(DI_RESAMPLED_SETTING("reservoirs")), GLOBAL_GET(DI_RESAMPLED_SETTING("temporal_reuse")), GLOBAL_GET(DI_RESAMPLED_SETTING("spatial_neighbors")), GLOBAL_GET(DI_RESAMPLED_SETTING("spatial_radius")), GLOBAL_GET(DI_RESAMPLED_SETTING("c_full")), GLOBAL_GET(DI_RESAMPLED_SETTING("m_temporal_cap")), GLOBAL_GET(DI_RESAMPLED_SETTING("m_stored_cap")), GLOBAL_GET("rendering/global_illumination/direct/dynamic_history_cap"), GLOBAL_GET(DI_RESAMPLED_SETTING("head_rank")), GLOBAL_GET(DI_RESAMPLED_SETTING("head_swap_margin")), GLOBAL_GET(DI_RESAMPLED_SETTING("head_swap_frames")), GLOBAL_GET(DI_RESAMPLED_SETTING("debug/head_swap_window")));
 	return settings;
+}
+
+uint32_t DirectResamplerRD::lab_mass_bound(const Settings &p_settings) {
+	return 2 * (p_settings.c_full + p_settings.m_temporal_cap) + p_settings.spatial_neighbors * p_settings.m_stored_cap;
+}
+
+String DirectResamplerRD::lab_settings_text(const Settings &p_settings) {
+	static const char *arms[3] = { "Off", "B1", "U1" };
+	static const char *visibility[3] = { "Traced", "Visible", "Hashed" };
+	String text = "settings";
+	text += " reservoirs=" + String(arms[MIN(p_settings.reservoirs, 2u)]);
+	text += " temporal_reuse=" + itos(p_settings.temporal_reuse ? 1 : 0);
+	text += " spatial_neighbors=" + itos(p_settings.spatial_neighbors);
+	text += " spatial_radius=" + String::num_real(p_settings.spatial_radius);
+	text += " c_full=" + itos(p_settings.c_full);
+	text += " m_temporal_cap=" + itos(p_settings.m_temporal_cap);
+	text += " m_stored_cap=" + itos(p_settings.m_stored_cap);
+	text += " dynamic_cap=" + itos(p_settings.dynamic_cap);
+	text += " head_rank=" + String(p_settings.head_rank_visible ? "TV" : "T");
+	text += " head_swap_margin=" + String::num_real(p_settings.head_swap_margin);
+	text += " head_swap_frames=" + itos(p_settings.head_swap_frames);
+	text += " head_swap_window=" + itos(p_settings.head_window ? 1 : 0);
+	text += " head=" + itos(p_settings.head);
+	text += " tail_samples=" + itos(p_settings.tail_samples);
+	text += " floor=" + String::num_real(p_settings.floor_value);
+	text += " energy_arm=" + String(p_settings.live_energy ? "Live" : "Mean");
+	text += " tail_visibility=" + String(visibility[MIN(p_settings.tail_visibility, 2u)]);
+	text += " stale_prior=" + itos(p_settings.stale_prior ? 1 : 0);
+	text += " mass_bound=" + itos(lab_mass_bound(p_settings));
+	return text;
 }
 
 bool DirectResamplerRD::is_enabled() const {
@@ -127,6 +159,8 @@ bool DirectResamplerRD::_ensure_device() {
 	Vector<String> modes;
 	modes.push_back("\n");
 	modes.push_back("\n#define MODE_SPATIAL\n");
+	modes.push_back("\n#define LAB_COUNTS\n");
+	modes.push_back("\n#define MODE_SPATIAL\n#define LAB_COUNTS\n");
 	shader->initialize(modes);
 	shader_version = shader->version_create();
 	if (!shader->version_is_valid(shader_version)) {
@@ -134,9 +168,12 @@ bool DirectResamplerRD::_ensure_device() {
 	}
 	pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, 0));
 	spatial_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, 1));
+	lab_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, 2));
+	lab_spatial_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, 3));
 	header_dummy = _dummy(RD::DATA_FORMAT_R32_UINT, RD::TEXTURE_TYPE_2D, "Direct Resampled Header Dummy");
 	params_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(Params));
 	debug_buffer = RD::get_singleton()->storage_buffer_create(DEBUG_BYTES);
+	lab_buffer = RD::get_singleton()->storage_buffer_create(LAB_BYTES);
 	history_slots_dummy = _dummy(RD::DATA_FORMAT_R16_UNORM, RD::TEXTURE_TYPE_2D_ARRAY, "Direct Resampled History Slots Dummy");
 	history_factors_dummy = _dummy(RD::DATA_FORMAT_R16_UNORM, RD::TEXTURE_TYPE_2D_ARRAY, "Direct Resampled History Factors Dummy");
 	history_guide_dummy = _dummy(RD::DATA_FORMAT_R32G32_UINT, RD::TEXTURE_TYPE_2D, "Direct Resampled History Guide Dummy");
@@ -167,6 +204,35 @@ void DirectResamplerRD::_flush_debug_line() {
 	debug_pending = false;
 }
 
+void DirectResamplerRD::_write_lab_line() {
+	const Vector<uint8_t> data = RD::get_singleton()->buffer_get_data(lab_buffer);
+	if (data.size() < int(LAB_BYTES)) {
+		return;
+	}
+	const uint32_t *values = reinterpret_cast<const uint32_t *>(data.ptr());
+	static const char *names[7] = { "path", "present", "dropped", "dropped_mass", "total_mass", "dynamic_capped", "trigger" };
+	String line = "frame " + itos(int64_t(lab_frame)) + " size " + itos(lab_size.x) + "x" + itos(lab_size.y);
+	for (uint32_t word = 0; word < 7; word++) {
+		line += " " + String(names[word]) + " " + itos(values[word]);
+	}
+	line += " final";
+	for (uint32_t slot = 0; slot < DEBUG_SLOTS; slot++) {
+		const uint32_t count = values[LAB_HEADER_WORDS + slot];
+		if (count != 0) {
+			line += " " + itos(slot) + ":" + itos(count);
+		}
+	}
+	lab_file->store_line(line);
+	lab_file->flush();
+}
+
+void DirectResamplerRD::_flush_lab_line() {
+	if (lab_pending && lab_file.is_valid()) {
+		_write_lab_line();
+	}
+	lab_pending = false;
+}
+
 bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	sampler_lab.serve();
 	const Settings settings = get_project_settings();
@@ -192,6 +258,29 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	if (counting) {
 		_flush_debug_line();
 		rd->buffer_clear(debug_buffer, 0, DEBUG_BYTES);
+	}
+
+	if (settings.lab_log != lab_path) {
+		_flush_lab_line();
+		lab_file.unref();
+		lab_path = settings.lab_log;
+		lab_settings = String();
+		if (!lab_path.is_empty()) {
+			lab_file = FileAccess::open(lab_path, FileAccess::WRITE);
+			if (lab_file.is_null()) {
+				ERR_PRINT(vformat("The direct resampler's lab log %s could not be opened.", lab_path));
+			}
+		}
+	}
+	const bool lab = lab_file.is_valid() && !(lab_pending && lab_frame == p_input.frame);
+	if (lab) {
+		_flush_lab_line();
+		rd->buffer_clear(lab_buffer, 0, LAB_BYTES);
+		const String text = lab_settings_text(settings);
+		if (text != lab_settings) {
+			lab_settings = text;
+			lab_file->store_line(text);
+		}
 	}
 
 	Ref<ViewportData> viewport;
@@ -337,27 +426,35 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 15, history_values));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 16, current_header));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 17, current_values));
+	if (lab) {
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 20, lab_buffer));
+	}
 	LocalVector<RD::Uniform> spatial_uniforms(uniforms);
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 12, debug_buffer));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 18, head_state_previous));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 19, head_state_next));
 
-	const RID shader_rid = shader->version_get_shader(shader_version, 0);
+	const RID shader_rid = shader->version_get_shader(shader_version, lab ? 2 : 0);
 	RD::ComputeListID list = rd->compute_list_begin();
-	rd->compute_list_bind_compute_pipeline(list, pipeline.get_rid());
+	rd->compute_list_bind_compute_pipeline(list, lab ? lab_pipeline.get_rid() : pipeline.get_rid());
 	rd->compute_list_bind_uniform_set(list, UniformSetCacheRD::get_singleton()->get_cache_vec(shader_rid, 0, uniforms), 0);
 	rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
 	rd->compute_list_end();
 	if (spatial) {
-		const RID spatial_rid = shader->version_get_shader(shader_version, 1);
+		const RID spatial_rid = shader->version_get_shader(shader_version, lab ? 3 : 1);
 		list = rd->compute_list_begin();
-		rd->compute_list_bind_compute_pipeline(list, spatial_pipeline.get_rid());
+		rd->compute_list_bind_compute_pipeline(list, lab ? lab_spatial_pipeline.get_rid() : spatial_pipeline.get_rid());
 		rd->compute_list_bind_uniform_set(list, UniformSetCacheRD::get_singleton()->get_cache_vec(spatial_rid, 0, spatial_uniforms), 0);
 		rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
 		rd->compute_list_end();
 	}
 	viewport->swap_sets = reservoir_sets && !feedback;
 	viewport->swap_head_state = head_state;
+	if (lab) {
+		lab_pending = true;
+		lab_frame = p_input.frame;
+		lab_size = size;
+	}
 	if (counting) {
 		debug_pending = true;
 		debug_frame = p_input.frame;
@@ -395,6 +492,8 @@ void DirectResamplerRD::free_device_resources() {
 	RD *rd = RD::get_singleton();
 	pipeline.free();
 	spatial_pipeline.free();
+	lab_pipeline.free();
+	lab_spatial_pipeline.free();
 	if (shader_version.is_valid()) {
 		shader->version_free(shader_version);
 		shader_version = RID();
@@ -404,7 +503,8 @@ void DirectResamplerRD::free_device_resources() {
 		shader = nullptr;
 	}
 	_flush_debug_line();
-	const RID owned[] = { params_buffer, debug_buffer, history_slots_dummy, history_factors_dummy, history_guide_dummy, header_dummy };
+	_flush_lab_line();
+	const RID owned[] = { params_buffer, debug_buffer, lab_buffer, history_slots_dummy, history_factors_dummy, history_guide_dummy, header_dummy };
 	for (const RID &rid : owned) {
 		if (rid.is_valid()) {
 			rd->free_rid(rid);
@@ -412,6 +512,7 @@ void DirectResamplerRD::free_device_resources() {
 	}
 	params_buffer = RID();
 	debug_buffer = RID();
+	lab_buffer = RID();
 	history_slots_dummy = RID();
 	history_factors_dummy = RID();
 	history_guide_dummy = RID();

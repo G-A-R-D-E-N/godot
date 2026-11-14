@@ -59,6 +59,7 @@ public:
 		uint32_t tail_visibility = 0;
 		bool stale_prior = false;
 		String debug_log;
+		String lab_log;
 		uint32_t reservoirs = 0;
 		bool temporal_reuse = true;
 		uint32_t spatial_neighbors = 2;
@@ -122,12 +123,16 @@ public:
 	static constexpr uint32_t DEBUG_HEADER_WORDS = 4;
 	static constexpr uint32_t DEBUG_SLOTS = 65536;
 	static constexpr uint32_t DEBUG_BYTES = (DEBUG_HEADER_WORDS + DEBUG_SLOTS) * 4;
+	static constexpr uint32_t LAB_HEADER_WORDS = 8;
+	static constexpr uint32_t LAB_BYTES = (LAB_HEADER_WORDS + DEBUG_SLOTS) * 4;
 
 	static void register_settings();
 	static Settings clamp_settings(bool p_enabled, int p_head, int p_tail_samples, float p_floor, int p_energy_arm);
 	static void clamp_reservoir_settings(Settings &r_settings, int p_reservoirs, bool p_temporal_reuse, int p_spatial_neighbors, float p_spatial_radius, int p_c_full, int p_m_temporal_cap, int p_m_stored_cap, int p_dynamic_cap, int p_head_rank, float p_head_swap_margin, int p_head_swap_frames, bool p_head_window);
 	static uint32_t advance_counter(uint32_t p_counter, bool p_continuous);
 	static Settings get_project_settings();
+	static uint32_t lab_mass_bound(const Settings &p_settings);
+	static String lab_settings_text(const Settings &p_settings);
 
 	virtual bool is_enabled() const override;
 	virtual bool run(const Input &p_input, Output &r_output) override;
@@ -161,22 +166,33 @@ private:
 	RID shader_version;
 	PipelineDeferredRD pipeline;
 	PipelineDeferredRD spatial_pipeline;
+	PipelineDeferredRD lab_pipeline;
+	PipelineDeferredRD lab_spatial_pipeline;
 	RID params_buffer;
 	RID header_dummy;
 	RID history_slots_dummy;
 	RID history_factors_dummy;
 	RID history_guide_dummy;
 	RID debug_buffer;
+	RID lab_buffer;
 	bool device_ready = false;
 	Ref<FileAccess> debug_file;
 	String debug_path;
 	bool debug_pending = false;
 	uint64_t debug_frame = 0;
 	Size2i debug_size;
+	Ref<FileAccess> lab_file;
+	String lab_path;
+	String lab_settings;
+	bool lab_pending = false;
+	uint64_t lab_frame = 0;
+	Size2i lab_size;
 	DirectSamplerLab sampler_lab;
 
 	bool _ensure_device();
 	void _write_debug_line();
 	void _flush_debug_line();
+	void _write_lab_line();
+	void _flush_lab_line();
 	RID _dummy(RD::DataFormat p_format, RD::TextureType p_type, const char *p_name);
 };

@@ -116,6 +116,21 @@ layout(r32ui, set = 0, binding = 18) uniform restrict readonly uimage2D head_sta
 layout(r32ui, set = 0, binding = 19) uniform restrict writeonly uimage2D head_state;
 #endif
 
+#ifdef LAB_COUNTS
+layout(set = 0, binding = 20, std430) restrict buffer LabCounts {
+	uint words[8];
+	uint finals[];
+}
+lab_counts;
+
+#define LAB_PATH 0
+#define LAB_PRESENT 1
+#define LAB_DROPPED 2
+#define LAB_DROPPED_MASS 3
+#define LAB_TOTAL_MASS 4
+#define LAB_DYNAMIC_CAPPED 5
+#endif
+
 #define DEBUG_STALE_PRIOR 1u
 #define DEBUG_COUNT 2u
 #define RECORD_EXACT_CHECK 0x80000000u
@@ -500,6 +515,20 @@ uint combine(uint p_count, uint p_stream, out float r_weight, out uint r_mass, o
 			mass += other_mass[i];
 		}
 	}
+#ifdef LAB_COUNTS
+	uint dropped = 0u;
+	uint dropped_mass = 0u;
+	for (uint i = 0u; i < p_count; i++) {
+		if (other_present[i] && other_here[i] == 0.0) {
+			dropped++;
+			dropped_mass += uint(other_mass[i]);
+		}
+	}
+	atomicAdd(lab_counts.words[LAB_PRESENT], present);
+	atomicAdd(lab_counts.words[LAB_DROPPED], dropped);
+	atomicAdd(lab_counts.words[LAB_DROPPED_MASS], dropped_mass);
+	atomicAdd(lab_counts.words[LAB_TOTAL_MASS], uint(mass));
+#endif
 	weights[0] = 0.0;
 	if (params.reservoirs == RESERVOIRS_U1) {
 		float share = float(max(present, 1u));
@@ -633,6 +662,9 @@ void resample_reservoir(ivec2 p_pixel, uint p_cluster_offset, uint p_cluster_z) 
 		uint cap = params.m_temporal_cap;
 		if (di_slots.data[other_slot[0]].dynamic != 0u) {
 			cap = min(cap, params.dynamic_cap);
+#ifdef LAB_COUNTS
+			atomicAdd(lab_counts.words[LAB_DYNAMIC_CAPPED], 1u);
+#endif
 		}
 		other_mass[0] = min(other_mass[0], float(cap));
 		if (params.reservoirs == RESERVOIRS_U1 && own_slot != DI_SAMPLER_NO_PICK) {
@@ -741,6 +773,9 @@ void main() {
 		sum_target = plain_sum;
 	}
 	if (reservoir) {
+#ifdef LAB_COUNTS
+		atomicAdd(lab_counts.words[LAB_PATH], 1u);
+#endif
 		resample_reservoir(pixel, cluster_offset, cluster_z);
 	}
 	bool exact = tail_lamps <= tails;
@@ -775,6 +810,9 @@ void main() {
 				write_sample(pixel, 0u, 0u, 0.0, 0.0, vec3(0.0));
 			} else {
 				write_sample(pixel, 0u, result_slot, result_weight, sum_weight, rest_scale(result_target, result_weight));
+#ifdef LAB_COUNTS
+				atomicAdd(lab_counts.finals[result_slot], 1u);
+#endif
 			}
 		}
 		return;
@@ -907,6 +945,9 @@ void main() {
 		other_slot[i] = other & 0xFFFFu;
 		if (di_slots.data[other_slot[i]].dynamic != 0u) {
 			mass = min(mass, params.dynamic_cap);
+#ifdef LAB_COUNTS
+			atomicAdd(lab_counts.words[LAB_DYNAMIC_CAPPED], 1u);
+#endif
 		}
 		other_mass[i] = float(mass);
 		other_weight[i] = uintBitsToFloat(held.x);
@@ -937,6 +978,9 @@ void main() {
 	} else {
 		slot = pick == 0u ? own_slot : other_slot[pick - 1u];
 		write_sample(pixel, 0u, slot, weight, sum_weight, rest_scale(pick == 0u ? own_target : other_target[pick - 1u], weight));
+#ifdef LAB_COUNTS
+		atomicAdd(lab_counts.finals[slot], 1u);
+#endif
 	}
 	if (params.reservoirs == RESERVOIRS_U1) {
 		imageStore(history_header, pixel, uvec4(reservoir_header(slot, mass), 0u, 0u, 0u));
