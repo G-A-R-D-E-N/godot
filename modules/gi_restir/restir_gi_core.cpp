@@ -348,7 +348,7 @@ void RestirGiCore::_upload(RID p_ubo, const RestirFrameParams &p, uint32_t p_pas
 	u.trace_size[1] = p.trace_size.y;
 	u.frame = p.frame_index;
 	u.seed = p.seed;
-	u.flags = p.flags | (p.mode == RESTIR_MODE_U1 ? RESTIR_F_UNBIASED : 0u) | (p.mode == RESTIR_MODE_B2 ? RESTIR_F_VIS_REUSE : 0u);
+	u.flags = (p.flags & ~uint32_t(RESTIR_F_KEEP_M)) | (p.mode == RESTIR_MODE_U1 ? RESTIR_F_UNBIASED : 0u) | ((p.mode == RESTIR_MODE_B2 || p.mode == RESTIR_MODE_B2K) ? RESTIR_F_VIS_REUSE : 0u) | (p.mode == RESTIR_MODE_B2K ? RESTIR_F_KEEP_M : 0u);
 	if (p.compat) {
 		u.flags |= RESTIR_F_COMPAT | (p.compat_gate == RESTIR_GATE_NONE ? RESTIR_F_COMPAT_NONE : 0u) | (p.compat_gate == RESTIR_GATE_BINARY ? RESTIR_F_COMPAT_BINARY : 0u) | (p.compat_early_stop ? RESTIR_F_COMPAT_STOP : 0u);
 	}

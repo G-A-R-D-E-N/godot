@@ -190,6 +190,7 @@ void rs_fill_neighbour(Reservoir p_sample, float p_m, bool p_usable, uint p_dead
 	}
 	if (!p_usable) {
 		r_reason = p_dead_reason;
+		r_cand.keep = (rf.flags & F_KEEP_M) != 0u && (p_dead_reason == REJ_VIS || p_dead_reason == REJ_DIRTY);
 		g_stats[PS_ZERO_WEIGHT] += 1.0;
 		return;
 	}
@@ -225,6 +226,7 @@ void rs_fill_neighbour(Reservoir p_sample, float p_m, bool p_usable, uint p_dead
 		r_reason = REJ_VIS;
 		if (!unbiased) {
 			r_cand.on = false;
+			r_cand.keep = (rf.flags & F_KEEP_M) != 0u;
 		}
 	}
 	r_cand.phat_r = phat_r;
@@ -410,7 +412,8 @@ void rs_temporal_pixel(ivec2 px) {
 					info |= INFO_HAD_HISTORY;
 					bool unbiased = (rf.flags & F_UNBIASED) != 0u;
 					bool dirty = rs_dirty_hit(q, h);
-					if (dirty && !unbiased) {
+					bool keep_m = (rf.flags & F_KEEP_M) != 0u;
+					if (dirty && !unbiased && !keep_m) {
 						reason = REJ_DIRTY;
 					} else {
 						float m_h = float(min(h.m, rf.m_temporal_cap));
@@ -422,6 +425,10 @@ void rs_temporal_pixel(ivec2 px) {
 						if (!unbiased && usable && ((vis & 0xFFu) > rf.vis_fail_limit || (vis & 0x100u) != 0u)) {
 							usable = false;
 							dead_reason = REJ_VIS;
+						}
+						if (dirty && !unbiased && (h.flags & RF_VALID) != 0u) {
+							usable = false;
+							dead_reason = REJ_DIRTY;
 						}
 						uint nb_reason;
 						rs_fill_neighbour(h, m_h, usable, dead_reason, dirty, q, r, c[0], c[1], nb_reason);

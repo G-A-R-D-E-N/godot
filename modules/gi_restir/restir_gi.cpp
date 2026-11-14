@@ -163,6 +163,9 @@ static uint32_t _gi_mode() {
 	if (mode == "B1") {
 		return RESTIR_MODE_B1;
 	}
+	if (mode == "B2k") {
+		return RESTIR_MODE_B2K;
+	}
 	return RESTIR_MODE_B2;
 }
 

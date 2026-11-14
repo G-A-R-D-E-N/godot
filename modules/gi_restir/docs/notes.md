@@ -19,7 +19,7 @@ Default: off at build time (config.py is_enabled returns False) and off at run t
 | Name (under rendering/global_illumination/restir/) | Type | Default |
 |---|---|---|
 | gi/enabled | bool | false |
-| gi/mode | enum B1,B2,U1 | B2 |
+| gi/mode | enum B1,B2,B2k,U1 | B2 |
 | gi/spatial_neighbors | int 0..8 | 3 |
 | gi/spatial_radius | int 1..128 | 24 |
 | gi/spatial_passes | int 1..2 | 1 |
@@ -171,7 +171,8 @@ is a refusal: counted in the status (pdf_refused) and treated as no candidate. S
 direction, valid only for cosine-drawn sources.
 
 Modes: B1 (m = M_i / sum M, W clamp 20 x 3x3 median, final visibility ray), B2 (B1 + visibility on every reuse), U1
-(pairwise MIS, symmetric accept rule, visibility both ways). A neighbour whose sample is invalid for the receiver
+(pairwise MIS, symmetric accept rule, visibility both ways); B2k (B2 keeping failed techniques' M) is in the "B2k, keep M"
+section below. A neighbour whose sample is invalid for the receiver
 (Jacobian, distance, cosine) stays in the technique set with weight 0; dropping it changes the canonical share per sample
 and biases the result (found by the S4 region-sum gate: +1 % to +15 % before the fix).
 
@@ -440,3 +441,28 @@ nothing changes.
   SPATIAL does commit 5's arithmetic. The UBO grew, so the SPIR-V of every pass that declares it (TEMPORAL, SPATIAL, VALIDATE)
   changes; the other module passes and every DDGI and RTGI variant don't. A capture made before this commit carries a 1328-byte
   "events" blob, which the harness no longer loads.
+
+## B2k, keep M (gi/mode B2k)
+
+Change plan row 7, design 2.5 ("keep-M is not the default"; arm B2k in the CPU toy and every reference cell). B2k is B2 (the
+same flags, F_VIS_REUSE included) plus F_KEEP_M (bit 22), RESTIR_MODE_B2K = 3 (mode_code 3, or 7 with fresh_lo; only the debug
+view reads it).
+- A Cand has a keep bit. In the B modes rs_combine adds a candidate's M to the total when it is on or kept; the weight loop
+  still skips anything not on, so a kept candidate has zero weight and its M stays in the denominator (biased by
+  -Σ m_i ∫ over what image_i can't reach, never brighter: G6.1(d)'s keep-M form).
+- Kept under B2k: rs_fill_neighbour's early return when its dead reason is REJ_VIS or REJ_DIRTY (TEMPORAL's history
+  visibility state over vis_fail_limit or flagged, and TEMPORAL's dirty history below), and the visibility test at the
+  receiver that turns a B-mode candidate off. TEMPORAL's dirty reject of a valid stored sample goes down that unusable path
+  with REJ_DIRTY instead of leaving the history out, so its M (after m_temporal_cap and the event cap) stays in.
+- Not kept (renormalised as in B2): shift-limit failures (the Jacobian, distance and cosine limits, r_reason from
+  rs_shift_jacobian); an invalid stored sample (RF_VALID clear, dead reason REJ_NO_SAMPLE, in TEMPORAL or SPATIAL), dirty or
+  not; and candidates that never enter (out of frame, not similar, no stored sample, epoch). Tile flags arrive with commit 9.
+  Keeping an invalid stored sample would carry M on an empty reservoir from frame to frame: a pixel with no canonical stores
+  M = m_h and an empty sample, which would be kept again the next frame and never decay (commit 7 review, SHOULD-FIX 1). The
+  design names visibility, dirty and history visibility only.
+- RESTIR_F_KEEP_M is taken from the mode alone: _upload masks bit 22 out of the caller's flags, so a capture or caller can't
+  turn keep-M on under B1 or B2.
+- U1 is untouched: F_KEEP_M is never set with F_UNBIASED, and U1's total already counts every present candidate.
+- Identity: with B1, B2 or U1, keep stays false, TEMPORAL takes the old dirty reject (the new dirty block can only run under
+  F_KEEP_M), and the totals are the old ones. The Cand struct grew by one bool, so the SPIR-V of the passes that use it changes;
+  their output must not.

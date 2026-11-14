@@ -48,8 +48,8 @@ struct RestirSetting {
 static const RestirSetting restir_table[] = {
 	{ Variant::BOOL, "gi/enabled", PROPERTY_HINT_NONE, "", 0, "", false,
 			"Experimental. Turns on the ReSTIR GI backend of the RTGI pass. Off keeps the plain RTGI path." },
-	{ Variant::STRING, "gi/mode", PROPERTY_HINT_ENUM, "B1,B2,U1", 0, "B2", false,
-			"Experimental. ReSTIR GI bias mode: B1 biased reuse, B2 biased reuse with per-reuse visibility (default), U1 unbiased (tests)." },
+	{ Variant::STRING, "gi/mode", PROPERTY_HINT_ENUM, "B1,B2,B2k,U1", 0, "B2", false,
+			"Experimental. ReSTIR GI bias mode: B1 biased reuse, B2 biased reuse with per-reuse visibility (default), B2k as B2 but a reused sample that fails visibility, the dirty test or the history visibility state keeps its count with zero weight (tests), U1 unbiased (tests)." },
 	{ Variant::INT, "gi/spatial_neighbors", PROPERTY_HINT_RANGE, "0,8,1", 3, "", false,
 			"Experimental. ReSTIR GI spatial neighbours per pass. Has no effect while gi/enabled is off." },
 	{ Variant::INT, "gi/spatial_radius", PROPERTY_HINT_RANGE, "1,128,1", 24, "", false,

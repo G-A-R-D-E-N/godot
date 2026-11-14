@@ -28,6 +28,7 @@
 #define F_KEEP_BLOCKED 262144u
 #define F_REVAL_FRAME 1048576u
 #define F_REVAL_SHARE 2097152u
+#define F_KEEP_M 4194304u
 #define F_REPLAY 8388608u
 #define F_EVENTS 16777216u
 #define F_SPATIAL_HOLD 33554432u
@@ -602,6 +603,7 @@ struct Cand {
 	float a_at_c;
 	bool on;
 	bool present;
+	bool keep;
 };
 
 Cand rs_cand_none() {
@@ -614,6 +616,7 @@ Cand rs_cand_none() {
 	c.a_at_c = 0.0;
 	c.on = false;
 	c.present = false;
+	c.keep = false;
 	return c;
 }
 
@@ -624,7 +627,7 @@ Reservoir rs_combine(int p_count, uvec2 p_pixel, out int r_sel, out float r_tota
 	float total_m = 0.0;
 	int neighbours = 0;
 	for (int i = 0; i < p_count; i++) {
-		if (unbiased ? (i == 0 || c[i].present) : c[i].on) {
+		if (unbiased ? (i == 0 || c[i].present) : (c[i].on || c[i].keep)) {
 			total_m += c[i].m;
 		}
 		if (i > 0 && c[i].present) {
