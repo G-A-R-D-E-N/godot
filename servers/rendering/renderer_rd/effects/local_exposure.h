@@ -50,6 +50,7 @@ public:
 		float range_sigma = 1.0;
 		float temporal_alpha = 1.0;
 		bool reset_history = false;
+		uint64_t frame = 0;
 	};
 
 	class Buffers : public RenderBufferCustomDataRD {
@@ -64,6 +65,7 @@ public:
 		RID wide;
 		int history_index = 0;
 		bool history_valid = false;
+		uint64_t last_frame = 0;
 
 		virtual void configure(RenderSceneBuffersRD *p_render_buffers) override;
 		virtual void free_data() override;

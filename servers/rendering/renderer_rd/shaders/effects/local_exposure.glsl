@@ -36,7 +36,7 @@ layout(rgba16f, set = 1, binding = 0) uniform restrict writeonly image2D dest_wi
 #ifdef MODE_TEMPORAL
 layout(set = 0, binding = 0) uniform sampler3D source_grid;
 layout(set = 0, binding = 1) uniform sampler3D source_history;
-layout(rgba16f, set = 1, binding = 0) uniform restrict writeonly image3D dest_grid;
+layout(rgba32f, set = 1, binding = 0) uniform restrict writeonly image3D dest_grid;
 #endif
 
 layout(push_constant, std430) uniform Params {

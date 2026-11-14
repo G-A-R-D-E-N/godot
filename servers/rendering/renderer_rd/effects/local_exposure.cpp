@@ -38,8 +38,8 @@ using namespace RendererRD;
 
 LocalExposure::LocalExposure() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/local_exposure/method", PROPERTY_HINT_ENUM, "Bilateral Grid,Edge-Checked Blur"), 0);
-	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/local_exposure/spatial_sigma", PROPERTY_HINT_RANGE, "0.25,3,0.01"), 1.0);
-	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/local_exposure/range_sigma", PROPERTY_HINT_RANGE, "0.1,4,0.01"), 1.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/local_exposure/spatial_sigma", PROPERTY_HINT_RANGE, "0.25,2,0.01"), 1.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/local_exposure/range_sigma", PROPERTY_HINT_RANGE, "0.1,1.5,0.01"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/local_exposure/wide_blend", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/local_exposure/edge_range", PROPERTY_HINT_RANGE, "0.1,6,0.01"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/local_exposure/temporal_seconds", PROPERTY_HINT_RANGE, "0,2,0.01"), 0.0);
@@ -84,10 +84,12 @@ void LocalExposure::Buffers::configure(RenderSceneBuffersRD *p_render_buffers) {
 
 	tf.texture_type = RD::TEXTURE_TYPE_3D;
 	tf.depth = GRID_DEPTH;
+	RD::TextureFormat history_format = tf;
+	history_format.format = RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
 	for (int i = 0; i < 2; i++) {
 		grid[i] = RD::get_singleton()->texture_create(tf, RD::TextureView());
 		RD::get_singleton()->set_resource_name(grid[i], "Local exposure grid");
-		history[i] = RD::get_singleton()->texture_create(tf, RD::TextureView());
+		history[i] = RD::get_singleton()->texture_create(history_format, RD::TextureView());
 		RD::get_singleton()->set_resource_name(history[i], "Local exposure grid history");
 	}
 	history_index = 0;
@@ -142,7 +144,12 @@ RID LocalExposure::process(RID p_source_texture, const Size2i p_source_size, Ref
 
 	const Size2i log_size = p_buffers->log_size;
 	const Size2i grid_size = p_buffers->grid_size;
-	const float range_cells = p_settings.range_sigma * float(GRID_DEPTH) / (LOG_MAX - LOG_MIN);
+	const float spatial_cells = CLAMP(p_settings.spatial_sigma, 0.25f, 2.0f);
+	const float range_cells = CLAMP(p_settings.range_sigma, 0.1f, 1.5f) * float(GRID_DEPTH) / (LOG_MAX - LOG_MIN);
+	if (p_settings.frame != p_buffers->last_frame + 1) {
+		p_buffers->history_valid = false;
+	}
+	p_buffers->last_frame = p_settings.frame;
 
 	PushConstant push_constant;
 	memset(&push_constant, 0, sizeof(PushConstant));
@@ -182,21 +189,10 @@ RID LocalExposure::process(RID p_source_texture, const Size2i p_source_size, Ref
 	}
 
 	const int blur_axis[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
-	const float blur_sigma[3] = { p_settings.spatial_sigma, p_settings.spatial_sigma, range_cells };
+	const float blur_sigma[3] = { spatial_cells, spatial_cells, range_cells };
 	const int blur_source[3] = { 0, 1, 0 };
 
 	for (int pass = 0; pass < 3; pass++) {
-		if (pass == 2) {
-			RID wide_shader = shader.version_get_shader(shader_version, MODE_WIDE);
-			RD::Uniform u_wide_source(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ nearest_sampler, p_buffers->grid[0] }));
-			RD::Uniform u_wide_dest(RD::UNIFORM_TYPE_IMAGE, 0, p_buffers->wide);
-			RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, pipelines[MODE_WIDE]);
-			RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(wide_shader, 0, u_wide_source), 0);
-			RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(wide_shader, 1, u_wide_dest), 1);
-			RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(PushConstant));
-			RD::get_singleton()->compute_list_dispatch_threads(compute_list, grid_size.x, grid_size.y, 1);
-		}
-
 		RID mode_shader = shader.version_get_shader(shader_version, MODE_BLUR);
 		push_constant.axis[0] = blur_axis[pass][0];
 		push_constant.axis[1] = blur_axis[pass][1];
@@ -225,11 +221,23 @@ RID LocalExposure::process(RID p_source_texture, const Size2i p_source_size, Ref
 		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(mode_shader, 1, u_dest), 1);
 		RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(PushConstant));
 		RD::get_singleton()->compute_list_dispatch_threads(compute_list, grid_size.x, grid_size.y, GRID_DEPTH);
+		RD::get_singleton()->compute_list_add_barrier(compute_list);
 		p_buffers->history_index = next;
 		p_buffers->history_valid = true;
 		result = p_buffers->history[next];
 	} else {
 		p_buffers->history_valid = false;
+	}
+
+	{
+		RID wide_shader = shader.version_get_shader(shader_version, MODE_WIDE);
+		RD::Uniform u_wide_source(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ nearest_sampler, p_settings.temporal_alpha < 1.0 ? result : p_buffers->grid[0] }));
+		RD::Uniform u_wide_dest(RD::UNIFORM_TYPE_IMAGE, 0, p_buffers->wide);
+		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, pipelines[MODE_WIDE]);
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(wide_shader, 0, u_wide_source), 0);
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(wide_shader, 1, u_wide_dest), 1);
+		RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(PushConstant));
+		RD::get_singleton()->compute_list_dispatch_threads(compute_list, grid_size.x, grid_size.y, 1);
 	}
 
 	RD::get_singleton()->compute_list_end();

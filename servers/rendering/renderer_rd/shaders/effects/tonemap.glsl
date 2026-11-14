@@ -967,10 +967,10 @@ float local_exposure_gain(vec3 p_exposed, vec2 p_uv, float p_exposure) {
 	float shift = 0.0;
 	if (stops < 0.0) {
 		if (local_exposure.max_lift > 0.0) {
-			shift = local_exposure.max_lift * tanh(local_exposure.shadow_slope * stops / local_exposure.max_lift);
+			shift = local_exposure.max_lift * tanh(clamp(local_exposure.shadow_slope * stops / local_exposure.max_lift, -10.0, 10.0));
 		}
 	} else if (local_exposure.max_drop > 0.0) {
-		shift = local_exposure.max_drop * tanh(local_exposure.highlight_slope * stops / local_exposure.max_drop);
+		shift = local_exposure.max_drop * tanh(clamp(local_exposure.highlight_slope * stops / local_exposure.max_drop, -10.0, 10.0));
 	}
 	return exp2(local_exposure.strength * shift);
 }

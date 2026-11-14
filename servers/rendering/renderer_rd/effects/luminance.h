@@ -40,6 +40,15 @@
 
 namespace RendererRD {
 
+struct LuminanceHistogramPolicy {
+	float highlight_percentile = 0.0;
+	float highlight_ceiling = 2.5;
+	float highlight_max_shift = 4.0;
+	bool exponential = false;
+	float light_adjust = 1.0;
+	float dark_adjust = 1.0;
+};
+
 class Luminance {
 private:
 	bool prefer_raster_effects;
@@ -133,14 +142,7 @@ private:
 	} luminance_histogram;
 
 public:
-	struct HistogramPolicy {
-		float highlight_percentile = 0.0;
-		float highlight_ceiling = 2.5;
-		float highlight_max_shift = 4.0;
-		bool exponential = false;
-		float light_adjust = 1.0;
-		float dark_adjust = 1.0;
-	};
+	using HistogramPolicy = LuminanceHistogramPolicy;
 
 	class LuminanceBuffers : public RenderBufferCustomDataRD {
 		GDCLASS(LuminanceBuffers, RenderBufferCustomDataRD);

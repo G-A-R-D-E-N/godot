@@ -527,6 +527,7 @@ RendererEnvironmentStorage::NightVision RendererEnvironmentStorage::environment_
 void RendererEnvironmentStorage::environment_set_local_exposure(RID p_env, bool p_enable, float p_strength, float p_shadow_contrast, float p_highlight_contrast, float p_max_shadow_lift, float p_max_highlight_drop, float p_pivot) {
 	Environment *env = environment_owner.get_or_null(p_env);
 	ERR_FAIL_NULL(env);
+	ERR_FAIL_COND(Math::is_nan(p_strength) || Math::is_nan(p_shadow_contrast) || Math::is_nan(p_highlight_contrast) || Math::is_nan(p_max_shadow_lift) || Math::is_nan(p_max_highlight_drop) || Math::is_nan(p_pivot));
 	LocalExposure &local = env->local_exposure;
 	local.enabled = p_enable;
 	local.strength = LocalExposureLimits::strength(p_strength);
