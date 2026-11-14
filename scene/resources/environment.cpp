@@ -1854,7 +1854,7 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "local_exposure_highlight_contrast", PROPERTY_HINT_RANGE, "0.25,1,0.01"), "set_local_exposure_highlight_contrast", "get_local_exposure_highlight_contrast");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "local_exposure_max_shadow_lift", PROPERTY_HINT_RANGE, "0,6,0.01"), "set_local_exposure_max_shadow_lift", "get_local_exposure_max_shadow_lift");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "local_exposure_max_highlight_drop", PROPERTY_HINT_RANGE, "0,6,0.01"), "set_local_exposure_max_highlight_drop", "get_local_exposure_max_highlight_drop");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "local_exposure_pivot", PROPERTY_HINT_RANGE, "-4,4,0.01"), "set_local_exposure_pivot", "get_local_exposure_pivot");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "local_exposure_pivot", PROPERTY_HINT_RANGE, "-8,8,0.01"), "set_local_exposure_pivot", "get_local_exposure_pivot");
 
 	// Constants
 

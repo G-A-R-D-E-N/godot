@@ -532,7 +532,7 @@ void RendererEnvironmentStorage::environment_set_local_exposure(RID p_env, bool 
 	local.highlight_contrast = CLAMP(p_highlight_contrast, 0.25f, 1.0f);
 	local.max_shadow_lift = CLAMP(p_max_shadow_lift, 0.0f, 6.0f);
 	local.max_highlight_drop = CLAMP(p_max_highlight_drop, 0.0f, 6.0f);
-	local.pivot = CLAMP(p_pivot, -4.0f, 4.0f);
+	local.pivot = CLAMP(p_pivot, -8.0f, 8.0f);
 }
 
 RendererEnvironmentStorage::LocalExposure RendererEnvironmentStorage::environment_get_local_exposure(RID p_env) const {
