@@ -45,6 +45,7 @@ Default: off at build time (config.py is_enabled returns False) and off at run t
 | gi/denoise | enum off,r2 | r2 |
 | gi/denoise_history_cap | int 1..255 | 4 |
 | gi/trace_all_tiles | bool | true |
+| gi/confidence | enum frames,frames_and_m | frames |
 | gi/replay_seed | bool | false |
 | gi/event_reshade | bool | false |
 | gi/reshade_budget | int 0..100 (percent of trace pixels) | 25 |
@@ -277,8 +278,8 @@ cannot re-read the sky by direction. A MISS_SKY sample therefore keeps its store
   scene, as DDGI does.
 - No cloud shadow and no alpha ray scene on this line; the shade passes bind set 2 bindings 0 and 3 to 8 only.
 - Output route: only gi/denoise = r2 is used by RTGI. A frame with gi/denoise off is counted as a refusal and RTGI runs on its own candidates.
-- Tiles: wants_all_tiles() returns gi/trace_all_tiles, and while it is true R2 traces every tile. Off is not a supported mode: R2 then skips the tiles it
-  judges converged, the module does not revalidate those tiles, and the history cap that follows the trace rate overstates their rate. The default stays on.
+- Tiles: wants_all_tiles() returns gi/trace_all_tiles, and while it is true R2 traces every tile. With it off, R2 picks its tiles and the module keeps
+  state only in the traced ones (change plan commit 9, "Traced tiles only" below). The default stays on.
 - Per-view release: R2's RtgiBuffers::free_data calls release(p_buffers) when the render buffers are cleaned up (destructor, configure,
   configure_for_reflections).
 
@@ -588,3 +589,69 @@ Design 2.9 (N3) and 8.1 row 10; change plan commit 8.
   eabba5d2a. FINAL and VALIDATE gained run-time tests of bit 26, so their SPIR-V changes and their output must not. SOURCE keeps
   its declarations and order through the set 2 restructure. No core shader changed, so every DDGI, RTGI and direct-shadow
   variant stays byte-identical.
+
+## Traced tiles only and M in PACK (gi/trace_all_tiles off, gi/confidence)
+
+Design 2.10 (N7 and "PACK writes M"), 3.2, 3.3, 8.1 rows 12-14; change plan commit 9.
+- Flags. F_TILE_SKIP is rf.flags bit 27 (134217728) and F_PACK_M bit 28 (268435456); bit 19 stays reserved for Fold. _upload
+  sets them from RestirFrameParams::tile_skip and ::pack_m alone and masks both out of the caller's flags (as bits 22 and 26),
+  so a harness capture can't set them.
+- The tile texture. R2's CLASSIFY output (RB_SCOPE_RTGI "tiles": R32_UINT, one texel per 8x8 tile of trace pixels, storage and
+  sampling usage, written by CLASSIFY as an image) is bound at module set 0 binding 27 as `utexture2D rs_tiles` in TEMPORAL,
+  every SPATIAL mode, their sky twins, FINAL and PACK. CLASSIFY keeps its storage usage; nothing in R2 changes. It reaches the
+  module through the hook field RtgiFrameInputs::tile_texture (design 8.2's hook table), which rtgi.cpp fills with the same RID
+  its CLASSIFY and trace bind. A tile is traced when RTGI_TILE_TRACE (bit 0 of the texel) is set, the test ddgi_trace's
+  MODE_RTGI makes.
+- rs_tile_traced(pixel) returns true without a read while F_TILE_SKIP is clear. Otherwise it reads the texel at
+  pixel / RTGI_TILE, clamped to the texture's last texel. The module's groups are 8x8 trace pixels and RTGI_TILE is 8, so every
+  invocation of a group reads the same texel and the skip is uniform per group; the barriers in rs_stats_store and FINAL sit
+  outside the branch anyway. restir_gi.cpp static_asserts RESTIR_TILE_SIZE against RtgiPass::TILE_SIZE.
+- The dummy. With no texture in RestirGiInputs, RestirGiCore binds a 1x1 R32_UINT texture holding RTGI_TILE_TRACE (freed in
+  free()). With the clamp, a read of it means "traced" everywhere, so a pass with bit 27 set and no texture runs as with every tile traced.
+  The frozen-frame PACK (test option freeze) is a different case: it keeps the last real frame's bits 27 and 28 and is handed
+  this frame's tile texture, so a tile setting changed during a freeze takes effect only when the freeze ends.
+- The plan, restir_plan_tiles in restir_events.cpp: gi/trace_all_tiles on gives "all" (bit 27 clear, nothing read); off with a
+  texture of ceil(trace size / 8) texels in both axes gives "skip"; off with no texture, a zero trace size or another size gives
+  "unavailable", where the module runs every tile as before while R2 traces its own tiles (the old unsupported state).
+  run_frame clears tile_skip again when the inputs carry no texture (the harness replay).
+- What a group in an untraced tile does:
+  - TEMPORAL: no candidate read, no history read, no rays. It stores rs_empty() and info = 0. Its pass-stats row is zero.
+  - SPATIAL, every mode: no taps and no rays. It stores rs_empty() and leaves info alone (TEMPORAL wrote 0 this frame). It
+    doesn't write sel_image, as for an invalid receiver today.
+  - FINAL: vis_state = 0, radiance (0, 0, 0, 1), coverage 0, debug 0 under F_DEBUG_OUT (what an invalid receiver gets), info
+    untouched. The group's stats row is still written, all zero (partial[] starts at 0), so it carries no counts from an
+    earlier frame into the host's reduction.
+  - PACK: NO_CANDIDATE | NOT_TRACED, radiance 0, pdf word 0, tag 0. R2's TEMPORAL then zeroes its history there (no THINNED,
+    so no carry) and its coverage is 0, so DDGI, surfels or SSGI show.
+  - VALIDATE, CLEAR, SOURCE, CAPTURE and SKY_EPOCH don't read the texture. VALIDATE works on the previous history in place;
+    a tile untraced last frame holds empty reservoirs there, which VALIDATE's M 0 early-out skips, so no budget goes to them.
+    SOURCE (gi/own_sampler, interim) still traces every pixel; TEMPORAL ignores those candidates in untraced groups.
+- Taps from a traced group into an untraced tile are not techniques (design 2.6). The offsets path tests the tap's tile after the
+  frame test and before rs_receiver_cur, and files it as REJ_UNTRACED (14; 13 stays free for Fold's REJ_BOUND) in the spatial reject nibble. The compatibility
+  selection skips such a tap before scoring, as an out-of-frame tap, so its pick slot goes to a traced tap; it records no
+  reason, so a receiver whose taps all fall in untraced tiles reads REJ_NO_COMPAT (12) there, and 14 shows on the offsets path only. The tapped
+  reservoir is empty anyway (TEMPORAL and an earlier SPATIAL pass wrote rs_empty() there), so the gate only saves fetches and
+  pick slots; the selection depends on geometry and tile flags only. FINAL's 3x3 W median already skips M 0 neighbours.
+- Re-trace: a tile traced again starts from empty reservoirs (the history tap reads M 0, REJ_NO_SAMPLE) and vis_state 0, so its
+  first FINAL counts from 0 (G-R1(j)). Spatial reuse from traced neighbours fills it.
+- No history cut on a change of the setting or the tile state: turning the skip on empties untraced tiles within the frame, and
+  turning it off lets the empty tiles fill from the candidates.
+- Readback stats with the skip: FINAL rows of untraced groups read 0, so geometry, output_pixels, m_sum and the record's
+  sample_count (mean M) and validity cover traced pixels only. The info-based reject counts already skip info 0.
+- M in PACK, gi/confidence:
+  - frames (default): the pdf word stays 0, today's output. Design 3.3's frames is the old form, coverage from R2's history
+    count alone (n̄ / T, T = target_samples), RG-2's O pair's first arm; M takes no part.
+  - frames_and_m sets F_PACK_M, whatever gi/trace_all_tiles says (RG-2's O pair runs it with every tile traced). PACK reads the final reservoir set (binding 7, reservoir[final_index], which run_pack now binds)
+    and writes float(M) (the low 16 bits of layer 1's w) into the pdf word wherever it packs a candidate (flags 0: a covered
+    pixel, or a blocked one on the INFO_VIS_BLOCKED path), in traced tiles only. THINNED and NO_CANDIDATE pixels keep 0.
+  - R2 doesn't read the word until commit 10 (module-output bit 256: the EMA of min(M / n_target, 1) into moments.w, route
+    coverage with T_r). With commit 9 alone frames_and_m changes candidate_second's z word and no image.
+  - restir_pack_word in restir_events.cpp mirrors PACK main line for line. Doctests "[RestirEvents] Tile plan ..." and
+    "[RestirEvents] Pack word ..." in tests/test_restir_events.h.
+- Status: tiles ("all", "skip" or "unavailable"; the last view to run), tile_skip_frames_total (frames run with the skip, over
+  the backend's life, every view), confidence ("frames" or "frames_and_m").
+- Identity with the defaults (gi/trace_all_tiles on, gi/confidence frames): bits 27 and 28 clear, rs_tile_traced returns true
+  without a read, every pass takes its old path, and PACK's pdf argument is 0.0 as before. The new bindings 27 (and PACK's 7)
+  and the run-time tests change the SPIR-V of TEMPORAL, the four SPATIAL modes, their five sky twins, FINAL and PACK; their
+  output must not change. CLEAR, SOURCE, CAPTURE, VALIDATE and SKY_EPOCH see only new #defines, so their SPIR-V should stay
+  byte-identical to 45bee90de. No core shader changed.

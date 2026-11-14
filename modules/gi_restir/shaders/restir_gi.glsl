@@ -484,7 +484,12 @@ void main() {
 	rs_stats_clear();
 	ivec2 px = ivec2(gl_GlobalInvocationID.xy);
 	if (all(lessThan(px, rf.trace_size))) {
-		rs_temporal_pixel(px);
+		if (rs_tile_traced(px)) {
+			rs_temporal_pixel(px);
+		} else {
+			rs_store(px, rs_empty());
+			imageStore(info_image, px, uvec4(0u));
+		}
 	}
 	rs_stats_store(rf.pass_index);
 }
@@ -595,7 +600,7 @@ int rs_select_neighbours(Receiver p_r, ivec2 p_pixel, int p_wanted, out ivec2 r_
 			continue;
 		}
 		ivec2 np = p_pixel + d;
-		if (any(lessThan(np, ivec2(0))) || any(greaterThanEqual(np, rf.trace_size))) {
+		if (any(lessThan(np, ivec2(0))) || any(greaterThanEqual(np, rf.trace_size)) || !rs_tile_traced(np)) {
 			continue;
 		}
 		bool seen = false;
@@ -722,6 +727,10 @@ void rs_spatial_pixel(ivec2 px) {
 			spatial_reason = REJ_FRAME;
 			continue;
 		}
+		if (!rs_tile_traced(np)) {
+			spatial_reason = REJ_UNTRACED;
+			continue;
+		}
 		Receiver q = rs_receiver_cur(np);
 		uint similar_reason;
 		if (!rs_similar(r, q, similar_reason)) {
@@ -775,7 +784,11 @@ void main() {
 	rs_stats_clear();
 	ivec2 px = ivec2(gl_GlobalInvocationID.xy);
 	if (all(lessThan(px, rf.trace_size))) {
-		rs_spatial_pixel(px);
+		if (rs_tile_traced(px)) {
+			rs_spatial_pixel(px);
+		} else {
+			rs_store(px, rs_empty());
+		}
 	}
 	rs_stats_store(rf.pass_index);
 }
@@ -907,7 +920,16 @@ void main() {
 		partial[local * uint(STATS_STRIDE) + uint(k)] = 0.0;
 	}
 	bool in_range = all(lessThan(px, rf.trace_size));
-	if (in_range) {
+	bool traced = in_range && rs_tile_traced(px);
+	if (in_range && !traced) {
+		imageStore(vis_state, px, uvec4(0u));
+		imageStore(out_radiance, px, vec4(0.0, 0.0, 0.0, 1.0));
+		imageStore(out_coverage, px, vec4(0.0));
+		if ((rf.flags & F_DEBUG_OUT) != 0u) {
+			imageStore(out_debug, px, vec4(0.0));
+		}
+	}
+	if (traced) {
 		Receiver r = rs_receiver_cur(px);
 		uint info = imageLoad(info_image, px).x;
 		vec3 radiance = vec3(0.0);
@@ -1158,7 +1180,10 @@ void main() {
 	}
 	vec3 radiance = vec3(0.0);
 	uint flags = RTGI_FLAG_NO_CANDIDATE;
-	if (texelFetch(geo_pos_cur, px, 0).w > 0.5) {
+	float m_word = 0.0;
+	if (!rs_tile_traced(px)) {
+		flags = RTGI_FLAG_NO_CANDIDATE | RTGI_FLAG_NOT_TRACED;
+	} else if (texelFetch(geo_pos_cur, px, 0).w > 0.5) {
 		uint info = imageLoad(info_image, px).x;
 		if ((info & INFO_VIS_BLOCKED) != 0u) {
 			flags = 0u;
@@ -1168,10 +1193,13 @@ void main() {
 		} else {
 			flags = RTGI_FLAG_THINNED;
 		}
+		if (flags == 0u && (rf.flags & F_PACK_M) != 0u) {
+			m_word = float(texelFetch(res_in, ivec3(px, 1), 0).w & 0xFFFFu);
+		}
 	}
 	uvec4 first;
 	uvec4 second;
-	rtgi_pack_candidate(vec3(0.0), 0u, radiance, flags, 0.0, 0u, first, second);
+	rtgi_pack_candidate(vec3(0.0), 0u, radiance, flags, m_word, 0u, first, second);
 	imageStore(pk_second, px, second);
 }
 

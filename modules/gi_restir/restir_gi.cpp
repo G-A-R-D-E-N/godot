@@ -37,10 +37,12 @@
 #include "core/variant/variant.h"
 #include "servers/rendering/renderer_rd/environment/gi_provider.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
+#include "servers/rendering/renderer_rd/environment/rtgi.h"
 
 using namespace RendererRD;
 
 static_assert(RESTIR_EVENT_MAX >= DDGILightTracker::MAX_EVENTS, "The event UBO must hold every event R2 delivers in one frame");
+static_assert(RESTIR_TILE_SIZE == RtgiPass::TILE_SIZE, "The module's tile planner must use R2's tile size");
 
 RestirTestOptions &restir_test_options() {
 	static RestirTestOptions options;
@@ -327,6 +329,7 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 			RestirGiInputs frozen;
 			frozen.geo_position = p_inputs.geo_position;
 			frozen.candidate_second = p_inputs.candidate_second;
+			frozen.tile_texture = p_inputs.tile_texture;
 			get_core()->run_pack(state.resources, frozen);
 			r_output.denoise = true;
 			r_output.history_cap = uint32_t(CLAMP(_gi_int("denoise_history_cap"), 1, 255));
@@ -427,6 +430,19 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 		params.flags |= RESTIR_F_REPLAY;
 	}
 	params.sky_reread = sky_reread;
+	const bool trace_all = _gi_bool("trace_all_tiles");
+	const bool have_tiles = p_inputs.tile_texture.is_valid();
+	uint32_t tiles_width = 0;
+	uint32_t tiles_height = 0;
+	if (!trace_all && have_tiles) {
+		const RD::TextureFormat tile_format = RD::get_singleton()->texture_get_format(p_inputs.tile_texture);
+		tiles_width = tile_format.width;
+		tiles_height = tile_format.height;
+	}
+	const RestirTileState tile_state = restir_plan_tiles(trace_all, have_tiles, uint32_t(MAX(p_inputs.trace_size.x, 0)), uint32_t(MAX(p_inputs.trace_size.y, 0)), tiles_width, tiles_height);
+	params.tile_skip = tile_state == RESTIR_TILES_SKIP;
+	const String confidence = _gi_text("confidence");
+	params.pack_m = confidence == "frames_and_m";
 	const String reval_text = _gi_text("revalidate");
 	const bool reval_budget = reval_text == "budget";
 	const bool reval_share = reval_text == "share";
@@ -551,6 +567,7 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	inputs.ddgi_irradiance = shade.irradiance;
 	inputs.ddgi_distance = shade.distance;
 	inputs.sky_texture = shade.sky_texture;
+	inputs.tile_texture = params.tile_skip ? p_inputs.tile_texture : RID();
 
 	if (own_sampler && (params.flags & RESTIR_F_REVAL_FRAME) == 0u) {
 		get_core()->run_source(state.resources, params, inputs);
@@ -642,6 +659,11 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	hold_dropped_total += hold_update.dropped;
 	hold_fill_max = MAX(hold_fill_max, summary.hold_fill);
 	summary.sky_reread = !sky_reread_asked ? "off" : (!sky_reread_inputs ? "inactive" : (sky_reread ? "on" : "unavailable"));
+	summary.tiles = restir_tile_state_name(tile_state);
+	summary.confidence = params.pack_m ? "frames_and_m" : "frames";
+	if (params.tile_skip) {
+		tile_skip_frames_total++;
+	}
 	summary.stats_valid = false;
 	summary.debug_valid = p_inputs.debug_view >= 0 && state.resources.debug.is_valid();
 	float mean_m = float(MIN(state.frames_since_cut, params.n_target));
@@ -776,6 +798,9 @@ void RestirGiBackend::get_status(Dictionary &r_status) const {
 	r_status["sky_jump_frames_total"] = sky_jump_frames;
 	r_status["sky_jump_capped_total"] = sky_jump_capped;
 	r_status["sky_reread_cuts_total"] = sky_reread_cuts;
+	r_status["tiles"] = summary.tiles;
+	r_status["tile_skip_frames_total"] = int64_t(tile_skip_frames_total);
+	r_status["confidence"] = summary.confidence;
 	Array cut_counts;
 	for (const KeyValue<RenderSceneBuffersRD *, RestirGiState> &entry : states) {
 		for (uint32_t i = 0; i < RESTIR_CUT_MAX; i++) {

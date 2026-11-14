@@ -101,6 +101,8 @@ struct RestirGiSummary {
 	uint32_t hold_fill = 0;
 	RestirHoldUpdate hold_update;
 	String sky_reread = "off";
+	String tiles = "all";
+	String confidence = "frames";
 };
 
 class RestirGiBackend : public RendererRD::RtgiResampleBackend {
@@ -115,6 +117,7 @@ class RestirGiBackend : public RendererRD::RtgiResampleBackend {
 	uint64_t hold_frames_total = 0;
 	uint64_t hold_dropped_total = 0;
 	uint32_t hold_fill_max = 0;
+	uint64_t tile_skip_frames_total = 0;
 	String refusal_reason;
 
 	void _free_state(RestirGiState &r_state);

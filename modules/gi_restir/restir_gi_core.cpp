@@ -324,7 +324,7 @@ bool RestirGiCore::is_sky_valid(Variant p_variant) {
 }
 
 void RestirGiCore::free() {
-	RID *dummies[] = { &dummy_ubo, &dummy_probe, &dummy_float };
+	RID *dummies[] = { &dummy_ubo, &dummy_probe, &dummy_float, &dummy_tiles };
 	for (RID *rid : dummies) {
 		if (rid->is_valid() && RD::get_singleton()) {
 			RD::get_singleton()->free_rid(*rid);
@@ -379,7 +379,7 @@ void RestirGiCore::_upload(RID p_ubo, const RestirFrameParams &p, uint32_t p_pas
 	u.trace_size[1] = p.trace_size.y;
 	u.frame = p.frame_index;
 	u.seed = p.seed;
-	u.flags = (p.flags & ~uint32_t(RESTIR_F_KEEP_M | RESTIR_F_SKY_REREAD)) | (p.mode == RESTIR_MODE_U1 ? RESTIR_F_UNBIASED : 0u) | ((p.mode == RESTIR_MODE_B2 || p.mode == RESTIR_MODE_B2K) ? RESTIR_F_VIS_REUSE : 0u) | (p.mode == RESTIR_MODE_B2K ? RESTIR_F_KEEP_M : 0u) | (p.sky_reread ? RESTIR_F_SKY_REREAD : 0u);
+	u.flags = (p.flags & ~uint32_t(RESTIR_F_KEEP_M | RESTIR_F_SKY_REREAD | RESTIR_F_TILE_SKIP | RESTIR_F_PACK_M)) | (p.mode == RESTIR_MODE_U1 ? RESTIR_F_UNBIASED : 0u) | ((p.mode == RESTIR_MODE_B2 || p.mode == RESTIR_MODE_B2K) ? RESTIR_F_VIS_REUSE : 0u) | (p.mode == RESTIR_MODE_B2K ? RESTIR_F_KEEP_M : 0u) | (p.sky_reread ? RESTIR_F_SKY_REREAD : 0u) | (p.tile_skip ? RESTIR_F_TILE_SKIP : 0u) | (p.pack_m ? RESTIR_F_PACK_M : 0u);
 	if (p.compat) {
 		u.flags |= RESTIR_F_COMPAT | (p.compat_gate == RESTIR_GATE_NONE ? RESTIR_F_COMPAT_NONE : 0u) | (p.compat_gate == RESTIR_GATE_BINARY ? RESTIR_F_COMPAT_BINARY : 0u) | (p.compat_early_stop ? RESTIR_F_COMPAT_STOP : 0u);
 	}
@@ -431,6 +431,28 @@ RID RestirGiCore::_sky_texture(const RestirGiInputs &p_inputs) const {
 		return p_inputs.sky_texture;
 	}
 	return TextureStorage::get_singleton()->texture_rd_get_default(octmap_array ? TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_WHITE : TextureStorage::DEFAULT_RD_TEXTURE_WHITE);
+}
+
+RID RestirGiCore::_tile_texture(const RestirGiInputs &p_inputs) {
+	if (p_inputs.tile_texture.is_valid()) {
+		return p_inputs.tile_texture;
+	}
+	if (dummy_tiles.is_null()) {
+		RD::TextureFormat format;
+		format.format = RD::DATA_FORMAT_R32_UINT;
+		format.width = 1;
+		format.height = 1;
+		format.texture_type = RD::TEXTURE_TYPE_2D;
+		format.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_UPDATE_BIT;
+		Vector<uint8_t> texel;
+		texel.resize(sizeof(uint32_t));
+		const uint32_t traced = RESTIR_TILE_TRACE;
+		memcpy(texel.ptrw(), &traced, sizeof(uint32_t));
+		Vector<Vector<uint8_t>> data;
+		data.push_back(texel);
+		dummy_tiles = RD::get_singleton()->texture_create(format, RD::TextureView(), data);
+	}
+	return dummy_tiles;
 }
 
 void RestirGiCore::_bind_shade(RID p_shader, RD::ComputeListID p_list, const RestirGiInputs &p_inputs) {
@@ -587,6 +609,8 @@ void RestirGiCore::run_frame(RestirGiResources &r_resources, const RestirFramePa
 	}
 	const bool sky_reread = params.sky_reread && variant != VARIANT_NONE && p_inputs.ddgi_ubo.is_valid() && sky_valid[variant];
 	params.sky_reread = sky_reread;
+	params.tile_skip = params.tile_skip && p_inputs.tile_texture.is_valid();
+	const RID tiles = _tile_texture(p_inputs);
 	if (sky_reread && r_resources.sky_epoch.is_null()) {
 		RD *rd = RD::get_singleton();
 		Vector<uint8_t> zeros;
@@ -660,6 +684,7 @@ void RestirGiCore::run_frame(RestirGiResources &r_resources, const RestirFramePa
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 23, r_resources.pass_stats));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 24, r_resources.dirty_ubo));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 26, r_resources.event_ubo));
+		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 27, tiles));
 		if (sky_reread) {
 			set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 29, r_resources.sky_epoch));
 		}
@@ -679,6 +704,7 @@ void RestirGiCore::run_frame(RestirGiResources &r_resources, const RestirFramePa
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, r_resources.info));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 23, r_resources.pass_stats));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 26, r_resources.event_ubo));
+		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 27, tiles));
 		if (params.compat) {
 			set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 25, (params.flags & RESTIR_F_PROBE_STATS) != 0u ? r_resources.sel_image : r_resources.sel_dummy));
 		}
@@ -702,6 +728,7 @@ void RestirGiCore::run_frame(RestirGiResources &r_resources, const RestirFramePa
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 12, r_resources.coverage));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 13, r_resources.debug.is_valid() ? r_resources.debug : r_resources.debug_dummy));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 14, r_resources.stats));
+		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 27, tiles));
 		_dispatch(variant, PASS_FINAL, r_resources.ubo[3], set0, p_inputs, r_resources.size);
 	}
 	r_resources.final_index = final_index;
@@ -715,10 +742,12 @@ void RestirGiCore::run_pack(RestirGiResources &r_resources, const RestirGiInputs
 	}
 	LocalVector<RD::Uniform> set0;
 	set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 1, p_inputs.geo_position));
+	set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 7, r_resources.reservoir[r_resources.final_index]));
 	set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, r_resources.info));
 	set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 11, r_resources.radiance));
 	set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 12, r_resources.coverage));
 	set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 16, p_inputs.candidate_second));
+	set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 27, _tile_texture(p_inputs)));
 	_dispatch(variant, PASS_PACK, r_resources.ubo[3], set0, p_inputs, r_resources.size);
 }
 

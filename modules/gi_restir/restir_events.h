@@ -124,6 +124,32 @@ struct RestirSkyEpoch {
 
 static_assert(sizeof(RestirSkyEpoch) == 32, "RestirSkyEpoch must match the std430 block in restir_gi_inc.glsl");
 
+static constexpr uint32_t RESTIR_TILE_SIZE = 8;
+static constexpr uint32_t RESTIR_TILE_TRACE = 1;
+static constexpr uint32_t RESTIR_CANDIDATE_NO_CANDIDATE = 8;
+static constexpr uint32_t RESTIR_CANDIDATE_NOT_TRACED = 16;
+static constexpr uint32_t RESTIR_CANDIDATE_THINNED = 64;
+
+enum RestirTileState : uint32_t {
+	RESTIR_TILES_ALL = 0,
+	RESTIR_TILES_SKIP = 1,
+	RESTIR_TILES_UNAVAILABLE = 2,
+};
+
+struct RestirPackPixel {
+	bool tile_traced = true;
+	bool geometry = false;
+	bool blocked = false;
+	bool covered = false;
+	uint32_t m = 0;
+};
+
+struct RestirPackWord {
+	uint32_t flags = RESTIR_CANDIDATE_NO_CANDIDATE;
+	float pdf = 0.0f;
+	bool radiance = false;
+};
+
 uint32_t restir_event_budget(uint32_t p_width, uint32_t p_height, uint32_t p_percent);
 bool restir_event_first_fire(uint32_t p_since_last, uint32_t p_quiet_frames);
 float restir_event_solid_angle(float p_reach, float p_distance);
@@ -138,3 +164,6 @@ void restir_hold_pack(const RestirHoldRing &p_ring, const Vector3 &p_anchor, Res
 bool restir_hold_caps(const RestirEventsUBO &p_ubo, const Vector3 &p_position);
 bool restir_sky_jump_caps(bool p_events, uint32_t p_event_jump, uint32_t p_jump_m_cap, uint32_t p_m_temporal_cap);
 bool restir_sky_epoch_step(RestirSkyEpoch &r_epoch, float p_luma, bool p_history, bool p_jump_caps = false);
+RestirTileState restir_plan_tiles(bool p_trace_all, bool p_have_texture, uint32_t p_trace_width, uint32_t p_trace_height, uint32_t p_tiles_width, uint32_t p_tiles_height);
+const char *restir_tile_state_name(RestirTileState p_state);
+RestirPackWord restir_pack_word(const RestirPackPixel &p_pixel, bool p_tile_skip, bool p_pack_m);

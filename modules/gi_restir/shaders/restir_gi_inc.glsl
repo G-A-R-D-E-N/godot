@@ -33,6 +33,8 @@
 #define F_EVENTS 16777216u
 #define F_SPATIAL_HOLD 33554432u
 #define F_SKY_REREAD 67108864u
+#define F_TILE_SKIP 134217728u
+#define F_PACK_M 268435456u
 
 #define REJ_NONE 0u
 #define REJ_FRAME 1u
@@ -47,6 +49,7 @@
 #define REJ_NO_SAMPLE 10u
 #define REJ_VIS 11u
 #define REJ_NO_COMPAT 12u
+#define REJ_UNTRACED 14u
 
 #define INFO_TEMPORAL_REJECT_MASK 15u
 #define INFO_SPATIAL_REJECT_SHIFT 4u
@@ -193,8 +196,17 @@ layout(set = 0, binding = 5) uniform utexture2D cand_first;
 layout(set = 0, binding = 6) uniform utexture2D cand_second;
 #endif
 
-#if defined(MODE_TEMPORAL) || defined(MODE_SPATIAL) || defined(MODE_FINAL)
+#if defined(MODE_TEMPORAL) || defined(MODE_SPATIAL) || defined(MODE_FINAL) || defined(MODE_PACK)
 layout(set = 0, binding = 7) uniform utexture2DArray res_in;
+layout(set = 0, binding = 27) uniform utexture2D rs_tiles;
+
+bool rs_tile_traced(ivec2 p_pixel) {
+	if ((rf.flags & F_TILE_SKIP) == 0u) {
+		return true;
+	}
+	ivec2 tile = min(p_pixel / RTGI_TILE, textureSize(rs_tiles, 0) - 1);
+	return (texelFetch(rs_tiles, tile, 0).r & RTGI_TILE_TRACE) != 0u;
+}
 #endif
 
 #if defined(MODE_CLEAR) || defined(MODE_TEMPORAL) || defined(MODE_SPATIAL)

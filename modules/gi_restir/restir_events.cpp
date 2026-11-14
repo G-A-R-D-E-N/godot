@@ -260,3 +260,52 @@ void restir_plan_events(const RestirEventInputs &p_inputs, RestirEventPlan &r_pl
 	u.gates[2] = r_plan.jump_frame ? 1u : 0u;
 	u.gates[3] = uint32_t(r_plan.validate);
 }
+
+RestirTileState restir_plan_tiles(bool p_trace_all, bool p_have_texture, uint32_t p_trace_width, uint32_t p_trace_height, uint32_t p_tiles_width, uint32_t p_tiles_height) {
+	if (p_trace_all) {
+		return RESTIR_TILES_ALL;
+	}
+	if (!p_have_texture || p_trace_width == 0u || p_trace_height == 0u) {
+		return RESTIR_TILES_UNAVAILABLE;
+	}
+	const uint32_t wanted_width = (p_trace_width + RESTIR_TILE_SIZE - 1u) / RESTIR_TILE_SIZE;
+	const uint32_t wanted_height = (p_trace_height + RESTIR_TILE_SIZE - 1u) / RESTIR_TILE_SIZE;
+	if (p_tiles_width != wanted_width || p_tiles_height != wanted_height) {
+		return RESTIR_TILES_UNAVAILABLE;
+	}
+	return RESTIR_TILES_SKIP;
+}
+
+const char *restir_tile_state_name(RestirTileState p_state) {
+	switch (p_state) {
+		case RESTIR_TILES_SKIP:
+			return "skip";
+		case RESTIR_TILES_UNAVAILABLE:
+			return "unavailable";
+		default:
+			return "all";
+	}
+}
+
+RestirPackWord restir_pack_word(const RestirPackPixel &p_pixel, bool p_tile_skip, bool p_pack_m) {
+	RestirPackWord word;
+	if (p_tile_skip && !p_pixel.tile_traced) {
+		word.flags = RESTIR_CANDIDATE_NO_CANDIDATE | RESTIR_CANDIDATE_NOT_TRACED;
+		return word;
+	}
+	if (!p_pixel.geometry) {
+		return word;
+	}
+	if (p_pixel.blocked) {
+		word.flags = 0u;
+	} else if (p_pixel.covered) {
+		word.flags = 0u;
+		word.radiance = true;
+	} else {
+		word.flags = RESTIR_CANDIDATE_THINNED;
+	}
+	if (word.flags == 0u && p_pack_m) {
+		word.pdf = float(p_pixel.m & 0xFFFFu);
+	}
+	return word;
+}

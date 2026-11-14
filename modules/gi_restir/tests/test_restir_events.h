@@ -544,4 +544,82 @@ TEST_CASE("[RestirEvents] Sky jump counts as capped only when the event cap is o
 	CHECK(epoch.capped == 1u);
 }
 
+TEST_CASE("[RestirEvents] Tile plan reads nothing while every tile is traced") {
+	CHECK(restir_plan_tiles(true, true, 1920u, 1080u, 240u, 135u) == RESTIR_TILES_ALL);
+	CHECK(restir_plan_tiles(true, false, 1920u, 1080u, 0u, 0u) == RESTIR_TILES_ALL);
+	CHECK(restir_plan_tiles(true, true, 1920u, 1080u, 7u, 7u) == RESTIR_TILES_ALL);
+	CHECK(strcmp(restir_tile_state_name(RESTIR_TILES_ALL), "all") == 0);
+}
+
+TEST_CASE("[RestirEvents] Tile plan skips only with a texture of one texel per tile") {
+	CHECK(restir_plan_tiles(false, true, 1920u, 1080u, 240u, 135u) == RESTIR_TILES_SKIP);
+	CHECK(restir_plan_tiles(false, true, 1921u, 1081u, 241u, 136u) == RESTIR_TILES_SKIP);
+	CHECK(restir_plan_tiles(false, true, 1u, 1u, 1u, 1u) == RESTIR_TILES_SKIP);
+	CHECK(restir_plan_tiles(false, true, 1921u, 1081u, 240u, 135u) == RESTIR_TILES_UNAVAILABLE);
+	CHECK(restir_plan_tiles(false, true, 1920u, 1080u, 240u, 136u) == RESTIR_TILES_UNAVAILABLE);
+	CHECK(restir_plan_tiles(false, false, 1920u, 1080u, 240u, 135u) == RESTIR_TILES_UNAVAILABLE);
+	CHECK(restir_plan_tiles(false, true, 0u, 1080u, 0u, 135u) == RESTIR_TILES_UNAVAILABLE);
+	CHECK(strcmp(restir_tile_state_name(RESTIR_TILES_SKIP), "skip") == 0);
+	CHECK(strcmp(restir_tile_state_name(RESTIR_TILES_UNAVAILABLE), "unavailable") == 0);
+}
+
+uint32_t pack_pdf_bits(const RestirPackWord &p_word) {
+	uint32_t bits = 0;
+	memcpy(&bits, &p_word.pdf, sizeof(uint32_t));
+	return bits;
+}
+
+RestirPackPixel pack_pixel(bool p_traced, bool p_geometry, bool p_blocked, bool p_covered, uint32_t p_m) {
+	RestirPackPixel pixel;
+	pixel.tile_traced = p_traced;
+	pixel.geometry = p_geometry;
+	pixel.blocked = p_blocked;
+	pixel.covered = p_covered;
+	pixel.m = p_m;
+	return pixel;
+}
+
+TEST_CASE("[RestirEvents] Pack word keeps the old flags and a zero pdf word with the defaults") {
+	for (const bool traced : { false, true }) {
+		const RestirPackWord none = restir_pack_word(pack_pixel(traced, false, false, false, 5u), false, false);
+		CHECK(none.flags == RESTIR_CANDIDATE_NO_CANDIDATE);
+		CHECK_FALSE(none.radiance);
+		const RestirPackWord blocked = restir_pack_word(pack_pixel(traced, true, true, true, 5u), false, false);
+		CHECK(blocked.flags == 0u);
+		CHECK_FALSE(blocked.radiance);
+		const RestirPackWord covered = restir_pack_word(pack_pixel(traced, true, false, true, 5u), false, false);
+		CHECK(covered.flags == 0u);
+		CHECK(covered.radiance);
+		const RestirPackWord thinned = restir_pack_word(pack_pixel(traced, true, false, false, 5u), false, false);
+		CHECK(thinned.flags == RESTIR_CANDIDATE_THINNED);
+		CHECK_FALSE(thinned.radiance);
+		CHECK(pack_pdf_bits(none) == 0u);
+		CHECK(pack_pdf_bits(blocked) == 0u);
+		CHECK(pack_pdf_bits(covered) == 0u);
+		CHECK(pack_pdf_bits(thinned) == 0u);
+	}
+}
+
+TEST_CASE("[RestirEvents] Pack word marks untraced tiles not traced, with no radiance or count") {
+	for (const bool geometry : { false, true }) {
+		const RestirPackWord word = restir_pack_word(pack_pixel(false, geometry, false, true, 9u), true, true);
+		CHECK(word.flags == (RESTIR_CANDIDATE_NO_CANDIDATE | RESTIR_CANDIDATE_NOT_TRACED));
+		CHECK_FALSE(word.radiance);
+		CHECK(pack_pdf_bits(word) == 0u);
+	}
+	const RestirPackWord traced = restir_pack_word(pack_pixel(true, true, false, true, 9u), true, false);
+	CHECK(traced.flags == 0u);
+	CHECK(traced.radiance);
+	CHECK(pack_pdf_bits(traced) == 0u);
+}
+
+TEST_CASE("[RestirEvents] Pack word carries M only where it packs a candidate") {
+	CHECK(restir_pack_word(pack_pixel(true, true, false, true, 7u), true, true).pdf == 7.0f);
+	CHECK(restir_pack_word(pack_pixel(true, true, true, false, 3u), false, true).pdf == 3.0f);
+	CHECK(restir_pack_word(pack_pixel(true, true, false, true, 0x1FFFFu), false, true).pdf == 65535.0f);
+	CHECK(pack_pdf_bits(restir_pack_word(pack_pixel(true, true, false, true, 0u), false, true)) == 0u);
+	CHECK(pack_pdf_bits(restir_pack_word(pack_pixel(true, true, false, false, 7u), false, true)) == 0u);
+	CHECK(pack_pdf_bits(restir_pack_word(pack_pixel(true, false, false, true, 7u), false, true)) == 0u);
+}
+
 }

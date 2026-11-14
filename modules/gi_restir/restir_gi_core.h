@@ -72,6 +72,8 @@ enum RestirFlags : uint32_t {
 	RESTIR_F_EVENTS = 16777216,
 	RESTIR_F_SPATIAL_HOLD = 33554432,
 	RESTIR_F_SKY_REREAD = 67108864,
+	RESTIR_F_TILE_SKIP = 134217728,
+	RESTIR_F_PACK_M = 268435456,
 };
 
 static constexpr uint32_t RESTIR_SPATIAL_SMALL_COUNT = 3;
@@ -143,6 +145,8 @@ struct RestirFrameParams {
 	uint32_t dirty_count = 0;
 	float dirty_margin = 0.01f;
 	bool sky_reread = false;
+	bool tile_skip = false;
+	bool pack_m = false;
 	Vector3 dirty_min[64];
 	Vector3 dirty_max[64];
 	RestirEventsUBO events = {};
@@ -160,6 +164,7 @@ struct RestirGiInputs {
 	RID ddgi_irradiance;
 	RID ddgi_distance;
 	RID sky_texture;
+	RID tile_texture;
 	RendererRD::RayScene *ray_scene = nullptr;
 	bool hardware = false;
 	bool use_rays = false;
@@ -290,6 +295,7 @@ private:
 	RID dummy_ubo;
 	RID dummy_probe;
 	RID dummy_float;
+	RID dummy_tiles;
 	bool octmap_array = false;
 
 	bool _ensure(Variant p_variant);
@@ -298,6 +304,7 @@ private:
 	String _defines(Variant p_variant) const;
 	void _upload(RID p_ubo, const RestirFrameParams &p_params, uint32_t p_pass_index);
 	RID _sky_texture(const RestirGiInputs &p_inputs) const;
+	RID _tile_texture(const RestirGiInputs &p_inputs);
 	void _bind_shade(RID p_shader, RD::ComputeListID p_list, const RestirGiInputs &p_inputs);
 	void _dispatch(Variant p_variant, PassMode p_mode, RID p_ubo, const LocalVector<RD::Uniform> &p_set0, const RestirGiInputs &p_inputs, const Size2i &p_size);
 
