@@ -78,6 +78,7 @@ struct RtgiFrameInputs {
 	RID previous_geo_normal;
 	RID candidate_first;
 	RID candidate_second;
+	RID tile_texture;
 	uint32_t candidate_layout_version = RTGI_CANDIDATE_LAYOUT_VERSION;
 	Projection projection;
 	Projection previous_projection;

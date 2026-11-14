@@ -575,6 +575,7 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 		backend_inputs.previous_geo_normal = geo_normal_previous;
 		backend_inputs.candidate_first = candidate_first;
 		backend_inputs.candidate_second = candidate_second;
+		backend_inputs.tile_texture = tiles;
 		backend_inputs.projection = inputs.projection;
 		backend_inputs.previous_projection = previous_projection;
 		backend_inputs.camera_transform = inputs.camera_transform;
