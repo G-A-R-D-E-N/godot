@@ -103,6 +103,11 @@ struct RtgiFrameInputs {
 	uint32_t restart_quiet_frames = 0;
 };
 
+enum RtgiOutputMode : uint32_t {
+	RTGI_OUTPUT_PLAIN,
+	RTGI_OUTPUT_MODULE,
+};
+
 struct RtgiResampleOutput {
 	RID radiance;
 	RID coverage;
@@ -112,6 +117,8 @@ struct RtgiResampleOutput {
 	bool denoise = false;
 	bool history_cut = false;
 	uint32_t history_cap = 0;
+	RtgiOutputMode mode = RTGI_OUTPUT_PLAIN;
+	uint32_t n_target = 0;
 };
 
 class RtgiResampleBackend {

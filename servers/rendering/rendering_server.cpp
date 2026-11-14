@@ -3934,6 +3934,14 @@ void RenderingServer::init() {
 	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/restart_quiet_frames", 0);
 	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/directional_jump_degrees", 2.0);
 	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/directional_jump_floor", 0.0);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/ddgi_wrong_events", false);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/ddgi_wrong_memory", false);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/ddgi_wrong_frames", 16);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/ddgi_wrong_tau", 0.5);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/ddgi_wrong_target", 2.0);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/ddgi_wrong_noise", 0.25);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/ddgi_wrong_floor", 0.05);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/ddgi_wrong_rho", 1.0);
 	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/gpu_counters", false);
 	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/debug_status_path", "");
 	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/debug_view", 0);
