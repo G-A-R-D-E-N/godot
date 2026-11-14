@@ -32,6 +32,9 @@ probe_list;
 
 layout(rgba16f, set = 0, binding = 2) uniform restrict writeonly image2D ray_image;
 
+#ifdef MODE_RTGI
+#define RAY_SCENE_REPLAY
+#endif
 #define RAY_SCENE_SET 1
 #include "ray_scene_inc.glsl"
 
@@ -474,6 +477,7 @@ void main() {
 	if (any(greaterThanEqual(trace_pixel, rtgi.trace_size))) {
 		return;
 	}
+	ray_scene_replay = (rtgi.flags & RTGI_FRAME_FLAG_REPLAY) != 0u;
 
 	uint tag = uint(trace_pixel.y * rtgi.trace_size.x + trace_pixel.x) ^ rtgi.frame;
 	uint tile = texelFetch(rtgi_tiles, trace_pixel / RTGI_TILE, 0).r;
@@ -507,10 +511,14 @@ void main() {
 
 	vec2 u = rtgi_rand2(uvec2(trace_pixel), rtgi.frame, RTGI_RNG_DIRECTION, rtgi.seed);
 	vec3 direction = rtgi_cosine_direction(normal, u);
-	if (rtgi.mirror_below_surface != 0u && dot(offset_normal, normal) > 0.999) {
+	bool mirror = rtgi.mirror_below_surface != 0u && dot(offset_normal, normal) > 0.999;
+	if (mirror) {
 		direction -= 2.0 * min(dot(direction, offset_normal), 0.0) * offset_normal;
 	}
 	float pdf = max(dot(direction, normal), 1e-4) * 0.31830988;
+	if (ray_scene_replay && mirror) {
+		pdf += max(dot(direction - 2.0 * dot(direction, offset_normal) * offset_normal, normal), 1e-4) * 0.31830988;
+	}
 
 	RaySceneHit hit;
 	vec3 radiance;

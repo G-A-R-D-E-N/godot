@@ -67,6 +67,7 @@ struct RtgiFrameInputs {
 	Size2i screen_size;
 	Size2i trace_size;
 	Size2i slot_size;
+	int32_t trace_scale = 1;
 	float ray_fraction = 1.0f;
 	RID depth;
 	RID normal_roughness;
@@ -112,6 +113,7 @@ public:
 
 	virtual bool is_active() const = 0;
 	virtual bool wants_all_tiles() const { return true; }
+	virtual bool wants_replay() const { return false; }
 	virtual bool begin_frame(const RtgiFrameInputs &p_inputs) = 0;
 	virtual void resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutput &r_output) = 0;
 	virtual void release(RenderSceneBuffersRD *p_buffers) = 0;

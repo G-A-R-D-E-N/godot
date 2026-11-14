@@ -479,7 +479,7 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 	trace_data.frame = inputs.frame_index;
 	trace_data.seed = settings.seed;
 	trace_data.scale = scale;
-	trace_data.flags = flags;
+	trace_data.flags = flags | (backend && backend->wants_replay() ? uint32_t(FRAME_FLAG_REPLAY) : 0u);
 	trace_data.origin_scale = settings.origin_scale;
 	trace_data.origin_floor = settings.origin_floor;
 	trace_data.mirror_below_surface = settings.mirror_below_surface ? 1u : 0u;
@@ -571,6 +571,7 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 		backend_inputs.previous_camera_transform = previous_transform;
 		backend_inputs.view_to_previous_clip = (correction * previous_projection) * Projection(delta);
 		backend_inputs.frame_index = inputs.frame_index;
+		backend_inputs.trace_scale = scale;
 		backend_inputs.epochs = inputs.epochs;
 		backend_inputs.dirty_source = nullptr;
 		backend_inputs.history_cut = !backend_ran_before || (flags & (FRAME_FLAG_HISTORY_CUT | FRAME_FLAG_CAMERA_CUT)) != 0u;
