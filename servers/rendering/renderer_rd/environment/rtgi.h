@@ -259,6 +259,7 @@ public:
 		bool previous_hardware = false;
 		Transform3D previous_transform;
 		Projection previous_projection;
+		Projection previous_drawn_projection;
 		GIEpochs::Snapshot previous_epochs = {};
 		String refused;
 		float last_ray_fraction = 0.0f;

@@ -82,6 +82,8 @@ struct RtgiFrameInputs {
 	uint32_t candidate_layout_version = RTGI_CANDIDATE_LAYOUT_VERSION;
 	Projection projection;
 	Projection previous_projection;
+	Projection drawn_projection;
+	Projection previous_drawn_projection;
 	Transform3D camera_transform;
 	Transform3D previous_camera_transform;
 	Projection view_to_previous_clip;

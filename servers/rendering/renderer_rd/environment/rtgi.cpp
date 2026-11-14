@@ -490,6 +490,7 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 
 	const Transform3D previous_transform = p_buffers->have_previous ? p_buffers->previous_transform : inputs.camera_transform;
 	const Projection previous_projection = p_buffers->have_previous ? p_buffers->previous_projection : inputs.projection;
+	const Projection previous_drawn_projection = p_buffers->have_previous ? p_buffers->previous_drawn_projection : inputs.drawn_projection;
 	const Transform3D delta = previous_transform.affine_inverse() * inputs.camera_transform;
 
 	const uint32_t current = p_buffers->index;
@@ -630,6 +631,8 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 		backend_inputs.tile_texture = tiles;
 		backend_inputs.projection = inputs.projection;
 		backend_inputs.previous_projection = previous_projection;
+		backend_inputs.drawn_projection = inputs.drawn_projection;
+		backend_inputs.previous_drawn_projection = previous_drawn_projection;
 		backend_inputs.camera_transform = inputs.camera_transform;
 		backend_inputs.previous_camera_transform = previous_transform;
 		backend_inputs.view_to_previous_clip = (correction * previous_projection) * Projection(delta);
@@ -788,6 +791,7 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 	p_buffers->have_previous = true;
 	p_buffers->previous_transform = inputs.camera_transform;
 	p_buffers->previous_projection = inputs.projection;
+	p_buffers->previous_drawn_projection = inputs.drawn_projection;
 	p_buffers->previous_hardware = inputs.hardware;
 	p_buffers->previous_epochs = inputs.epochs;
 	p_buffers->have_epochs = true;
