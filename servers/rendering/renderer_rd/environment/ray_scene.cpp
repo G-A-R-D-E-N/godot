@@ -661,6 +661,8 @@ void RayScene::_pack_light(RID p_light_instance, bool p_physical_units, float p_
 	packed.pad = p_light_instance.get_local_index();
 	if (type == RSE::LIGHT_AREA) {
 		pack_area(transform.basis, area_size, packed);
+	} else if (type != RSE::LIGHT_DIRECTIONAL) {
+		packed.area = light_storage->light_get_direct_size(light);
 	}
 	if (type != RSE::LIGHT_DIRECTIONAL) {
 		census.candidates++;

@@ -137,7 +137,7 @@ vec4 shade_hit(vec3 p_origin, vec3 p_direction, RaySceneHit hit, uint p_seed) {
 	}
 	vec3 position = p_origin + p_direction * hit.t;
 	float bias = 0.01 + hit.t * 0.001;
-	vec3 irradiance = ray_scene_direct_light(position, normal, bias, ddgi.max_distance, p_seed);
+	vec3 irradiance = gi_hit_direct_light(position, normal, bias, ddgi.max_distance, p_seed);
 	if (params.bounce_energy > 0.0) {
 		vec3 bounce = vec3(0.0);
 		float near_origin = 0.0;
