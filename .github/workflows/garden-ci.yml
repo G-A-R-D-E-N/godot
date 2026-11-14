@@ -218,9 +218,12 @@ jobs:
   publish-release:
     name: Publish engine release
     needs: [static-checks, linux-editor, windows-editor]
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/engine-4.8.0-dev-') }}
+    if: ${{ github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/engine-4.8.0-dev-') || github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    concurrency:
+      group: engine-release
+      cancel-in-progress: false
     permissions:
       contents: write
     env:
@@ -252,15 +255,16 @@ jobs:
 
       - name: Publish GitHub release
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
         run: |
           set -euo pipefail
+          TAG=${TAG:-engine-4.8.0-dev-${GITHUB_SHA:0:10}}
           pkg=$(ls stage/linux64/GodotSharp/Tools/nupkgs/ | sed -n 's/^Godot\.NET\.Sdk\.\(.*\)\.nupkg$/\1/p')
           test -n "$pkg"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" assets/* --clobber
           else
-            gh release create "$TAG" assets/* --verify-tag \
+            gh release create "$TAG" assets/* --target "$GITHUB_SHA" \
               --title "Garden engine 4.8.0-dev double + Mono (${GITHUB_SHA:0:10})" \
               --notes "Built by CI from $GITHUB_SHA. .NET packages: $pkg."
           fi
