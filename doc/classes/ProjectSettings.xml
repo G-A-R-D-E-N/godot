@@ -3181,6 +3181,9 @@
 			If [code]true[/code], disables the threaded optimization feature from the NVIDIA drivers, which are known to cause stuttering in most OpenGL applications.
 			[b]Note:[/b] This setting only works on Windows, as threaded optimization is disabled by default on other platforms.
 		</member>
+		<member name="rendering/global_illumination/compositor/extra_provider" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], the global illumination compositor reads the extra provider slot: a diffuse radiance and coverage pair written by a ray-traced global illumination provider is blended over the ambient light after the DDGI, surfel and voxel stages. Nothing changes while no provider writes to the slot.
+		</member>
 		<member name="rendering/global_illumination/ddgi/bounce_energy" type="float" setter="" getter="" default="1.0">
 			How much of the probes' own light is fed back into the rays, which gives multiple bounces of indirect light. 0 gives a single bounce.
 		</member>
@@ -3280,6 +3283,33 @@
 		</member>
 		<member name="rendering/global_illumination/ray_scene/skip_additive_surfaces" type="bool" setter="" getter="" default="true">
 			If [code]true[/code], surfaces whose spatial shader uses [code]blend_add[/code] are left out of the GI ray scene: DDGI, surfel and shadow rays pass through them, and they neither block nor bounce light. Additive surfaces add light to what is behind them and hide nothing, so they stand for light (glows, beams, screens), not matter. Their emission is not traced either. If [code]false[/code], they are opaque hits with their base color as albedo. Read on every ray scene update, so a change applies on the next frame.
+		</member>
+		<member name="rendering/global_illumination/rtgi/atrous_iterations" type="int" setter="" getter="" default="3">
+			Number of edge-aware filter passes the ray-traced global illumination runs on its temporally accumulated result. Each pass doubles the filter step. [code]0[/code] disables the filter.
+		</member>
+		<member name="rendering/global_illumination/rtgi/depth_sigma" type="float" setter="" getter="" default="1.0">
+			Scales the depth tolerance of the temporal reprojection and of the filter of the ray-traced global illumination. Smaller values reject more history across depth edges.
+		</member>
+		<member name="rendering/global_illumination/rtgi/enabled" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], a ray-traced diffuse global illumination pass traces one cosine-weighted ray per selected pixel at reduced resolution, where screen-space and probe lighting are unreliable, accumulates it over time and publishes it to the global illumination compositor as the extra provider. Needs [member rendering/global_illumination/ddgi/enabled], a single view and a ready ray scene. The result only reaches the image while [member rendering/global_illumination/compositor/extra_provider] is [code]true[/code].
+		</member>
+		<member name="rendering/global_illumination/rtgi/history_cap" type="int" setter="" getter="" default="6">
+			Highest number of frames the ray-traced global illumination accumulates per pixel. Lower values react faster to changes and are noisier.
+		</member>
+		<member name="rendering/global_illumination/rtgi/normal_sigma" type="float" setter="" getter="" default="32.0">
+			Sharpness of the normal edge-stopping weight of the ray-traced global illumination filter. Higher values stop the filter at smaller normal differences.
+		</member>
+		<member name="rendering/global_illumination/rtgi/rays_per_pixel" type="float" setter="" getter="" default="0.25">
+			Average number of rays traced per full resolution pixel. Values above what the trace resolution allows are capped; values below thin out the traced pixels.
+		</member>
+		<member name="rendering/global_illumination/rtgi/resolution_scale" type="float" setter="" getter="" default="0.5">
+			Resolution of the ray-traced global illumination relative to the internal resolution. [code]0.5[/code] traces one ray per two by two pixels.
+		</member>
+		<member name="rendering/global_illumination/rtgi/target_samples" type="int" setter="" getter="" default="6">
+			Number of accumulated frames at which the ray-traced global illumination counts as fully converged and reaches full coverage in the compositor.
+		</member>
+		<member name="rendering/global_illumination/rtgi/variance_sigma" type="float" setter="" getter="" default="4.0">
+			Sharpness of the luminance edge-stopping weight of the ray-traced global illumination filter, relative to the estimated noise. Lower values keep more detail and leave more noise.
 		</member>
 		<member name="rendering/global_illumination/sdfgi/frames_to_converge" type="int" setter="" getter="" default="5">
 			The number of frames to use for converging signed distance field global illumination. Higher values lead to a less noisy result, at the cost of taking a longer time to fully converge. This means the scene's global illumination will be too dark for a longer period of time, especially when the camera moves fast. The actual convergence speed depends on rendered framerate. For example, with the default setting of 30 frames, rendering at 60 FPS will make SDFGI fully converge after 0.5 seconds. See also [member rendering/global_illumination/sdfgi/frames_to_update_lights] and [member rendering/global_illumination/sdfgi/probe_ray_count].

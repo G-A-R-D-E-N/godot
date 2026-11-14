@@ -42,10 +42,17 @@ public:
 	static constexpr uint32_t MAX_BOXES = 32;
 	static constexpr uint32_t MAX_PENDING = 1024;
 	static constexpr uint64_t RATE_FRAMES = 8;
+	static constexpr uint32_t MAX_EVENTS = 64;
 
 	struct Box {
 		Vector3 center;
 		float half = 0.0f;
+	};
+
+	struct Event {
+		Vector3 center;
+		float half = 0.0f;
+		uint32_t since_last = UINT32_MAX;
 	};
 
 	struct Stats {
@@ -57,11 +64,12 @@ public:
 		uint32_t total_probes = 0;
 	};
 
-	static void begin(bool p_enabled, uint64_t p_frame, float p_spacing);
+	static void begin(bool p_enabled, uint64_t p_frame, float p_spacing, bool p_list = false);
 	static void observe(RID p_light, const RayScene::Light &p_data, const Vector3 &p_anchor);
 	static void end();
 	static void take(LocalVector<Box> &r_boxes);
 	static uint32_t pending_count();
+	static uint64_t events_since(uint64_t p_serial, LocalVector<Event> &r_events);
 	static Stats &stats();
 };
 

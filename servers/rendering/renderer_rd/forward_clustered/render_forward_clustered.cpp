@@ -33,6 +33,7 @@
 #include "core/config/project_settings.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
+#include "servers/rendering/renderer_rd/environment/rtgi.h"
 #include "servers/rendering/renderer_rd/framebuffer_cache_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/mesh_storage.h"
@@ -1992,6 +1993,29 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 		}
 
 		_render_shadow_process();
+	}
+
+	if (render_gi && p_normal_roughness_slices && p_normal_roughness_slices[0].is_valid() && rb->has_custom_data(RB_SCOPE_DDGI) && RendererRD::RtgiPass::is_enabled()) {
+		RendererRD::RtgiPass::FrameInputs rtgi_inputs;
+		rtgi_inputs.depth = rb->get_depth_texture(0);
+		rtgi_inputs.normal_roughness = p_normal_roughness_slices[0];
+		if (rb_data.is_valid() && rb_data->ss_effects_data.ssgi_history) {
+			const StringName ssgi_length_name = rb_data->ss_effects_data.ssil.history_index ? RB_SSR_HISTORY_LENGTH_1 : RB_SSR_HISTORY_LENGTH_0;
+			if (rb->has_texture(RB_SCOPE_SSGI, ssgi_length_name)) {
+				rtgi_inputs.ssgi_length = rb->get_texture_slice(RB_SCOPE_SSGI, ssgi_length_name, 0, 0);
+			}
+		}
+		rtgi_inputs.projection = p_render_data->scene_data->cam_projection;
+		rtgi_inputs.drawn_projection = p_render_data->scene_data->get_cam_projection();
+		rtgi_inputs.camera_transform = p_render_data->scene_data->cam_transform;
+		rtgi_inputs.frame_index = uint32_t(Engine::get_singleton()->get_frames_drawn());
+		rtgi_inputs.epochs = RendererRD::GIEpochs::get_singleton()->snapshot();
+		rtgi_inputs.history_cut = rb->get_history_discard();
+		rtgi_inputs.physical_units = RendererSceneRenderRD::get_singleton()->is_using_physical_light_units();
+		rtgi_inputs.lights = p_render_data->lights;
+		RendererRD::RtgiPass::process(rb, ddgi, rtgi_inputs);
+	} else {
+		RendererRD::RtgiPass::release(rb);
 	}
 
 	if (render_gi) {

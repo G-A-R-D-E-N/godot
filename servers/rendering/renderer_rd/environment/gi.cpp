@@ -34,6 +34,7 @@
 #include "core/math/geometry_3d.h"
 #include "servers/rendering/renderer_rd/environment/ddgi.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
+#include "servers/rendering/renderer_rd/environment/gi_compositor.h"
 #include "servers/rendering/renderer_rd/environment/surfel_gi.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
@@ -3522,6 +3523,8 @@ GI::GI() {
 }
 
 GI::~GI() {
+	GICompositor::finalize();
+
 	for (int v = 0; v < SHADER_SPECIALIZATION_VARIATIONS; v++) {
 		for (int i = 0; i < MODE_MAX; i++) {
 			pipelines[v][i].free();
@@ -3993,6 +3996,9 @@ void GI::process_gi(Ref<RenderSceneBuffersRD> p_render_buffers, const RID *p_nor
 	if (!p_render_buffers->has_texture(RB_SCOPE_GI, RB_TEX_AMBIENT)) {
 		Size2i size = internal_size;
 		uint32_t usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
+		if (!String(GLOBAL_GET("rendering/global_illumination/compositor/debug_dump_path")).is_empty()) {
+			usage_bits |= RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
+		}
 
 		if (half_resolution) {
 			size.x >>= 1;
@@ -4310,6 +4316,9 @@ void GI::process_gi(Ref<RenderSceneBuffersRD> p_render_buffers, const RID *p_nor
 	}
 
 	RD::get_singleton()->compute_list_end();
+
+	GICompositor::process(p_render_buffers, p_view_count);
+
 	RD::get_singleton()->draw_command_end_label();
 }
 

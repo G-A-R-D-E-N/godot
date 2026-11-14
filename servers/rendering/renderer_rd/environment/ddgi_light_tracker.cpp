@@ -41,7 +41,7 @@ struct Record {
 	RayScene::Light light;
 	Vector3 world;
 	uint64_t last_fire = 0;
-	uint32_t seen = 0;
+	uint64_t seen_frame = 0;
 };
 
 constexpr float ENERGY_BAND_LOW = 0.8f;
@@ -56,11 +56,14 @@ constexpr float SAME_HALF = 1e-3f;
 
 HashMap<RID, Record> records;
 LocalVector<DDGILightTracker::Box> pending;
+DDGILightTracker::Event events[DDGILightTracker::MAX_EVENTS];
+uint64_t event_serial = 0;
 DDGILightTracker::Stats window;
 bool enabled = false;
+bool reset_on = false;
+bool list_on = false;
 bool initialized = false;
 uint64_t frame_now = 0;
-uint32_t generation = 0;
 float spacing = 1.0f;
 
 float half_of(const RayScene::Light &p_light) {
@@ -161,14 +164,31 @@ void post(const Vector3 &p_center, float p_half) {
 	pending.push_back(box);
 }
 
+void fire(const Vector3 &p_center, float p_half, uint64_t p_since_last) {
+	if (reset_on) {
+		post(p_center, p_half);
+	}
+	if (list_on) {
+		DDGILightTracker::Event &event = events[event_serial % DDGILightTracker::MAX_EVENTS];
+		event.center = p_center;
+		event.half = p_half;
+		event.since_last = uint32_t(MIN(p_since_last, uint64_t(UINT32_MAX)));
+		event_serial++;
+	}
+}
+
 } // namespace
 
-void DDGILightTracker::begin(bool p_enabled, uint64_t p_frame, float p_spacing) {
+void DDGILightTracker::begin(bool p_enabled, uint64_t p_frame, float p_spacing, bool p_list) {
+	reset_on = p_enabled;
+	list_on = p_list;
 	if (!p_enabled) {
+		pending.clear();
+		window = Stats();
+	}
+	if (!p_enabled && !p_list) {
 		if (enabled) {
 			records.clear();
-			pending.clear();
-			window = Stats();
 			initialized = false;
 		}
 		enabled = false;
@@ -177,7 +197,6 @@ void DDGILightTracker::begin(bool p_enabled, uint64_t p_frame, float p_spacing) 
 	enabled = true;
 	frame_now = p_frame;
 	spacing = p_spacing;
-	generation++;
 }
 
 void DDGILightTracker::observe(RID p_light, const RayScene::Light &p_data, const Vector3 &p_anchor) {
@@ -191,21 +210,22 @@ void DDGILightTracker::observe(RID p_light, const RayScene::Light &p_data, const
 		created.light = p_data;
 		created.world = world;
 		created.last_fire = frame_now;
-		created.seen = generation;
+		created.seen_frame = frame_now;
 		records.insert(p_light, created);
 		if (initialized) {
-			post(world, half_of(p_data));
-			window.fired++;
+			fire(world, half_of(p_data), UINT64_MAX);
+			window.fired += reset_on;
 		}
 		return;
 	}
-	record->seen = generation;
+	record->seen_frame = frame_now;
 	if (!differs(*record, p_data, world) || frame_now - record->last_fire < RATE_FRAMES) {
 		return;
 	}
-	post(record->world, half_of(record->light));
-	post(world, half_of(p_data));
-	window.fired++;
+	const uint64_t since_last = frame_now - record->last_fire;
+	fire(record->world, half_of(record->light), since_last);
+	fire(world, half_of(p_data), since_last);
+	window.fired += reset_on;
 	record->light = p_data;
 	record->world = world;
 	record->last_fire = frame_now;
@@ -217,15 +237,15 @@ void DDGILightTracker::end() {
 	}
 	LocalVector<RID> gone;
 	for (const KeyValue<RID, Record> &entry : records) {
-		if (entry.value.seen != generation) {
+		if (frame_now > entry.value.seen_frame + 1) {
 			gone.push_back(entry.key);
 		}
 	}
 	for (const RID &id : gone) {
 		const Record &record = records[id];
 		if (initialized) {
-			post(record.world, half_of(record.light));
-			window.fired++;
+			fire(record.world, half_of(record.light), UINT64_MAX);
+			window.fired += reset_on;
 		}
 		records.erase(id);
 	}
@@ -247,6 +267,15 @@ void DDGILightTracker::take(LocalVector<Box> &r_boxes) {
 
 uint32_t DDGILightTracker::pending_count() {
 	return pending.size();
+}
+
+uint64_t DDGILightTracker::events_since(uint64_t p_serial, LocalVector<Event> &r_events) {
+	r_events.clear();
+	const uint64_t oldest = event_serial > MAX_EVENTS ? event_serial - MAX_EVENTS : 0;
+	for (uint64_t serial = MAX(p_serial, oldest); serial < event_serial; serial++) {
+		r_events.push_back(events[serial % MAX_EVENTS]);
+	}
+	return event_serial;
 }
 
 DDGILightTracker::Stats &DDGILightTracker::stats() {

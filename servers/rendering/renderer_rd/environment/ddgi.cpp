@@ -239,15 +239,19 @@ void DDGI::init(SkyRD *p_sky) {
 	trace_shader.initialize(_trace_modes(), trace_defines);
 	trace_shader_version = trace_shader.version_create();
 	for (int i = 0; i < TRACE_MODE_MAX; i++) {
+		if (i == TRACE_MODE_RTGI) {
+			continue;
+		}
 		trace_pipelines[i].create_compute_pipeline(trace_shader.version_get_shader(trace_shader_version, i));
 	}
 }
 
-Vector<String> DDGI::_trace_modes() {
-	Vector<String> trace_modes;
-	trace_modes.push_back("\n#define MODE_PROBE_TRACE\n");
-	trace_modes.push_back("\n#define MODE_DEBUG_RAYS\n");
-	trace_modes.push_back("\n#define MODE_SURFEL_TRACE\n");
+Vector<ShaderRD::VariantDefine> DDGI::_trace_modes() {
+	Vector<ShaderRD::VariantDefine> trace_modes;
+	trace_modes.push_back(ShaderRD::VariantDefine(TRACE_GROUP_BASE, "\n#define MODE_PROBE_TRACE\n", true));
+	trace_modes.push_back(ShaderRD::VariantDefine(TRACE_GROUP_BASE, "\n#define MODE_DEBUG_RAYS\n", true));
+	trace_modes.push_back(ShaderRD::VariantDefine(TRACE_GROUP_BASE, "\n#define MODE_SURFEL_TRACE\n", true));
+	trace_modes.push_back(ShaderRD::VariantDefine(TRACE_GROUP_RTGI, "\n#define MODE_RTGI\n", false));
 	return trace_modes;
 }
 
@@ -260,10 +264,13 @@ bool DDGI::_ensure_trace_hw() {
 	trace_hw_valid = trace_shader_hw.version_is_valid(trace_shader_hw_version);
 	if (trace_hw_valid) {
 		for (int i = 0; i < TRACE_MODE_MAX; i++) {
+			if (i == TRACE_MODE_RTGI) {
+				continue;
+			}
 			trace_pipelines_hw[i].create_compute_pipeline(trace_shader_hw.version_get_shader(trace_shader_hw_version, i));
 		}
 		for (int i = 0; i < TRACE_MODE_MAX; i++) {
-			trace_hw_valid = trace_hw_valid && trace_pipelines_hw[i].get_rid().is_valid();
+			trace_hw_valid = trace_hw_valid && (i == TRACE_MODE_RTGI || trace_pipelines_hw[i].get_rid().is_valid());
 		}
 	}
 	return trace_hw_valid;
@@ -534,6 +541,26 @@ void DDGI::trace_surfels(const Ref<Volume> &p_volume, const LocalVector<RD::Unif
 	RD::get_singleton()->draw_command_begin_label("Surfel Trace");
 	_trace(TRACE_MODE_SURFELS, p_volume, p_volume->rays, p_volume->trace_constant, 0, 0, p_indirect_buffer, p_indirect_offset, &p_surfel_uniforms);
 	RD::get_singleton()->draw_command_end_label();
+}
+
+bool DDGI::trace_rtgi(const Ref<Volume> &p_volume, RID p_output, const LocalVector<RD::Uniform> &p_uniforms, uint32_t p_x_groups, uint32_t p_y_groups) {
+	RayScene *ray_scene = RayScene::get_singleton();
+	if (p_volume.is_null() || !ray_scene || !ray_scene->is_ready() || p_output.is_null() || !_trace_usable(ray_scene)) {
+		return false;
+	}
+	const bool hardware = ray_scene->uses_hardware();
+	DdgiTraceShaderRD &rtgi_shader = hardware ? trace_shader_hw : trace_shader;
+	PipelineDeferredRD &rtgi_pipeline = hardware ? trace_pipelines_hw[TRACE_MODE_RTGI] : trace_pipelines[TRACE_MODE_RTGI];
+	if (!rtgi_shader.is_group_enabled(TRACE_GROUP_RTGI)) {
+		rtgi_shader.enable_group(TRACE_GROUP_RTGI);
+		rtgi_pipeline.create_compute_pipeline(rtgi_shader.version_get_shader(hardware ? trace_shader_hw_version : trace_shader_version, TRACE_MODE_RTGI));
+	}
+	if (hardware && !rtgi_pipeline.get_rid().is_valid()) {
+		ray_scene->refuse_hardware("the hardware RTGI trace pipeline could not be made");
+		return false;
+	}
+	_trace(TRACE_MODE_RTGI, p_volume, p_output, p_volume->trace_constant, p_x_groups, p_y_groups, RID(), 0, &p_uniforms);
+	return true;
 }
 
 void DDGI::process(const Ref<Volume> &p_volume, RID p_environment, SkyRD::Sky *p_sky, RID p_camera_attributes, const Projection &p_projection, const Transform3D &p_camera_transform, const Size2i &p_screen_size) {

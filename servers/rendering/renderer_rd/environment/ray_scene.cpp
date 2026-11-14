@@ -37,6 +37,7 @@
 #include "servers/rendering/renderer_geometry_instance.h"
 #include "servers/rendering/renderer_rd/environment/ddgi.h"
 #include "servers/rendering/renderer_rd/environment/ddgi_light_tracker.h"
+#include "servers/rendering/renderer_rd/environment/gi_epochs.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
@@ -792,6 +793,9 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	const Vector3 snapped = (p_camera_position / ANCHOR_GRID).floor() * ANCHOR_GRID;
 	const bool anchor_moved = snapped != anchor;
 	anchor = snapped;
+	if (anchor_moved || GIEpochs::get_singleton()->get(GIEpochs::SOURCE_ORIGIN) == 0) {
+		GIEpochs::get_singleton()->bump(GIEpochs::SOURCE_ORIGIN);
+	}
 
 	LocalVector<RID> referenced;
 	bool need_assembly = assembly_dirty || blas_node_buffer.is_null();
@@ -965,7 +969,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	lights.clear();
 	local_lights.clear();
 	census = LightCensus();
-	DDGILightTracker::begin(GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/light_change_reset"), RSG::rasterizer->get_frame_number(), MAX(GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/probe_spacing"), 0.1f));
+	DDGILightTracker::begin(GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/light_change_reset"), RSG::rasterizer->get_frame_number(), MAX(GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/probe_spacing"), 0.1f), GLOBAL_GET_CACHED(bool, "rendering/global_illumination/rtgi/enabled"));
 	for (const RID &light_instance : p_directional_lights) {
 		_pack_light(light_instance, physical_units, exposure, MAX_LIGHTS, lights);
 	}

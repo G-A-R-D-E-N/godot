@@ -6,7 +6,7 @@
 
 #extension GL_EXT_samplerless_texture_functions : enable
 
-#ifdef MODE_DEBUG_RAYS
+#if defined(MODE_DEBUG_RAYS) || defined(MODE_RTGI)
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 #else
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
@@ -418,6 +418,162 @@ void main() {
 		}
 	}
 	imageStore(ray_image, pixel, vec4(color / (1.0 + color), 1.0));
+}
+
+#endif
+
+#ifdef MODE_RTGI
+
+#include "rtgi_inc.glsl"
+
+layout(set = 3, binding = 0, std140) uniform RtgiData {
+	mat4 inv_projection;
+	mat4 cam_transform;
+	ivec2 screen_size;
+	ivec2 trace_size;
+	uint frame;
+	uint seed;
+	int scale;
+	uint flags;
+	float origin_scale;
+	float ray_fraction;
+	float origin_floor;
+	uint mirror_below_surface;
+}
+rtgi;
+
+layout(set = 3, binding = 1) uniform texture2D rtgi_depth;
+layout(set = 3, binding = 2) uniform texture2D rtgi_normal_roughness;
+layout(set = 3, binding = 3) uniform utexture2D rtgi_tiles;
+layout(rgba32ui, set = 3, binding = 4) uniform restrict writeonly uimage2D rtgi_candidate_first;
+layout(rgba32ui, set = 3, binding = 5) uniform restrict writeonly uimage2D rtgi_candidate_second;
+
+#define RTGI_ORIGIN_VIEW_ULPS 4.0
+#define RTGI_ORIGIN_ANCHOR_ULPS 4.0
+#define RTGI_ORIGIN_RASTER 0.00390625
+#define RTGI_FLOAT_EPSILON 1.1920929e-7
+
+vec3 rtgi_view_position_at(ivec2 p_pixel, float p_depth) {
+	vec2 uv = (vec2(p_pixel) + 0.5) / vec2(rtgi.screen_size);
+	vec4 clip = rtgi.inv_projection * vec4(uv * 2.0 - 1.0, p_depth, 1.0);
+	return clip.xyz / clip.w;
+}
+
+vec3 rtgi_geometric_normal(ivec2 p_pixel, vec3 p_view_position, vec3 p_fallback, out float r_footprint) {
+	r_footprint = length(rtgi_view_position_at(p_pixel + ivec2(1, 0), texelFetch(rtgi_depth, p_pixel, 0).x) - p_view_position);
+	ivec2 limit = rtgi.screen_size - 1;
+	vec3 best[2];
+	float best_gap[2];
+	for (int axis = 0; axis < 2; axis++) {
+		best[axis] = vec3(0.0);
+		best_gap[axis] = 1e30;
+		for (int side = -1; side <= 1; side += 2) {
+			ivec2 tap = clamp(p_pixel + (axis == 0 ? ivec2(side, 0) : ivec2(0, side)), ivec2(0), limit);
+			float tap_depth = texelFetch(rtgi_depth, tap, 0).x;
+			if (tap_depth == 0.0 || tap == p_pixel) {
+				continue;
+			}
+			vec3 delta = (rtgi_view_position_at(tap, tap_depth) - p_view_position) * float(side);
+			float gap = abs(dot(delta, normalize(p_view_position)));
+			if (gap < best_gap[axis]) {
+				best_gap[axis] = gap;
+				best[axis] = delta;
+			}
+		}
+	}
+	if (best_gap[0] > 1e29 || best_gap[1] > 1e29) {
+		return p_fallback;
+	}
+	r_footprint = max(length(best[0]), length(best[1]));
+	vec3 n = cross(best[0], best[1]);
+	float n_length = length(n);
+	if (n_length <= 0.0) {
+		return p_fallback;
+	}
+	n /= n_length;
+	return dot(n, p_view_position) > 0.0 ? -n : n;
+}
+
+float rtgi_origin_offset(float p_view_distance, vec3 p_anchor_position, float p_footprint) {
+	float anchor_extent = max(abs(p_anchor_position.x), max(abs(p_anchor_position.y), abs(p_anchor_position.z)));
+	float error = RTGI_FLOAT_EPSILON * (RTGI_ORIGIN_VIEW_ULPS * p_view_distance + RTGI_ORIGIN_ANCHOR_ULPS * anchor_extent) + p_footprint * RTGI_ORIGIN_RASTER;
+	return max(rtgi.origin_scale * error, rtgi.origin_floor * p_view_distance);
+}
+
+void main() {
+	ivec2 trace_pixel = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(trace_pixel, rtgi.trace_size))) {
+		return;
+	}
+
+	uint tag = uint(trace_pixel.y * rtgi.trace_size.x + trace_pixel.x) ^ rtgi.frame;
+	uint tile = texelFetch(rtgi_tiles, trace_pixel / RTGI_TILE, 0).r;
+	ivec2 scale = ivec2(max(rtgi.scale, 1));
+	ivec2 pixel = min(trace_pixel * scale + scale / 2, rtgi.screen_size - 1);
+	float depth = texelFetch(rtgi_depth, pixel, 0).x;
+
+	bool candidate = (tile & RTGI_TILE_TRACE) != 0u && depth != 0.0;
+	bool traced = candidate && rtgi_thin_keeps(uvec2(trace_pixel), rtgi.frame, rtgi.seed, rtgi.ray_fraction);
+	if (!traced) {
+		uint skipped = RTGI_FLAG_NO_CANDIDATE | RTGI_FLAG_NOT_TRACED | (candidate ? RTGI_FLAG_THINNED : 0u);
+		imageStore(rtgi_candidate_first, trace_pixel, uvec4(0u));
+		imageStore(rtgi_candidate_second, trace_pixel, uvec4(0u, skipped << 16u, 0u, tag));
+		imageStore(ray_image, trace_pixel, vec4(0.0, 0.0, 0.0, -1.0));
+		return;
+	}
+
+	vec4 normal_roughness = texelFetch(rtgi_normal_roughness, pixel, 0);
+	vec2 uv = (vec2(pixel) + 0.5) / vec2(rtgi.screen_size);
+	vec4 clip = rtgi.inv_projection * vec4(uv * 2.0 - 1.0, depth, 1.0);
+	vec3 view_position = clip.xyz / clip.w;
+	mat3 to_world = mat3(rtgi.cam_transform);
+	vec3 normal = normalize(to_world * normalize(normal_roughness.xyz * 2.0 - 1.0));
+	float view_distance = length(view_position);
+	vec3 shading_normal_view = normalize(normal_roughness.xyz * 2.0 - 1.0);
+	float footprint;
+	vec3 geometric_view = rtgi_geometric_normal(pixel, view_position, shading_normal_view, footprint);
+	vec3 offset_normal = dot(geometric_view, shading_normal_view) > 0.7 ? normalize(to_world * geometric_view) : normal;
+	vec3 anchor_position = to_world * view_position + ray_scene.camera_to_anchor;
+	vec3 origin = anchor_position + offset_normal * rtgi_origin_offset(view_distance, anchor_position, footprint);
+
+	vec2 u = rtgi_rand2(uvec2(trace_pixel), rtgi.frame, RTGI_RNG_DIRECTION, rtgi.seed);
+	vec3 direction = rtgi_cosine_direction(normal, u);
+	if (rtgi.mirror_below_surface != 0u && dot(offset_normal, normal) > 0.999) {
+		direction -= 2.0 * min(dot(direction, offset_normal), 0.0) * offset_normal;
+	}
+	float pdf = max(dot(direction, normal), 1e-4) * 0.31830988;
+
+	RaySceneHit hit;
+	vec3 radiance;
+	vec3 point;
+	uint normal_packed = 0u;
+	uint flags = 0u;
+	float hit_distance = DDGI_MISS_DISTANCE;
+	if (ray_scene_trace(origin, direction, ddgi.max_distance, false, hit)) {
+		vec4 shaded = shade_hit(origin, direction, hit, ray_scene_hash(uint(pixel.y) * 65537u + uint(pixel.x) + rtgi.frame * 6271u));
+		radiance = shaded.rgb;
+		hit_distance = hit.t;
+		point = origin + direction * hit.t;
+		vec3 hit_normal = ray_scene_hit_normal(hit);
+		normal_packed = rtgi_pack_normal(hit.backface ? -hit_normal : hit_normal);
+		if (shaded.a < 0.0) {
+			flags |= RTGI_FLAG_BACKFACE;
+		}
+		if (dot(ray_scene_hit_material(hit).emission, vec3(1.0)) > 0.0) {
+			flags |= RTGI_FLAG_EMISSIVE;
+		}
+	} else {
+		radiance = min(sky_radiance_in(direction), vec3(DDGI_MAX_RADIANCE));
+		point = direction;
+		flags |= RTGI_FLAG_MISS_SKY;
+	}
+
+	uvec4 first;
+	uvec4 second;
+	rtgi_pack_candidate(point, normal_packed, radiance, flags, pdf, tag, first, second);
+	imageStore(rtgi_candidate_first, trace_pixel, first);
+	imageStore(rtgi_candidate_second, trace_pixel, second);
+	imageStore(ray_image, trace_pixel, vec4(radiance, hit_distance));
 }
 
 #endif
