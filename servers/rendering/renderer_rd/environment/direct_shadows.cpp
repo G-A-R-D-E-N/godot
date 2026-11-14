@@ -50,6 +50,7 @@ DirectShadows::Settings DirectShadows::get_project_settings() {
 	settings.debug_view = MAX(int(GLOBAL_GET("rendering/global_illumination/direct/debug_view")), 0);
 	settings.filter = GLOBAL_GET("rendering/global_illumination/direct/filter");
 	settings.force_one = GLOBAL_GET("rendering/global_illumination/direct/force_factor_one");
+	settings.cold_frames = CLAMP(int(GLOBAL_GET("rendering/global_illumination/direct/debug_cold_frames")), 0, 64);
 	settings.history_cap = MAX(int(GLOBAL_GET("rendering/global_illumination/direct/history_cap")), 0);
 	settings.dynamic_history_cap = MAX(int(GLOBAL_GET("rendering/global_illumination/direct/dynamic_history_cap")), 1);
 	settings.clamp_sigmas = GLOBAL_GET("rendering/global_illumination/direct/clamp_sigmas");
@@ -369,6 +370,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	params.history_valid = viewport->last_frame != 0 ? 1 : 0;
 	params.filter_on = settings.filtered() ? 1 : 0;
 	params.force_one = settings.force_one ? 1 : 0;
+	params.cold_frames = external ? 0 : settings.cold_frames;
 	params.history_cap = float(settings.history_cap);
 	params.dynamic_cap = float(settings.dynamic_history_cap);
 	params.clamp_sigmas = settings.clamp_sigmas;

@@ -47,9 +47,9 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	uint count;
 	uint head_entries;
 	uint tail_visibility;
+	uint cold_frames;
 	uint pad0;
 	uint pad1;
-	uint pad2;
 }
 params;
 

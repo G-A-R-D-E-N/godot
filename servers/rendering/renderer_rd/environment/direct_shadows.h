@@ -87,6 +87,7 @@ public:
 		uint32_t debug_view = 0;
 		bool filter = true;
 		bool force_one = false;
+		uint32_t cold_frames = 0;
 		uint32_t history_cap = 32;
 		uint32_t dynamic_history_cap = 2;
 		float clamp_sigmas = 3.0f;
@@ -155,7 +156,8 @@ private:
 		uint32_t count;
 		uint32_t head_entries;
 		uint32_t tail_visibility;
-		uint32_t pad[3];
+		uint32_t cold_frames;
+		uint32_t pad[2];
 	};
 
 	static constexpr uint32_t COUNTER_BYTES = 32;

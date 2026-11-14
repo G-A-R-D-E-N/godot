@@ -393,6 +393,10 @@ bool find_history(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal, vec3 p_view, out 
 	return dot(mat3(params.prev_view_from_view) * p_normal, direct_oct_decode(unpackSnorm2x16(guide.y))) >= 0.9;
 }
 
+bool cold_lamp(uint p_slot) {
+	return params.cold_frames != 0u && params.frame - direct_lamps.data[p_slot].reset_frame < params.cold_frames;
+}
+
 float history_limit(bool p_dynamic) {
 	if (params.history_cap <= 0.0 || params.reference != 0u) {
 		return 1e30;
@@ -499,7 +503,7 @@ void main() {
 	vec2 accum[MAX_ENTRIES];
 	for (uint i = 0u; i < own_count; i++) {
 		accum[i] = vec2(0.0);
-		if (direct_lamps.data[own[i].slot].reset_frame > params.last_frame) {
+		if (direct_lamps.data[own[i].slot].reset_frame > params.last_frame || cold_lamp(own[i].slot)) {
 			continue;
 		}
 		for (uint j = 0u; j < own_limit; j++) {
@@ -621,6 +625,9 @@ void main() {
 					chosen = i;
 					break;
 				}
+			}
+			if (chosen < own_count && cold_lamp(own[chosen].slot)) {
+				continue;
 			}
 			if (chosen < own_count) {
 				bool hit = lamp_ray(vertex, anchored, normal, own[chosen].position, own[chosen].slot, random_value(), random_value(), rng_state);
