@@ -33,6 +33,7 @@
 #include "restir_gi_core.h"
 
 #include "core/math/color.h"
+#include "core/os/mutex.h"
 #include "core/templates/local_vector.h"
 #include "core/variant/dictionary.h"
 
@@ -61,6 +62,8 @@ struct RestirTestOptions {
 	int compat_k = -1;
 	int compat_gate = -1;
 	int compat_early_stop = -1;
+	int fold_tag = 0;
+	bool release_once = false;
 };
 
 enum RestirDetail : uint32_t {
@@ -85,13 +88,44 @@ struct RestirPixelSums {
 	uint32_t frames = 0;
 };
 
+struct RestirFoldRecord {
+	int64_t tag = -1;
+	int64_t serial = -1;
+	int64_t clock = -1;
+	int64_t k = -1;
+	int64_t k_eff = -1;
+	int64_t mode = -1;
+	int64_t feedback = -1;
+	int64_t cut = -1;
+	int64_t cut_reason = -1;
+	int64_t pre_frame = -1;
+	int64_t reval = -1;
+	int64_t history_used = -1;
+	int64_t trace_w = -1;
+	int64_t trace_h = -1;
+	int64_t hp_eq_px = -1;
+	int64_t expected_phase0 = -1;
+	int64_t s_max = -1;
+	int64_t n_over = -1;
+	int64_t hist_texels = -1;
+};
+
 struct RestirFrameRecord {
 	uint32_t frame = 0;
 	RestirFrameStats stats;
+	RestirFoldRecord fold;
 };
+
+static constexpr int RESTIR_FOLD_ROW_FIELDS = 29;
+
+const char *const *restir_fold_row_names();
+int64_t restir_fold_n_valid(const uint32_t *p_temporal_reject);
+int64_t restir_fold_cut_rej(const uint32_t *p_temporal_reject);
+void restir_fold_pack_row(const RestirFrameRecord &p_record, int64_t p_index, int64_t *r_row);
 
 RestirTestOptions &restir_test_options();
 LocalVector<RestirFrameRecord> &restir_frame_records();
+Mutex &restir_frame_records_mutex();
 Dictionary &restir_captured_case();
 Dictionary &restir_final_capture();
 RestirPixelSums &restir_pixel_sums();

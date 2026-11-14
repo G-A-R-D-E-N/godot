@@ -35,6 +35,7 @@
 
 #include "core/os/mutex.h"
 #include "core/variant/dictionary.h"
+#include "core/variant/variant.h"
 
 class RestirProbe : public Object {
 	GDCLASS(RestirProbe, Object);
@@ -59,6 +60,9 @@ public:
 	Dictionary get_case_result() const;
 	Dictionary read_case_file(const String &p_path) const;
 	void write_case_file(const String &p_path, const Dictionary &p_case) const;
+	PackedInt64Array get_fold_rows() const;
+	PackedStringArray get_fold_row_fields() const;
+	Dictionary get_fold_seeds() const;
 	~RestirProbe();
 
 private:

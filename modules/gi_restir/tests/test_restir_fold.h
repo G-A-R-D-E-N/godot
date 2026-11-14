@@ -32,6 +32,7 @@
 
 #include "../restir_epochs.h"
 #include "../restir_fold.h"
+#include "../restir_fold_mirror.h"
 #include "../restir_harness.h"
 
 #include "core/math/math_funcs.h"
@@ -46,44 +47,6 @@ constexpr uint32_t FOLD_S_SHIFT = 8u;
 constexpr uint32_t FOLD_S_MASK = 0x3Fu;
 constexpr uint32_t FOLD_MV = 1u << 14u;
 constexpr uint32_t FOLD_KS[] = { 4u, 8u, 16u, 32u, 64u };
-
-uint32_t mirror_pcg(uint32_t p_value) {
-	const uint32_t state = p_value * 747796405u + 2891336453u;
-	const uint32_t word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-	return (word >> 22u) ^ word;
-}
-
-uint32_t mirror_rng_state(uint32_t p_x, uint32_t p_y, uint32_t p_frame, uint32_t p_dimension, uint32_t p_seed) {
-	return mirror_pcg(p_x + mirror_pcg(p_y + mirror_pcg(p_frame + mirror_pcg(p_dimension + p_seed))));
-}
-
-uint32_t mirror_phi(uint32_t p_x, uint32_t p_y) {
-	return mirror_pcg(p_x + mirror_pcg(p_y + FOLD_C1));
-}
-
-uint32_t mirror_isqrt_from(uint32_t p_seed, uint32_t p_x) {
-	uint32_t s = p_seed;
-	if ((s + 1u) * (s + 1u) <= p_x) {
-		s++;
-	}
-	if (s * s > p_x) {
-		s--;
-	}
-	return s;
-}
-
-uint32_t mirror_isqrt(uint32_t p_x) {
-	return mirror_isqrt_from(uint32_t(Math::sqrt(float(p_x))), p_x);
-}
-
-uint32_t mirror_draw(uint32_t p_psi, uint32_t p_k) {
-	const uint32_t quarter = (p_k * p_k) >> 2u;
-	const uint32_t x = p_psi % (3u * quarter);
-	if (x < quarter) {
-		return mirror_isqrt(x);
-	}
-	return (p_k >> 1u) + (x - quarter) / p_k;
-}
 
 bool mirror_refuses(uint32_t p_h_s, uint32_t p_k, bool p_pre_frame) {
 	const uint32_t bound = p_pre_frame ? p_k - 1u : p_k;
@@ -115,7 +78,7 @@ uint32_t mirror_fold_bits(const FoldPixel &p_pixel, uint32_t p_k, bool p_pre_fra
 			s = u <= half_k ? u : u - half_k;
 			mv = false;
 		} else {
-			s = mirror_draw(p_pixel.psi_s, p_k);
+			s = restir_fold_draw(p_pixel.psi_s, p_k);
 			mv = true;
 		}
 		if (p_pre_frame) {
@@ -365,11 +328,11 @@ TEST_CASE("[RestirFold] Mirror: the integer square root is exact from a float se
 		while ((exact + 1u) * (exact + 1u) <= x) {
 			exact++;
 		}
-		exact_all = exact_all && mirror_isqrt(x) == exact;
-		exact_all = exact_all && mirror_isqrt_from(exact, x) == exact;
-		exact_all = exact_all && mirror_isqrt_from(exact + 1u, x) == exact;
+		exact_all = exact_all && restir_fold_isqrt(x) == exact;
+		exact_all = exact_all && restir_fold_isqrt_from(exact, x) == exact;
+		exact_all = exact_all && restir_fold_isqrt_from(exact + 1u, x) == exact;
 		if (exact > 0u) {
-			exact_all = exact_all && mirror_isqrt_from(exact - 1u, x) == exact;
+			exact_all = exact_all && restir_fold_isqrt_from(exact - 1u, x) == exact;
 		}
 	}
 	CHECK(exact_all);
@@ -382,9 +345,9 @@ TEST_CASE("[RestirFold] Mirror: KB9, the draw gives each s exactly its weight at
 		bool below_k = true;
 		bool wraps = true;
 		for (uint32_t x = 0u; x < total; x++) {
-			const uint32_t s = mirror_draw(x, k);
+			const uint32_t s = restir_fold_draw(x, k);
 			below_k = below_k && s < k;
-			wraps = wraps && mirror_draw(x + total * 7u, k) == s;
+			wraps = wraps && restir_fold_draw(x + total * 7u, k) == s;
 			counts[MIN(s, 63u)]++;
 		}
 		CHECK(below_k);
@@ -534,23 +497,23 @@ TEST_CASE("[RestirFold] Mirror: a static pixel relocks to (v + phi) mod K within
 }
 
 TEST_CASE("[RestirFold] Mirror: the hashes give the known answers") {
-	CHECK(mirror_pcg(0u) == 0x07BB2FE2u);
-	CHECK(mirror_pcg(1u) == 0xA8BEEA3Cu);
-	CHECK(mirror_phi(3u, 5u) == 0x2D397518u);
-	const uint32_t psi_r = mirror_rng_state(3u, 5u, 7u, 0u, FOLD_C2);
-	const uint32_t psi_s = mirror_rng_state(3u, 5u, 7u, 1u, FOLD_C2);
+	CHECK(restir_fold_pcg(0u) == 0x07BB2FE2u);
+	CHECK(restir_fold_pcg(1u) == 0xA8BEEA3Cu);
+	CHECK(restir_fold_phi(3u, 5u) == 0x2D397518u);
+	const uint32_t psi_r = restir_fold_rng_state(3u, 5u, 7u, 0u, FOLD_C2);
+	const uint32_t psi_s = restir_fold_rng_state(3u, 5u, 7u, 1u, FOLD_C2);
 	CHECK(psi_r == 0x5072A4E0u);
 	CHECK(psi_s == 0xB99D54B9u);
 	CHECK(psi_r % 8u == 0u);
 	CHECK(psi_r % 32u == 0u);
-	CHECK(mirror_draw(psi_s, 8u) == 7u);
-	CHECK(mirror_draw(psi_s, 32u) == 13u);
+	CHECK(restir_fold_draw(psi_s, 8u) == 7u);
+	CHECK(restir_fold_draw(psi_s, 32u) == 13u);
 }
 
 TEST_CASE("[RestirFold] C2 sits at least 5 from C1 and from the default seed sums of every other rtgi_rng_state caller") {
 	CHECK(ring_distance(FOLD_C2, FOLD_C1) >= 5u);
 	const uint32_t default_seed = 1u;
-	const uint32_t hashed[] = { mirror_pcg(default_seed * 0x9E3779B1u + 0x7F4A7C15u), mirror_pcg(0x1234567u * 0x9E3779B1u + 0x7F4A7C15u) };
+	const uint32_t hashed[] = { restir_fold_pcg(default_seed * 0x9E3779B1u + 0x7F4A7C15u), restir_fold_pcg(0x1234567u * 0x9E3779B1u + 0x7F4A7C15u) };
 	bool spaced = true;
 	for (uint32_t own = 0u; own < 2u; own++) {
 		for (uint32_t dim = 0u; dim < 8u; dim++) {

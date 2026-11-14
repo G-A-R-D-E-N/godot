@@ -1001,3 +1001,161 @@ reads a light.
   - R2's own passes are unchanged and still read the stored (unshifted) position: rtgi_previous_trace_pixel, R2's
     temporal plane test and its DDGI lookup. With denoise r2 after the module, some TAA-on difference from the TAA-off
     level may remain for that reason; it is R2's to fix.
+
+## Commit 12a: run counters
+
+Change plan commit 12, sub-commit 12a (C12-DESIGN section 2.1): CPU only. No shader file, no UBO, no pass and no setting
+changes; nothing here alters what a frame computes. Everything below is read by the lab through the probe (frame records,
+fold rows, seeds) or through status.
+
+- Frame records. RestirFrameRecord gains RestirFoldRecord fold (restir_test.h), every field int64 with -1 for not
+  available: tag, serial, clock, k, k_eff, mode, feedback, cut, cut_reason, pre_frame, reval, history_used, trace_w,
+  trace_h, hp_eq_px, expected_phase0, s_max, n_over, hist_texels. resample fills the first fourteen in the readback block,
+  next to the existing record, from values already in scope there: tag = test option fold_tag, serial = the state's serial,
+  clock = params.fold_clock (RestirGiState::frames before frames++), k and k_eff and mode and feedback from this frame's
+  RestirFoldFrame, cut and cut_reason from the epoch plan (reason 0 when there is no cut), pre_frame =
+  params.fold_pre_frame, reval = RESTIR_F_REVAL_FRAME in params.flags (budget revalidation frames only; share mode's
+  RESTIR_F_REVAL_SHARE is not this bit), history_used = use_history, trace_w and trace_h from the trace size. hp_eq_px,
+  expected_phase0, s_max, n_over and hist_texels stay -1 until 12b's dump fills them. A record exists only on frames with
+  the readback test option on (the existing gate), so with readback off nothing new runs per frame except the release_once
+  test, the state lookup (now getptr, then operator[] only for a new view) and two summary copies.
+- get_records is unchanged: stride 35, same fields and order. It now copies the list under the records mutex and builds
+  its array outside the lock, as get_fold_rows does.
+- Fold rows. Probe get_fold_rows() returns a PackedInt64Array, 29 values per record in this order: record (index in the
+  record list), frame, tag, serial, clock, k, k_eff, mode, feedback, cut, cut_reason, pre_frame, reval, history_used,
+  trace_w, trace_h, n_valid, cut_rej, had_history, refused, renewed_raw, started, carried, refused_empty, hp_eq_px,
+  expected_phase0, s_max, n_over, hist_texels. get_fold_row_fields() returns those names (restir_fold_row_names), so the lab
+  reads by name and a later field is appended, never inserted. restir_fold_pack_row (restir_fold_rows.cpp) builds one row:
+  - n_valid = restir_fold_n_valid, the sum of all 16 entries of stats.temporal_reject. read_stats fills that histogram only
+    for info words with INFO_VALID (bit 14), and TEMPORAL writes info 0 on an untraced tile and on an invalid receiver, so
+    n_valid is the frame's valid traced receivers. SPATIAL rewrites bits 4 to 7 and may set bit 9, and FINAL ORs in bits 10
+    to 12 and 15 and up, so bit 14 and the low four bits are TEMPORAL's. The population: receivers with geometry (w above
+    0.5) on a traced tile. Sky pixels and untraced tiles are in neither n_valid nor the four counts; a ray-thinned valid
+    pixel is counted. stats.geometry (get_records column 1) counts the same set from FINAL, and the row's record index is
+    get_records' row index, so the lab VOIDs a row whose n_valid differs from geometry.
+  - cut_rej = restir_fold_cut_rej, temporal_reject[9] (REJ_CUT). had_history = stats.had_history (INFO_HAD_HISTORY).
+    REJ_CUT is given only when no history is read, so cut_rej == n_valid exactly when history_used is 0, and cut 1 implies
+    history_used 0. With the probe option history off, cut is 0 and history_used is 0: the lab writes its cut column from
+    cut and VOIDs any row with cut 0 and history_used 0.
+  - mode is the RestirMode value: 0 B1, 1 B2, 2 U1, 3 B2k. cut_reason is the RestirCutReason value: 0 none, 1 first frame
+    of a state, 2 request, 3 origin, 4 backend, 5 scene without feed, 6 scene overflow, 7 scene unlocalised, 8 Fold. The
+    plan never produces 6 or 7. R2's own cuts (a camera jump over 25 m, a resize, an R2 refusal on the frame before) reach
+    the module as history_cut and read 2, the same as a forced LightingUnits.BumpHistoryResetSerial; the rows can't tell
+    them apart.
+  - record is the index in the current record list. It restarts at 0 after reset_records, and every get_fold_rows call
+    packs the whole list. The lab doesn't call reset_records inside a leg, keys rows by (serial, clock), and reads the
+    rows once at the end of a leg.
+  - refused, renewed_raw, started, carried, refused_empty: pass-stats slots 22, 24, 25, 23 and 26, read by read_stats from
+    the TEMPORAL row (doubles, cast to int64; exact below 2^53).
+  - renewed_raw is slot 24 as the shader writes it. The shader adds to it on every rule-1 refusal and nowhere else: the
+    refusal sets the cleared flag, and a cleared pixel always takes the renew branch of rs_fold_bits. So renewed_raw equals
+    refused on every frame of this design. The disjoint class "renewed" of the reader is renewed_raw − refused, which is 0
+    on every row; the lab does that subtraction and asserts renewed_raw == refused, not only at least, so a later shader
+    change that breaks it fails loudly (12b edits this shader). The engine exports the raw slot only.
+  - The lab's identity is refused + (renewed_raw − refused) + started + carried == n_valid on a frame with K_eff above 0,
+    since every valid traced receiver in TEMPORAL calls rs_fold_bits once and it adds 1 to exactly one of carried,
+    renewed_raw and started. On K_eff 0 frames the four counts are 0, and on a frame without history started == n_valid;
+    the lab applies the identity only when k_eff is above 0.
+- Records mutex. restir_frame_records_mutex() (restir_test.h, defined in restir_gi.cpp) guards the push in resample (render
+  thread) and the copy in get_fold_rows, get_records and reset_records (main thread). get_fold_rows copies the list under
+  the lock and packs outside it.
+- Tag rule. configure({"fold_tag": t}) sets the test option fold_tag; every record and the status key fold_tag carry the
+  tag of the frame that ran. The option is read on the render thread, so the first frame with the new tag can be one frame
+  after the call. The lab splits rows by tag, then drops a scenario's leading rows until its first row with cut 1.
+- State serial and backend totals (restir_gi.h / .cpp). RestirGiState::serial is set from the backend's
+  state_serial_next (first state 1) every time begin_frame makes a new state and its allocation succeeds: a view seen for
+  the first time adds 1 to state_creates_total; a view whose state exists but is unallocated or has another trace size
+  adds 1 to state_rebuilds_total. A failed allocation moves neither total nor the serial; the retry that succeeds counts
+  once, as a rebuild, since the empty entry stayed in the map. A view released by the module (release, release_once, R2's free_data or RtgiPass::release) has no
+  state, so its next frame is a create, not a rebuild. Every new state starts at frames 0 with a RESTIR_CUT_FIRST frame,
+  so serial changes exactly where the clock v restarts. release_calls_total counts release(p_buffers) calls with a
+  non-null pointer that found a state (release(nullptr), the release of everything at shutdown, is not counted).
+- release_once. configure({"release_once": true}) sets a one-shot test option. The next begin_frame that passes every
+  refusal test clears it, calls release(p_inputs.buffers) (the real path), adds 1 to release_tests_total and then makes the
+  new state in the same call, with a new serial. It sits after all of begin_frame's refusals, so a refused frame does not
+  spend the shot, and after the "no buffers" test because release(nullptr) would free every state and the core's
+  pipelines. The option is a plain bool written from two threads, as the other test options are: a configure call that
+  lands between the render thread's read and its clear is lost, and the lab VOIDs the release leg when
+  release_tests_total did not move. With several views it releases the first view that begins a frame, and fold_tag is one
+  value for the process: the 12a legs run exactly one RTGI view, and the lab VOIDs a scenario whose rows hold a serial it
+  did not expect.
+- Status keys (get_status): fold_feedback (last frame that ran), fold_tag (the tag that frame ran with), state_serial (its
+  state's serial; 0 before any frame), state_creates_total, state_rebuilds_total, release_calls_total,
+  release_tests_total.
+- R2 release counters (servers/rendering/renderer_rd/environment/rtgi.cpp and rtgi.h; their own commit, CPU only, and
+  this bullet and the two lines naming them below hold only while that commit is in the tree). RtgiPass gains two static
+  atomic counters (SafeNumeric<uint64_t>), only ever incremented and never read by render code: release_free_data_total,
+  added in RtgiBuffers::free_data after backend->release(owner), and release_pass_total, added in RtgiPass::release after
+  backend->release(buffers). Both count only calls that reached a registered backend; free_data counts also when the
+  module had no state for those buffers, so it is weaker proof than the module's own release_calls_total, and the lab
+  reads the two deltas together. _write_status (status.json, rtgi/debug_status_path) gains the top-level keys
+  rtgi_release_free_data and rtgi_release_pass. Nothing in the module reads them: the module builds and behaves the same
+  without that commit, and the lab reads them from R2's status file.
+  - Which path moves which counter, by reading. Forward clustered's GI block calls RtgiPass::process only when render_gi,
+    the normal-roughness slice, DDGI's custom data and RtgiPass::is_enabled() (rtgi/enabled) all hold, and otherwise
+    calls RtgiPass::release. So rtgi/enabled off reaches the pass path, once the view holds RTGI custom data (one
+    processed frame first). RtgiPass::release ends in set_custom_data with a null Ref, which only erases the map entry;
+    free_data is called only from RenderSceneBuffersRD::cleanup (the destructor and the two configure paths), and
+    RtgiBuffers has no destructor that calls it. So the pass path moves rtgi_release_pass by 1 and rtgi_release_free_data
+    by 0, and a SubViewport resize moves rtgi_release_free_data by 1. Whether the resize also leaves the pass counter
+    still depends on DDGI's custom data surviving cleanup, which was not read.
+  - How to read them. Both totals are process-wide since start and cover every viewport, while the status file is
+    written per buffers: read the difference across the forced event, never the absolute value, and keep one RTGI view
+    per process so no other viewport moves them. Both stay at 0 with no backend registered, so a leg with the module
+    off can't use them. One RtgiPass::release call can't fire both paths, so both keys moving by 1 across one event
+    means two separate releases, and the lab reports that as such instead of counting it as one clean path.
+- Seeds and CPU mirrors (restir_fold_mirror.h / .cpp, pure). The doctest mirrors moved into engine functions, with the
+  same arithmetic: restir_fold_pcg, restir_fold_rng_state, restir_fold_phi, restir_fold_isqrt_from, restir_fold_isqrt,
+  restir_fold_draw. restir_fold_draw returns 0 for K below 2 (K² / 4 = 0), where the old mirror divided by zero; no Fold K
+  reaches that. Constants: RESTIR_FOLD_C1, RESTIR_FOLD_C2, RESTIR_FOLD_DIM_RENEW (0), RESTIR_FOLD_DIM_START (1),
+  RESTIR_FOLD_DETERMINISTIC_SEED (0x1234567). restir_fold_rand_seed(seed) = rtgi_pcg(seed * 0x9E3779B1 + 0x7F4A7C15), the
+  seed rs_rand and rs_rand_frame hash. The mirrors exist to be compared with 12b's GPU self-test. They are never the
+  source of the reader's draw.csv, phi_classes.csv or psi.csv, which are about the shader; a lab dry mode may use them
+  for format checks only, in a directory of its own.
+- restir_fold_other_seeds(rtgi_seed, seed_offset) lists every seed sum another rtgi_rng_state caller can use, in order:
+  C1; rtgi_seed + 0 .. 7 (rtgi_rand2 in R2's MODE_RTGI, with the doubled dimension); only when seed_offset is not 0,
+  rtgi_seed + seed_offset + 0 .. 7 (the module's SOURCE, which runs on params.seed); restir_fold_rand_seed(rtgi_seed +
+  seed_offset) + 64 .. 575; restir_fold_rand_seed(0x1234567) + 64 .. 575. That is 1033 values at seed offset 0 and 1041
+  otherwise. Both hashed blocks are always listed, since the deterministic setting can switch between them.
+- Probe get_fold_seeds() returns {c1_seed, c2_seed, other_seeds (PackedInt64Array from restir_fold_other_seeds with the
+  live rtgi/seed and the seed_offset test option), rtgi_seed, seed_offset, deterministic (gi/deterministic now),
+  rand_seed_live (the hashed seed rs_rand uses under those settings)}. It reads rtgi/seed and seed_offset at the call,
+  and R2 reads its seed through a cached setting: the lab sets both before the first frame and calls get_fold_seeds
+  after the leg.
+- What fires each new counter or field (no counter here is without a lab action that moves it):
+  - record cut, serial, state_creates_total: the first frame of every leg (a new view is a create, a RESTIR_CUT_FIRST
+    frame); record cut also on every forced cut (LightingUnits.BumpHistoryResetSerial, R2's history_cut).
+  - state_rebuilds_total: the reset leg's resample path, rtgi/resolution_scale 1 to 0.5 (the trace size changes on the
+    same buffers).
+  - release_tests_total, release_calls_total: the reset leg's release path, configure({"release_once": true});
+    release_calls_total also moves on free_data and the pass path when the view had a state.
+  - rtgi_release_free_data: the reset leg's free_data path, a SubViewport resize (RenderSceneBuffersRD::cleanup calls
+    free_data on every custom data, RtgiBuffers among them).
+  - rtgi_release_pass: the reset leg's rtgi_pass_release path, rtgi/enabled off for 2 frames then on, after at least one
+    processed frame. The counter is the proof, and the lab VOIDs that path when it does not move.
+  - record pre_frame and reval: the preframe scenario (gi/revalidate budget, revalidate_period 3).
+  - record feedback, mode, k_eff changes: the transitions leg (configure spatial_feedback 1 and back, gi/mode B2 to B2k,
+    gi/fold_k 8 to 16).
+  - record and status fold_tag: every scenario's configure({"fold_tag": t}).
+  - fold rows refused, carried, started: static and pan at any K above 0; refused_empty: the thinned leg
+    (rtgi/rays_per_pixel 0.5). renewed_raw moves with refused.
+  - get_fold_seeds: read once per run for run.json.
+- Not in 12a: item 1 and last_lit (GI's), the dump fields (hp_eq_px, expected_phase0, s_max, n_over, hist_texels stay -1
+  in every 12a run; 12b's dump is what fills them, and its bars are where they are tested), the self-test, lineage.
+- Doctests. tests/test_restir_fold.h ("[RestirFold] ...") now calls the engine functions in place of its own mirrors, with
+  the same known answers (pcg(0) 0x07BB2FE2, pcg(1) 0xA8BEEA3C, φ(3, 5) 0x2D397518, ψ_r(3, 5, 7) 0x5072A4E0, ψ_s
+  0xB99D54B9, draw(ψ_s, 8) 7, draw(ψ_s, 32) 13, KB9 at every K, the isqrt from a seed one off either way).
+  tests/test_restir_fold_rows.h ("[RestirFoldRows] ..."): the constants; restir_fold_rand_seed(1) 0xF5F17964 (worked by
+  hand for this commit) and (0x1234567) 0x56F88133; other_seeds at (1, 0): 1033 values, C1 first, 1 .. 8, the hashed
+  blocks' ends, every value at ring distance 5 or more from C2 and C2 + 1; other_seeds at (1, 3): 1041 values with the
+  module's 4 .. 11 and the offset seed hashed; isqrt exact from 0 to 4096; draw at K 0 and 1 gives 0; n_valid and cut_rej
+  over a planted histogram (1 .. 16 gives 136 and 10); the 29 names in order; a planted record packs to the known row
+  (renewed_raw raw, the four classes summing to n_valid); a default record packs -1 in every Fold field and 0 in every
+  count.
+- Known limits.
+  - fold_tag is read on the render thread without a lock, as the other test options are; a tag change lands on the next
+    frame that runs, and the lab drops leading rows until the first cut.
+  - Records and the totals are per process; a reset_records call clears records, never totals.
+  - The rows carry the module's cut reason only. R2's cut kind for the frame is not in them.
+  - Whether a lab set_setting of rtgi/resolution_scale reaches R2 in the same frame (R2 reads it through a cached
+    setting) was not read; state_rebuilds_total is the proof for that path, and the lab VOIDs it when it does not move.

@@ -33,12 +33,14 @@
 #include "core/variant/variant.h"
 
 #include "restir_epochs.h"
+#include "restir_fold_mirror.h"
 #include "restir_settings.h"
 #include "restir_harness.h"
 #include "restir_test.h"
 
 #include "shaders/restir_shim_check.glsl.gen.h"
 
+#include "core/config/project_settings.h"
 #include "core/object/class_db.h"
 #include "servers/rendering/renderer_rd/environment/gi_module_hooks.h"
 #include "core/object/callable_mp.h"
@@ -61,6 +63,9 @@ void RestirProbe::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_case_result"), &RestirProbe::get_case_result);
 	ClassDB::bind_method(D_METHOD("read_case_file", "path"), &RestirProbe::read_case_file);
 	ClassDB::bind_method(D_METHOD("write_case_file", "path", "case"), &RestirProbe::write_case_file);
+	ClassDB::bind_method(D_METHOD("get_fold_rows"), &RestirProbe::get_fold_rows);
+	ClassDB::bind_method(D_METHOD("get_fold_row_fields"), &RestirProbe::get_fold_row_fields);
+	ClassDB::bind_method(D_METHOD("get_fold_seeds"), &RestirProbe::get_fold_seeds);
 }
 
 static_assert(sizeof(RestirShimCheckShaderRD) > 0, "the shim check header must be part of every build");
@@ -146,14 +151,70 @@ void RestirProbe::configure(const Dictionary &p_options) {
 	if (p_options.has("rearm_dump") && bool(p_options["rearm_dump"])) {
 		options.dumped = false;
 	}
+	if (p_options.has("fold_tag")) {
+		options.fold_tag = int(p_options["fold_tag"]);
+	}
+	if (p_options.has("release_once")) {
+		options.release_once = p_options["release_once"];
+	}
 }
 
 void RestirProbe::reset_records() {
+	MutexLock lock(restir_frame_records_mutex());
 	restir_frame_records().clear();
 }
 
+PackedInt64Array RestirProbe::get_fold_rows() const {
+	LocalVector<RestirFrameRecord> records;
+	{
+		MutexLock lock(restir_frame_records_mutex());
+		records = restir_frame_records();
+	}
+	PackedInt64Array rows;
+	rows.resize(int(records.size()) * RESTIR_FOLD_ROW_FIELDS);
+	int64_t *w = rows.ptrw();
+	for (uint32_t i = 0; i < records.size(); i++) {
+		restir_fold_pack_row(records[i], int64_t(i), w + int64_t(i) * RESTIR_FOLD_ROW_FIELDS);
+	}
+	return rows;
+}
+
+PackedStringArray RestirProbe::get_fold_row_fields() const {
+	PackedStringArray fields;
+	const char *const *names = restir_fold_row_names();
+	for (int i = 0; i < RESTIR_FOLD_ROW_FIELDS; i++) {
+		fields.push_back(String(names[i]));
+	}
+	return fields;
+}
+
+Dictionary RestirProbe::get_fold_seeds() const {
+	const uint32_t rtgi_seed = uint32_t(int(GLOBAL_GET("rendering/global_illumination/rtgi/seed")));
+	const uint32_t seed_offset = restir_test_options().seed_offset;
+	const bool deterministic = GLOBAL_GET("rendering/global_illumination/restir/gi/deterministic");
+	const Vector<uint32_t> others = restir_fold_other_seeds(rtgi_seed, seed_offset);
+	PackedInt64Array other_seeds;
+	other_seeds.resize(others.size());
+	for (int i = 0; i < others.size(); i++) {
+		other_seeds.set(i, int64_t(others[i]));
+	}
+	Dictionary result;
+	result["c1_seed"] = int64_t(RESTIR_FOLD_C1);
+	result["c2_seed"] = int64_t(RESTIR_FOLD_C2);
+	result["other_seeds"] = other_seeds;
+	result["rtgi_seed"] = int64_t(rtgi_seed);
+	result["seed_offset"] = int64_t(seed_offset);
+	result["deterministic"] = deterministic;
+	result["rand_seed_live"] = int64_t(restir_fold_rand_seed(deterministic ? RESTIR_FOLD_DETERMINISTIC_SEED : rtgi_seed + seed_offset));
+	return result;
+}
+
 Dictionary RestirProbe::get_records() const {
-	const LocalVector<RestirFrameRecord> &records = restir_frame_records();
+	LocalVector<RestirFrameRecord> records;
+	{
+		MutexLock lock(restir_frame_records_mutex());
+		records = restir_frame_records();
+	}
 	const int stride = 35;
 	PackedFloat64Array data;
 	data.resize(int(records.size()) * stride);

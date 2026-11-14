@@ -54,6 +54,11 @@ LocalVector<RestirFrameRecord> &restir_frame_records() {
 	return records;
 }
 
+Mutex &restir_frame_records_mutex() {
+	static Mutex mutex;
+	return mutex;
+}
+
 Dictionary &restir_captured_case() {
 	static Dictionary captured;
 	return captured;
@@ -292,7 +297,14 @@ bool RestirGiBackend::begin_frame(const RtgiFrameInputs &p_inputs) {
 			return false;
 		}
 	}
-	RestirGiState &state = states[p_inputs.buffers];
+	if (restir_test_options().release_once) {
+		restir_test_options().release_once = false;
+		release(p_inputs.buffers);
+		release_tests_total++;
+	}
+	RestirGiState *existing = states.getptr(p_inputs.buffers);
+	const bool existed = existing != nullptr;
+	RestirGiState &state = existed ? *existing : states[p_inputs.buffers];
 	if (!state.resources.allocated || state.size != p_inputs.trace_size) {
 		_free_state(state);
 		state = RestirGiState();
@@ -302,6 +314,13 @@ bool RestirGiBackend::begin_frame(const RtgiFrameInputs &p_inputs) {
 			return false;
 		}
 		state.size = p_inputs.trace_size;
+		state_serial_next++;
+		state.serial = state_serial_next;
+		if (existed) {
+			state_rebuilds_total++;
+		} else {
+			state_creates_total++;
+		}
 		RestirGiInputs clear_inputs;
 		get_core()->clear_history(state.resources, clear_inputs);
 	}
@@ -695,6 +714,8 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	summary.fold_pre_frame = params.fold_pre_frame;
 	summary.jitter = jitter;
 	summary.previous_jitter = previous_jitter;
+	summary.serial = state.serial;
+	summary.fold_tag = options.fold_tag;
 	if (jitter.unmatched || previous_jitter.unmatched) {
 		jitter_unmatched_frames_total++;
 	}
@@ -714,8 +735,26 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 		RestirFrameRecord record;
 		record.frame = p_inputs.frame_index;
 		record.stats = summary.stats;
-		const int record_index = int(restir_frame_records().size());
-		restir_frame_records().push_back(record);
+		record.fold.tag = options.fold_tag;
+		record.fold.serial = int64_t(state.serial);
+		record.fold.clock = int64_t(params.fold_clock);
+		record.fold.k = int64_t(fold.k);
+		record.fold.k_eff = int64_t(fold.k_eff);
+		record.fold.mode = int64_t(fold.mode);
+		record.fold.feedback = fold.feedback ? 1 : 0;
+		record.fold.cut = cut ? 1 : 0;
+		record.fold.cut_reason = int64_t(plan.reason);
+		record.fold.pre_frame = params.fold_pre_frame ? 1 : 0;
+		record.fold.reval = (params.flags & RESTIR_F_REVAL_FRAME) != 0u ? 1 : 0;
+		record.fold.history_used = use_history ? 1 : 0;
+		record.fold.trace_w = int64_t(p_inputs.trace_size.x);
+		record.fold.trace_h = int64_t(p_inputs.trace_size.y);
+		int record_index = 0;
+		{
+			MutexLock lock(restir_frame_records_mutex());
+			record_index = int(restir_frame_records().size());
+			restir_frame_records().push_back(record);
+		}
 		if (options.accumulate_from >= 0 && record_index >= options.accumulate_from && record_index < options.accumulate_to) {
 			_accumulate_pixels(state.resources);
 		}
@@ -751,6 +790,7 @@ void RestirGiBackend::release(RenderSceneBuffersRD *p_buffers) {
 		if (found) {
 			_free_state(*found);
 			states.erase(p_buffers);
+			release_calls_total++;
 		}
 		return;
 	}
@@ -847,6 +887,13 @@ void RestirGiBackend::get_status(Dictionary &r_status) const {
 	r_status["fold_k_eff"] = int64_t(summary.fold.k_eff);
 	r_status["fold_clock"] = int64_t(summary.fold_clock);
 	r_status["fold_pre_frame"] = summary.fold_pre_frame;
+	r_status["fold_feedback"] = summary.fold.feedback;
+	r_status["fold_tag"] = int64_t(summary.fold_tag);
+	r_status["state_serial"] = int64_t(summary.serial);
+	r_status["state_creates_total"] = int64_t(state_creates_total);
+	r_status["state_rebuilds_total"] = int64_t(state_rebuilds_total);
+	r_status["release_calls_total"] = int64_t(release_calls_total);
+	r_status["release_tests_total"] = int64_t(release_tests_total);
 	r_status["jitter_shift"] = PackedFloat64Array({ summary.jitter.ax, summary.jitter.ay, summary.jitter.bx, summary.jitter.by });
 	r_status["jitter_ndc"] = PackedFloat64Array({ summary.jitter.jitter_x, summary.jitter.jitter_y });
 	r_status["jitter_unmatched"] = summary.jitter.unmatched || summary.previous_jitter.unmatched;

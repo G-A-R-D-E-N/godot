@@ -63,6 +63,7 @@ struct RestirGiState {
 	int64_t sky_epoch_frame = -1;
 	RestirRoute route;
 	RestirFoldFrame fold;
+	uint64_t serial = 0;
 };
 
 struct RestirGiSummary {
@@ -113,6 +114,8 @@ struct RestirGiSummary {
 	bool fold_pre_frame = false;
 	RestirJitterShift jitter;
 	RestirJitterShift previous_jitter;
+	uint64_t serial = 0;
+	int fold_tag = 0;
 };
 
 class RestirGiBackend : public RendererRD::RtgiResampleBackend {
@@ -130,6 +133,11 @@ class RestirGiBackend : public RendererRD::RtgiResampleBackend {
 	uint64_t tile_skip_frames_total = 0;
 	uint64_t module_output_frames_total = 0;
 	uint64_t jitter_unmatched_frames_total = 0;
+	uint64_t state_serial_next = 0;
+	uint64_t state_creates_total = 0;
+	uint64_t state_rebuilds_total = 0;
+	uint64_t release_calls_total = 0;
+	uint64_t release_tests_total = 0;
 	String refusal_reason;
 
 	void _free_state(RestirGiState &r_state);
