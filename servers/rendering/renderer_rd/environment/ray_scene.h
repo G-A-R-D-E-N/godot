@@ -201,6 +201,7 @@ public:
 	static void build_bvh(LocalVector<BuildPrimitive> &p_primitives, uint32_t p_max_leaf, uint32_t p_max_depth, LocalVector<Node> &r_nodes);
 	static float light_energy(float p_energy, float p_intensity, RSE::LightType p_type, bool p_physical_units, float p_exposure, const Vector2 &p_area_size, bool p_area_normalize);
 	static void pack_area(const Basis &p_basis, const Vector2 &p_area_size, Light &r_light);
+	static void pack_shape(RSE::LightType p_type, const Basis &p_basis, const Vector2 &p_area_size, float p_direct_size, Light &r_light);
 	static uint32_t shadow_cast_flags(RSE::ShadowCastingSetting p_setting);
 	static uint64_t surface_candidates(uint32_t p_surface, uint32_t p_flags);
 	static uint32_t instance_class(uint64_t p_candidates, uint64_t p_split);

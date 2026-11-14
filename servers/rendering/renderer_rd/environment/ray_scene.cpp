@@ -618,6 +618,14 @@ void RayScene::pack_area(const Basis &p_basis, const Vector2 &p_area_size, Light
 	r_light.area = p_area_size.x * p_area_size.y;
 }
 
+void RayScene::pack_shape(RSE::LightType p_type, const Basis &p_basis, const Vector2 &p_area_size, float p_direct_size, Light &r_light) {
+	if (p_type == RSE::LIGHT_AREA) {
+		pack_area(p_basis, p_area_size, r_light);
+	} else if (p_type != RSE::LIGHT_DIRECTIONAL) {
+		r_light.area = p_direct_size;
+	}
+}
+
 void RayScene::_pack_light(RID p_light_instance, bool p_physical_units, float p_exposure, uint32_t p_limit, LocalVector<Light> &r_lights) {
 	LightStorage *light_storage = LightStorage::get_singleton();
 	if (r_lights.size() >= p_limit || !light_storage->owns_light_instance(p_light_instance)) {
@@ -660,11 +668,7 @@ void RayScene::_pack_light(RID p_light_instance, bool p_physical_units, float p_
 	packed.inv_spot_attenuation = 1.0f / MAX(0.0001f, light_storage->light_get_param(light, RSE::LIGHT_PARAM_SPOT_ATTENUATION));
 	packed.caster_mask = light_storage->light_get_shadow_caster_mask(light);
 	packed.pad = p_light_instance.get_local_index();
-	if (type == RSE::LIGHT_AREA) {
-		pack_area(transform.basis, area_size, packed);
-	} else if (type != RSE::LIGHT_DIRECTIONAL) {
-		packed.area = light_storage->light_get_direct_size(light);
-	}
+	pack_shape(type, transform.basis, area_size, light_storage->light_get_direct_size(light), packed);
 	if (type != RSE::LIGHT_DIRECTIONAL) {
 		census.candidates++;
 		census.area_candidates += type == RSE::LIGHT_AREA;
