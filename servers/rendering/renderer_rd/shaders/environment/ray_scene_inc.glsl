@@ -143,6 +143,8 @@ uint ray_scene_hash(uint p_value) {
 #ifdef RAY_SCENE_REPLAY
 bool ray_scene_replay = false;
 
+#define RAY_SCENE_MIN_TARGET 5.421011e-20
+
 #define RAY_SCENE_LIGHT_KEY(m_index, m_id) (ray_scene_replay ? (m_id) : (m_index))
 #define RAY_SCENE_PICKS(m_stream, m_race) (ray_scene_replay ? (m_race) : (m_stream))
 
@@ -173,9 +175,6 @@ float ray_scene_race_exponential(uint p_seed_hash, uint p_id) {
 
 bool ray_scene_race_step(inout float r_key, inout uint r_id, uint p_seed_hash, uint p_id, float p_weight) {
 	float key = ray_scene_precise_divide(ray_scene_race_exponential(p_seed_hash, p_id), p_weight);
-	if (isnan(key)) {
-		key = uintBitsToFloat(0x7f800000u);
-	}
 	if (key < r_key || (key == r_key && p_id < r_id)) {
 		r_key = key;
 		r_id = p_id;
@@ -481,7 +480,7 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 			continue;
 		}
 #ifdef RAY_SCENE_REPLAY
-		if (ray_scene_replay && !(weight > 0.0 && !isinf(weight))) {
+		if (ray_scene_replay && !(weight >= RAY_SCENE_MIN_TARGET && !isinf(weight))) {
 			continue;
 		}
 #endif
