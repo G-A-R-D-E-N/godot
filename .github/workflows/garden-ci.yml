@@ -1,0 +1,266 @@
+# Upstream .github/workflows are switched off in this repository with the repository variable DISABLE_GODOT_CI=1.
+
+name: Garden CI
+
+on:
+  push:
+    branches: [main, nomad/dev, darkstar/dev]
+    tags: ["engine-4.8.0-dev-*"]
+  pull_request:
+    paths-ignore:
+      - "**/*.md"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}|${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+env:
+  SCONS_FLAGS: dev_mode=yes module_text_server_fb_enabled=yes debug_symbols=no
+  GODOT_VERSION_STATUS: dev-double
+  PYTHONIOENCODING: utf8
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  SCONS_CACHE_LIMIT: 3072
+
+jobs:
+  static-checks:
+    name: Static checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: .gitignore checks
+        run: bash ./misc/scripts/gitignore_check.sh
+
+      - name: Style checks via prek
+        env:
+          SKIP: dotnet-format
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          python -m pip install --disable-pip-version-check prek
+          from_ref="${PR_BASE_SHA:-$PUSH_BEFORE_SHA}"
+          if [ -z "$from_ref" ] || ! git cat-file -e "${from_ref}^{commit}" 2>/dev/null; then
+            from_ref=HEAD~1
+          fi
+          prek run --show-diff-on-failure --color=always --from-ref "$from_ref" --to-ref HEAD
+
+  linux-editor:
+    name: Linux editor (double, Mono)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+          python -m pip install --disable-pip-version-check scons==4.11.1
+          dotnet --version
+          scons --version
+          echo "SCONS_CACHE=$RUNNER_TEMP/scons-cache" >> "$GITHUB_ENV"
+          echo "CACHE_TIMESTAMP=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Restore SCons cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/scons-cache
+          key: scons-linux-editor-${{ github.sha }}
+          restore-keys: scons-linux-editor-
+
+      - name: Build editor
+        run: |
+          export GODOT_VERSION_STATUS="dev-double${GITHUB_RUN_NUMBER}"
+          scons platform=linuxbsd target=editor precision=double module_mono_enabled=yes tests=yes $SCONS_FLAGS -j"$(nproc)"
+
+      - name: Purge stale SCons cache entries
+        continue-on-error: true
+        run: python misc/scripts/purge_cache.py "$CACHE_TIMESTAMP" "$SCONS_CACHE"
+
+      - name: Save SCons cache
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/scons-cache
+          key: scons-linux-editor-${{ github.sha }}
+
+      - name: Generate Mono glue and build assemblies
+        run: |
+          export GODOT_VERSION_STATUS="dev-double${GITHUB_RUN_NUMBER}"
+          ./bin/godot.linuxbsd.editor.double.x86_64.mono --headless --generate-mono-glue modules/mono/glue
+          python modules/mono/build_scripts/build_assemblies.py --godot-output-dir=./bin --precision=double
+
+      - name: Unit tests
+        run: ./bin/godot.linuxbsd.editor.double.x86_64.mono --headless --test --force-colors
+
+      - name: Package editor
+        run: |
+          mkdir -p package
+          cp bin/godot.linuxbsd.editor.double.x86_64.mono package/
+          cp -r bin/GodotSharp package/
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: godot-4.8-double-mono-linux64
+          path: package/
+          retention-days: 14
+
+  windows-editor:
+    name: Windows editor (MSVC, double, Mono)
+    runs-on: windows-latest
+    timeout-minutes: 240
+    env:
+      SCONS_CACHE_MSVC_CONFIG: true
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install build tools
+        run: |
+          python -m pip install --disable-pip-version-check scons==4.11.1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          dotnet --version
+          python -m SCons --version
+          python misc/scripts/install_d3d12_sdk_windows.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python misc/scripts/install_accesskit.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          "SCONS_CACHE=$env:RUNNER_TEMP\scons-cache" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "CACHE_TIMESTAMP=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Restore SCons cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}\scons-cache
+          key: scons-windows-editor-${{ github.sha }}
+          restore-keys: scons-windows-editor-
+
+      - name: Build editor
+        run: |
+          $env:GODOT_VERSION_STATUS = "dev-double$env:GITHUB_RUN_NUMBER"
+          python -m SCons platform=windows target=editor precision=double module_mono_enabled=yes tests=yes windows_subsystem=console $env:SCONS_FLAGS.Split(' ') -j $env:NUMBER_OF_PROCESSORS
+
+      - name: Purge stale SCons cache entries
+        continue-on-error: true
+        run: python misc/scripts/purge_cache.py $env:CACHE_TIMESTAMP $env:SCONS_CACHE
+
+      - name: Save SCons cache
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}\scons-cache
+          key: scons-windows-editor-${{ github.sha }}
+
+      - name: Generate Mono glue and build assemblies
+        run: |
+          $env:GODOT_VERSION_STATUS = "dev-double$env:GITHUB_RUN_NUMBER"
+          ./bin/godot.windows.editor.double.x86_64.mono.exe --headless --generate-mono-glue modules/mono/glue
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python modules/mono/build_scripts/build_assemblies.py --godot-output-dir=./bin --precision=double
+
+      - name: Unit tests
+        run: ./bin/godot.windows.editor.double.x86_64.mono.exe --headless --test --force-colors
+
+      - name: Mono shutdown tracker regression
+        run: python tests/mono_shutdown_tracker/run.py --candidate bin/godot.windows.editor.double.x86_64.mono.exe --output shutdown-tracker-logs
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: mono-shutdown-tracker-logs
+          path: shutdown-tracker-logs/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Package editor
+        run: |
+          New-Item -ItemType Directory -Force package | Out-Null
+          Copy-Item bin\godot.windows.editor.double.x86_64.mono*.exe package\
+          Copy-Item bin\*.dll package\ -ErrorAction SilentlyContinue
+          Copy-Item -Recurse bin\GodotSharp package\
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: godot-4.8-double-mono-win64
+          path: package/
+          retention-days: 14
+
+  publish-release:
+    name: Publish engine release
+    needs: [static-checks, linux-editor, windows-editor]
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/engine-4.8.0-dev-') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: godot-4.8-double-mono-win64
+          path: stage/win64
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: godot-4.8-double-mono-linux64
+          path: stage/linux64
+
+      - name: Zip release assets
+        run: |
+          set -euo pipefail
+          chmod +x stage/linux64/godot.*
+          mkdir -p assets
+          for p in win64 linux64; do
+            name=godot-4.8.0-dev-double-mono-$p.zip
+            test -n "$(ls stage/$p/godot.*.editor.double.x86_64.mono*)"
+            (cd stage/$p && python3 -m zipfile -c "../../assets/$name" .)
+            (cd assets && sha256sum "$name" > "$name.sha256")
+          done
+          ls -l assets
+
+      - name: Publish GitHub release
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          pkg=$(ls stage/linux64/GodotSharp/Tools/nupkgs/ | sed -n 's/^Godot\.NET\.Sdk\.\(.*\)\.nupkg$/\1/p')
+          test -n "$pkg"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" assets/* --clobber
+          else
+            gh release create "$TAG" assets/* --verify-tag \
+              --title "Garden engine 4.8.0-dev double + Mono (${GITHUB_SHA:0:10})" \
+              --notes "Built by CI from $GITHUB_SHA. .NET packages: $pkg."
+          fi
