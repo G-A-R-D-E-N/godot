@@ -68,6 +68,8 @@ constexpr double CAMERA_CUT_DISTANCE = 25.0;
 } // namespace
 
 RtgiPass *RtgiPass::singleton = nullptr;
+SafeNumeric<uint64_t> RtgiPass::release_free_data_total;
+SafeNumeric<uint64_t> RtgiPass::release_pass_total;
 
 RtgiPass::Settings RtgiPass::get_project_settings() {
 	Settings settings;
@@ -829,6 +831,7 @@ void RtgiPass::RtgiBuffers::free_data() {
 	}
 	if (RtgiResampleBackend *backend = GIModuleHooks::get_singleton()->get_rtgi_backend()) {
 		backend->release(owner);
+		release_free_data_total.increment();
 	}
 }
 
@@ -838,6 +841,7 @@ void RtgiPass::release(const Ref<RenderSceneBuffersRD> &p_render_buffers) {
 	}
 	if (RtgiResampleBackend *backend = GIModuleHooks::get_singleton()->get_rtgi_backend()) {
 		backend->release(p_render_buffers.ptr());
+		release_pass_total.increment();
 	}
 	p_render_buffers->clear_context(RB_SCOPE_RTGI);
 	p_render_buffers->set_custom_data(RB_SCOPE_RTGI, Ref<RenderBufferCustomDataRD>());
@@ -916,6 +920,8 @@ void RtgiPass::_write_status(const Ref<RenderSceneBuffersRD> &p_render_buffers, 
 	status["ray_capacity"] = int64_t(p_buffers->last_trace_pixel_capacity);
 	status["atrous_iterations"] = int64_t(p_buffers->last_atrous_iterations);
 	status["last_inputs"] = p_buffers->last_inputs;
+	status["rtgi_release_free_data"] = int64_t(release_free_data_total.get());
+	status["rtgi_release_pass"] = int64_t(release_pass_total.get());
 	GIProviderRecord published;
 	if (GICompositor::get_record(p_render_buffers, published)) {
 		Dictionary record;

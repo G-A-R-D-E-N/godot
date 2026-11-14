@@ -33,6 +33,7 @@
 #include "core/math/projection.h"
 #include "core/math/transform_3d.h"
 #include "core/templates/paged_array.h"
+#include "core/templates/safe_refcount.h"
 #include "core/variant/dictionary.h"
 #include "servers/rendering/renderer_rd/environment/ddgi.h"
 #include "servers/rendering/renderer_rd/environment/gi_epochs.h"
@@ -301,6 +302,8 @@ public:
 
 private:
 	static RtgiPass *singleton;
+	static SafeNumeric<uint64_t> release_free_data_total;
+	static SafeNumeric<uint64_t> release_pass_total;
 
 	RtgiShaderRD shader;
 	RID shader_version;
