@@ -323,7 +323,7 @@ void RtgiPass::_read_light_changes(const Ref<RtgiBuffers> &p_buffers, const Sett
 }
 
 bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const Ref<RtgiBuffers> &p_buffers, DDGI &p_ddgi, const FrameInputs &p_inputs) {
-	const Settings settings = get_project_settings();
+	Settings settings = get_project_settings();
 	RayScene *ray_scene = RayScene::get_singleton();
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
 	TextureStorage *texture_storage = TextureStorage::get_singleton();
@@ -348,6 +348,14 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 	if (p_inputs.depth.is_null() || p_inputs.normal_roughness.is_null()) {
 		_refuse(p_buffers, "no depth or normal buffer");
 		return false;
+	}
+
+	RtgiResampleBackend *backend = GIModuleHooks::get_singleton()->get_rtgi_backend();
+	if (backend && !backend->is_active()) {
+		backend = nullptr;
+	}
+	if (backend) {
+		settings.force_trace = true;
 	}
 
 	FrameInputs inputs = p_inputs;
@@ -443,17 +451,20 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 	const uint32_t atrous_count = settings.atrous_iterations;
 
 	FrameUBO frame_data;
-	_fill_frame_ubo(frame_data, settings, p_buffers, inputs, volume, flags, DEBUG_VIEW_NONE, 1, slot_scale, delta, previous_projection);
-	if ((flags & FRAME_FLAG_RESTART_SPHERES) != 0) {
-		frame_data.restart_count = selection.count;
-		memcpy(frame_data.restart_spheres, selection.spheres, sizeof(selection.spheres));
-	}
-	RD::get_singleton()->buffer_update(frame_ubo, 0, sizeof(FrameUBO), &frame_data);
-	for (uint32_t i = 0; i < atrous_count; i++) {
-		FrameUBO step_data = frame_data;
-		step_data.atrous_step = 1 << i;
-		RD::get_singleton()->buffer_update(atrous_ubo[i], 0, sizeof(FrameUBO), &step_data);
-	}
+	auto upload_frame = [&](uint32_t p_flags) {
+		_fill_frame_ubo(frame_data, settings, p_buffers, inputs, volume, p_flags, DEBUG_VIEW_NONE, 1, slot_scale, delta, previous_projection);
+		if ((p_flags & FRAME_FLAG_RESTART_SPHERES) != 0) {
+			frame_data.restart_count = selection.count;
+			memcpy(frame_data.restart_spheres, selection.spheres, sizeof(selection.spheres));
+		}
+		RD::get_singleton()->buffer_update(frame_ubo, 0, sizeof(FrameUBO), &frame_data);
+		for (uint32_t i = 0; i < atrous_count; i++) {
+			FrameUBO step_data = frame_data;
+			step_data.atrous_step = 1 << i;
+			RD::get_singleton()->buffer_update(atrous_ubo[i], 0, sizeof(FrameUBO), &step_data);
+		}
+	};
+	upload_frame(flags);
 
 	TraceUBO trace_data = {};
 	MaterialStorage::store_camera(inputs.drawn_projection.inverse(), trace_data.inv_projection);
@@ -531,6 +542,89 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 			_refuse(p_buffers, "the trace did not run");
 			return false;
 		}
+	}
+
+	bool denoise = false;
+	if (backend) {
+		Projection correction;
+		correction.set_depth_correction(true);
+		RtgiFrameInputs backend_inputs;
+		backend_inputs.buffers = p_render_buffers.ptr();
+		backend_inputs.screen_size = inputs.screen_size;
+		backend_inputs.trace_size = inputs.trace_size;
+		backend_inputs.slot_size = inputs.slot_size;
+		backend_inputs.ray_fraction = ray_fraction;
+		backend_inputs.depth = inputs.depth;
+		backend_inputs.normal_roughness = inputs.normal_roughness;
+		backend_inputs.geo_position = geo_position_current;
+		backend_inputs.geo_normal = geo_normal_current;
+		backend_inputs.previous_geo_position = geo_position_previous;
+		backend_inputs.previous_geo_normal = geo_normal_previous;
+		backend_inputs.candidate_first = candidate_first;
+		backend_inputs.candidate_second = candidate_second;
+		backend_inputs.projection = inputs.projection;
+		backend_inputs.previous_projection = previous_projection;
+		backend_inputs.camera_transform = inputs.camera_transform;
+		backend_inputs.previous_camera_transform = previous_transform;
+		backend_inputs.view_to_previous_clip = (correction * previous_projection) * Projection(delta);
+		backend_inputs.frame_index = inputs.frame_index;
+		backend_inputs.epochs = inputs.epochs;
+		backend_inputs.dirty_source = nullptr;
+		backend_inputs.history_cut = (flags & (FRAME_FLAG_HISTORY_CUT | FRAME_FLAG_CAMERA_CUT)) != 0u;
+		backend_inputs.hardware = ray_scene->uses_hardware();
+		backend_inputs.deterministic = false;
+		backend_inputs.physical_units = inputs.physical_units;
+		backend_inputs.exposure = 1.0f;
+		backend_inputs.debug_view = -1;
+		backend_inputs.ray_scene = ray_scene;
+		backend_inputs.shade.ddgi_ubo = volume->ubo;
+		backend_inputs.shade.probe_data = volume->probe_data;
+		backend_inputs.shade.irradiance = volume->irradiance;
+		backend_inputs.shade.distance = volume->distance;
+		backend_inputs.shade.sky_texture = volume->sky_texture;
+		for (int i = 0; i < 3; i++) {
+			backend_inputs.shade.sky_color_or_orientation[i] = volume->trace_constant.sky_color_or_orientation[i];
+		}
+		backend_inputs.shade.sky_flags = volume->trace_constant.sky_flags;
+		backend_inputs.shade.sky_border_size[0] = volume->trace_constant.sky_border_size[0];
+		backend_inputs.shade.sky_border_size[1] = volume->trace_constant.sky_border_size[1];
+		backend_inputs.shade.sky_energy = volume->trace_constant.sky_energy;
+		backend_inputs.shade.bounce_energy = volume->trace_constant.bounce_energy;
+		backend_inputs.shade.emission_exposure = volume->trace_constant.emission_exposure;
+		backend_inputs.shade.valid = volume->ubo.is_valid() && volume->probe_data.is_valid() && volume->irradiance.is_valid() && volume->distance.is_valid();
+		RtgiResampleOutput backend_output;
+		if (backend->begin_frame(backend_inputs)) {
+			RENDER_TIMESTAMP("RTGI Backend");
+			backend->resample(backend_inputs, backend_output);
+			denoise = backend_output.valid && backend_output.denoise && backend_output.radiance.is_valid() && backend_output.coverage.is_valid();
+		}
+		if (denoise) {
+			if (backend_output.history_cap > 0u) {
+				settings.history_cap = CLAMP(backend_output.history_cap, 1u, 255u);
+			}
+			if (backend_output.soft_hold_frames > 0u && cut == CUT_NONE && (flags & FRAME_FLAG_SOFT_CUT) == 0u) {
+				flags |= FRAME_FLAG_SOFT_CUT;
+				p_buffers->soft_cuts++;
+				p_buffers->frames_since_cut = MIN(p_buffers->frames_since_cut, settings.soft_cut_count);
+			}
+		} else {
+			p_buffers->backend_refusals++;
+		}
+		if (denoise && backend_output.history_cut && cut == CUT_NONE) {
+			cut = CUT_MODULE;
+		}
+	}
+	if (cut == CUT_NONE && p_buffers->previous_denoise != denoise) {
+		cut = CUT_MODULE;
+	}
+	if (cut == CUT_MODULE) {
+		flags |= FRAME_FLAG_HISTORY_CUT;
+		p_buffers->cut_counts[CUT_MODULE]++;
+		p_buffers->last_cut = CUT_MODULE;
+		p_buffers->frames_since_cut = 0;
+	}
+	if (denoise || cut == CUT_MODULE) {
+		upload_frame(flags);
 	}
 
 	RENDER_TIMESTAMP("RTGI Temporal");
@@ -621,6 +715,11 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 	p_buffers->have_epochs = true;
 	p_buffers->frames_processed++;
 	p_buffers->frames_since_cut++;
+	p_buffers->previous_denoise = denoise;
+	p_buffers->backend_active = denoise;
+	if (denoise) {
+		p_buffers->backend_frames++;
+	}
 
 	const uint32_t accumulated = MIN(p_buffers->frames_since_cut, settings.history_cap);
 	const float confidence = gi_provider_confidence_from_samples(accumulated, settings.target_samples);
@@ -643,6 +742,9 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 void RtgiPass::release(const Ref<RenderSceneBuffersRD> &p_render_buffers) {
 	if (p_render_buffers.is_null() || !p_render_buffers->has_custom_data(RB_SCOPE_RTGI)) {
 		return;
+	}
+	if (RtgiResampleBackend *backend = GIModuleHooks::get_singleton()->get_rtgi_backend()) {
+		backend->release(p_render_buffers.ptr());
 	}
 	p_render_buffers->clear_context(RB_SCOPE_RTGI);
 	p_render_buffers->set_custom_data(RB_SCOPE_RTGI, Ref<RenderBufferCustomDataRD>());
@@ -739,6 +841,18 @@ void RtgiPass::_write_status(const Ref<RenderSceneBuffersRD> &p_render_buffers, 
 		counters["history_rejects"] = int64_t(values[COUNTER_HISTORY_REJECTS]);
 		counters["restarted"] = int64_t(values[COUNTER_RESTARTED]);
 		status["gpu_counters"] = counters;
+	}
+	if (const RtgiResampleBackend *registered = GIModuleHooks::get_singleton()->get_rtgi_backend()) {
+		Dictionary backend;
+		backend["name"] = String::utf8(registered->get_name());
+		backend["active"] = p_buffers->backend_active;
+		backend["frames"] = int64_t(p_buffers->backend_frames);
+		backend["refusals"] = int64_t(p_buffers->backend_refusals);
+		backend["module_cuts"] = int64_t(p_buffers->cut_counts[CUT_MODULE]);
+		Dictionary own;
+		registered->get_status(own);
+		backend["status"] = own;
+		status["backend"] = backend;
 	}
 	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::WRITE);
 	if (file.is_valid()) {

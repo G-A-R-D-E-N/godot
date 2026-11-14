@@ -36,6 +36,7 @@
 #include "core/variant/dictionary.h"
 #include "servers/rendering/renderer_rd/environment/ddgi.h"
 #include "servers/rendering/renderer_rd/environment/gi_epochs.h"
+#include "servers/rendering/renderer_rd/environment/gi_module_hooks.h"
 #include "servers/rendering/renderer_rd/environment/rtgi_restarts.h"
 #include "servers/rendering/renderer_rd/pipeline_deferred_rd.h"
 #include "servers/rendering/renderer_rd/shaders/environment/rtgi.glsl.gen.h"
@@ -87,6 +88,7 @@ public:
 		CUT_CAMERA,
 		CUT_BACKEND,
 		CUT_REQUEST,
+		CUT_MODULE,
 		CUT_MAX
 	};
 
@@ -243,6 +245,10 @@ public:
 		uint64_t region_crossings = 0;
 		uint64_t directional_jumps = 0;
 		uint64_t directional_repeats = 0;
+		bool previous_denoise = false;
+		bool backend_active = false;
+		uint64_t backend_frames = 0;
+		uint64_t backend_refusals = 0;
 
 		virtual void configure(RenderSceneBuffersRD *p_render_buffers) override {}
 		virtual void free_data() override {}
