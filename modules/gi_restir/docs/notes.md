@@ -54,6 +54,7 @@ Default: off at build time (config.py is_enabled returns False) and off at run t
 | gi/event_solid_angle | float 0..4π (steradians) | 0.05 |
 | gi/spatial_hold | enum off,uncapped | uncapped |
 | gi/spatial_hold_frames | int 1..256 | 40 |
+| gi/sky_reread | bool | false |
 
 The numeric defaults other than the bools are the ADR values. They have no effect while the matching enabled
 setting is off. Every description starts with "Experimental.". Godot shows project-setting help from
@@ -371,9 +372,11 @@ Design 2.8, 8.1 rows 5-8, 8.3 row 4; change plan commit 5.
   M = min(min(n.m, m_max), event_m_cap); neighbours inside the capped region keep their M (design 2.8 "neighbours inside the capped
   region keep their M", Q10 H1). This is the event frame; the SPATIAL hold below carries it over later frames. The jump cap
   is TEMPORAL only.
-- Jump frame: directional_jump or events_lost > 0 (commit 8 adds the sky epoch). Candidates are kept (F_REVAL_FRAME is never set).
+- Jump frame: directional_jump or events_lost > 0. Candidates are kept (F_REVAL_FRAME is never set).
   jump_m_cap 0: restart from the fresh candidates and spatial reuse, no event or all re-shade. jump_m_cap > 0: VALIDATE re-shades
-  every stored valid non-sky sample first (selection all: no sphere test, budget or cap-0 skip).
+  every stored valid non-sky sample first (selection all: no sphere test, budget or cap-0 skip). A sky epoch jump (gi/sky_reread,
+  decided on the GPU, see "Sky re-read") is not a jump frame in this sense: it applies only the TEMPORAL cap at jump_m_cap, with no
+  VALIDATE re-shade, no hold clear, and no change to status jump_frame.
 - VALIDATE event selection, on the previous history set in place, before TEMPORAL. It runs when events are on, the history is used,
   the ray scene is there and the frame has events (not a jump frame). Early outs as replay: M 0, not RF_VALID, an old epoch tag, an
   invalid previous receiver, sky, |x_s - o_prev| < 1e-3. No tile skip and no skip on this frame's NO_CANDIDATE. Cap-0 skip: with
@@ -466,3 +469,122 @@ view reads it).
 - Identity: with B1, B2 or U1, keep stays false, TEMPORAL takes the old dirty reject (the new dirty block can only run under
   F_KEEP_M), and the totals are the old ones. The Cand struct grew by one bool, so the SPIR-V of the passes that use it changes;
   their output must not.
+
+## Sky re-read (gi/sky_reread, default off)
+
+Design 2.9 (N3) and 8.1 row 10; change plan commit 8.
+- The flag. F_SKY_REREAD is rf.flags bit 26 (67108864); bit 19 stays reserved for Fold. _upload sets it from
+  RestirFrameParams::sky_reread alone and masks bit 26 out of the caller's flags (as bit 22 for B2k), so a capture or a caller
+  can't set it. resample decides the effective flag before it plans the history cut: the setting is on, the ray scene is ready,
+  the shading inputs are valid (shade_valid, the condition of F_SHADE_DDGI) with a DDGI UBO, and the frame's ray variant built its
+  sky modes (RestirGiCore::is_sky_valid). run_frame repeats the test as a guard (VARIANT_NONE, no DDGI UBO, sky modes not
+  built), so the harness replay (no rays) never runs it. With the own sampler and the constant test sky (F_REAL_SKY clear) the
+  live sky is the test sky.
+- What changes under the flag. A sample with RF_SKY (a MISS_SKY candidate) takes p̂ and radiance from
+  rs_sky_radiance(normalize(x_s)), the lookup FINAL already made for fresh_lo.
+  - TEMPORAL: the import checks R2's candidate radiance for finiteness as before, then sets the fresh sample's Lo from the live
+    sky. A history sample gets its Lo from the live sky in rs_fill_neighbour after the early return for unusable samples, so a
+    technique that takes no part costs no lookup.
+  - SPATIAL: the pixel's own sample (M > 0, RF_VALID) and each usable neighbour the same way.
+  - The looked-up radiance is cached in the candidate's Reservoir.lo (Cand.s), so rs_phat is unchanged and reads it at the
+    receiver and, in U1, at the neighbour: one lookup per sky technique evaluated.
+  - rs_store in the sky modes writes Lo = 0 for every RF_SKY sample, so a stored sky sample's Lo bits are zero, and under the flag
+    nothing reads them.
+  - FINAL: a sky sample with W > 0 takes its radiance from the live sky before the visibility block; fresh_lo's own sky lookup is
+    skipped then, so it is still one lookup.
+  - VALIDATE (gi/revalidate budget or share without gi/replay_seed): a sky sample whose visibility ray lands keeps its stored Lo
+    (zero) and M, with no change cut, which would compare 0 with the live sky and cut every sky sample. A sky sample whose ray is
+    blocked still loses M as before. The replay and event paths skipped sky samples already.
+- Variants. Six new modes in restir_gi.glsl, PassMode 11 to 16: PASS_TEMPORAL_SKY, PASS_SPATIAL_SKY, PASS_SPATIAL_COMPAT_SKY,
+  PASS_SPATIAL_WIDE_SKY and PASS_SPATIAL_COMPAT_WIDE_SKY (the plain mode's defines plus SKY_REREAD), and PASS_SKY_EPOCH
+  (MODE_SKY_EPOCH). With RESTIR_RAYS, SKY_REREAD defines RS_SKY_REREAD.
+  - Set 2 and the one include. The top of restir_gi.glsl defines RESTIR_SHADE (FINAL, SOURCE, VALIDATE) and RS_SKY_REREAD in two
+    blocks, then one block under RESTIR_SHADE or RS_SKY_REREAD declares DDGI_SET 2, DDGI_UBO_BINDING 0, the DDGI sampling
+    bindings 3 to 6 (RESTIR_SHADE only, with DDGI_SAMPLING), binding 7 sky_radiance (texture2DArray under
+    USE_RADIANCE_OCTMAP_ARRAY, texture2D otherwise) and binding 8 sky_sampler, and includes restir_core_ddgi_inc.glsl once. The
+    sky modes need it for vec3_to_oct_with_border, and they declare the DDGI UBO at set 2 binding 0 too. glsl_builders.py inlines
+    a file only at its first #include in a stage and drops every later #include of it, whatever the #if around either, so the
+    file must have exactly one #include (a second one under another condition compiles to nothing).
+  - _dispatch binds set 2 for the sky modes through _bind_shade, as for FINAL, so TEMPORAL, SPATIAL and FINAL of one run_frame
+    read the same sky texture and sampler. run_frame picks the sky twin of TEMPORAL and of whichever SPATIAL mode it would run
+    (_sky_twin).
+  - Own shader. ShaderRD's validity is all or nothing per version (one variant that fails to compile frees them all), so the six
+    sky modes live in a second RestirGiShaderRD per variant (sky_shaders, sky_versions), compiled by _compile into the same
+    pipelines table at PASS_SKY_FIRST + i. valid[] covers the 11 old modes only; sky_valid[] covers the six. A sky mode that
+    fails leaves the variant running with the flag off, and status sky_reread reads "unavailable". VARIANT_NONE doesn't build
+    the sky shader. _ensure builds both at the first frame of a ray variant.
+- The sky epoch, decided on the GPU so it has no readback lag.
+  - RestirGiResources::sky_epoch is a 32-byte storage buffer (RestirSkyEpoch: float luma, uint epochs, uint jump, uint jumps,
+    uint capped, three spare uints; static_assert in restir_events.h), made zeroed on the first frame with the flag on (alloc
+    log "sky_epoch"), kept across frames and cuts, and freed with the view's other resources. A trace-size change reallocates
+    the state and the epoch starts over.
+  - PASS_SKY_EPOCH, one 8x8 group (64 invocations), runs in the frame's ray variant after VALIDATE and before TEMPORAL. It binds
+    set 0 only: binding 0 the frame UBO (ubo[0]), 26 the event UBO, 29 the epoch buffer, 30 the same sky texture, 31 the linear
+    mipmapped sampler. MODE_SKY_EPOCH undefines RESTIR_RAYS, so the mode declares no set 1 or 2 and _dispatch binds neither.
+  - The mean sky luma. F_REAL_SKY clear: luma(min(test_sky, 60000)). A sky texture (RS_SKY_SKY): the mean over the texels of the
+    lowest mip, textureQueryLevels - 1 (layer 0 in the array form), of luma(min(texel * sky_energy, 60000)), the per-texel
+    transform of rs_sky_radiance. A mip wider than 64 texels is strided to at most 64 rows of at most 64 texels (the radiance
+    octmap's lowest mip is much smaller). Invocation i sums row i left to right into a shared slot with its texel count, and a
+    fixed tree (halves 32, 16, ..., 1, a barrier after each) adds slot i + half into slot i; invocation 0 divides. The order of
+    every addition is fixed, so the mean is the same every run on one device. Border texels count, and the sky's rotation
+    doesn't change a mean. A constant colour (RS_SKY_COLOR): luma(min(colour * energy, 60000)). Neither: 0. That mip is not the
+    one rs_sky_radiance samples (textureLod at lod 2): it is more heavily filtered and its absolute luma differs, but both scale
+    linearly with sky energy, and the rule below only compares ratios.
+  - The rule, restir_sky_epoch_step in restir_events.cpp, which invocation 0 of MODE_SKY_EPOCH mirrors line for line (the
+    mirror takes the luma, so it has no reduction): the jump word is cleared; a NaN or infinite luma changes nothing else; with
+    no epoch yet (epochs 0) or no history this frame (F_HISTORY clear: a cut, the first frame, or the history test option off)
+    the luma is stored and epochs grows by 1, without a jump; otherwise the frame jumps when luma < 0.8 * epoch luma or luma >
+    1.25 * epoch luma, stores the luma, and epochs and jumps grow by 1, and capped grows by 1 when the jump caps (next bullet).
+    The test multiplies, so the ratios 0.8 and 1.25 are inside and an epoch at luma 0 jumps on any light. epochs counts every
+    epoch started: the first frame, every cut and every jump, so a flat sky over a run with no cuts reads 1, and in general
+    epochs = 1 + cuts while the flag ran + jumps. Doctests "[RestirEvents] Sky epoch ..." and "[RestirEvents] Sky jump counts
+    as capped ..." in tests/test_restir_events.h.
+  - The anchor is the luma of the last epoch, not a running mean, and moves only at a jump or a cut. A slow drift that stays
+    within the band of the anchor never jumps; a steady dawn or dusk ramp crosses it again and again, about once per factor of
+    1.25 in sky luma, and each crossing is one jump frame (at jump_m_cap 0, one frame with no temporal history). That is the
+    design rule (2.9), which assumed weather-scale drift, not a time-of-day ramp.
+  - TEMPORAL's sky mode reads binding 29 (readonly) and treats the jump word as commit 5's jump frame: in rs_event_cap_history,
+    after the gates.z cap, m = min(m, jump_m_cap) when the word is set. That function runs under F_EVENTS only, and jump_m_cap
+    comes from the event UBO, so the sky jump caps M only with gi/event_reshade on (design 8.1: jump frames are "with
+    gi/event_reshade"). With events off the epoch is still followed and counted and nothing is capped. The jump cap is TEMPORAL
+    only (commit 5), so the sky jump doesn't reach SPATIAL.
+  - capped counts the jumps that lowered the cap: the epoch pass adds 1 at a jump when F_EVENTS is set, the CPU jump word
+    (gates.z) is clear (otherwise that frame was capped already) and jump_m_cap (counts.w) < m_temporal_cap (otherwise the min
+    changes nothing). restir_sky_jump_caps is the CPU mirror of that test. It counts frames where the cap applied, not pixels
+    whose M went down.
+  - Not carried over from the CPU jump frame, because the CPU learns of a sky jump only through a readback: VALIDATE "all" at
+    jump_m_cap > 0 (it runs before the epoch pass, and it re-shades non-sky samples, which carry no sky Lo), and the SPATIAL hold's
+    clear on a jump frame. Status jump_frame stays the CPU's jump.
+- One sky per frame. run_frame takes the sky texture once from RestirGiInputs and binds that RID in the epoch pass, TEMPORAL,
+  SPATIAL and FINAL. The windowed sky refresh must not land between TEMPORAL and FINAL (design 2.9, memory
+  water-sky-refresh-windowed-only); the four passes are recorded back to back in one run_frame call, so a refresh could only land
+  between them from inside run_frame.
+- Switching is a history cut. A sky sample stored under the flag has Lo 0, and without the flag a history sample with p̂ 0
+  still counts its M in the combine (rs_fill_neighbour leaves it on, rs_combine adds its M to total_m), which would divide the
+  fresh sample's W by 1 + M and darken every sky-facing pixel for several frames. So resample cuts the history whenever the
+  effective flag differs from the last frame's (RestirGiState::sky_reread): the setting toggled, the shading inputs or DDGI UBO
+  gone or back, or the sky modes unavailable. The cut goes through the epoch planner's backend test (hardware_changed or the
+  flag changed), so cut_counts files it under RESTIR_CUT_BACKEND; sky_reread_cuts counts the ones the flag caused (backend cut
+  with the hardware unchanged). The cut also clears F_HISTORY for that frame, so the epoch pass restarts the epoch at the
+  current luma, without a jump, when the flag comes back on.
+- Cost: one sky sample (textureLod at lod 2, as rs_sky_radiance) per sky technique evaluated in TEMPORAL and SPATIAL and one per
+  sky pixel with W > 0 in FINAL; the epoch pass is one 64-invocation group over the lowest mip; 32 bytes of buffer.
+- Status.
+  - sky_reread: "off" (setting off), "inactive" (setting on, no ray scene, shading inputs or DDGI UBO this frame), "unavailable"
+    (setting on, the frame's ray variant failed to build its sky modes), or "on"; the last view to run.
+  - sky_epochs, sky_jump_frames_total and sky_jump_capped_total: the epoch buffer's epochs, jumps and capped, summed over the
+    views. sky_reread_cuts_total: the history cuts the flag caused, summed over the views. All count over a view state's life,
+    not the backend's.
+  - The epoch counters are cached, never read in get_status: get_status is const, runs on whatever thread asks, and a
+    buffer_get_data there is legal only on the render thread and stalls the GPU queue even there. resample refreshes each
+    view's copy right after read_stats on frames with the readback test option on (options.readback), the frames that already
+    stall for the probe stats, so the 32-byte read adds no stall. sky_epoch_source is always "cached"; sky_epoch_frame is the
+    frame index of the newest refresh, -1 when there was none, and the three totals are 0 until a refresh. A lab that wants
+    them turns readback on for at least its last frame.
+- Identity with the setting off: sky_reread "off", bit 26 clear, no epoch buffer, no epoch pass and no history cut from the
+  flag, and the plain TEMPORAL and SPATIAL modes run from the first shader. The sky shader is still built when a ray variant is
+  first used; it isn't dispatched. The first shader's source changed only under #ifdef RS_SKY_REREAD, MODE_SKY_EPOCH and in
+  preprocessor guards for the TEMPORAL, SPATIAL, CLEAR, CAPTURE and PACK modes, so their SPIR-V should stay byte-identical to
+  eabba5d2a. FINAL and VALIDATE gained run-time tests of bit 26, so their SPIR-V changes and their output must not. SOURCE keeps
+  its declarations and order through the set 2 restructure. No core shader changed, so every DDGI, RTGI and direct-shadow
+  variant stays byte-identical.

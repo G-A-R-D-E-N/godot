@@ -174,6 +174,34 @@ bool restir_event_holds(const RestirEventsUBO &p_ubo, const Vector3 &p_sample) {
 	return false;
 }
 
+bool restir_sky_jump_caps(bool p_events, uint32_t p_event_jump, uint32_t p_jump_m_cap, uint32_t p_m_temporal_cap) {
+	return p_events && p_event_jump == 0u && p_jump_m_cap < p_m_temporal_cap;
+}
+
+bool restir_sky_epoch_step(RestirSkyEpoch &r_epoch, float p_luma, bool p_history, bool p_jump_caps) {
+	r_epoch.jump = 0;
+	if (Math::is_nan(p_luma) || Math::is_inf(p_luma)) {
+		return false;
+	}
+	if (r_epoch.epochs == 0u || !p_history) {
+		r_epoch.luma = p_luma;
+		r_epoch.epochs++;
+		return false;
+	}
+	const float epoch = r_epoch.luma;
+	if (p_luma < RESTIR_SKY_EPOCH_LOW * epoch || p_luma > RESTIR_SKY_EPOCH_HIGH * epoch) {
+		r_epoch.jump = 1;
+		r_epoch.luma = p_luma;
+		r_epoch.epochs++;
+		r_epoch.jumps++;
+		if (p_jump_caps) {
+			r_epoch.capped++;
+		}
+		return true;
+	}
+	return false;
+}
+
 uint32_t restir_event_bin(float p_key) {
 	if (!(p_key > 0.0f)) {
 		return 0;

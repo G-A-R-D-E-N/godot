@@ -430,4 +430,118 @@ TEST_CASE("[RestirEvents] Hold caps by reach and solid angle like the event test
 	}
 }
 
+RestirSkyEpoch sky_epoch_at(float p_luma) {
+	RestirSkyEpoch epoch;
+	restir_sky_epoch_step(epoch, p_luma, true);
+	return epoch;
+}
+
+TEST_CASE("[RestirEvents] Sky epoch starts on the first frame without a jump") {
+	RestirSkyEpoch epoch;
+	CHECK_FALSE(restir_sky_epoch_step(epoch, 3.0f, true));
+	CHECK(epoch.luma == 3.0f);
+	CHECK(epoch.epochs == 1u);
+	CHECK(epoch.jump == 0u);
+	CHECK(epoch.jumps == 0u);
+	RestirSkyEpoch dark;
+	CHECK_FALSE(restir_sky_epoch_step(dark, 0.0f, false));
+	CHECK(dark.epochs == 1u);
+	CHECK(dark.luma == 0.0f);
+}
+
+TEST_CASE("[RestirEvents] Sky epoch keeps its luma inside the band, edges included") {
+	const float inside[] = { 1.0f, 0.8f, 1.25f, 0.9f, 1.2f, 0.81f, 1.249f };
+	for (float ratio : inside) {
+		RestirSkyEpoch epoch = sky_epoch_at(1.0f);
+		CHECK_FALSE(restir_sky_epoch_step(epoch, ratio, true));
+		CHECK(epoch.luma == 1.0f);
+		CHECK(epoch.epochs == 1u);
+		CHECK(epoch.jump == 0u);
+		CHECK(epoch.jumps == 0u);
+	}
+	RestirSkyEpoch scaled = sky_epoch_at(2.0f);
+	CHECK_FALSE(restir_sky_epoch_step(scaled, 1.6f, true));
+	CHECK_FALSE(restir_sky_epoch_step(scaled, 2.5f, true));
+	CHECK(scaled.luma == 2.0f);
+}
+
+TEST_CASE("[RestirEvents] Sky epoch jumps outside the band and starts a new epoch") {
+	RestirSkyEpoch low = sky_epoch_at(1.0f);
+	CHECK(restir_sky_epoch_step(low, 0.79f, true));
+	CHECK(low.jump == 1u);
+	CHECK(low.luma == 0.79f);
+	CHECK(low.epochs == 2u);
+	CHECK(low.jumps == 1u);
+	CHECK_FALSE(restir_sky_epoch_step(low, 0.79f, true));
+	CHECK(low.jump == 0u);
+	CHECK(low.epochs == 2u);
+	RestirSkyEpoch high = sky_epoch_at(1.0f);
+	CHECK(restir_sky_epoch_step(high, 1.26f, true));
+	CHECK(high.jump == 1u);
+	CHECK(high.luma == 1.26f);
+	CHECK(high.jumps == 1u);
+}
+
+TEST_CASE("[RestirEvents] Sky epoch measures each jump from the new epoch, not the first") {
+	RestirSkyEpoch epoch = sky_epoch_at(1.0f);
+	CHECK_FALSE(restir_sky_epoch_step(epoch, 1.2f, true));
+	CHECK_FALSE(restir_sky_epoch_step(epoch, 1.24f, true));
+	CHECK(restir_sky_epoch_step(epoch, 1.3f, true));
+	CHECK(epoch.luma == 1.3f);
+	CHECK_FALSE(restir_sky_epoch_step(epoch, 1.6f, true));
+	CHECK(restir_sky_epoch_step(epoch, 1.7f, true));
+	CHECK(epoch.epochs == 3u);
+	CHECK(epoch.jumps == 2u);
+}
+
+TEST_CASE("[RestirEvents] Sky epoch restarts on a cut without a jump") {
+	RestirSkyEpoch epoch = sky_epoch_at(1.0f);
+	CHECK_FALSE(restir_sky_epoch_step(epoch, 5.0f, false));
+	CHECK(epoch.jump == 0u);
+	CHECK(epoch.luma == 5.0f);
+	CHECK(epoch.epochs == 2u);
+	CHECK(epoch.jumps == 0u);
+	CHECK_FALSE(restir_sky_epoch_step(epoch, 4.5f, true));
+	CHECK(restir_sky_epoch_step(epoch, 1.0f, true));
+	epoch.jump = 1;
+	CHECK_FALSE(restir_sky_epoch_step(epoch, 1.0f, false));
+	CHECK(epoch.jump == 0u);
+}
+
+TEST_CASE("[RestirEvents] Sky epoch from a black sky jumps on any light and skips a non-finite luma") {
+	RestirSkyEpoch epoch = sky_epoch_at(0.0f);
+	CHECK_FALSE(restir_sky_epoch_step(epoch, 0.0f, true));
+	CHECK(restir_sky_epoch_step(epoch, 1e-6f, true));
+	CHECK(epoch.luma == 1e-6f);
+	epoch.jump = 1;
+	CHECK_FALSE(restir_sky_epoch_step(epoch, float(Math::NaN), true));
+	CHECK_FALSE(restir_sky_epoch_step(epoch, float(Math::INF), true));
+	CHECK(epoch.jump == 0u);
+	CHECK(epoch.luma == 1e-6f);
+	CHECK(epoch.epochs == 2u);
+	RestirSkyEpoch none;
+	CHECK_FALSE(restir_sky_epoch_step(none, float(Math::NaN), true));
+	CHECK(none.epochs == 0u);
+}
+
+TEST_CASE("[RestirEvents] Sky jump counts as capped only when the event cap is on, not already applied and below the temporal cap") {
+	CHECK(restir_sky_jump_caps(true, 0u, 4u, 20u));
+	CHECK(restir_sky_jump_caps(true, 0u, 0u, 20u));
+	CHECK_FALSE(restir_sky_jump_caps(false, 0u, 4u, 20u));
+	CHECK_FALSE(restir_sky_jump_caps(true, 1u, 4u, 20u));
+	CHECK_FALSE(restir_sky_jump_caps(true, 0u, 20u, 20u));
+	CHECK_FALSE(restir_sky_jump_caps(true, 0u, 32u, 20u));
+	RestirSkyEpoch epoch = sky_epoch_at(1.0f);
+	CHECK_FALSE(restir_sky_epoch_step(epoch, 1.1f, true, true));
+	CHECK(epoch.capped == 0u);
+	CHECK(restir_sky_epoch_step(epoch, 2.0f, true, false));
+	CHECK(epoch.jumps == 1u);
+	CHECK(epoch.capped == 0u);
+	CHECK(restir_sky_epoch_step(epoch, 4.0f, true, true));
+	CHECK(epoch.jumps == 2u);
+	CHECK(epoch.capped == 1u);
+	CHECK_FALSE(restir_sky_epoch_step(epoch, 9.0f, false, true));
+	CHECK(epoch.capped == 1u);
+}
+
 }

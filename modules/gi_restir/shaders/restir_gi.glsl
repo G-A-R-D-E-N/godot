@@ -8,6 +8,10 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
+#ifdef MODE_SKY_EPOCH
+#undef RESTIR_RAYS
+#endif
+
 #ifdef RESTIR_RAYS
 #if defined(MODE_FINAL) || defined(MODE_SOURCE) || defined(MODE_VALIDATE)
 #define RAY_SCENE_REPLAY
@@ -19,13 +23,22 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 #if defined(RESTIR_RAYS) && (defined(MODE_FINAL) || defined(MODE_SOURCE) || defined(MODE_VALIDATE))
 #define RESTIR_SHADE
+#endif
+
+#if defined(RESTIR_RAYS) && defined(SKY_REREAD) && (defined(MODE_TEMPORAL) || defined(MODE_SPATIAL))
+#define RS_SKY_REREAD
+#endif
+
+#if defined(RESTIR_SHADE) || defined(RS_SKY_REREAD)
 #define DDGI_SET 2
 #define DDGI_UBO_BINDING 0
+#ifdef RESTIR_SHADE
 #define DDGI_SAMPLING
 layout(set = 2, binding = 3) uniform utexture2DArray ddgi_probe_texture;
 layout(set = 2, binding = 4) uniform texture2DArray ddgi_irradiance_texture;
 layout(set = 2, binding = 5) uniform texture2DArray ddgi_distance_texture;
 layout(set = 2, binding = 6) uniform sampler ddgi_linear_sampler;
+#endif
 #ifdef USE_RADIANCE_OCTMAP_ARRAY
 layout(set = 2, binding = 7) uniform texture2DArray sky_radiance;
 #else
@@ -56,11 +69,13 @@ void rs_shade_setup() {
 }
 #endif
 
-#ifdef RESTIR_SHADE
+#if defined(RESTIR_SHADE) || defined(RS_SKY_REREAD) || defined(MODE_SKY_EPOCH)
 #define RS_SKY_COLOR 1u
 #define RS_SKY_SKY 2u
 #define RS_SKY_SIGN 4u
+#endif
 
+#if defined(RESTIR_SHADE) || defined(RS_SKY_REREAD)
 vec3 rs_sky_radiance(vec3 p_direction) {
 	if ((rf.flags & F_REAL_SKY) == 0u) {
 		return min(rf.test_sky.xyz, vec3(RS_LO_CLAMP));
@@ -194,6 +209,12 @@ void rs_fill_neighbour(Reservoir p_sample, float p_m, bool p_usable, uint p_dead
 		g_stats[PS_ZERO_WEIGHT] += 1.0;
 		return;
 	}
+#ifdef RS_SKY_REREAD
+	if (rs_is_sky(p_sample)) {
+		p_sample.lo = rs_sky_radiance(normalize(p_sample.xs));
+		r_cand.s = p_sample;
+	}
+#endif
 	uint reason;
 	uint kind;
 	float jac = rs_shift_jacobian(p_sample, p_q.origin, p_r.origin, reason, kind);
@@ -316,6 +337,9 @@ Reservoir rs_from_candidate(ivec2 p_pixel, Receiver p_r) {
 		res.flags |= RF_SKY;
 		res.xs = normalize(uintBitsToFloat(first.xyz));
 		res.ns = vec3(0.0, 0.0, 1.0);
+#ifdef RS_SKY_REREAD
+		res.lo = rs_sky_radiance(normalize(res.xs));
+#endif
 	} else {
 		res.xs = uintBitsToFloat(first.xyz);
 		res.ns = rtgi_unpack_normal(first.w);
@@ -355,6 +379,11 @@ float rs_event_cap_history(Receiver p_r, Receiver p_q, Reservoir p_h, float p_m)
 	if (ev.gates.z != 0u) {
 		m = min(m, float(ev.counts.w));
 	}
+#ifdef RS_SKY_REREAD
+	if (sky_epoch.jump != 0u) {
+		m = min(m, float(ev.counts.w));
+	}
+#endif
 	return m;
 }
 
@@ -647,6 +676,11 @@ void rs_spatial_pixel(ivec2 px) {
 		return;
 	}
 	Reservoir own = rs_load(px);
+#ifdef RS_SKY_REREAD
+	if (own.m > 0u && (own.flags & RF_VALID) != 0u && rs_is_sky(own)) {
+		own.lo = rs_sky_radiance(normalize(own.xs));
+	}
+#endif
 	bool event_capped = (rf.flags & F_EVENTS) != 0u && rs_event_caps(r.pos);
 	bool hold_on = (rf.flags & F_SPATIAL_HOLD) != 0u;
 	bool hold_capped = hold_on && rs_hold_caps(r.pos);
@@ -897,6 +931,12 @@ void main() {
 			bool visible = true;
 			bool tested = false;
 			vec3 lo = s.lo;
+#ifdef RESTIR_SHADE
+			bool sky_reread = has && (rf.flags & F_SKY_REREAD) != 0u && rs_is_sky(s);
+			if (sky_reread) {
+				lo = rs_sky_radiance(normalize(s.xs));
+			}
+#endif
 			if (has && (rf.flags & F_VIS) != 0u) {
 				tested = true;
 #ifdef RESTIR_RAYS
@@ -917,7 +957,7 @@ void main() {
 					}
 				} else {
 					visible = rs_visible(r.origin, s);
-					if (visible && (rf.flags & F_FRESH_LO) != 0u) {
+					if (visible && (rf.flags & F_FRESH_LO) != 0u && !sky_reread) {
 						lo = rs_sky_radiance(normalize(s.xs));
 					}
 				}
@@ -1154,6 +1194,98 @@ void main() {
 
 #endif
 
+#ifdef MODE_SKY_EPOCH
+
+#define RS_SKY_EPOCH_LOW 0.8
+#define RS_SKY_EPOCH_HIGH 1.25
+#define RS_SKY_EPOCH_SPAN 64
+
+shared float rs_epoch_sum[RS_SKY_EPOCH_SPAN];
+shared uint rs_epoch_count[RS_SKY_EPOCH_SPAN];
+
+float rs_sky_flat_luma() {
+	if ((rf.flags & F_REAL_SKY) == 0u) {
+		return rs_luma(min(rf.test_sky.xyz, vec3(RS_LO_CLAMP)));
+	}
+	if ((rf.shade_sky_flags & RS_SKY_COLOR) != 0u) {
+		return rs_luma(min(rf.shade_sky * rf.shade_sky_energy, vec3(RS_LO_CLAMP)));
+	}
+	return 0.0;
+}
+
+void rs_sky_row_luma(uint p_row, out float r_sum, out uint r_count) {
+	r_sum = 0.0;
+	r_count = 0u;
+#ifdef USE_RADIANCE_OCTMAP_ARRAY
+	int lod = textureQueryLevels(sampler2DArray(epoch_sky, epoch_sampler)) - 1;
+	ivec2 size = textureSize(sampler2DArray(epoch_sky, epoch_sampler), lod).xy;
+#else
+	int lod = textureQueryLevels(sampler2D(epoch_sky, epoch_sampler)) - 1;
+	ivec2 size = textureSize(sampler2D(epoch_sky, epoch_sampler), lod);
+#endif
+	ivec2 stride = max((size + (RS_SKY_EPOCH_SPAN - 1)) / RS_SKY_EPOCH_SPAN, ivec2(1));
+	int y = int(p_row) * stride.y;
+	if (y >= size.y) {
+		return;
+	}
+	for (int x = 0; x < size.x; x += stride.x) {
+#ifdef USE_RADIANCE_OCTMAP_ARRAY
+		vec3 texel = texelFetch(sampler2DArray(epoch_sky, epoch_sampler), ivec3(x, y, 0), lod).rgb;
+#else
+		vec3 texel = texelFetch(sampler2D(epoch_sky, epoch_sampler), ivec2(x, y), lod).rgb;
+#endif
+		r_sum += rs_luma(min(texel * rf.shade_sky_energy, vec3(RS_LO_CLAMP)));
+		r_count += 1u;
+	}
+}
+
+void main() {
+	uint lid = gl_LocalInvocationIndex;
+	bool texture_sky = (rf.flags & F_REAL_SKY) != 0u && (rf.shade_sky_flags & RS_SKY_SKY) != 0u;
+	float row_sum = 0.0;
+	uint row_count = 0u;
+	if (texture_sky) {
+		rs_sky_row_luma(lid, row_sum, row_count);
+	}
+	rs_epoch_sum[lid] = row_sum;
+	rs_epoch_count[lid] = row_count;
+	memoryBarrierShared();
+	barrier();
+	for (uint half_span = uint(RS_SKY_EPOCH_SPAN) / 2u; half_span > 0u; half_span >>= 1u) {
+		if (lid < half_span) {
+			rs_epoch_sum[lid] += rs_epoch_sum[lid + half_span];
+			rs_epoch_count[lid] += rs_epoch_count[lid + half_span];
+		}
+		memoryBarrierShared();
+		barrier();
+	}
+	if (lid != 0u) {
+		return;
+	}
+	float luma = texture_sky ? (rs_epoch_count[0] > 0u ? rs_epoch_sum[0] / float(rs_epoch_count[0]) : 0.0) : rs_sky_flat_luma();
+	sky_epoch.jump = 0u;
+	if (isnan(luma) || isinf(luma)) {
+		return;
+	}
+	if (sky_epoch.epochs == 0u || (rf.flags & F_HISTORY) == 0u) {
+		sky_epoch.luma = luma;
+		sky_epoch.epochs += 1u;
+		return;
+	}
+	float epoch = sky_epoch.luma;
+	if (luma < RS_SKY_EPOCH_LOW * epoch || luma > RS_SKY_EPOCH_HIGH * epoch) {
+		sky_epoch.jump = 1u;
+		sky_epoch.luma = luma;
+		sky_epoch.epochs += 1u;
+		sky_epoch.jumps += 1u;
+		if ((rf.flags & F_EVENTS) != 0u && ev.gates.z == 0u && ev.counts.w < rf.m_temporal_cap) {
+			sky_epoch.capped += 1u;
+		}
+	}
+}
+
+#endif
+
 #ifdef MODE_VALIDATE
 
 #if defined(RESTIR_RAYS) && defined(RESTIR_SHADE)
@@ -1315,6 +1447,9 @@ void rs_validate_pixel(ivec2 px) {
 	bool landed = false;
 	if (rs_is_sky(h)) {
 		landed = rs_visible(q.origin, h);
+		if (landed && (rf.flags & F_SKY_REREAD) != 0u) {
+			return;
+		}
 		if (landed) {
 			fresh = rs_sky_radiance(normalize(h.xs));
 		}

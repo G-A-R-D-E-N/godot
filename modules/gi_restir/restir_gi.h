@@ -55,6 +55,10 @@ struct RestirGiState {
 	uint32_t history_cuts = 0;
 	uint32_t reval_frames = 0;
 	RestirHoldRing hold;
+	bool sky_reread = false;
+	uint32_t sky_reread_cuts = 0;
+	RestirSkyEpoch sky_epoch;
+	int64_t sky_epoch_frame = -1;
 };
 
 struct RestirGiSummary {
@@ -96,6 +100,7 @@ struct RestirGiSummary {
 	uint32_t hold_frames = 0;
 	uint32_t hold_fill = 0;
 	RestirHoldUpdate hold_update;
+	String sky_reread = "off";
 };
 
 class RestirGiBackend : public RendererRD::RtgiResampleBackend {

@@ -118,6 +118,8 @@ static const RestirSetting restir_table[] = {
 			"Experimental. ReSTIR GI light events: uncapped keeps each first-fire sphere for gi/spatial_hold_frames frames, and in the spatial pass a receiver capped by a kept sphere caps every neighbour no kept sphere caps, at gi/event_m_cap. Off caps neighbours on the event frame only. Has no effect while gi/event_reshade is off." },
 	{ Variant::INT, "gi/spatial_hold_frames", PROPERTY_HINT_RANGE, "1,256,1", 40, "", false,
 			"Experimental. ReSTIR GI light events: frames a first-fire sphere stays in the spatial hold, counted from its event frame." },
+	{ Variant::BOOL, "gi/sky_reread", PROPERTY_HINT_NONE, "", 0, "", false,
+			"Experimental. ReSTIR GI sky samples take their target weight and radiance from the live sky in the temporal, spatial and final passes instead of a stored radiance, and a sky epoch caps every receiver like a sun jump when the mean sky brightness leaves 0.8 to 1.25 times its value at the epoch's start (the cap needs gi/event_reshade). Needs the DDGI shading inputs; without them it has no effect. A change in whether it applies cuts the history." },
 	{ Variant::BOOL, "gi/own_sampler", PROPERTY_HINT_NONE, "", 0, "", false,
 			"Experimental. ReSTIR GI uses the module's own initial sampler instead of the RTGI candidates (interim)." },
 	{ Variant::BOOL, "gi/deterministic", PROPERTY_HINT_NONE, "", 0, "", true,

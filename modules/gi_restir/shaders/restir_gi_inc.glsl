@@ -32,6 +32,7 @@
 #define F_REPLAY 8388608u
 #define F_EVENTS 16777216u
 #define F_SPATIAL_HOLD 33554432u
+#define F_SKY_REREAD 67108864u
 
 #define REJ_NONE 0u
 #define REJ_FRAME 1u
@@ -225,7 +226,7 @@ layout(rgba32ui, set = 0, binding = 8) uniform restrict uimage2DArray res_io;
 layout(rg32ui, set = 0, binding = 25) uniform restrict writeonly uimage2DArray sel_image;
 #endif
 
-#if defined(MODE_TEMPORAL) || defined(MODE_SPATIAL) || defined(MODE_VALIDATE)
+#if defined(MODE_TEMPORAL) || defined(MODE_SPATIAL) || defined(MODE_VALIDATE) || defined(MODE_SKY_EPOCH)
 layout(set = 0, binding = 26, std140) uniform RestirEvents {
 	uvec4 counts;
 	vec4 params;
@@ -294,6 +295,40 @@ bool rs_event_holds(vec3 p_sample) {
 	}
 	return false;
 }
+#endif
+
+#if defined(MODE_TEMPORAL) && defined(RS_SKY_REREAD)
+layout(set = 0, binding = 29, std430) restrict readonly buffer RestirSkyEpoch {
+	float luma;
+	uint epochs;
+	uint jump;
+	uint jumps;
+	uint capped;
+	uint spare0;
+	uint spare1;
+	uint spare2;
+}
+sky_epoch;
+#endif
+
+#ifdef MODE_SKY_EPOCH
+layout(set = 0, binding = 29, std430) restrict buffer RestirSkyEpoch {
+	float luma;
+	uint epochs;
+	uint jump;
+	uint jumps;
+	uint capped;
+	uint spare0;
+	uint spare1;
+	uint spare2;
+}
+sky_epoch;
+#ifdef USE_RADIANCE_OCTMAP_ARRAY
+layout(set = 0, binding = 30) uniform texture2DArray epoch_sky;
+#else
+layout(set = 0, binding = 30) uniform texture2D epoch_sky;
+#endif
+layout(set = 0, binding = 31) uniform sampler epoch_sampler;
 #endif
 
 #ifdef MODE_VALIDATE
@@ -493,6 +528,11 @@ Reservoir rs_load(ivec2 p_pixel) {
 
 #if defined(MODE_CLEAR) || defined(MODE_TEMPORAL) || defined(MODE_SPATIAL)
 void rs_store(ivec2 p_pixel, Reservoir r) {
+#ifdef RS_SKY_REREAD
+	if ((r.flags & RF_SKY) != 0u) {
+		r.lo = vec3(0.0);
+	}
+#endif
 	uint lo_b = packHalf2x16(vec2(r.lo.b, 0.0)) & 0xFFFFu;
 	imageStore(res_out, ivec3(p_pixel, 0), uvec4(floatBitsToUint(r.xs.x), floatBitsToUint(r.xs.y), floatBitsToUint(r.xs.z), rtgi_pack_normal(r.ns)));
 	imageStore(res_out, ivec3(p_pixel, 1), uvec4(packHalf2x16(r.lo.rg), lo_b | (r.flags << 16u), floatBitsToUint(r.w), (r.m & 0xFFFFu) | (r.age << 16u)));

@@ -207,7 +207,7 @@ void RestirGiResources::free_all() {
 			reservoir[i] = RID();
 		}
 	}
-	RID *singles[] = { &vis_state, &info, &radiance, &coverage, &debug, &debug_dummy, &stats, &pass_stats, &sel_image, &sel_dummy, &count_ubo, &event_ubo, &event_bins };
+	RID *singles[] = { &vis_state, &info, &radiance, &coverage, &debug, &debug_dummy, &stats, &pass_stats, &sel_image, &sel_dummy, &count_ubo, &event_ubo, &event_bins, &sky_epoch };
 	for (RID *rid : singles) {
 		if (rid->is_valid()) {
 			rd->free_rid(*rid);
@@ -268,33 +268,59 @@ bool RestirGiCore::_ensure(Variant p_variant) {
 	modes.push_back("\n#define MODE_SPATIAL\n#define SPATIAL_WIDE\n");
 	modes.push_back("\n#define MODE_SPATIAL\n#define PASS_SPATIAL_COMPAT\n#define SPATIAL_WIDE\n");
 	modes.push_back("\n#define MODE_VALIDATE\n");
-	shaders[p_variant].initialize(modes, _defines(p_variant));
-	versions[p_variant] = shaders[p_variant].version_create();
-	bool ok = p_variant != VARIANT_HW || shaders[p_variant].version_is_valid(versions[p_variant]);
-	for (int i = 0; ok && i < PASS_MAX; i++) {
-		RID shader_rid = shaders[p_variant].version_get_shader(versions[p_variant], i);
+	valid[p_variant] = _compile(shaders[p_variant], versions[p_variant], modes, p_variant, 0);
+	if (!valid[p_variant] || p_variant == VARIANT_NONE) {
+		return valid[p_variant];
+	}
+	Vector<String> sky_modes;
+	sky_modes.push_back("\n#define MODE_TEMPORAL\n#define SKY_REREAD\n");
+	sky_modes.push_back("\n#define MODE_SPATIAL\n#define SKY_REREAD\n");
+	sky_modes.push_back("\n#define MODE_SPATIAL\n#define PASS_SPATIAL_COMPAT\n#define SKY_REREAD\n");
+	sky_modes.push_back("\n#define MODE_SPATIAL\n#define SPATIAL_WIDE\n#define SKY_REREAD\n");
+	sky_modes.push_back("\n#define MODE_SPATIAL\n#define PASS_SPATIAL_COMPAT\n#define SPATIAL_WIDE\n#define SKY_REREAD\n");
+	sky_modes.push_back("\n#define MODE_SKY_EPOCH\n");
+	sky_valid[p_variant] = _compile(sky_shaders[p_variant], sky_versions[p_variant], sky_modes, p_variant, PASS_SKY_FIRST);
+	return true;
+}
+
+bool RestirGiCore::_compile(RestirGiShaderRD &r_shader, RID &r_version, const Vector<String> &p_modes, Variant p_variant, int p_first_pass) {
+	r_shader.initialize(p_modes, _defines(p_variant));
+	r_version = r_shader.version_create();
+	bool ok = p_variant != VARIANT_HW || r_shader.version_is_valid(r_version);
+	for (int i = 0; ok && i < p_modes.size(); i++) {
+		RID shader_rid = r_shader.version_get_shader(r_version, i);
 		if (shader_rid.is_null()) {
 			ok = false;
 			continue;
 		}
-		pipelines[p_variant][i].create_compute_pipeline(shader_rid);
-		if (p_variant == VARIANT_HW && !pipelines[p_variant][i].get_rid().is_valid()) {
+		pipelines[p_variant][p_first_pass + i].create_compute_pipeline(shader_rid);
+		if (p_variant == VARIANT_HW && !pipelines[p_variant][p_first_pass + i].get_rid().is_valid()) {
 			ok = false;
 		}
 	}
 	if (!ok) {
-		for (int i = 0; i < PASS_MAX; i++) {
-			pipelines[p_variant][i].free();
+		for (int i = 0; i < p_modes.size(); i++) {
+			pipelines[p_variant][p_first_pass + i].free();
 		}
-		shaders[p_variant].version_free(versions[p_variant]);
-		versions[p_variant] = RID();
+		r_shader.version_free(r_version);
+		r_version = RID();
 	}
-	valid[p_variant] = ok;
 	return ok;
+}
+
+RID RestirGiCore::_shader_rid(Variant p_variant, PassMode p_mode) {
+	if (p_mode >= PASS_SKY_FIRST) {
+		return sky_shaders[p_variant].version_get_shader(sky_versions[p_variant], p_mode - PASS_SKY_FIRST);
+	}
+	return shaders[p_variant].version_get_shader(versions[p_variant], p_mode);
 }
 
 bool RestirGiCore::is_variant_valid(Variant p_variant) {
 	return _ensure(p_variant);
+}
+
+bool RestirGiCore::is_sky_valid(Variant p_variant) {
+	return _ensure(p_variant) && sky_valid[p_variant];
 }
 
 void RestirGiCore::free() {
@@ -316,8 +342,13 @@ void RestirGiCore::free() {
 			shaders[v].version_free(versions[v]);
 			versions[v] = RID();
 		}
+		if (sky_versions[v].is_valid()) {
+			sky_shaders[v].version_free(sky_versions[v]);
+			sky_versions[v] = RID();
+		}
 		initialized[v] = false;
 		valid[v] = false;
+		sky_valid[v] = false;
 	}
 }
 
@@ -348,7 +379,7 @@ void RestirGiCore::_upload(RID p_ubo, const RestirFrameParams &p, uint32_t p_pas
 	u.trace_size[1] = p.trace_size.y;
 	u.frame = p.frame_index;
 	u.seed = p.seed;
-	u.flags = (p.flags & ~uint32_t(RESTIR_F_KEEP_M)) | (p.mode == RESTIR_MODE_U1 ? RESTIR_F_UNBIASED : 0u) | ((p.mode == RESTIR_MODE_B2 || p.mode == RESTIR_MODE_B2K) ? RESTIR_F_VIS_REUSE : 0u) | (p.mode == RESTIR_MODE_B2K ? RESTIR_F_KEEP_M : 0u);
+	u.flags = (p.flags & ~uint32_t(RESTIR_F_KEEP_M | RESTIR_F_SKY_REREAD)) | (p.mode == RESTIR_MODE_U1 ? RESTIR_F_UNBIASED : 0u) | ((p.mode == RESTIR_MODE_B2 || p.mode == RESTIR_MODE_B2K) ? RESTIR_F_VIS_REUSE : 0u) | (p.mode == RESTIR_MODE_B2K ? RESTIR_F_KEEP_M : 0u) | (p.sky_reread ? RESTIR_F_SKY_REREAD : 0u);
 	if (p.compat) {
 		u.flags |= RESTIR_F_COMPAT | (p.compat_gate == RESTIR_GATE_NONE ? RESTIR_F_COMPAT_NONE : 0u) | (p.compat_gate == RESTIR_GATE_BINARY ? RESTIR_F_COMPAT_BINARY : 0u) | (p.compat_early_stop ? RESTIR_F_COMPAT_STOP : 0u);
 	}
@@ -395,6 +426,13 @@ void RestirGiCore::_upload(RID p_ubo, const RestirFrameParams &p, uint32_t p_pas
 	RD::get_singleton()->buffer_update(p_ubo, 0, sizeof(RestirFrameUBO), &u);
 }
 
+RID RestirGiCore::_sky_texture(const RestirGiInputs &p_inputs) const {
+	if (p_inputs.sky_texture.is_valid()) {
+		return p_inputs.sky_texture;
+	}
+	return TextureStorage::get_singleton()->texture_rd_get_default(octmap_array ? TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_WHITE : TextureStorage::DEFAULT_RD_TEXTURE_WHITE);
+}
+
 void RestirGiCore::_bind_shade(RID p_shader, RD::ComputeListID p_list, const RestirGiInputs &p_inputs) {
 	RD *rd = RD::get_singleton();
 	if (dummy_ubo.is_null()) {
@@ -406,10 +444,7 @@ void RestirGiCore::_bind_shade(RID p_shader, RD::ComputeListID p_list, const Res
 		dummy_float = _create_texture(RD::DATA_FORMAT_R16G16B16A16_SFLOAT, Size2i(1, 1), RD::TEXTURE_TYPE_2D_ARRAY, 1);
 	}
 	const bool real = p_inputs.ddgi_ubo.is_valid() && p_inputs.ddgi_probe_data.is_valid() && p_inputs.ddgi_irradiance.is_valid() && p_inputs.ddgi_distance.is_valid();
-	RID sky = p_inputs.sky_texture;
-	if (sky.is_null()) {
-		sky = TextureStorage::get_singleton()->texture_rd_get_default(octmap_array ? TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_WHITE : TextureStorage::DEFAULT_RD_TEXTURE_WHITE);
-	}
+	const RID sky = _sky_texture(p_inputs);
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
 	LocalVector<RD::Uniform> set2;
 	set2.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, real ? p_inputs.ddgi_ubo : dummy_ubo));
@@ -424,28 +459,46 @@ void RestirGiCore::_bind_shade(RID p_shader, RD::ComputeListID p_list, const Res
 
 void RestirGiCore::_dispatch(Variant p_variant, PassMode p_mode, RID p_ubo, const LocalVector<RD::Uniform> &p_set0, const RestirGiInputs &p_inputs, const Size2i &p_size) {
 	UniformSetCacheRD *cache = UniformSetCacheRD::get_singleton();
-	RID shader_rid = shaders[p_variant].version_get_shader(versions[p_variant], p_mode);
+	RID shader_rid = _shader_rid(p_variant, p_mode);
 	LocalVector<RD::Uniform> set0;
 	set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, p_ubo));
 	for (const RD::Uniform &uniform : p_set0) {
 		set0.push_back(uniform);
 	}
 	RD *rd = RD::get_singleton();
-	static const char *const marker_names[PASS_MAX] = { "ReSTIR Clear", "ReSTIR Temporal", "ReSTIR Spatial", "ReSTIR Final", "ReSTIR Source", "ReSTIR Capture", "ReSTIR Spatial", "ReSTIR Pack", "ReSTIR Spatial", "ReSTIR Spatial", "ReSTIR Validate" };
+	static const char *const marker_names[PASS_MAX] = { "ReSTIR Clear", "ReSTIR Temporal", "ReSTIR Spatial", "ReSTIR Final", "ReSTIR Source", "ReSTIR Capture", "ReSTIR Spatial", "ReSTIR Pack", "ReSTIR Spatial", "ReSTIR Spatial", "ReSTIR Validate", "ReSTIR Temporal", "ReSTIR Spatial", "ReSTIR Spatial", "ReSTIR Spatial", "ReSTIR Spatial", "ReSTIR Sky Epoch" };
 	RENDER_TIMESTAMP(marker_names[p_mode]);
 	RD::ComputeListID list = rd->compute_list_begin();
 	rd->compute_list_bind_compute_pipeline(list, pipelines[p_variant][p_mode].get_rid());
 	rd->compute_list_bind_uniform_set(list, cache->get_cache_vec(shader_rid, 0, set0), 0);
-	if (p_variant != VARIANT_NONE) {
+	if (p_variant != VARIANT_NONE && p_mode != PASS_SKY_EPOCH) {
 		LocalVector<RD::Uniform> set1;
 		p_inputs.ray_scene->append_uniforms(set1);
 		rd->compute_list_bind_uniform_set(list, cache->get_cache_vec(shader_rid, 1, set1), 1);
-		if (p_mode == PASS_FINAL || p_mode == PASS_SOURCE || p_mode == PASS_VALIDATE) {
+		const bool sky_pass = p_mode >= PASS_TEMPORAL_SKY && p_mode <= PASS_SPATIAL_COMPAT_WIDE_SKY;
+		if (p_mode == PASS_FINAL || p_mode == PASS_SOURCE || p_mode == PASS_VALIDATE || sky_pass) {
 			_bind_shade(shader_rid, list, p_inputs);
 		}
 	}
 	rd->compute_list_dispatch(list, uint32_t(Math::division_round_up(p_size.x, 8)), uint32_t(Math::division_round_up(p_size.y, 8)), 1);
 	rd->compute_list_end();
+}
+
+static RestirGiCore::PassMode _sky_twin(RestirGiCore::PassMode p_mode) {
+	switch (p_mode) {
+		case RestirGiCore::PASS_TEMPORAL:
+			return RestirGiCore::PASS_TEMPORAL_SKY;
+		case RestirGiCore::PASS_SPATIAL:
+			return RestirGiCore::PASS_SPATIAL_SKY;
+		case RestirGiCore::PASS_SPATIAL_COMPAT:
+			return RestirGiCore::PASS_SPATIAL_COMPAT_SKY;
+		case RestirGiCore::PASS_SPATIAL_WIDE:
+			return RestirGiCore::PASS_SPATIAL_WIDE_SKY;
+		case RestirGiCore::PASS_SPATIAL_COMPAT_WIDE:
+			return RestirGiCore::PASS_SPATIAL_COMPAT_WIDE_SKY;
+		default:
+			return p_mode;
+	}
 }
 
 static RestirGiCore::Variant _variant_for(const RestirGiInputs &p_inputs) {
@@ -532,6 +585,17 @@ void RestirGiCore::run_frame(RestirGiResources &r_resources, const RestirFramePa
 	if (!p_inputs.ddgi_ubo.is_valid()) {
 		params.flags &= ~(RESTIR_F_REAL_SKY | RESTIR_F_SHADE_DDGI);
 	}
+	const bool sky_reread = params.sky_reread && variant != VARIANT_NONE && p_inputs.ddgi_ubo.is_valid() && sky_valid[variant];
+	params.sky_reread = sky_reread;
+	if (sky_reread && r_resources.sky_epoch.is_null()) {
+		RD *rd = RD::get_singleton();
+		Vector<uint8_t> zeros;
+		zeros.resize(sizeof(RestirSkyEpoch));
+		zeros.fill(0);
+		const uint64_t before = rd->get_memory_usage(RD::MEMORY_BUFFERS);
+		r_resources.sky_epoch = rd->storage_buffer_create(sizeof(RestirSkyEpoch), zeros);
+		r_resources.alloc_log.push_back({ "sky_epoch", sizeof(RestirSkyEpoch), rd->get_memory_usage(RD::MEMORY_BUFFERS) - before, true });
+	}
 	if (params.compat && (params.flags & RESTIR_F_PROBE_STATS) != 0u && r_resources.sel_image.is_null()) {
 		r_resources.sel_image = _create_texture(RD::DATA_FORMAT_R32G32_UINT, r_resources.size, RD::TEXTURE_TYPE_2D_ARRAY, 2);
 	}
@@ -573,6 +637,14 @@ void RestirGiCore::run_frame(RestirGiResources &r_resources, const RestirFramePa
 		}
 		_dispatch(variant, PASS_VALIDATE, r_resources.ubo[0], set0, p_inputs, r_resources.size);
 	}
+	if (sky_reread) {
+		LocalVector<RD::Uniform> set0;
+		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 29, r_resources.sky_epoch));
+		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 30, _sky_texture(p_inputs)));
+		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER, 31, MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED)));
+		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 26, r_resources.event_ubo));
+		_dispatch(variant, PASS_SKY_EPOCH, r_resources.ubo[0], set0, p_inputs, Size2i(1, 1));
+	}
 	{
 		LocalVector<RD::Uniform> set0;
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 1, p_inputs.geo_position));
@@ -588,7 +660,10 @@ void RestirGiCore::run_frame(RestirGiResources &r_resources, const RestirFramePa
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 23, r_resources.pass_stats));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 24, r_resources.dirty_ubo));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 26, r_resources.event_ubo));
-		_dispatch(variant, PASS_TEMPORAL, r_resources.ubo[0], set0, p_inputs, r_resources.size);
+		if (sky_reread) {
+			set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 29, r_resources.sky_epoch));
+		}
+		_dispatch(variant, sky_reread ? PASS_TEMPORAL_SKY : PASS_TEMPORAL, r_resources.ubo[0], set0, p_inputs, r_resources.size);
 	}
 
 	const uint32_t passes = params.spatial_count > 0 ? CLAMP(params.spatial_passes, 1u, 2u) : 0u;
@@ -609,7 +684,7 @@ void RestirGiCore::run_frame(RestirGiResources &r_resources, const RestirFramePa
 		}
 		const bool wide = params.spatial_count > RESTIR_SPATIAL_SMALL_COUNT;
 		const PassMode spatial_pass = params.compat ? (wide ? PASS_SPATIAL_COMPAT_WIDE : PASS_SPATIAL_COMPAT) : (wide ? PASS_SPATIAL_WIDE : PASS_SPATIAL);
-		_dispatch(variant, spatial_pass, r_resources.ubo[1 + s], set0, p_inputs, r_resources.size);
+		_dispatch(variant, sky_reread ? _sky_twin(spatial_pass) : spatial_pass, r_resources.ubo[1 + s], set0, p_inputs, r_resources.size);
 	}
 	const uint32_t final_index = params.spatial_feedback ? ((hist ^ 1u) ^ (passes & 1u)) : (passes == 0u ? (hist ^ 1u) : (passes == 1u ? 2u : hist));
 
@@ -730,6 +805,18 @@ RestirFrameStats RestirGiCore::read_stats(const RestirGiResources &p_resources) 
 		}
 	}
 	return stats;
+}
+
+bool RestirGiCore::read_sky_epoch(const RestirGiResources &p_resources, RestirSkyEpoch &r_epoch) {
+	if (!p_resources.allocated || p_resources.sky_epoch.is_null()) {
+		return false;
+	}
+	const Vector<uint8_t> raw = RD::get_singleton()->buffer_get_data(p_resources.sky_epoch, 0, sizeof(RestirSkyEpoch));
+	if (size_t(raw.size()) < sizeof(RestirSkyEpoch)) {
+		return false;
+	}
+	r_epoch = *reinterpret_cast<const RestirSkyEpoch *>(raw.ptr());
+	return true;
 }
 
 Vector<uint8_t> RestirGiCore::read_selection(const RestirGiResources &p_resources) {

@@ -110,6 +110,20 @@ struct RestirHoldUpdate {
 	uint32_t dropped = 0;
 };
 
+static constexpr float RESTIR_SKY_EPOCH_LOW = 0.8f;
+static constexpr float RESTIR_SKY_EPOCH_HIGH = 1.25f;
+
+struct RestirSkyEpoch {
+	float luma = 0.0f;
+	uint32_t epochs = 0;
+	uint32_t jump = 0;
+	uint32_t jumps = 0;
+	uint32_t capped = 0;
+	uint32_t spare[3] = {};
+};
+
+static_assert(sizeof(RestirSkyEpoch) == 32, "RestirSkyEpoch must match the std430 block in restir_gi_inc.glsl");
+
 uint32_t restir_event_budget(uint32_t p_width, uint32_t p_height, uint32_t p_percent);
 bool restir_event_first_fire(uint32_t p_since_last, uint32_t p_quiet_frames);
 float restir_event_solid_angle(float p_reach, float p_distance);
@@ -122,3 +136,5 @@ void restir_hold_clear(RestirHoldRing &r_ring);
 RestirHoldUpdate restir_hold_update(RestirHoldRing &r_ring, const RestirEventSphere *p_spheres, uint32_t p_count, const Vector3 &p_anchor, uint32_t p_quiet_frames, uint32_t p_hold_frames);
 void restir_hold_pack(const RestirHoldRing &p_ring, const Vector3 &p_anchor, RestirEventsUBO &r_ubo);
 bool restir_hold_caps(const RestirEventsUBO &p_ubo, const Vector3 &p_position);
+bool restir_sky_jump_caps(bool p_events, uint32_t p_event_jump, uint32_t p_jump_m_cap, uint32_t p_m_temporal_cap);
+bool restir_sky_epoch_step(RestirSkyEpoch &r_epoch, float p_luma, bool p_history, bool p_jump_caps = false);

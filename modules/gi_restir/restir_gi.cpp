@@ -339,11 +339,15 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 		state.light_soft_frames = 0;
 	}
 
+	const bool sky_reread_asked = _gi_bool("sky_reread");
+	const bool sky_reread_inputs = ray_scene != nullptr && p_inputs.shade.valid && p_inputs.shade.ddgi_ubo.is_valid();
+	const bool sky_reread = sky_reread_asked && sky_reread_inputs && get_core()->is_sky_valid(ray_scene->uses_hardware() ? RestirGiCore::VARIANT_HW : RestirGiCore::VARIANT_SW);
+
 	RestirEpochInputs epoch_inputs;
 	epoch_inputs.have_history = state.have_history;
 	epoch_inputs.have_epochs = state.have_epochs;
 	epoch_inputs.history_cut = p_inputs.history_cut;
-	epoch_inputs.hardware_changed = state.hardware != p_inputs.hardware;
+	epoch_inputs.hardware_changed = state.hardware != p_inputs.hardware || state.sky_reread != sky_reread;
 	epoch_inputs.previous = state.epochs;
 	epoch_inputs.current = p_inputs.epochs;
 	epoch_inputs.anchor = ray_scene ? ray_scene->get_anchor() : Vector3();
@@ -357,6 +361,9 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 		state.history_cuts++;
 		state.cut_counts[plan.reason]++;
 		state.frames_since_cut = 0;
+		if (plan.reason == RESTIR_CUT_BACKEND && state.hardware == p_inputs.hardware) {
+			state.sky_reread_cuts++;
+		}
 	} else if (plan.dirty_count > 0) {
 		state.dirty_frames++;
 	}
@@ -419,6 +426,7 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	if (_gi_bool("replay_seed")) {
 		params.flags |= RESTIR_F_REPLAY;
 	}
+	params.sky_reread = sky_reread;
 	const String reval_text = _gi_text("revalidate");
 	const bool reval_budget = reval_text == "budget";
 	const bool reval_share = reval_text == "share";
@@ -573,6 +581,7 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 
 	state.have_history = true;
 	state.hardware = p_inputs.hardware;
+	state.sky_reread = sky_reread;
 	state.epochs = p_inputs.epochs;
 	state.have_epochs = true;
 	state.prev_epoch_tag = params.epoch_tag;
@@ -632,6 +641,7 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	}
 	hold_dropped_total += hold_update.dropped;
 	hold_fill_max = MAX(hold_fill_max, summary.hold_fill);
+	summary.sky_reread = !sky_reread_asked ? "off" : (!sky_reread_inputs ? "inactive" : (sky_reread ? "on" : "unavailable"));
 	summary.stats_valid = false;
 	summary.debug_valid = p_inputs.debug_view >= 0 && state.resources.debug.is_valid();
 	float mean_m = float(MIN(state.frames_since_cut, params.n_target));
@@ -639,6 +649,9 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	if (options.readback) {
 		summary.stats = RestirGiCore::read_stats(state.resources);
 		summary.stats_valid = true;
+		if (RestirGiCore::read_sky_epoch(state.resources, state.sky_epoch)) {
+			state.sky_epoch_frame = int64_t(p_inputs.frame_index);
+		}
 		RestirFrameRecord record;
 		record.frame = p_inputs.frame_index;
 		record.stats = summary.stats;
@@ -741,6 +754,28 @@ void RestirGiBackend::get_status(Dictionary &r_status) const {
 	r_status["hold_frames_total"] = int64_t(hold_frames_total);
 	r_status["hold_dropped_total"] = int64_t(hold_dropped_total);
 	r_status["hold_fill_max"] = int64_t(hold_fill_max);
+	r_status["sky_reread"] = summary.sky_reread;
+	int64_t sky_epochs = 0;
+	int64_t sky_jump_frames = 0;
+	int64_t sky_jump_capped = 0;
+	int64_t sky_reread_cuts = 0;
+	int64_t sky_epoch_frame = -1;
+	for (const KeyValue<RenderSceneBuffersRD *, RestirGiState> &entry : states) {
+		sky_reread_cuts += int64_t(entry.value.sky_reread_cuts);
+		if (entry.value.sky_epoch_frame < 0) {
+			continue;
+		}
+		sky_epochs += int64_t(entry.value.sky_epoch.epochs);
+		sky_jump_frames += int64_t(entry.value.sky_epoch.jumps);
+		sky_jump_capped += int64_t(entry.value.sky_epoch.capped);
+		sky_epoch_frame = MAX(sky_epoch_frame, entry.value.sky_epoch_frame);
+	}
+	r_status["sky_epoch_source"] = "cached";
+	r_status["sky_epoch_frame"] = sky_epoch_frame;
+	r_status["sky_epochs"] = sky_epochs;
+	r_status["sky_jump_frames_total"] = sky_jump_frames;
+	r_status["sky_jump_capped_total"] = sky_jump_capped;
+	r_status["sky_reread_cuts_total"] = sky_reread_cuts;
 	Array cut_counts;
 	for (const KeyValue<RenderSceneBuffersRD *, RestirGiState> &entry : states) {
 		for (uint32_t i = 0; i < RESTIR_CUT_MAX; i++) {

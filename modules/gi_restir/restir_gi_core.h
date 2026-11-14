@@ -71,6 +71,7 @@ enum RestirFlags : uint32_t {
 	RESTIR_F_REPLAY = 8388608,
 	RESTIR_F_EVENTS = 16777216,
 	RESTIR_F_SPATIAL_HOLD = 33554432,
+	RESTIR_F_SKY_REREAD = 67108864,
 };
 
 static constexpr uint32_t RESTIR_SPATIAL_SMALL_COUNT = 3;
@@ -141,6 +142,7 @@ struct RestirFrameParams {
 	uint32_t prev_epoch_tag = 0xFFFFFFFFu;
 	uint32_t dirty_count = 0;
 	float dirty_margin = 0.01f;
+	bool sky_reread = false;
 	Vector3 dirty_min[64];
 	Vector3 dirty_max[64];
 	RestirEventsUBO events = {};
@@ -189,6 +191,7 @@ struct RestirGiResources {
 	RID count_ubo;
 	RID event_ubo;
 	RID event_bins;
+	RID sky_epoch;
 	uint32_t group_count = 0;
 	uint32_t history_index = 0;
 	uint32_t final_index = 0;
@@ -263,15 +266,26 @@ public:
 		PASS_SPATIAL_WIDE,
 		PASS_SPATIAL_COMPAT_WIDE,
 		PASS_VALIDATE,
+		PASS_TEMPORAL_SKY,
+		PASS_SPATIAL_SKY,
+		PASS_SPATIAL_COMPAT_SKY,
+		PASS_SPATIAL_WIDE_SKY,
+		PASS_SPATIAL_COMPAT_WIDE_SKY,
+		PASS_SKY_EPOCH,
 		PASS_MAX
 	};
+
+	static constexpr int PASS_SKY_FIRST = PASS_TEMPORAL_SKY;
 
 private:
 	RestirGiShaderRD shaders[VARIANT_MAX];
 	RID versions[VARIANT_MAX];
+	RestirGiShaderRD sky_shaders[VARIANT_MAX];
+	RID sky_versions[VARIANT_MAX];
 	PipelineDeferredRD pipelines[VARIANT_MAX][PASS_MAX];
 	bool initialized[VARIANT_MAX] = {};
 	bool valid[VARIANT_MAX] = {};
+	bool sky_valid[VARIANT_MAX] = {};
 	uint32_t hw_compiles = 0;
 	RID dummy_ubo;
 	RID dummy_probe;
@@ -279,8 +293,11 @@ private:
 	bool octmap_array = false;
 
 	bool _ensure(Variant p_variant);
+	bool _compile(RestirGiShaderRD &r_shader, RID &r_version, const Vector<String> &p_modes, Variant p_variant, int p_first_pass);
+	RID _shader_rid(Variant p_variant, PassMode p_mode);
 	String _defines(Variant p_variant) const;
 	void _upload(RID p_ubo, const RestirFrameParams &p_params, uint32_t p_pass_index);
+	RID _sky_texture(const RestirGiInputs &p_inputs) const;
 	void _bind_shade(RID p_shader, RD::ComputeListID p_list, const RestirGiInputs &p_inputs);
 	void _dispatch(Variant p_variant, PassMode p_mode, RID p_ubo, const LocalVector<RD::Uniform> &p_set0, const RestirGiInputs &p_inputs, const Size2i &p_size);
 
@@ -288,6 +305,7 @@ public:
 	~RestirGiCore();
 
 	bool is_variant_valid(Variant p_variant);
+	bool is_sky_valid(Variant p_variant);
 	bool hw_variant_compiled() const { return initialized[VARIANT_HW] && valid[VARIANT_HW]; }
 	uint32_t get_hw_compiles() const { return hw_compiles; }
 
@@ -300,4 +318,5 @@ public:
 
 	static RestirFrameStats read_stats(const RestirGiResources &p_resources);
 	static Vector<uint8_t> read_selection(const RestirGiResources &p_resources);
+	static bool read_sky_epoch(const RestirGiResources &p_resources, RestirSkyEpoch &r_epoch);
 };
