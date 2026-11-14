@@ -337,7 +337,7 @@ void main() {
 			vec2 tail = imageLoad(accum_image, ivec3(pixel, int(i))).rg;
 			value = tail.y > 0.0 ? tail.x / tail.y : 1.0;
 		}
-		if (params.force_one != 0u) {
+		if (params.force_one != 0u && !(params.tail_visibility == 2u && i >= own_limit && i < rest_layer)) {
 			value = 1.0;
 		}
 #endif

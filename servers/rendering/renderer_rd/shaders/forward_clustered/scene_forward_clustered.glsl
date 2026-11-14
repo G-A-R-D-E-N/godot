@@ -1238,9 +1238,12 @@ vec3 direct_record_vertex = vec3(0.0);
 vec3 direct_record_normal = vec3(0.0);
 int direct_record_tails = 0;
 int direct_record_heads = 0;
+bool direct_record_check = false;
+bool direct_no_layer = false;
 
 void direct_record_begin(in SceneData scene_data, vec3 p_vertex) {
 	direct_record_ok = false;
+	direct_record_check = false;
 	if (!sc_use_direct_resampled()) {
 		return;
 	}
@@ -1250,7 +1253,7 @@ void direct_record_begin(in SceneData scene_data, vec3 p_vertex) {
 		return;
 	}
 	uvec2 head = texelFetch(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), ivec3(pixel, 0), 0).xy;
-	float depth = uintBitsToFloat(head.y);
+	float depth = uintBitsToFloat(head.y & 0x7FFFFFFFu);
 	if (!(depth > 0.0)) {
 		return;
 	}
@@ -1265,6 +1268,7 @@ void direct_record_begin(in SceneData scene_data, vec3 p_vertex) {
 	direct_record_tails = layers - 1;
 	direct_record_heads = textureSize(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), 0).z - 1 - direct_record_tails;
 	direct_record_ok = direct_record_heads >= 0;
+	direct_record_check = direct_record_ok && (head.y & 0x80000000u) != 0u;
 }
 
 int direct_route(uint p_flags, vec3 p_position, float p_inv_radius, float p_decay, bool p_spot, vec3 p_direction, float p_cos_angle, float p_cone_attenuation) {
@@ -1291,6 +1295,7 @@ int direct_route(uint p_flags, vec3 p_position, float p_inv_radius, float p_deca
 			passes++;
 		}
 	}
+	direct_no_layer = direct_no_layer || (passes == 0 && direct_record_check);
 	return passes;
 }
 
@@ -3777,6 +3782,12 @@ void fragment_shader(in SceneData scene_data) {
 		diffuse_buffer.rgb = debug_lighting_component(sc_debug_lighting_component(), diffuse_light, direct_specular_light, ambient_light, indirect_specular_light, output_emission, fog, ssr_confidence, persistent_ao, specular_source, ambient_source, surfel_coverage.y);
 		specular_buffer.rgb = vec3(0.0);
 	}
+#ifdef DIRECT_RESAMPLED_ROUTE
+	if (direct_no_layer) {
+		diffuse_buffer.rgb = vec3(16384.0, 0.0, 16384.0);
+		specular_buffer.rgb = vec3(0.0);
+	}
+#endif
 
 #else //MODE_SEPARATE_SPECULAR
 
@@ -3796,6 +3807,11 @@ void fragment_shader(in SceneData scene_data) {
 	if (sc_debug_lighting_component() != 0u) {
 		frag_color.rgb = debug_lighting_component(sc_debug_lighting_component(), diffuse_light, direct_specular_light, ambient_light, indirect_specular_light, output_emission, fog, ssr_confidence, persistent_ao, specular_source, ambient_source, surfel_coverage.y);
 	}
+#ifdef DIRECT_RESAMPLED_ROUTE
+	if (direct_no_layer) {
+		frag_color.rgb = vec3(16384.0, 0.0, 16384.0);
+	}
+#endif
 
 #if defined(PREMUL_ALPHA_USED) && !defined(MODE_RENDER_DEPTH)
 	frag_color.rgb *= premul_alpha;

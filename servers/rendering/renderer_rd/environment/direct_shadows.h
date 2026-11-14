@@ -77,6 +77,7 @@ public:
 		RID entries;
 		uint32_t head_entries = 0;
 		uint32_t tail_samples = 0;
+		uint32_t tail_visibility = 0;
 	};
 
 	struct Settings {
@@ -153,6 +154,8 @@ private:
 		float dynamic_cap;
 		uint32_t count;
 		uint32_t head_entries;
+		uint32_t tail_visibility;
+		uint32_t pad[3];
 	};
 
 	static constexpr uint32_t COUNTER_BYTES = 32;

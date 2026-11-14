@@ -46,6 +46,10 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	float dynamic_cap;
 	uint count;
 	uint head_entries;
+	uint tail_visibility;
+	uint pad0;
+	uint pad1;
+	uint pad2;
 }
 params;
 

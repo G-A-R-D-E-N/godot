@@ -342,6 +342,23 @@ bool lamp_ray(vec3 p_vertex, vec3 p_anchored, vec3 p_normal, vec3 p_lamp, uint p
 	return ray_scene_unshadowed(p_anchored, to_world(p_normal), params.bias, to_world(direction), reach, lamp.caster_mask, p_seed);
 }
 
+#ifdef EXTERNAL_ENTRIES
+float tail_visible(ivec2 p_pixel, uint p_k, vec3 p_vertex, vec3 p_anchored, vec3 p_normal) {
+	float u = random_value();
+	float v = random_value();
+	if (params.tail_visibility == 1u) {
+		return 1.0;
+	}
+	if (params.tail_visibility == 2u) {
+		uint slot = tail_slot[p_k];
+		float rho = 0.2 + 0.7 * float((slot * 40503u) & 0xFFFFu) / 65536.0;
+		uint h = ray_scene_hash(ray_scene_hash(uint(p_pixel.y) * 65537u + uint(p_pixel.x)) ^ ray_scene_hash(params.frame ^ 0x5bd1e995u) ^ ray_scene_hash(slot + 0x27d4eb2fu));
+		return float(h >> 8u) * (1.0 / 16777216.0) < rho ? 1.0 : 0.0;
+	}
+	return lamp_ray(p_vertex, p_anchored, p_normal, tail_position[p_k], tail_slot[p_k], u, v, rng_state) ? 1.0 : 0.0;
+}
+#endif
+
 vec3 slot_color(uint p_slot) {
 	uint h = ray_scene_hash(p_slot + 1u);
 	return p_slot == 0u ? vec3(0.0) : vec3(float(h & 255u), float((h >> 8u) & 255u), float((h >> 16u) & 255u)) / 255.0;
@@ -527,12 +544,12 @@ void main() {
 				continue;
 			}
 			for (uint r = 0u; r < REFERENCE_RAYS; r++) {
-				float visible = lamp_ray(vertex, anchored, normal, tail_position[k], tail_slot[k], random_value(), random_value(), rng_state) ? 1.0 : 0.0;
+				float visible = tail_visible(pixel, k, vertex, anchored, normal);
 				tail_hits[k] += visible;
 				tail_rays[k] += 1.0;
 				rest_accum.rgb += visible * tail_scale[k];
 				rest_accum.a += 1.0;
-				traced_rays++;
+				traced_rays += params.tail_visibility == 0u ? 1u : 0u;
 			}
 		}
 #else
@@ -615,7 +632,7 @@ void main() {
 			} else {
 #ifdef EXTERNAL_ENTRIES
 				uint k = tail_of_pick[chosen - own_count];
-				float visible = lamp_ray(vertex, anchored, normal, tail_position[k], tail_slot[k], random_value(), random_value(), rng_state) ? 1.0 : 0.0;
+				float visible = tail_visible(pixel, k, vertex, anchored, normal);
 				tail_hits[k] += visible;
 				tail_rays[k] += 1.0;
 				rest_accum.rgb += visible * tail_scale[k];
@@ -625,7 +642,7 @@ void main() {
 #endif
 				rest_accum.a += 1.0;
 			}
-			traced_rays++;
+			traced_rays += chosen < own_count || params.tail_visibility == 0u ? 1u : 0u;
 		}
 		for (uint i = 0u; i < pick_count; i++) {
 			bool dynamic = i < own_count ? direct_lamps.data[own[i].slot].dynamic != 0u : rest_dynamic;
@@ -676,7 +693,7 @@ void main() {
 		imageStore(slot_image, ivec3(pixel, int(own_limit + k)), vec4(0.0));
 		imageStore(accum_image, ivec3(pixel, int(own_limit + k)), vec4(visible, 1.0, 0.0, 0.0));
 		if (params.filter_on == 0u) {
-			imageStore(factor_image, ivec3(pixel, int(own_limit + k)), vec4(params.force_one != 0u ? 1.0 : visible));
+			imageStore(factor_image, ivec3(pixel, int(own_limit + k)), vec4(params.force_one != 0u && params.tail_visibility != 2u ? 1.0 : visible));
 		}
 	}
 #endif

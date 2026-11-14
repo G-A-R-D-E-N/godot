@@ -65,7 +65,7 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	uint tail_samples;
 	uint history_valid;
 	uint live_energy;
-	uint pad0;
+	uint debug_flags;
 	uint pad1;
 }
 params;
@@ -77,6 +77,17 @@ layout(r16, set = 0, binding = 8) uniform restrict readonly image2DArray history
 layout(rg32ui, set = 0, binding = 9) uniform restrict readonly uimage2D history_guide;
 layout(r32ui, set = 0, binding = 10) uniform restrict writeonly uimage2DArray entry_image;
 layout(rg32ui, set = 0, binding = 11) uniform restrict writeonly uimage2DArray record_image;
+
+layout(set = 0, binding = 12, std430) restrict buffer DebugCounts {
+	uint tail_pixels;
+	uint header_pad[3];
+	uint selections[];
+}
+debug_counts;
+
+#define DEBUG_STALE_PRIOR 1u
+#define DEBUG_COUNT 2u
+#define RECORD_EXACT_CHECK 0x80000000u
 
 vec3 vertex = vec3(0.0);
 vec3 normal = vec3(0.0, 0.0, 1.0);
@@ -114,6 +125,9 @@ vec3 to_view(vec3 p_world) {
 }
 
 float prior(uint p_slot, vec3 p_mean) {
+	if ((params.debug_flags & DEBUG_STALE_PRIOR) != 0u && (p_slot & 1u) == 0u) {
+		return 0.0;
+	}
 	if (!has_history) {
 		return 1.0;
 	}
@@ -324,6 +338,16 @@ void main() {
 
 	uint tails = params.tail_samples;
 	bool exact = tail_lamps <= tails;
+	bool counting = (params.debug_flags & DEBUG_COUNT) != 0u;
+	uint record_flag = counting && exact ? RECORD_EXACT_CHECK : 0u;
+	if (counting) {
+		if (tail_lamps > 0u) {
+			atomicAdd(debug_counts.tail_pixels, 1u);
+		}
+		for (uint i = 0u; i < head_count; i++) {
+			atomicAdd(debug_counts.selections[head_slot[i]], 1u);
+		}
+	}
 	if (!exact) {
 		uint seed = di_hash(uint(pixel.y) * 65537u + uint(pixel.x)) ^ di_hash(params.frame ^ 0x68e31da4u);
 		for (uint k = 0u; k < tails; k++) {
@@ -335,7 +359,7 @@ void main() {
 		walk(cluster_offset + params.cluster_type_size, cluster_z, true, 2u);
 	}
 
-	imageStore(record_image, ivec3(pixel, 0), uvec4(packed_normal, floatBitsToUint(depth), 0u, 0u));
+	imageStore(record_image, ivec3(pixel, 0), uvec4(packed_normal, floatBitsToUint(depth) | record_flag, 0u, 0u));
 	for (uint i = 0u; i < params.head_entries; i++) {
 		imageStore(entry_image, ivec3(pixel, int(i)), uvec4(i < head_count ? head_slot[i] : 0u, 0u, 0u, 0u));
 	}
@@ -345,6 +369,9 @@ void main() {
 				bool picked = exact_weight[k] > 0.0;
 				float share = picked ? sum_weight / float(tail_candidates) : 0.0;
 				write_sample(pixel, k, exact_slot[k], float(tails), share, picked ? rest_scale(exact_target[k], float(tail_candidates)) : vec3(0.0));
+				if (counting && picked) {
+					atomicAdd(debug_counts.selections[exact_slot[k]], 1u);
+				}
 			} else {
 				write_sample(pixel, k, 0u, 0.0, 0.0, vec3(0.0));
 			}
@@ -359,5 +386,8 @@ void main() {
 		vec3 target = opened ? pick_target[k] : last_target;
 		float weight = di_weight(sum_weight, inversions[k].pick_target);
 		write_sample(pixel, k, pick, weight, sum_weight / float(tails), rest_scale(target, weight));
+		if (counting) {
+			atomicAdd(debug_counts.selections[pick], 1u);
+		}
 	}
 }

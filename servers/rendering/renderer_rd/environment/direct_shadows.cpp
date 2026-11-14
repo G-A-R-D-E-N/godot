@@ -362,6 +362,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	params.last_frame = uint32_t(viewport->last_frame);
 	params.entries = settings.entries;
 	params.head_entries = external ? p_input.head_entries : settings.entries - 1;
+	params.tail_visibility = external ? p_input.tail_visibility : 0;
 	params.rays = settings.rays;
 	params.reference = settings.reference ? 1 : 0;
 	params.debug_view = settings.debug_view;

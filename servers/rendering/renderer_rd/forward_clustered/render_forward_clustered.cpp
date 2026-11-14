@@ -2167,6 +2167,7 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 				input.entries = resample_output.entries;
 				input.head_entries = resample_output.head_entries;
 				input.tail_samples = resample_output.tail_samples;
+				input.tail_visibility = resample_output.tail_visibility;
 				record = resample_output.record;
 			}
 		} else if (resampler) {

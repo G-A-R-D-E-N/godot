@@ -42,6 +42,9 @@ void DirectResamplerRD::register_settings() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("tail_samples"), PROPERTY_HINT_RANGE, "1,7,1"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, DI_RESAMPLED_SETTING("floor"), PROPERTY_HINT_RANGE, "0.0001,1,0.0001"), 0.0625);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("energy_arm"), PROPERTY_HINT_ENUM, "Mean,Live"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("debug/tail_visibility"), PROPERTY_HINT_ENUM, "Traced,Visible,Hashed"), 0);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("debug/stale_prior"), false);
+	GLOBAL_DEF(PropertyInfo(Variant::STRING, DI_RESAMPLED_SETTING("debug/log"), PROPERTY_HINT_GLOBAL_SAVE_FILE, "*.txt"), String());
 }
 
 DirectResamplerRD::Settings DirectResamplerRD::clamp_settings(bool p_enabled, int p_head, int p_tail_samples, float p_floor, int p_energy_arm) {
@@ -55,7 +58,11 @@ DirectResamplerRD::Settings DirectResamplerRD::clamp_settings(bool p_enabled, in
 }
 
 DirectResamplerRD::Settings DirectResamplerRD::get_project_settings() {
-	return clamp_settings(GLOBAL_GET(DI_RESAMPLED_SETTING("enabled")), GLOBAL_GET(DI_RESAMPLED_SETTING("head")), GLOBAL_GET(DI_RESAMPLED_SETTING("tail_samples")), GLOBAL_GET(DI_RESAMPLED_SETTING("floor")), GLOBAL_GET(DI_RESAMPLED_SETTING("energy_arm")));
+	Settings settings = clamp_settings(GLOBAL_GET(DI_RESAMPLED_SETTING("enabled")), GLOBAL_GET(DI_RESAMPLED_SETTING("head")), GLOBAL_GET(DI_RESAMPLED_SETTING("tail_samples")), GLOBAL_GET(DI_RESAMPLED_SETTING("floor")), GLOBAL_GET(DI_RESAMPLED_SETTING("energy_arm")));
+	settings.tail_visibility = uint32_t(CLAMP(int(GLOBAL_GET(DI_RESAMPLED_SETTING("debug/tail_visibility"))), 0, 2));
+	settings.stale_prior = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/stale_prior"));
+	settings.debug_log = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/log"));
+	return settings;
 }
 
 bool DirectResamplerRD::is_enabled() const {
@@ -93,10 +100,35 @@ bool DirectResamplerRD::_ensure_device() {
 	}
 	pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, 0));
 	params_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(Params));
+	debug_buffer = RD::get_singleton()->storage_buffer_create(DEBUG_BYTES);
 	history_slots_dummy = _dummy(RD::DATA_FORMAT_R16_UNORM, RD::TEXTURE_TYPE_2D_ARRAY, "Direct Resampled History Slots Dummy");
 	history_factors_dummy = _dummy(RD::DATA_FORMAT_R16_UNORM, RD::TEXTURE_TYPE_2D_ARRAY, "Direct Resampled History Factors Dummy");
 	history_guide_dummy = _dummy(RD::DATA_FORMAT_R32G32_UINT, RD::TEXTURE_TYPE_2D, "Direct Resampled History Guide Dummy");
 	return true;
+}
+
+void DirectResamplerRD::_write_debug_line() {
+	const Vector<uint8_t> data = RD::get_singleton()->buffer_get_data(debug_buffer);
+	if (data.size() < int(DEBUG_BYTES)) {
+		return;
+	}
+	const uint32_t *values = reinterpret_cast<const uint32_t *>(data.ptr());
+	String line = "frame " + itos(int64_t(debug_frame)) + " size " + itos(debug_size.x) + "x" + itos(debug_size.y) + " tail_pixels " + itos(values[0]);
+	for (uint32_t slot = 0; slot < DEBUG_SLOTS; slot++) {
+		const uint32_t count = values[DEBUG_HEADER_WORDS + slot];
+		if (count != 0) {
+			line += " " + itos(slot) + ":" + itos(count);
+		}
+	}
+	debug_file->store_line(line);
+	debug_file->flush();
+}
+
+void DirectResamplerRD::_flush_debug_line() {
+	if (debug_pending && debug_file.is_valid()) {
+		_write_debug_line();
+	}
+	debug_pending = false;
 }
 
 bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
@@ -107,6 +139,23 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	}
 	RD *rd = RD::get_singleton();
 	const Size2i size = rb->get_internal_size();
+
+	if (settings.debug_log != debug_path) {
+		_flush_debug_line();
+		debug_file.unref();
+		debug_path = settings.debug_log;
+		if (!debug_path.is_empty()) {
+			debug_file = FileAccess::open(debug_path, FileAccess::WRITE);
+			if (debug_file.is_null()) {
+				ERR_PRINT(vformat("The direct resampler's debug log %s could not be opened.", debug_path));
+			}
+		}
+	}
+	const bool counting = debug_file.is_valid() && !(debug_pending && debug_frame == p_input.frame);
+	if (counting) {
+		_flush_debug_line();
+		rd->buffer_clear(debug_buffer, 0, DEBUG_BYTES);
+	}
 
 	Ref<ViewportData> viewport;
 	if (rb->has_custom_data(RB_SCOPE_DI_RESAMPLED)) {
@@ -166,6 +215,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	params.tail_samples = settings.tail_samples;
 	params.history_valid = history ? 1 : 0;
 	params.live_energy = settings.live_energy ? 1 : 0;
+	params.debug_flags = (settings.stale_prior ? DEBUG_FLAG_STALE_PRIOR : 0) | (counting ? DEBUG_FLAG_COUNT : 0);
 	rd->buffer_update(params_buffer, 0, sizeof(Params), &params);
 
 	RID sampler = RendererRD::MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
@@ -182,6 +232,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 9, history ? p_input.history_guide : history_guide_dummy));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, entries));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 11, record));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 12, debug_buffer));
 
 	const RID shader_rid = shader->version_get_shader(shader_version, 0);
 	RD::ComputeListID list = rd->compute_list_begin();
@@ -189,11 +240,17 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	rd->compute_list_bind_uniform_set(list, UniformSetCacheRD::get_singleton()->get_cache_vec(shader_rid, 0, uniforms), 0);
 	rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
 	rd->compute_list_end();
+	if (counting) {
+		debug_pending = true;
+		debug_frame = p_input.frame;
+		debug_size = size;
+	}
 
 	r_output.entries = entries;
 	r_output.record = record;
 	r_output.head_entries = settings.head;
 	r_output.tail_samples = settings.tail_samples;
+	r_output.tail_visibility = settings.tail_visibility;
 	return true;
 }
 
@@ -225,13 +282,15 @@ void DirectResamplerRD::free_device_resources() {
 		memdelete(shader);
 		shader = nullptr;
 	}
-	const RID owned[] = { params_buffer, history_slots_dummy, history_factors_dummy, history_guide_dummy };
+	_flush_debug_line();
+	const RID owned[] = { params_buffer, debug_buffer, history_slots_dummy, history_factors_dummy, history_guide_dummy };
 	for (const RID &rid : owned) {
 		if (rid.is_valid()) {
 			rd->free_rid(rid);
 		}
 	}
 	params_buffer = RID();
+	debug_buffer = RID();
 	history_slots_dummy = RID();
 	history_factors_dummy = RID();
 	history_guide_dummy = RID();

@@ -84,7 +84,9 @@ TEST_CASE("[DirectResampler] Params match the entry pass's std140 block") {
 	CHECK(offsetof(DirectResamplerRD::Params, head_entries) == 296);
 	CHECK(offsetof(DirectResamplerRD::Params, history_valid) == 304);
 	CHECK(offsetof(DirectResamplerRD::Params, live_energy) == 308);
+	CHECK(offsetof(DirectResamplerRD::Params, debug_flags) == 312);
 	CHECK(sizeof(DirectResamplerRD::Params) == 320);
+	CHECK(DirectResamplerRD::DEBUG_BYTES == (4 + 65536) * 4);
 }
 
 } // namespace TestDirectResampler
