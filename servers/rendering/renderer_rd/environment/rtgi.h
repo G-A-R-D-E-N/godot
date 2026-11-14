@@ -242,6 +242,8 @@ public:
 		uint64_t spheres_dropped = 0;
 		uint64_t spheres_behind = 0;
 		uint64_t events_lost = 0;
+		LocalVector<DDGILightTracker::Event> backend_events;
+		uint32_t backend_events_lost = 0;
 		uint64_t event_repeats = 0;
 		uint64_t region_crossings = 0;
 		uint64_t directional_jumps = 0;

@@ -273,10 +273,20 @@ void RtgiPass::_read_light_changes(const Ref<RtgiBuffers> &p_buffers, const Sett
 	LocalVector<DDGILightTracker::Event> events;
 	const uint64_t asked = p_buffers->have_previous ? p_buffers->event_serial : UINT64_MAX;
 	const uint64_t serial = DDGILightTracker::events_since(asked, events);
+	uint64_t lost = 0;
 	if (asked != UINT64_MAX) {
-		p_buffers->events_lost += serial - asked - events.size();
+		lost = serial - asked - events.size();
+		p_buffers->events_lost += lost;
 	}
 	p_buffers->event_serial = serial;
+	p_buffers->backend_events_lost = uint32_t(MIN(lost, uint64_t(UINT32_MAX)));
+	p_buffers->backend_events.clear();
+	const Vector3 anchor = RayScene::get_singleton() ? RayScene::get_singleton()->get_anchor() : Vector3();
+	for (const DDGILightTracker::Event &event : events) {
+		DDGILightTracker::Event relative = event;
+		relative.center = event.center - anchor;
+		p_buffers->backend_events.push_back(relative);
+	}
 
 	const Vector3 origin = p_inputs.camera_transform.origin;
 	const Vector3 region_half = RendererSceneRenderRD::get_singleton()->ray_scene_get_region(origin).size * 0.5;
@@ -596,6 +606,11 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 		backend_inputs.shade.bounce_energy = volume->trace_constant.bounce_energy;
 		backend_inputs.shade.emission_exposure = volume->trace_constant.emission_exposure;
 		backend_inputs.shade.valid = volume->ubo.is_valid() && volume->probe_data.is_valid() && volume->irradiance.is_valid() && volume->distance.is_valid();
+		backend_inputs.events = p_buffers->backend_events.ptr();
+		backend_inputs.event_count = p_buffers->backend_events.size();
+		backend_inputs.events_lost = p_buffers->backend_events_lost;
+		backend_inputs.directional_jump = directional.jumps > 0;
+		backend_inputs.restart_quiet_frames = settings.restart_quiet_frames;
 		RtgiResampleOutput backend_output;
 		if (backend->begin_frame(backend_inputs)) {
 			RENDER_TIMESTAMP("RTGI Backend");

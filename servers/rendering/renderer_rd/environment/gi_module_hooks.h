@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "ddgi_light_tracker.h"
 #include "gi_epochs.h"
 #include "gi_provider.h"
 
@@ -94,6 +95,11 @@ struct RtgiFrameInputs {
 	int32_t debug_view = -1;
 	RayScene *ray_scene = nullptr;
 	RtgiShadeInputs shade;
+	const DDGILightTracker::Event *events = nullptr;
+	uint32_t event_count = 0;
+	uint32_t events_lost = 0;
+	bool directional_jump = false;
+	uint32_t restart_quiet_frames = 0;
 };
 
 struct RtgiResampleOutput {
@@ -113,6 +119,7 @@ public:
 
 	virtual bool is_active() const = 0;
 	virtual bool wants_all_tiles() const { return true; }
+	// Must come from a setting: R2 reads it before begin_frame.
 	virtual bool wants_replay() const { return false; }
 	virtual bool begin_frame(const RtgiFrameInputs &p_inputs) = 0;
 	virtual void resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutput &r_output) = 0;
