@@ -51,25 +51,22 @@
 using namespace RendererRD;
 
 RayScene *RayScene::singleton = nullptr;
-bool RayScene::needed_latched = false;
-bool RayScene::needed = false;
+SafeFlag RayScene::needed;
 
 bool RayScene::_settings_need() {
 	return DDGI::is_enabled() || GLOBAL_GET_CACHED(bool, "rendering/global_illumination/direct/enabled");
 }
 
 bool RayScene::is_needed() {
-	return needed_latched ? needed : _settings_need();
+	if (!needed.is_set() && _settings_need()) {
+		needed.set();
+	}
+	return needed.is_set();
 }
 
-void RayScene::latch_needed() {
-	if (!needed_latched) {
-		needed = _settings_need();
-		needed_latched = true;
-		return;
-	}
-	if (!needed && _settings_need()) {
-		WARN_PRINT_ONCE("The ray scene was off when the first frame was drawn. DDGI and direct shadows turned on later stay off until the next start.");
+void RayScene::watch_needed() {
+	if (needed.is_set() && !_settings_need()) {
+		WARN_PRINT_ONCE("DDGI and direct shadows were turned off after the ray scene started. The ray scene stays on until the next start.");
 	}
 }
 

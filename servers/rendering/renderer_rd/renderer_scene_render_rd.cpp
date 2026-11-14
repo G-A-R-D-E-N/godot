@@ -1812,7 +1812,7 @@ void RendererSceneRenderRD::set_debug_draw_mode(RSE::ViewportDebugDraw p_debug_d
 }
 
 void RendererSceneRenderRD::update() {
-	RendererRD::RayScene::latch_needed();
+	RendererRD::RayScene::watch_needed();
 	sky.publish_completed_cycles();
 	sky.update_dirty_skys();
 }

@@ -38,6 +38,7 @@
 #include "core/templates/hash_set.h"
 #include "core/templates/local_vector.h"
 #include "core/templates/paged_array.h"
+#include "core/templates/safe_refcount.h"
 #include "servers/rendering/rendering_device.h"
 #include "servers/rendering/rendering_server_enums.h"
 #include "servers/rendering/rendering_server_types.h"
@@ -179,8 +180,7 @@ public:
 
 private:
 	static RayScene *singleton;
-	static bool needed_latched;
-	static bool needed;
+	static SafeFlag needed;
 	static bool _settings_need();
 
 	struct MeshEntry {
@@ -303,7 +303,7 @@ private:
 public:
 	static RayScene *get_singleton() { return singleton; }
 	static bool is_needed();
-	static void latch_needed();
+	static void watch_needed();
 
 	void mesh_surface_added(RID p_mesh, uint32_t p_surface, const RenderingServerTypes::SurfaceData &p_surface_data);
 	void mesh_cleared(RID p_mesh);
