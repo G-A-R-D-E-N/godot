@@ -448,10 +448,17 @@ void RayScene::_instance_slots(RID p_material, CachedMaterial &r_cached) const {
 static constexpr float ALBEDO_MAX = 0.9f;
 static const Color TEXTURE_MEAN_ALBEDO = Color(0.1759f, 0.1502f, 0.1185f);
 
-static void _store_albedo(float *r_values, const Color &p_color, float p_scale) {
+static float _albedo_max(float p_coverage) {
+	if (!(p_coverage >= 0.0f)) {
+		return ALBEDO_MAX;
+	}
+	return p_coverage > ALBEDO_MAX ? ALBEDO_MAX / MIN(p_coverage, 1.0f) : 1.0f;
+}
+
+static void _store_albedo(float *r_values, const Color &p_color, float p_scale, float p_max) {
 	const Color albedo(MAX(p_color.r * p_scale, 0.0f), MAX(p_color.g * p_scale, 0.0f), MAX(p_color.b * p_scale, 0.0f));
 	const float peak = albedo.get_v();
-	const float scale = peak > ALBEDO_MAX ? ALBEDO_MAX / peak : 1.0f;
+	const float scale = peak > p_max ? p_max / peak : 1.0f;
 	r_values[0] = albedo.r * scale;
 	r_values[1] = albedo.g * scale;
 	r_values[2] = albedo.b * scale;
@@ -477,14 +484,16 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 		return;
 	}
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
+	const float coverage = _param_float(material_storage->material_get_param(p_material, SNAME("gi_coverage")), -1.0f);
+	const float albedo_max = _albedo_max(coverage);
 
 	Color albedo;
 	Color emission;
 	if (_param_color(material_storage->material_get_param(p_material, SNAME("gi_albedo")), albedo) && albedo.r >= 0.0f && albedo.g >= 0.0f && albedo.b >= 0.0f) {
-		if (albedo.get_v() > ALBEDO_MAX) {
+		if (albedo.get_v() > albedo_max) {
 			albedo_sources[ALBEDO_GI_CAPPED]++;
 		}
-		_store_albedo(r_material.albedo, albedo, 1.0f);
+		_store_albedo(r_material.albedo, albedo, 1.0f, albedo_max);
 		albedo_sources[ALBEDO_GI]++;
 	} else if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("base_color")), albedo)) {
 		const float weight = CLAMP(_param_float(material_storage->material_get_declared_param(p_material, SNAME("base_weight")), 1.0f), 0.0f, 1.0f);
@@ -504,7 +513,7 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 			albedo = albedo.srgb_to_linear();
 			albedo_sources[ALBEDO_UNTEXTURED]++;
 		}
-		_store_albedo(r_material.albedo, albedo, weight);
+		_store_albedo(r_material.albedo, albedo, weight, albedo_max);
 	} else if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("albedo")), albedo)) {
 		albedo = albedo.srgb_to_linear();
 		const RID texture = _param_texture(material_storage->material_get_declared_param(p_material, SNAME("texture_albedo")));
@@ -512,7 +521,7 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 			albedo *= TEXTURE_MEAN_ALBEDO;
 			_warn_albedo_fallback(p_material, texture, p_mesh, p_surface);
 		}
-		_store_albedo(r_material.albedo, albedo, 1.0f);
+		_store_albedo(r_material.albedo, albedo, 1.0f, albedo_max);
 		albedo_sources[ALBEDO_STANDARD]++;
 	} else {
 		albedo_sources[ALBEDO_DEFAULT]++;
@@ -543,6 +552,10 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 			r_material.flags |= MATERIAL_FLAG_SKIP;
 			additive_skipped++;
 		}
+	}
+	if (coverage >= 0.0f) {
+		r_material.flags |= MATERIAL_FLAG_BLEND;
+		r_material.coverage = MIN(coverage, 1.0f);
 	}
 	const Variant shadow_pass = material_storage->material_get_param(p_material, SNAME("gi_shadow_pass"));
 	if (shadow_pass.get_type() == Variant::BOOL ? bool(shadow_pass) : _param_float(shadow_pass, 0.0f) > 0.5f) {
