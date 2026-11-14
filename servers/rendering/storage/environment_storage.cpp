@@ -30,6 +30,8 @@
 
 #include "environment_storage.h"
 
+#include "servers/rendering/storage/local_exposure_limits.h"
+
 #ifdef DEBUG_ENABLED
 #include "core/os/os.h"
 #endif
@@ -527,12 +529,12 @@ void RendererEnvironmentStorage::environment_set_local_exposure(RID p_env, bool 
 	ERR_FAIL_NULL(env);
 	LocalExposure &local = env->local_exposure;
 	local.enabled = p_enable;
-	local.strength = CLAMP(p_strength, 0.0f, 1.0f);
-	local.shadow_contrast = CLAMP(p_shadow_contrast, 0.25f, 1.0f);
-	local.highlight_contrast = CLAMP(p_highlight_contrast, 0.25f, 1.0f);
-	local.max_shadow_lift = CLAMP(p_max_shadow_lift, 0.0f, 6.0f);
-	local.max_highlight_drop = CLAMP(p_max_highlight_drop, 0.0f, 6.0f);
-	local.pivot = CLAMP(p_pivot, -8.0f, 8.0f);
+	local.strength = LocalExposureLimits::strength(p_strength);
+	local.shadow_contrast = LocalExposureLimits::contrast(p_shadow_contrast);
+	local.highlight_contrast = LocalExposureLimits::contrast(p_highlight_contrast);
+	local.max_shadow_lift = LocalExposureLimits::shift(p_max_shadow_lift);
+	local.max_highlight_drop = LocalExposureLimits::shift(p_max_highlight_drop);
+	local.pivot = LocalExposureLimits::pivot(p_pivot);
 }
 
 RendererEnvironmentStorage::LocalExposure RendererEnvironmentStorage::environment_get_local_exposure(RID p_env) const {
