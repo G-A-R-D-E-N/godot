@@ -32,6 +32,7 @@
 
 #include "gi_provider.h"
 
+#include "core/math/aabb.h"
 #include "core/templates/hash_set.h"
 #include "core/templates/local_vector.h"
 
@@ -68,6 +69,16 @@ public:
 		SOURCE_COUNT = 5,
 	};
 
+	enum DirtyResult : uint32_t {
+		DIRTY_NONE = 0,
+		DIRTY_BOXES = 1,
+		DIRTY_OVERFLOW = 2,
+	};
+
+	static constexpr uint32_t DIRTY_RING_FRAMES = 16;
+	static constexpr uint32_t DIRTY_RING_BOXES = 32;
+	static constexpr uint32_t DIRTY_QUERY_BOXES = 64;
+
 	struct Snapshot {
 		uint32_t scene;
 		uint32_t light;
@@ -77,18 +88,45 @@ public:
 	};
 
 private:
+	struct DirtyFrame {
+		uint32_t serial = 0;
+		uint32_t scene_epoch = 0;
+		uint32_t structure_generation = 0;
+		bool overflow = false;
+		LocalVector<AABB> boxes;
+	};
+
 	uint32_t epochs[SOURCE_COUNT] = {};
+	uint32_t feed_serial = 0;
+	uint32_t structure_generation = 0;
+	bool feed_live = false;
+	real_t merge_distance = 0.5;
+	DirtyFrame ring[DIRTY_RING_FRAMES];
+
+	static uint32_t _wrap(uint64_t p_value);
+	DirtyResult _finish(LocalVector<AABB> &r_boxes, bool p_overflow) const;
 
 public:
 	static GIEpochs *get_singleton();
 	static uint32_t next(uint32_t p_value);
 
+	void sync_ray_scene(uint64_t p_feed_serial, uint32_t p_structure_generation);
 	void bump(Source p_source);
 	void apply(const GISceneTracker::Change &p_change);
 
 	uint32_t get(Source p_source) const;
 	Snapshot snapshot() const;
 	void fill_record(GIProviderRecord &r_record) const;
+
+	uint32_t get_feed_serial() const { return feed_serial; }
+	uint32_t get_structure_generation() const { return structure_generation; }
+	bool is_feed_live() const { return feed_live; }
+
+	static void merge_boxes(LocalVector<AABB> &r_boxes, real_t p_distance);
+	void publish_dirty_frame(const LocalVector<AABB> &p_boxes, bool p_overflow, real_t p_merge_distance);
+	void clear_dirty_feed();
+	DirtyResult get_dirty_boxes(uint32_t p_since_scene_epoch, LocalVector<AABB> &r_boxes) const;
+	DirtyResult get_dirty_boxes_since_serial(uint32_t p_since_serial, LocalVector<AABB> &r_boxes) const;
 };
 
 } // namespace RendererRD

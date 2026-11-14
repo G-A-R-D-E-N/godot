@@ -3341,6 +3341,15 @@
 		<member name="rendering/global_illumination/ray_scene/backend" type="int" setter="" getter="" default="0">
 			Selects how GI rays (DDGI, surfel and shadow rays) find their hits in the ray scene. [b]Software[/b] walks the ray scene's own BVH in compute shaders and runs on every Vulkan, Direct3D 12 and Metal device. [b]Hardware[/b] traces the same triangles through Vulkan ray queries, building one bottom-level acceleration structure per mesh and one top-level structure per frame; it falls back to [b]Software[/b] with a warning when the device has no ray query support. [b]Auto[/b] picks [b]Hardware[/b] when ray queries are available and [b]Software[/b] otherwise, without a warning. Both backends report the same hits, materials and shadow-caster rules. Read on every ray scene update, so a change applies on the next frame.
 		</member>
+		<member name="rendering/global_illumination/ray_scene/dirty_box_cap" type="int" setter="" getter="" default="32">
+			Most boxes the ray scene dirty-box feed publishes per frame after merging. When more merged boxes are needed, the feed keeps the first ones and sets its overflow flag, which readers treat as "anything may have changed". The feed exists only while a lighting system that needs it holds it, and the setting costs nothing otherwise.
+		</member>
+		<member name="rendering/global_illumination/ray_scene/dirty_merge_distance" type="float" setter="" getter="" default="0.5">
+			Dirty boxes of the ray scene feed that lie closer to each other than this distance, in meters, are merged into one box. Boxes are in world space.
+		</member>
+		<member name="rendering/global_illumination/ray_scene/mover_frames" type="int" setter="" getter="" default="3">
+			An instance counts as a mover for the ray scene dirty-box feed when it changed in at least this many of the last 8 frames. Readers use the mover boxes to avoid placing long-lived samples on surfaces that will not stay.
+		</member>
 		<member name="rendering/global_illumination/ray_scene/skip_additive_surfaces" type="bool" setter="" getter="" default="true">
 			If [code]true[/code], surfaces whose spatial shader uses [code]blend_add[/code] are left out of the GI ray scene: DDGI, surfel and shadow rays pass through them, and they neither block nor bounce light. Additive surfaces add light to what is behind them and hide nothing, so they stand for light (glows, beams, screens), not matter. Their emission is not traced either. If [code]false[/code], they are opaque hits with their base color as albedo. Read on every ray scene update, so a change applies on the next frame.
 		</member>

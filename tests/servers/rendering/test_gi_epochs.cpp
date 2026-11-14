@@ -218,6 +218,98 @@ TEST_CASE("[GIEpochs] Confidence is the sample share, full at the target and pas
 	CHECK(gi_provider_confidence_from_samples(0, 0) == 1.0f);
 }
 
+static void _publish(GIEpochs &r_epochs, uint32_t p_serial, const LocalVector<AABB> &p_boxes, bool p_overflow = false) {
+	r_epochs.sync_ray_scene(p_serial, 0);
+	r_epochs.publish_dirty_frame(p_boxes, p_overflow, 0.5);
+}
+
+TEST_CASE("[GIEpochs] Boxes closer than the distance merge and farther ones stay apart") {
+	LocalVector<AABB> boxes;
+	boxes.push_back(AABB(Vector3(10, 0, 0), Vector3(1, 1, 1)));
+	boxes.push_back(AABB(Vector3(1.3, 0, 0), Vector3(1, 1, 1)));
+	boxes.push_back(AABB(Vector3(0, 0, 0), Vector3(1, 1, 1)));
+	GIEpochs::merge_boxes(boxes, 0.5);
+	REQUIRE(boxes.size() == 2);
+	CHECK(boxes[0].position.is_equal_approx(Vector3(0, 0, 0)));
+	CHECK(boxes[0].size.is_equal_approx(Vector3(2.3, 1, 1)));
+	CHECK(boxes[1].position.is_equal_approx(Vector3(10, 0, 0)));
+
+	LocalVector<AABB> apart;
+	apart.push_back(AABB(Vector3(0, 0, 0), Vector3(1, 1, 1)));
+	apart.push_back(AABB(Vector3(1.6, 0, 0), Vector3(1, 1, 1)));
+	GIEpochs::merge_boxes(apart, 0.5);
+	CHECK(apart.size() == 2);
+
+	LocalVector<AABB> single;
+	single.push_back(AABB(Vector3(3, 3, 3), Vector3(1, 1, 1)));
+	GIEpochs::merge_boxes(single, 0.5);
+	CHECK(single.size() == 1);
+}
+
+TEST_CASE("[GIEpochs] The ring answers none for the current serial and boxes for one behind") {
+	GIEpochs epochs;
+	LocalVector<AABB> boxes;
+	boxes.push_back(AABB(Vector3(0, 0, 0), Vector3(1, 1, 1)));
+	_publish(epochs, 1, LocalVector<AABB>());
+	_publish(epochs, 2, boxes);
+	CHECK(epochs.is_feed_live());
+	CHECK(epochs.get_feed_serial() == 2);
+
+	LocalVector<AABB> result;
+	CHECK(epochs.get_dirty_boxes_since_serial(2, result) == GIEpochs::DIRTY_NONE);
+	CHECK(result.is_empty());
+	CHECK(epochs.get_dirty_boxes_since_serial(1, result) == GIEpochs::DIRTY_BOXES);
+	REQUIRE(result.size() == 1);
+	CHECK(result[0].position.is_equal_approx(Vector3(0, 0, 0)));
+	CHECK(epochs.get_dirty_boxes_since_serial(0, result) == GIEpochs::DIRTY_BOXES);
+	CHECK(result.size() == 1);
+}
+
+TEST_CASE("[GIEpochs] The ring overflows past sixteen frames and for a gap") {
+	GIEpochs epochs;
+	LocalVector<AABB> boxes;
+	boxes.push_back(AABB(Vector3(0, 0, 0), Vector3(1, 1, 1)));
+	_publish(epochs, 1, boxes);
+	for (uint32_t serial = 2; serial <= 17; serial++) {
+		_publish(epochs, serial, LocalVector<AABB>());
+	}
+	LocalVector<AABB> result;
+	CHECK(epochs.get_dirty_boxes_since_serial(1, result) == GIEpochs::DIRTY_NONE);
+	CHECK(epochs.get_dirty_boxes_since_serial(0, result) == GIEpochs::DIRTY_OVERFLOW);
+
+	GIEpochs gap;
+	_publish(gap, 1, LocalVector<AABB>());
+	_publish(gap, 5, boxes);
+	CHECK(gap.get_dirty_boxes_since_serial(4, result) == GIEpochs::DIRTY_BOXES);
+	CHECK(gap.get_dirty_boxes_since_serial(1, result) == GIEpochs::DIRTY_OVERFLOW);
+}
+
+TEST_CASE("[GIEpochs] A frame overflow, a released feed and an oversized frame read as overflow") {
+	GIEpochs epochs;
+	LocalVector<AABB> result;
+	CHECK(epochs.get_dirty_boxes_since_serial(0, result) == GIEpochs::DIRTY_OVERFLOW);
+
+	_publish(epochs, 1, LocalVector<AABB>());
+	_publish(epochs, 2, LocalVector<AABB>(), true);
+	CHECK(epochs.get_dirty_boxes_since_serial(1, result) == GIEpochs::DIRTY_OVERFLOW);
+
+	LocalVector<AABB> many;
+	for (uint32_t i = 0; i < GIEpochs::DIRTY_RING_BOXES + 1; i++) {
+		many.push_back(AABB(Vector3(real_t(i) * 10, 0, 0), Vector3(1, 1, 1)));
+	}
+	_publish(epochs, 3, many);
+	CHECK(epochs.get_dirty_boxes_since_serial(2, result) == GIEpochs::DIRTY_OVERFLOW);
+	CHECK(result.size() == GIEpochs::DIRTY_RING_BOXES);
+
+	epochs.sync_ray_scene(0, 0);
+	CHECK_FALSE(epochs.is_feed_live());
+	CHECK(epochs.get_dirty_boxes_since_serial(2, result) == GIEpochs::DIRTY_OVERFLOW);
+	epochs.sync_ray_scene(3, 7);
+	CHECK(epochs.get_structure_generation() == 7);
+	epochs.clear_dirty_feed();
+	CHECK(epochs.get_dirty_boxes_since_serial(2, result) == GIEpochs::DIRTY_OVERFLOW);
+}
+
 } // namespace TestGIEpochs
 
 #endif

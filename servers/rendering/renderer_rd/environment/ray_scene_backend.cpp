@@ -134,6 +134,7 @@ void RayScene::_backend_tick() {
 		_hw_assembled();
 	}
 	instance_signature = 0;
+	structure_generation++;
 	print_line(hardware ? "Ray scene backend: hardware." : "Ray scene backend: software.");
 }
 

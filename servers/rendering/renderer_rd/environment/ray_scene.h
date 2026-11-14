@@ -31,7 +31,9 @@
 #pragma once
 
 #include "core/math/aabb.h"
+#include "core/io/file_access.h"
 #include "core/math/basis.h"
+#include "core/math/transform_3d.h"
 #include "core/math/vector2.h"
 #include "core/os/mutex.h"
 #include "core/templates/hash_map.h"
@@ -66,6 +68,31 @@ public:
 	static constexpr uint32_t RESERVED_AREA_LIGHTS = 16;
 	static constexpr uint32_t MAX_CANDIDATE_LIGHTS = 16384;
 	static constexpr double ANCHOR_GRID = 64.0;
+
+	enum FeedConsumer : uint32_t {
+		FEED_SURFELS = 1,
+		FEED_DDGI = 2,
+		FEED_REFLECTIONS = 4,
+		FEED_RTGI = 8,
+		FEED_MODULE = 16,
+		FEED_DEBUG = 32,
+	};
+
+	static constexpr uint32_t FEED_HISTORY_FRAMES = 8;
+	static constexpr uint32_t FEED_RAW_LIMIT = 4096;
+	static constexpr uint32_t FEED_EPOCH_HISTORY = 32;
+
+	struct DirtyFeed {
+		LocalVector<AABB> boxes;
+		LocalVector<AABB> mover_boxes;
+		bool overflow = false;
+		bool baseline = false;
+		uint32_t structure_generation = 0;
+		uint32_t serial = 0;
+		uint32_t changes = 0;
+		uint32_t tracked = 0;
+		uint32_t mover_count = 0;
+	};
 
 	enum MaterialFlags {
 		MATERIAL_FLAG_TWO_SIDED = 1,
@@ -196,6 +223,7 @@ private:
 		uint32_t node_offset = 0;
 		uint32_t triangle_offset = 0;
 		AABB aabb;
+		uint64_t generation = 0;
 		uint64_t hw_generation = 0;
 		uint64_t hw_split = 0;
 		uint32_t hw_opaque = 0;
@@ -207,6 +235,36 @@ private:
 	HashMap<RID, MeshEntry> meshes;
 	HashSet<RID> assembled_meshes;
 	bool assembly_dirty = false;
+	uint64_t mesh_generation_counter = 0;
+	SafeNumeric<uint32_t> feed_consumers;
+	struct FeedRecord {
+		Transform3D world;
+		RID mesh;
+		uint64_t generation = 0;
+		AABB bounds;
+		uint32_t stamp = 0;
+		uint8_t history = 0;
+		uint8_t usable = 1;
+		bool listed = false;
+	};
+	HashMap<const void *, FeedRecord> feed_records;
+	LocalVector<const void *> feed_active;
+	LocalVector<AABB> feed_raw;
+	DirtyFeed feed;
+	bool feed_was_on = false;
+	bool feed_baseline = false;
+	bool feed_raw_overflow = false;
+	uint32_t feed_serial = 0;
+	uint32_t feed_stamp = 0;
+	uint32_t feed_seen = 0;
+	uint32_t feed_survivors = 0;
+	uint32_t feed_tracked_before = 0;
+	uint32_t feed_generation_before = 0;
+	uint32_t structure_generation = 0;
+	Ref<FileAccess> feed_log;
+	int feed_log_mode = 0;
+	uint64_t feed_update_start = 0;
+	uint32_t feed_epoch_history[FEED_EPOCH_HISTORY] = {};
 
 	LocalVector<Node> blas_nodes;
 	LocalVector<Triangle> triangles;
@@ -285,6 +343,11 @@ private:
 	uint32_t hw_groups[HW_GROUP_COUNT] = {};
 	uint32_t hw_group_count = 0;
 
+	void _feed_begin();
+	void _feed_observe(const void *p_key, const Transform3D &p_world, RID p_mesh_rid, const MeshEntry &p_mesh, bool p_usable);
+	void _feed_end();
+	void _feed_stop();
+	void _feed_log_line();
 	MeshEntry *_capture_mesh(RID p_mesh);
 	void _capture_surface(MeshEntry &r_mesh, uint32_t p_surface, const RenderingServerTypes::SurfaceData &p_surface_data);
 	void _build_blas(MeshEntry &p_mesh);
@@ -315,6 +378,11 @@ public:
 	void mesh_cleared(RID p_mesh);
 
 	void update(const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const Vector<RID> &p_directional_lights, RID p_camera_attributes, const Vector3 &p_camera_position);
+	void acquire_dirty_feed(FeedConsumer p_consumer) { feed_consumers.bit_or(p_consumer); }
+	void release_dirty_feed(FeedConsumer p_consumer) { feed_consumers.bit_and(~uint32_t(p_consumer)); }
+	bool is_dirty_feed_held() const { return feed_consumers.get() != 0; }
+	const DirtyFeed &get_dirty_feed() const { return feed; }
+	uint32_t get_structure_generation() const { return structure_generation; }
 
 	bool is_ready() const { return scene_data_buffer.is_valid() && blas_node_buffer.is_valid() && tlas_node_buffer.is_valid() && (!accel || _hw_ready()); }
 	bool uses_hardware() const { return accel != nullptr; }
