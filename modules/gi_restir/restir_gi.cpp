@@ -214,6 +214,10 @@ bool RestirGiBackend::is_active() const {
 	return restir_gi_enabled();
 }
 
+bool RestirGiBackend::wants_all_tiles() const {
+	return _gi_bool("trace_all_tiles");
+}
+
 void RestirGiBackend::_free_state(RestirGiState &r_state) {
 	r_state.resources.free_all();
 }

@@ -98,6 +98,8 @@ static const RestirSetting restir_table[] = {
 			"Experimental. ReSTIR GI re-validation: relative luminance change, in percent, above which the reservoir count is cut." },
 	{ Variant::INT, "gi/revalidate_cut_m", PROPERTY_HINT_RANGE, "0,16,1", 1, "", false,
 			"Experimental. ReSTIR GI re-validation: the reservoir count after a radiance cut (0 resets the reservoir)." },
+	{ Variant::BOOL, "gi/trace_all_tiles", PROPERTY_HINT_NONE, "", 1, "", false,
+			"Experimental. ReSTIR GI asks the RTGI pass to trace every tile while it runs. Off lets RTGI skip converged tiles, which the module does not read yet." },
 	{ Variant::BOOL, "gi/own_sampler", PROPERTY_HINT_NONE, "", 0, "", false,
 			"Experimental. ReSTIR GI uses the module's own initial sampler instead of the RTGI candidates (interim)." },
 	{ Variant::BOOL, "gi/deterministic", PROPERTY_HINT_NONE, "", 0, "", true,
