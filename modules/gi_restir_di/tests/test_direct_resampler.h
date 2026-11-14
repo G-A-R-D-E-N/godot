@@ -74,19 +74,102 @@ TEST_CASE("[DirectResampler] Settings keep head and tail inside DI-1's entries")
 TEST_CASE("[DirectResampler] Params match the entry pass's std140 block") {
 	CHECK(offsetof(DirectResamplerRD::Params, prev_view_from_view) == 64);
 	CHECK(offsetof(DirectResamplerRD::Params, prev_projection) == 128);
-	CHECK(offsetof(DirectResamplerRD::Params, camera_basis) == 192);
-	CHECK(offsetof(DirectResamplerRD::Params, region_half) == 240);
-	CHECK(offsetof(DirectResamplerRD::Params, floor_value) == 252);
-	CHECK(offsetof(DirectResamplerRD::Params, size) == 256);
-	CHECK(offsetof(DirectResamplerRD::Params, pixel_size) == 264);
-	CHECK(offsetof(DirectResamplerRD::Params, cluster_shift) == 272);
-	CHECK(offsetof(DirectResamplerRD::Params, z_far) == 288);
-	CHECK(offsetof(DirectResamplerRD::Params, head_entries) == 296);
-	CHECK(offsetof(DirectResamplerRD::Params, history_valid) == 304);
-	CHECK(offsetof(DirectResamplerRD::Params, live_energy) == 308);
-	CHECK(offsetof(DirectResamplerRD::Params, debug_flags) == 312);
-	CHECK(sizeof(DirectResamplerRD::Params) == 320);
+	CHECK(offsetof(DirectResamplerRD::Params, prev_inv_projection) == 192);
+	CHECK(offsetof(DirectResamplerRD::Params, camera_basis) == 256);
+	CHECK(offsetof(DirectResamplerRD::Params, region_half) == 304);
+	CHECK(offsetof(DirectResamplerRD::Params, floor_value) == 316);
+	CHECK(offsetof(DirectResamplerRD::Params, size) == 320);
+	CHECK(offsetof(DirectResamplerRD::Params, pixel_size) == 328);
+	CHECK(offsetof(DirectResamplerRD::Params, cluster_shift) == 336);
+	CHECK(offsetof(DirectResamplerRD::Params, z_far) == 352);
+	CHECK(offsetof(DirectResamplerRD::Params, head_entries) == 360);
+	CHECK(offsetof(DirectResamplerRD::Params, history_valid) == 368);
+	CHECK(offsetof(DirectResamplerRD::Params, live_energy) == 372);
+	CHECK(offsetof(DirectResamplerRD::Params, debug_flags) == 376);
+	CHECK(offsetof(DirectResamplerRD::Params, reservoirs) == 380);
+	CHECK(offsetof(DirectResamplerRD::Params, c_full) == 384);
+	CHECK(offsetof(DirectResamplerRD::Params, m_temporal_cap) == 388);
+	CHECK(offsetof(DirectResamplerRD::Params, dynamic_cap) == 392);
+	CHECK(offsetof(DirectResamplerRD::Params, m_stored_cap) == 396);
+	CHECK(offsetof(DirectResamplerRD::Params, spatial_neighbors) == 400);
+	CHECK(offsetof(DirectResamplerRD::Params, spatial_radius) == 404);
+	CHECK(offsetof(DirectResamplerRD::Params, counter) == 408);
+	CHECK(offsetof(DirectResamplerRD::Params, head_rank) == 412);
+	CHECK(offsetof(DirectResamplerRD::Params, head_swap_margin) == 416);
+	CHECK(offsetof(DirectResamplerRD::Params, head_swap_frames) == 420);
+	CHECK(offsetof(DirectResamplerRD::Params, temporal_reuse) == 424);
+	CHECK(offsetof(DirectResamplerRD::Params, head_window) == 428);
+	CHECK(sizeof(DirectResamplerRD::Params) == 432);
 	CHECK(DirectResamplerRD::DEBUG_BYTES == (4 + 65536) * 4);
+}
+
+TEST_CASE("[DirectResampler] Reservoir settings stay inside the record's fields") {
+	DirectResamplerRD::Settings settings = DirectResamplerRD::clamp_settings(true, 4, 1, 0.0625f, 0);
+	CHECK(settings.reservoirs == DirectResamplerRD::RESERVOIRS_OFF);
+	CHECK_FALSE(settings.head_rank_visible);
+
+	DirectResamplerRD::clamp_reservoir_settings(settings, 1, true, 2, 16.0f, 32, 20, 255, 2, 0, 0.25f, 4, false);
+	CHECK(settings.reservoirs == DirectResamplerRD::RESERVOIRS_B1);
+	CHECK(settings.temporal_reuse);
+	CHECK(settings.spatial_neighbors == 2);
+	CHECK(settings.spatial_radius == doctest::Approx(16.0f));
+	CHECK(settings.c_full == 32);
+	CHECK(settings.m_temporal_cap == 20);
+	CHECK(settings.m_stored_cap == 255);
+	CHECK(settings.dynamic_cap == 2);
+	CHECK_FALSE(settings.head_rank_visible);
+	CHECK(settings.head_swap_margin == doctest::Approx(0.25f));
+	CHECK(settings.head_swap_frames == 4);
+	CHECK_FALSE(settings.head_window);
+
+	DirectResamplerRD::clamp_reservoir_settings(settings, 7, false, 9, 500.0f, 900, 0, 4096, -3, 1, -1.0f, 12, true);
+	CHECK(settings.reservoirs == DirectResamplerRD::RESERVOIRS_U1);
+	CHECK_FALSE(settings.temporal_reuse);
+	CHECK(settings.spatial_neighbors == DirectResamplerRD::MAX_NEIGHBORS);
+	CHECK(settings.spatial_radius == doctest::Approx(64.0f));
+	CHECK(settings.c_full == DirectResamplerRD::MAX_MASS);
+	CHECK(settings.m_temporal_cap == 1);
+	CHECK(settings.m_stored_cap == DirectResamplerRD::MAX_MASS);
+	CHECK(settings.dynamic_cap == 1);
+	CHECK(settings.head_rank_visible);
+	CHECK(settings.head_swap_margin == doctest::Approx(0.0f));
+	CHECK(settings.head_swap_frames == DirectResamplerRD::MAX_SWAP_FRAMES);
+	CHECK(settings.head_window);
+
+	DirectResamplerRD::clamp_reservoir_settings(settings, -4, true, -1, 0.0f, 0, 20, 0, 2, 3, 9.0f, 0, false);
+	CHECK(settings.reservoirs == DirectResamplerRD::RESERVOIRS_OFF);
+	CHECK(settings.spatial_neighbors == 0);
+	CHECK(settings.spatial_radius == doctest::Approx(1.0f));
+	CHECK(settings.c_full == 1);
+	CHECK(settings.m_stored_cap == 1);
+	CHECK_FALSE(settings.head_rank_visible);
+	CHECK(settings.head_swap_margin == doctest::Approx(4.0f));
+	CHECK(settings.head_swap_frames == 1);
+
+	for (int tail = 2; tail < 8; tail++) {
+		settings = DirectResamplerRD::clamp_settings(true, 0, tail, 0.0625f, 0);
+		DirectResamplerRD::clamp_reservoir_settings(settings, 2, true, 2, 16.0f, 32, 20, 255, 2, 0, 0.25f, 4, false);
+		CHECK(settings.reservoirs == DirectResamplerRD::RESERVOIRS_OFF);
+	}
+}
+
+TEST_CASE("[DirectResampler] The frame counter steps by one on a continuous frame and by two otherwise") {
+	CHECK(DirectResamplerRD::advance_counter(1, true) == 2);
+	CHECK(DirectResamplerRD::advance_counter(1, false) == 3);
+	CHECK(DirectResamplerRD::advance_counter(0xffffffffu, true) == 1);
+	CHECK(DirectResamplerRD::advance_counter(0xfffffffeu, false) == 1);
+	CHECK(DirectResamplerRD::advance_counter(0xffffffffu, false) == 1);
+
+	uint32_t counter = 1;
+	for (int frame = 0; frame < 4096; frame++) {
+		const bool continuous = (frame % 7) != 3;
+		const uint32_t next = DirectResamplerRD::advance_counter(counter, continuous);
+		CHECK(next != 0);
+		const bool temporal_accepts = ((next - 1) & 127u) == (counter & 127u);
+		CHECK(temporal_accepts == continuous);
+		CHECK((next & 127u) != (counter & 127u));
+		counter = next;
+	}
 }
 
 } // namespace TestDirectResampler

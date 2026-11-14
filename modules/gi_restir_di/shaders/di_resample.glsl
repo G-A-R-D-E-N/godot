@@ -10,6 +10,7 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 #include "../../../servers/rendering/renderer_rd/shaders/environment/di_sampler_inc.glsl"
 
 #define MAX_ENTRIES 8
+#define MAX_NEIGHBORS 4
 
 struct DiSlot {
 	uint caster_mask;
@@ -50,6 +51,7 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	mat4 inv_projection;
 	mat4 prev_view_from_view;
 	mat4 prev_projection;
+	mat4 prev_inv_projection;
 	vec4 camera_basis[3];
 	vec3 region_half;
 	float floor_value;
@@ -66,7 +68,19 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	uint history_valid;
 	uint live_energy;
 	uint debug_flags;
-	uint pad1;
+	uint reservoirs;
+	uint c_full;
+	uint m_temporal_cap;
+	uint dynamic_cap;
+	uint m_stored_cap;
+	uint spatial_neighbors;
+	float spatial_radius;
+	uint counter;
+	uint head_rank;
+	float head_swap_margin;
+	uint head_swap_frames;
+	uint temporal_reuse;
+	uint head_window;
 }
 params;
 
@@ -75,19 +89,46 @@ layout(set = 0, binding = 6) uniform sampler2D normal_roughness_buffer;
 layout(r16, set = 0, binding = 7) uniform restrict readonly image2DArray history_slots;
 layout(r16, set = 0, binding = 8) uniform restrict readonly image2DArray history_factors;
 layout(rg32ui, set = 0, binding = 9) uniform restrict readonly uimage2D history_guide;
+#ifdef MODE_SPATIAL
+layout(r32ui, set = 0, binding = 10) uniform restrict uimage2DArray entry_image;
+#else
 layout(r32ui, set = 0, binding = 10) uniform restrict writeonly uimage2DArray entry_image;
+#endif
 layout(rg32ui, set = 0, binding = 11) uniform restrict writeonly uimage2DArray record_image;
 
+#ifndef MODE_SPATIAL
 layout(set = 0, binding = 12, std430) restrict buffer DebugCounts {
 	uint tail_pixels;
 	uint header_pad[3];
 	uint selections[];
 }
 debug_counts;
+#endif
+
+layout(r32ui, set = 0, binding = 13) uniform restrict uimage2D tile_flags;
+layout(r32ui, set = 0, binding = 14) uniform restrict uimage2D history_header;
+layout(rg32ui, set = 0, binding = 15) uniform restrict uimage2D history_values;
+layout(r32ui, set = 0, binding = 16) uniform restrict uimage2D current_header;
+layout(rg32ui, set = 0, binding = 17) uniform restrict uimage2D current_values;
+
+#ifndef MODE_SPATIAL
+layout(r32ui, set = 0, binding = 18) uniform restrict readonly uimage2D head_state_previous;
+layout(r32ui, set = 0, binding = 19) uniform restrict writeonly uimage2D head_state;
+#endif
 
 #define DEBUG_STALE_PRIOR 1u
 #define DEBUG_COUNT 2u
 #define RECORD_EXACT_CHECK 0x80000000u
+#define RESERVOIRS_OFF 0u
+#define RESERVOIRS_B1 1u
+#define RESERVOIRS_U1 2u
+#define STREAM_STRATA 1u
+#define STREAM_SELECT 2u
+#define STREAM_TEMPORAL 3u
+#define STREAM_SPATIAL 4u
+#define STREAM_OFFSET 5u
+#define STREAM_SALT 0xb5297a4du
+#define STREAM_STEP 0x9e3779b9u
 
 vec3 vertex = vec3(0.0);
 vec3 normal = vec3(0.0, 0.0, 1.0);
@@ -99,6 +140,9 @@ uint head_slot[MAX_ENTRIES];
 float head_rank[MAX_ENTRIES];
 
 bool has_history = false;
+ivec2 history_pixel = ivec2(0);
+float history_depth = 0.0;
+vec3 history_normal = vec3(0.0, 0.0, 1.0);
 uint history_count = 0u;
 uint history_slot[MAX_ENTRIES];
 float history_factor[MAX_ENTRIES];
@@ -108,6 +152,10 @@ uint tail_lamps = 0u;
 uint tail_candidates = 0u;
 float sum_weight = 0.0;
 vec3 sum_target = vec3(0.0);
+bool plain_tail = false;
+uint plain_candidates = 0u;
+float plain_weight = 0.0;
+vec3 plain_sum = vec3(0.0);
 uint exact_slot[MAX_ENTRIES];
 float exact_weight[MAX_ENTRIES];
 vec3 exact_target[MAX_ENTRIES];
@@ -115,6 +163,33 @@ vec3 exact_target[MAX_ENTRIES];
 DiInversion inversions[MAX_ENTRIES];
 vec3 pick_target[MAX_ENTRIES];
 vec3 last_target = vec3(0.0);
+
+uint kept_count = 0u;
+uint kept_slot[MAX_ENTRIES];
+float kept_rank[MAX_ENTRIES];
+
+uint stream_seed = 0u;
+DiList strata_list;
+uint strata_index = 0u;
+uint strata_seen = 0u;
+uint strata_next = 0u;
+
+uint own_slot = DI_SAMPLER_NO_PICK;
+float own_weight = 0.0;
+float own_mass = 0.0;
+float own_p = 0.0;
+vec3 own_target = vec3(0.0);
+LightData own_light;
+bool own_spot = false;
+
+bool other_present[MAX_NEIGHBORS];
+uint other_slot[MAX_NEIGHBORS];
+float other_weight[MAX_NEIGHBORS];
+float other_mass[MAX_NEIGHBORS];
+float other_stored[MAX_NEIGHBORS];
+float other_here[MAX_NEIGHBORS];
+float other_there[MAX_NEIGHBORS];
+vec3 other_target[MAX_NEIGHBORS];
 
 vec3 to_world(vec3 p_view) {
 	return vec3(dot(params.camera_basis[0].xyz, p_view), dot(params.camera_basis[1].xyz, p_view), dot(params.camera_basis[2].xyz, p_view));
@@ -140,6 +215,39 @@ float prior(uint p_slot, vec3 p_mean) {
 	return total > 0.0 ? dot(history_ratio, p_mean) / total : 1.0;
 }
 
+float tail_prior(uint p_slot, vec3 p_mean) {
+	return plain_tail ? 1.0 : prior(p_slot, p_mean);
+}
+
+float stream_uniform(uint p_stream, uint p_index) {
+	return float(di_hash(stream_seed ^ di_hash(p_index + STREAM_SALT + p_stream * STREAM_STEP)) >> 8u) / 16777216.0;
+}
+
+uint reservoir_arm() {
+	return params.reservoirs == RESERVOIRS_U1 ? 1u : 0u;
+}
+
+uint reservoir_header(uint p_slot, uint p_mass) {
+	return p_slot | (p_mass << 16u) | (reservoir_arm() << 24u) | ((params.counter & 127u) << 25u);
+}
+
+bool reservoir_reads(uint p_header, uint p_counter) {
+	return (p_header >> 25u) == (p_counter & 127u) && ((p_header >> 24u) & 1u) == reservoir_arm() && ((p_header >> 16u) & 0xFFu) != 0u;
+}
+
+bool was_head(uint p_slot) {
+	if (!has_history) {
+		return false;
+	}
+	uint count = min(history_count, params.head_entries);
+	for (uint i = 0u; i < count; i++) {
+		if (history_slot[i] == p_slot) {
+			return true;
+		}
+	}
+	return false;
+}
+
 bool is_head(uint p_slot) {
 	for (uint i = 0u; i < head_count; i++) {
 		if (head_slot[i] == p_slot) {
@@ -149,15 +257,15 @@ bool is_head(uint p_slot) {
 	return false;
 }
 
-void rank_head(uint p_slot, float p_rank) {
+void rank_head(uint p_slot, float p_rank, uint p_limit) {
 	uint at = head_count;
 	while (at > 0u && (head_rank[at - 1u] < p_rank || (head_rank[at - 1u] == p_rank && head_slot[at - 1u] > p_slot))) {
 		at--;
 	}
-	if (at >= params.head_entries) {
+	if (at >= p_limit) {
 		return;
 	}
-	if (head_count < params.head_entries) {
+	if (head_count < p_limit) {
 		head_count++;
 	}
 	for (uint i = head_count - 1u; i > at; i--) {
@@ -166,6 +274,54 @@ void rank_head(uint p_slot, float p_rank) {
 	}
 	head_slot[at] = p_slot;
 	head_rank[at] = p_rank;
+}
+
+uint strata_begin(uint p_stratum) {
+	return (p_stratum * tail_candidates) / params.c_full;
+}
+
+uint strata_position(uint p_stratum) {
+	uint begin = strata_begin(p_stratum);
+	uint size = strata_begin(p_stratum + 1u) - begin;
+	return begin + min(size - 1u, uint(stream_uniform(STREAM_STRATA, p_stratum) * float(size)));
+}
+
+void visit_reservoir(LightData p_light, bool p_spot, uint p_pass, uint p_slot, vec3 p_target, float p_weight, bool p_candidate) {
+	if (p_pass == 3u) {
+		if (!p_candidate) {
+			return;
+		}
+		if (strata_seen == strata_next) {
+			uint size = strata_begin(strata_index + 1u) - strata_begin(strata_index);
+			di_list_step(strata_list, p_weight * float(size), strata_index, p_slot);
+			if (strata_list.pick == p_slot) {
+				own_p = p_weight;
+				own_target = p_target;
+				own_light = p_light;
+				own_spot = p_spot;
+			}
+			strata_index++;
+			strata_next = strata_index < params.c_full ? strata_position(strata_index) : DI_SAMPLER_NO_PICK;
+		}
+		strata_seen++;
+		return;
+	}
+	if (p_candidate) {
+		tail_candidates++;
+		sum_weight += p_weight;
+		sum_target += p_target;
+	}
+	if (p_slot == own_slot) {
+		own_target = p_target;
+		own_light = p_light;
+		own_spot = p_spot;
+	}
+	for (uint i = 0u; i < params.spatial_neighbors; i++) {
+		if (other_present[i] && other_slot[i] == p_slot) {
+			other_here[i] = p_candidate ? p_weight : 0.0;
+			other_target[i] = p_target;
+		}
+	}
 }
 
 void visit(LightData p_light, bool p_spot, uint p_pass) {
@@ -182,16 +338,48 @@ void visit(LightData p_light, bool p_spot, uint p_pass) {
 	if (p_pass == 0u) {
 		vec3 anchor = p_light.position + to_view(vec3(data.anchor_offset_x, data.anchor_offset_y, data.anchor_offset_z));
 		DiGeometry anchored = di_geometry(anchor, p_light.inv_radius, p_light.attenuation, p_spot, p_light.direction, p_light.cone_angle, p_light.cone_attenuation, vertex);
-		rank_head(slot, di_luminance(di_screen_target(mean, anchored, normal, view, roughness, p_light.specular_amount)));
+		float rank = di_luminance(di_screen_target(mean, anchored, normal, view, roughness, p_light.specular_amount));
+		if (params.head_rank == 0u) {
+			rank_head(slot, rank, params.head_entries);
+			return;
+		}
+		rank *= max(prior(slot, mean), params.floor_value);
+		if (was_head(slot)) {
+			kept_slot[kept_count] = slot;
+			kept_rank[kept_count] = rank;
+			kept_count++;
+			return;
+		}
+		rank_head(slot, rank, params.head_entries + 1u);
 		return;
 	}
 	if (is_head(slot)) {
 		return;
 	}
 	vec3 target = di_screen_target(mean, geometry, normal, view, roughness, p_light.specular_amount);
-	float weight = di_resample_weight(target, prior(slot, mean), params.floor_value);
+	float weight = di_resample_weight(target, tail_prior(slot, mean), params.floor_value);
 	bool candidate = di_candidate(weight);
+	if (p_pass >= 3u) {
+		visit_reservoir(p_light, p_spot, p_pass, slot, target, weight, candidate);
+		return;
+	}
 	if (p_pass == 1u) {
+		if (params.reservoirs == RESERVOIRS_U1) {
+			float plain = di_resample_weight(target, 1.0, params.floor_value);
+			bool plain_candidate = di_candidate(plain);
+			if (plain_candidate) {
+				plain_candidates++;
+				plain_weight += plain;
+				plain_sum += target;
+			}
+			if (slot == other_slot[0]) {
+				other_here[0] = plain_candidate ? plain : 0.0;
+				other_target[0] = target;
+			}
+		} else if (slot == other_slot[0]) {
+			other_here[0] = candidate ? weight : 0.0;
+			other_target[0] = target;
+		}
 		if (tail_lamps < params.tail_samples) {
 			exact_slot[tail_lamps] = slot;
 			exact_weight[tail_lamps] = candidate ? weight : 0.0;
@@ -260,9 +448,12 @@ void load_history() {
 	if (abs(uintBitsToFloat(guide.x) - expected) > tolerance) {
 		return;
 	}
-	if (dot(mat3(params.prev_view_from_view) * normal, di_oct_decode(unpackSnorm2x16(guide.y))) < 0.9) {
+	history_normal = di_oct_decode(unpackSnorm2x16(guide.y));
+	if (dot(mat3(params.prev_view_from_view) * normal, history_normal) < 0.9) {
 		return;
 	}
+	history_pixel = pixel;
+	history_depth = uintBitsToFloat(guide.x);
 	int layers = imageSize(history_slots).z;
 	history_count = uint(clamp(layers - 1, 0, MAX_ENTRIES - 1));
 	for (uint i = 0u; i < history_count; i++) {
@@ -288,7 +479,187 @@ void write_sample(ivec2 p_pixel, uint p_k, uint p_slot, float p_weight, float p_
 	imageStore(entry_image, ivec3(p_pixel, int(base + 2u)), uvec4(packHalf2x16(p_scale.rg), 0u, 0u, 0u));
 }
 
+float plain_target(vec3 p_lamp, vec3 p_direction, vec3 p_vertex, vec3 p_normal, vec3 p_view, float p_roughness) {
+	DiGeometry geometry = di_geometry(p_lamp, own_light.inv_radius, own_light.attenuation, own_spot, p_direction, own_light.cone_angle, own_light.cone_attenuation, p_vertex);
+	if (!di_in_set(geometry, p_normal)) {
+		return 0.0;
+	}
+	DiSlot data = di_slots.data[own_slot];
+	float weight = di_luminance(di_screen_target(vec3(data.mean_r, data.mean_g, data.mean_b), geometry, p_normal, p_view, p_roughness, own_light.specular_amount));
+	return di_candidate(weight) ? weight : 0.0;
+}
+
+uint combine(uint p_count, uint p_stream, out float r_weight, out uint r_mass, out float r_target) {
+	float weights[MAX_NEIGHBORS + 1];
+	uint present = 0u;
+	float mass = own_mass;
+	for (uint i = 0u; i < p_count; i++) {
+		weights[i + 1u] = 0.0;
+		if (other_present[i]) {
+			present++;
+			mass += other_mass[i];
+		}
+	}
+	weights[0] = 0.0;
+	if (params.reservoirs == RESERVOIRS_U1) {
+		float share = float(max(present, 1u));
+		float own = own_mass * own_p;
+		float pairs = 0.0;
+		for (uint i = 0u; i < p_count; i++) {
+			if (!other_present[i]) {
+				continue;
+			}
+			float there = other_mass[i] * other_there[i];
+			pairs += there == 0.0 ? 1.0 : own / (own + there);
+			if (other_here[i] == 0.0) {
+				continue;
+			}
+			float a = other_mass[i] * other_stored[i];
+			float b = own_mass * other_here[i];
+			weights[i + 1u] = a / ((a + b) * share) * other_here[i] * other_weight[i];
+		}
+		if (own_mass > 0.0) {
+			weights[0] = (present == 0u ? 1.0 : pairs / share) * own_p * own_weight;
+		}
+	} else if (mass > 0.0) {
+		if (own_mass > 0.0) {
+			weights[0] = own_mass / mass * own_p * own_weight;
+		}
+		for (uint i = 0u; i < p_count; i++) {
+			if (other_present[i] && other_here[i] != 0.0) {
+				weights[i + 1u] = other_mass[i] / mass * other_here[i] * other_weight[i];
+			}
+		}
+	}
+	float sum = 0.0;
+	for (uint i = 0u; i <= p_count; i++) {
+		sum += weights[i];
+	}
+	DiInversion inversion = di_inversion_begin(sum, stream_uniform(p_stream, 0u));
+	for (uint i = 0u; i <= p_count; i++) {
+		di_inversion_step(inversion, weights[i], i);
+	}
+	uint pick = di_inversion_end(inversion);
+	r_weight = 0.0;
+	r_mass = 0u;
+	r_target = 0.0;
+	if (pick == DI_SAMPLER_NO_PICK) {
+		return pick;
+	}
+	r_target = pick == 0u ? own_p : other_here[pick - 1u];
+	r_weight = sum / r_target;
+	r_mass = min(uint(mass), params.m_stored_cap);
+	return pick;
+}
+
+#ifndef MODE_SPATIAL
+bool head_fresh(uint p_slot) {
+	uint reset = di_slots.data[p_slot].reset_frame;
+	return params.head_window != 0u ? params.frame - reset < params.head_swap_frames : reset == params.frame;
+}
+
+void settle_head(ivec2 p_pixel) {
+	uint fill_count = head_count;
+	uint fill_slot[MAX_ENTRIES] = head_slot;
+	float fill_rank[MAX_ENTRIES] = head_rank;
+	head_count = 0u;
+	for (uint i = 0u; i < kept_count && head_count < params.head_entries; i++) {
+		head_slot[head_count] = kept_slot[i];
+		head_rank[head_count] = kept_rank[i];
+		head_count++;
+	}
+	uint used = 0u;
+	while (head_count < params.head_entries && used < fill_count) {
+		head_slot[head_count] = fill_slot[used];
+		head_rank[head_count] = fill_rank[used];
+		head_count++;
+		used++;
+	}
+	uint state = 0u;
+	if (has_history && params.head_entries > 0u && head_count == params.head_entries && used < fill_count) {
+		uint weakest = 0u;
+		for (uint i = 1u; i < head_count; i++) {
+			if (head_rank[i] < head_rank[weakest] || (head_rank[i] == head_rank[weakest] && head_slot[i] > head_slot[weakest])) {
+				weakest = i;
+			}
+		}
+		uint slot = fill_slot[used];
+		float rank = fill_rank[used];
+		bool above = rank > head_rank[weakest] || (rank == head_rank[weakest] && slot < head_slot[weakest]);
+		if (above && rank >= (1.0 + params.head_swap_margin) * head_rank[weakest]) {
+			uint old = imageLoad(head_state_previous, history_pixel).r;
+			uint count = ((old & 0xFFFFu) == slot ? (old >> 16u) & 7u : 0u) + 1u;
+			if (count >= params.head_swap_frames || head_fresh(slot) || head_fresh(head_slot[weakest])) {
+				head_slot[weakest] = slot;
+				head_rank[weakest] = rank;
+			} else {
+				state = slot | (min(count, 7u) << 16u);
+			}
+		}
+	}
+	imageStore(head_state, p_pixel, uvec4(state, 0u, 0u, 0u));
+}
+
+float history_target() {
+	if (was_head(own_slot)) {
+		return 0.0;
+	}
+	vec2 uv = (vec2(history_pixel) + 0.5) * params.pixel_size;
+	vec4 ray_h = params.prev_inv_projection * vec4(uv * 2.0 - 1.0, 0.5, 1.0);
+	vec3 ray = ray_h.xyz / ray_h.w;
+	vec3 point = ray * (history_depth / max(-ray.z, 1e-6));
+	vec3 lamp = (params.prev_view_from_view * vec4(own_light.position, 1.0)).xyz;
+	vec3 direction = mat3(params.prev_view_from_view) * own_light.direction;
+	return plain_target(lamp, direction, point, history_normal, -normalize(point), roughness);
+}
+
+uint result_slot = 0u;
+float result_weight = 0.0;
+vec3 result_target = vec3(0.0);
+
+void resample_reservoir(ivec2 p_pixel, uint p_cluster_offset, uint p_cluster_z) {
+	strata_list = di_list_begin(stream_seed ^ di_hash(STREAM_SALT + STREAM_SELECT * STREAM_STEP));
+	strata_index = 0u;
+	strata_seen = 0u;
+	strata_next = strata_position(0u);
+	walk(p_cluster_offset, p_cluster_z, false, 3u);
+	walk(p_cluster_offset + params.cluster_type_size, p_cluster_z, true, 3u);
+	own_slot = strata_list.pick;
+	if (own_slot != DI_SAMPLER_NO_PICK) {
+		own_weight = strata_list.total / own_p;
+		own_mass = float(params.c_full);
+	}
+	if (other_present[0]) {
+		uint cap = params.m_temporal_cap;
+		if (di_slots.data[other_slot[0]].dynamic != 0u) {
+			cap = min(cap, params.dynamic_cap);
+		}
+		other_mass[0] = min(other_mass[0], float(cap));
+		if (params.reservoirs == RESERVOIRS_U1 && own_slot != DI_SAMPLER_NO_PICK) {
+			other_there[0] = history_target();
+		}
+	}
+	float weight;
+	uint mass;
+	float target;
+	uint pick = combine(1u, STREAM_TEMPORAL, weight, mass, target);
+	if (pick != DI_SAMPLER_NO_PICK) {
+		result_slot = pick == 0u ? own_slot : other_slot[0];
+		result_weight = weight;
+		result_target = pick == 0u ? own_target : other_target[0];
+	}
+	imageStore(current_header, p_pixel, uvec4(reservoir_header(result_slot, mass), 0u, 0u, 0u));
+	imageStore(current_values, p_pixel, uvec4(floatBitsToUint(weight), floatBitsToUint(target), 0u, 0u));
+	imageStore(tile_flags, p_pixel >> 3, uvec4(params.counter, 0u, 0u, 0u));
+}
+#endif
+
 void write_empty(ivec2 p_pixel) {
+#ifndef MODE_SPATIAL
+	if (params.head_rank != 0u) {
+		imageStore(head_state, p_pixel, uvec4(0u));
+	}
+#endif
 	imageStore(record_image, ivec3(p_pixel, 0), uvec4(0u));
 	for (uint i = 0u; i < params.head_entries; i++) {
 		imageStore(entry_image, ivec3(p_pixel, int(i)), uvec4(0u));
@@ -298,6 +669,7 @@ void write_empty(ivec2 p_pixel) {
 	}
 }
 
+#ifndef MODE_SPATIAL
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 	if (any(greaterThanEqual(pixel, params.size))) {
@@ -328,15 +700,49 @@ void main() {
 
 	load_history();
 
+	for (uint i = 0u; i < MAX_NEIGHBORS; i++) {
+		other_present[i] = false;
+		other_slot[i] = DI_SAMPLER_NO_PICK;
+		other_here[i] = 0.0;
+		other_there[i] = 0.0;
+		other_target[i] = vec3(0.0);
+	}
+	stream_seed = di_hash(uint(pixel.y) * 65537u + uint(pixel.x)) ^ di_hash(params.frame ^ 0x68e31da4u);
+	if (params.reservoirs != RESERVOIRS_OFF && params.temporal_reuse != 0u && has_history) {
+		uint held = imageLoad(history_header, history_pixel).r;
+		if (reservoir_reads(held, params.counter - 1u)) {
+			uvec2 values = imageLoad(history_values, history_pixel).xy;
+			other_present[0] = true;
+			other_slot[0] = held & 0xFFFFu;
+			other_mass[0] = float((held >> 16u) & 0xFFu);
+			other_weight[0] = uintBitsToFloat(values.x);
+			other_stored[0] = uintBitsToFloat(values.y);
+		}
+	}
+
 	uvec2 cluster_pos = uvec2(pixel) >> params.cluster_shift;
 	uint cluster_offset = (params.cluster_width * cluster_pos.y + cluster_pos.x) * (params.max_cluster_element_count_div_32 + 32u);
 	uint cluster_z = uint(clamp((-vertex.z / params.z_far) * 32.0, 0.0, 31.0));
 	for (uint walk_pass = 0u; walk_pass < 2u; walk_pass++) {
 		walk(cluster_offset, cluster_z, false, walk_pass);
 		walk(cluster_offset + params.cluster_type_size, cluster_z, true, walk_pass);
+		if (walk_pass == 0u && params.head_rank != 0u) {
+			settle_head(pixel);
+		}
 	}
 
 	uint tails = params.tail_samples;
+	bool unbiased = params.reservoirs == RESERVOIRS_U1;
+	bool reservoir = params.reservoirs != RESERVOIRS_OFF && (unbiased ? plain_candidates : tail_candidates) > params.c_full;
+	if (reservoir && unbiased) {
+		plain_tail = true;
+		tail_candidates = plain_candidates;
+		sum_weight = plain_weight;
+		sum_target = plain_sum;
+	}
+	if (reservoir) {
+		resample_reservoir(pixel, cluster_offset, cluster_z);
+	}
 	bool exact = tail_lamps <= tails;
 	bool counting = (params.debug_flags & DEBUG_COUNT) != 0u;
 	uint record_flag = counting && exact ? RECORD_EXACT_CHECK : 0u;
@@ -348,7 +754,7 @@ void main() {
 			atomicAdd(debug_counts.selections[head_slot[i]], 1u);
 		}
 	}
-	if (!exact) {
+	if (!exact && !reservoir) {
 		uint seed = di_hash(uint(pixel.y) * 65537u + uint(pixel.x)) ^ di_hash(params.frame ^ 0x68e31da4u);
 		for (uint k = 0u; k < tails; k++) {
 			uint h = di_hash(seed ^ di_hash(k + 0xb5297a4du));
@@ -362,6 +768,16 @@ void main() {
 	imageStore(record_image, ivec3(pixel, 0), uvec4(packed_normal, floatBitsToUint(depth) | record_flag, 0u, 0u));
 	for (uint i = 0u; i < params.head_entries; i++) {
 		imageStore(entry_image, ivec3(pixel, int(i)), uvec4(i < head_count ? head_slot[i] : 0u, 0u, 0u, 0u));
+	}
+	if (reservoir) {
+		if (params.spatial_neighbors == 0u) {
+			if (result_slot == 0u) {
+				write_sample(pixel, 0u, 0u, 0.0, 0.0, vec3(0.0));
+			} else {
+				write_sample(pixel, 0u, result_slot, result_weight, sum_weight, rest_scale(result_target, result_weight));
+			}
+		}
+		return;
 	}
 	for (uint k = 0u; k < tails; k++) {
 		if (exact) {
@@ -391,3 +807,140 @@ void main() {
 		}
 	}
 }
+#else
+bool surface_at(ivec2 p_pixel, out vec3 r_vertex, out vec3 r_normal, out float r_roughness) {
+	float depth = texelFetch(depth_buffer, p_pixel, 0).r;
+	if (depth <= 0.0) {
+		return false;
+	}
+	vec2 uv = (vec2(p_pixel) + 0.5) * params.pixel_size;
+	vec4 view_h = params.inv_projection * vec4(uv * 2.0 - 1.0, depth, 1.0);
+	r_vertex = view_h.xyz / view_h.w;
+	vec4 normal_roughness = texelFetch(normal_roughness_buffer, p_pixel, 0);
+	r_normal = di_oct_decode(unpackSnorm2x16(packSnorm2x16(di_oct_encode(normalize(normal_roughness.xyz * 2.0 - 1.0)))));
+	r_roughness = normal_roughness.w;
+	if (r_roughness > 0.5) {
+		r_roughness = 1.0 - r_roughness;
+	}
+	r_roughness /= 127.0 / 255.0;
+	return true;
+}
+
+float neighbour_target(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal, float p_roughness) {
+	for (uint i = 0u; i < params.head_entries; i++) {
+		if ((imageLoad(entry_image, ivec3(p_pixel, int(i))).r & 0xFFFFu) == own_slot) {
+			return 0.0;
+		}
+	}
+	return plain_target(own_light.position, own_light.direction, p_vertex, p_normal, -normalize(p_vertex), p_roughness);
+}
+
+void main() {
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(pixel, params.size))) {
+		return;
+	}
+	if (imageLoad(tile_flags, pixel >> 3).r != params.counter) {
+		return;
+	}
+	uint header = imageLoad(current_header, pixel).r;
+	if ((header >> 25u) != (params.counter & 127u) || ((header >> 24u) & 1u) != reservoir_arm()) {
+		return;
+	}
+	if (!surface_at(pixel, vertex, normal, roughness)) {
+		return;
+	}
+	view = -normalize(vertex);
+	if (params.reservoirs != RESERVOIRS_U1) {
+		load_history();
+	} else {
+		plain_tail = true;
+	}
+	head_count = params.head_entries;
+	for (uint i = 0u; i < params.head_entries; i++) {
+		head_slot[i] = imageLoad(entry_image, ivec3(pixel, int(i))).r & 0xFFFFu;
+	}
+
+	uvec2 values = imageLoad(current_values, pixel).xy;
+	own_mass = float((header >> 16u) & 0xFFu);
+	own_slot = own_mass > 0.0 ? header & 0xFFFFu : DI_SAMPLER_NO_PICK;
+	own_weight = uintBitsToFloat(values.x);
+	own_p = uintBitsToFloat(values.y);
+	stream_seed = di_hash(uint(pixel.y) * 65537u + uint(pixel.x)) ^ di_hash(params.frame ^ 0x68e31da4u);
+
+	ivec2 other_pixel[MAX_NEIGHBORS];
+	vec3 other_vertex[MAX_NEIGHBORS];
+	vec3 other_normal[MAX_NEIGHBORS];
+	float other_roughness[MAX_NEIGHBORS];
+	float expected = -vertex.z;
+	float tolerance = expected * (0.01 + 0.02 / max(dot(normal, view), 0.05));
+	for (uint i = 0u; i < MAX_NEIGHBORS; i++) {
+		other_present[i] = false;
+		other_slot[i] = DI_SAMPLER_NO_PICK;
+		other_here[i] = 0.0;
+		other_there[i] = 0.0;
+		other_target[i] = vec3(0.0);
+		if (i >= params.spatial_neighbors) {
+			continue;
+		}
+		float reach = params.spatial_radius * sqrt(stream_uniform(STREAM_OFFSET, 2u * i));
+		float angle = 6.28318530718 * stream_uniform(STREAM_OFFSET, 2u * i + 1u);
+		ivec2 offset = ivec2(round(reach * vec2(cos(angle), sin(angle))));
+		ivec2 at = pixel + offset;
+		if (offset == ivec2(0) || any(lessThan(at, ivec2(0))) || any(greaterThanEqual(at, params.size))) {
+			continue;
+		}
+		uint other = imageLoad(current_header, at).r;
+		if (!reservoir_reads(other, params.counter)) {
+			continue;
+		}
+		if (!surface_at(at, other_vertex[i], other_normal[i], other_roughness[i])) {
+			continue;
+		}
+		if (abs(-other_vertex[i].z - expected) > tolerance || dot(normal, other_normal[i]) < 0.9) {
+			continue;
+		}
+		uvec2 held = imageLoad(current_values, at).xy;
+		uint mass = (other >> 16u) & 0xFFu;
+		other_present[i] = true;
+		other_pixel[i] = at;
+		other_slot[i] = other & 0xFFFFu;
+		if (di_slots.data[other_slot[i]].dynamic != 0u) {
+			mass = min(mass, params.dynamic_cap);
+		}
+		other_mass[i] = float(mass);
+		other_weight[i] = uintBitsToFloat(held.x);
+		other_stored[i] = uintBitsToFloat(held.y);
+	}
+
+	uvec2 cluster_pos = uvec2(pixel) >> params.cluster_shift;
+	uint cluster_offset = (params.cluster_width * cluster_pos.y + cluster_pos.x) * (params.max_cluster_element_count_div_32 + 32u);
+	uint cluster_z = uint(clamp((-vertex.z / params.z_far) * 32.0, 0.0, 31.0));
+	walk(cluster_offset, cluster_z, false, 4u);
+	walk(cluster_offset + params.cluster_type_size, cluster_z, true, 4u);
+
+	if (params.reservoirs == RESERVOIRS_U1 && own_slot != DI_SAMPLER_NO_PICK) {
+		for (uint i = 0u; i < params.spatial_neighbors; i++) {
+			if (other_present[i]) {
+				other_there[i] = neighbour_target(other_pixel[i], other_vertex[i], other_normal[i], other_roughness[i]);
+			}
+		}
+	}
+
+	float weight;
+	uint mass;
+	float target;
+	uint pick = combine(params.spatial_neighbors, STREAM_SPATIAL, weight, mass, target);
+	uint slot = 0u;
+	if (pick == DI_SAMPLER_NO_PICK) {
+		write_sample(pixel, 0u, 0u, 0.0, 0.0, vec3(0.0));
+	} else {
+		slot = pick == 0u ? own_slot : other_slot[pick - 1u];
+		write_sample(pixel, 0u, slot, weight, sum_weight, rest_scale(pick == 0u ? own_target : other_target[pick - 1u], weight));
+	}
+	if (params.reservoirs == RESERVOIRS_U1) {
+		imageStore(history_header, pixel, uvec4(reservoir_header(slot, mass), 0u, 0u, 0u));
+		imageStore(history_values, pixel, uvec4(floatBitsToUint(weight), floatBitsToUint(target), 0u, 0u));
+	}
+}
+#endif

@@ -40,6 +40,13 @@
 #define RB_SCOPE_DI_RESAMPLED SNAME("rb_di_resampled")
 #define RB_DI_ENTRIES SNAME("entries")
 #define RB_DI_RECORD SNAME("record")
+#define RB_DI_TILES SNAME("tiles")
+#define RB_DI_SET_HEADER_0 SNAME("set_header_0")
+#define RB_DI_SET_HEADER_1 SNAME("set_header_1")
+#define RB_DI_SET_VALUES_0 SNAME("set_values_0")
+#define RB_DI_SET_VALUES_1 SNAME("set_values_1")
+#define RB_DI_HEAD_STATE_0 SNAME("head_state_0")
+#define RB_DI_HEAD_STATE_1 SNAME("head_state_1")
 
 class DirectResamplerRD : public RendererRD::DirectResampler {
 public:
@@ -52,12 +59,25 @@ public:
 		uint32_t tail_visibility = 0;
 		bool stale_prior = false;
 		String debug_log;
+		uint32_t reservoirs = 0;
+		bool temporal_reuse = true;
+		uint32_t spatial_neighbors = 2;
+		float spatial_radius = 16.0f;
+		uint32_t c_full = 32;
+		uint32_t m_temporal_cap = 20;
+		uint32_t m_stored_cap = 255;
+		uint32_t dynamic_cap = 2;
+		bool head_rank_visible = false;
+		float head_swap_margin = 0.25f;
+		uint32_t head_swap_frames = 4;
+		bool head_window = false;
 	};
 
 	struct Params {
 		float inv_projection[16];
 		float prev_view_from_view[16];
 		float prev_projection[16];
+		float prev_inv_projection[16];
 		float camera_basis[12];
 		float region_half[3];
 		float floor_value;
@@ -74,9 +94,28 @@ public:
 		uint32_t history_valid;
 		uint32_t live_energy;
 		uint32_t debug_flags;
-		uint32_t pad;
+		uint32_t reservoirs;
+		uint32_t c_full;
+		uint32_t m_temporal_cap;
+		uint32_t dynamic_cap;
+		uint32_t m_stored_cap;
+		uint32_t spatial_neighbors;
+		float spatial_radius;
+		uint32_t counter;
+		uint32_t head_rank;
+		float head_swap_margin;
+		uint32_t head_swap_frames;
+		uint32_t temporal_reuse;
+		uint32_t head_window;
 	};
-	static_assert(sizeof(Params) == 320);
+	static_assert(sizeof(Params) == 432);
+
+	static constexpr uint32_t RESERVOIRS_OFF = 0;
+	static constexpr uint32_t RESERVOIRS_B1 = 1;
+	static constexpr uint32_t RESERVOIRS_U1 = 2;
+	static constexpr uint32_t MAX_NEIGHBORS = 4;
+	static constexpr uint32_t MAX_MASS = 255;
+	static constexpr uint32_t MAX_SWAP_FRAMES = 7;
 
 	static constexpr uint32_t DEBUG_FLAG_STALE_PRIOR = 1;
 	static constexpr uint32_t DEBUG_FLAG_COUNT = 2;
@@ -86,6 +125,8 @@ public:
 
 	static void register_settings();
 	static Settings clamp_settings(bool p_enabled, int p_head, int p_tail_samples, float p_floor, int p_energy_arm);
+	static void clamp_reservoir_settings(Settings &r_settings, int p_reservoirs, bool p_temporal_reuse, int p_spatial_neighbors, float p_spatial_radius, int p_c_full, int p_m_temporal_cap, int p_m_stored_cap, int p_dynamic_cap, int p_head_rank, float p_head_swap_margin, int p_head_swap_frames, bool p_head_window);
+	static uint32_t advance_counter(uint32_t p_counter, bool p_continuous);
 	static Settings get_project_settings();
 
 	virtual bool is_enabled() const override;
@@ -103,6 +144,14 @@ private:
 		Size2i size;
 		uint32_t head = 0;
 		uint32_t tail_samples = 0;
+		bool reservoir_sets = false;
+		bool head_state = false;
+		uint32_t counter = 1;
+		uint32_t history_set = 0;
+		uint32_t head_state_set = 0;
+		uint64_t last_frame = 0;
+		bool swap_sets = false;
+		bool swap_head_state = false;
 
 		virtual void configure(RenderSceneBuffersRD *p_render_buffers) override {}
 		virtual void free_data() override {}
@@ -111,7 +160,9 @@ private:
 	DiResampleShaderRD *shader = nullptr;
 	RID shader_version;
 	PipelineDeferredRD pipeline;
+	PipelineDeferredRD spatial_pipeline;
 	RID params_buffer;
+	RID header_dummy;
 	RID history_slots_dummy;
 	RID history_factors_dummy;
 	RID history_guide_dummy;

@@ -42,6 +42,17 @@ void DirectResamplerRD::register_settings() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("tail_samples"), PROPERTY_HINT_RANGE, "1,7,1"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, DI_RESAMPLED_SETTING("floor"), PROPERTY_HINT_RANGE, "0.0001,1,0.0001"), 0.0625);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("energy_arm"), PROPERTY_HINT_ENUM, "Mean,Live"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("reservoirs"), PROPERTY_HINT_ENUM, "Off,B1,U1"), 0);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("temporal_reuse"), true);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("spatial_neighbors"), PROPERTY_HINT_RANGE, "0,4,1"), 2);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, DI_RESAMPLED_SETTING("spatial_radius"), PROPERTY_HINT_RANGE, "1,64,0.5"), 16.0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("c_full"), PROPERTY_HINT_RANGE, "1,255,1"), 32);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("m_temporal_cap"), PROPERTY_HINT_RANGE, "1,255,1"), 20);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("m_stored_cap"), PROPERTY_HINT_RANGE, "1,255,1"), 255);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("head_rank"), PROPERTY_HINT_ENUM, "T,TV"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, DI_RESAMPLED_SETTING("head_swap_margin"), PROPERTY_HINT_RANGE, "0,4,0.01"), 0.25);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("head_swap_frames"), PROPERTY_HINT_RANGE, "1,7,1"), 4);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("debug/head_swap_window"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("debug/tail_visibility"), PROPERTY_HINT_ENUM, "Traced,Visible,Hashed"), 0);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("debug/stale_prior"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::STRING, DI_RESAMPLED_SETTING("debug/log"), PROPERTY_HINT_GLOBAL_SAVE_FILE, "*.txt"), String());
@@ -58,11 +69,32 @@ DirectResamplerRD::Settings DirectResamplerRD::clamp_settings(bool p_enabled, in
 	return settings;
 }
 
+void DirectResamplerRD::clamp_reservoir_settings(Settings &r_settings, int p_reservoirs, bool p_temporal_reuse, int p_spatial_neighbors, float p_spatial_radius, int p_c_full, int p_m_temporal_cap, int p_m_stored_cap, int p_dynamic_cap, int p_head_rank, float p_head_swap_margin, int p_head_swap_frames, bool p_head_window) {
+	r_settings.reservoirs = r_settings.tail_samples == 1 ? uint32_t(CLAMP(p_reservoirs, int(RESERVOIRS_OFF), int(RESERVOIRS_U1))) : RESERVOIRS_OFF;
+	r_settings.temporal_reuse = p_temporal_reuse;
+	r_settings.spatial_neighbors = uint32_t(CLAMP(p_spatial_neighbors, 0, int(MAX_NEIGHBORS)));
+	r_settings.spatial_radius = CLAMP(p_spatial_radius, 1.0f, 64.0f);
+	r_settings.c_full = uint32_t(CLAMP(p_c_full, 1, int(MAX_MASS)));
+	r_settings.m_temporal_cap = uint32_t(CLAMP(p_m_temporal_cap, 1, int(MAX_MASS)));
+	r_settings.m_stored_cap = uint32_t(CLAMP(p_m_stored_cap, 1, int(MAX_MASS)));
+	r_settings.dynamic_cap = uint32_t(CLAMP(p_dynamic_cap, 1, int(MAX_MASS)));
+	r_settings.head_rank_visible = p_head_rank == 1;
+	r_settings.head_swap_margin = CLAMP(p_head_swap_margin, 0.0f, 4.0f);
+	r_settings.head_swap_frames = uint32_t(CLAMP(p_head_swap_frames, 1, int(MAX_SWAP_FRAMES)));
+	r_settings.head_window = p_head_window;
+}
+
+uint32_t DirectResamplerRD::advance_counter(uint32_t p_counter, bool p_continuous) {
+	const uint32_t next = p_counter + (p_continuous ? 1 : 2);
+	return next == 0 ? 1 : next;
+}
+
 DirectResamplerRD::Settings DirectResamplerRD::get_project_settings() {
 	Settings settings = clamp_settings(GLOBAL_GET(DI_RESAMPLED_SETTING("enabled")), GLOBAL_GET(DI_RESAMPLED_SETTING("head")), GLOBAL_GET(DI_RESAMPLED_SETTING("tail_samples")), GLOBAL_GET(DI_RESAMPLED_SETTING("floor")), GLOBAL_GET(DI_RESAMPLED_SETTING("energy_arm")));
 	settings.tail_visibility = uint32_t(CLAMP(int(GLOBAL_GET(DI_RESAMPLED_SETTING("debug/tail_visibility"))), 0, 2));
 	settings.stale_prior = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/stale_prior"));
 	settings.debug_log = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/log"));
+	clamp_reservoir_settings(settings, GLOBAL_GET(DI_RESAMPLED_SETTING("reservoirs")), GLOBAL_GET(DI_RESAMPLED_SETTING("temporal_reuse")), GLOBAL_GET(DI_RESAMPLED_SETTING("spatial_neighbors")), GLOBAL_GET(DI_RESAMPLED_SETTING("spatial_radius")), GLOBAL_GET(DI_RESAMPLED_SETTING("c_full")), GLOBAL_GET(DI_RESAMPLED_SETTING("m_temporal_cap")), GLOBAL_GET(DI_RESAMPLED_SETTING("m_stored_cap")), GLOBAL_GET("rendering/global_illumination/direct/dynamic_history_cap"), GLOBAL_GET(DI_RESAMPLED_SETTING("head_rank")), GLOBAL_GET(DI_RESAMPLED_SETTING("head_swap_margin")), GLOBAL_GET(DI_RESAMPLED_SETTING("head_swap_frames")), GLOBAL_GET(DI_RESAMPLED_SETTING("debug/head_swap_window")));
 	return settings;
 }
 
@@ -94,12 +126,15 @@ bool DirectResamplerRD::_ensure_device() {
 	shader = memnew(DiResampleShaderRD);
 	Vector<String> modes;
 	modes.push_back("\n");
+	modes.push_back("\n#define MODE_SPATIAL\n");
 	shader->initialize(modes);
 	shader_version = shader->version_create();
 	if (!shader->version_is_valid(shader_version)) {
 		return false;
 	}
 	pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, 0));
+	spatial_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, 1));
+	header_dummy = _dummy(RD::DATA_FORMAT_R32_UINT, RD::TEXTURE_TYPE_2D, "Direct Resampled Header Dummy");
 	params_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(Params));
 	debug_buffer = RD::get_singleton()->storage_buffer_create(DEBUG_BYTES);
 	history_slots_dummy = _dummy(RD::DATA_FORMAT_R16_UNORM, RD::TEXTURE_TYPE_2D_ARRAY, "Direct Resampled History Slots Dummy");
@@ -166,11 +201,34 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		viewport.instantiate();
 		rb->set_custom_data(RB_SCOPE_DI_RESAMPLED, viewport);
 	}
-	if (viewport->size != size || viewport->head != settings.head || viewport->tail_samples != settings.tail_samples || !rb->has_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_RECORD)) {
+	const bool reservoir_sets = settings.reservoirs != RESERVOIRS_OFF;
+	const bool head_state = settings.head_rank_visible && settings.head > 0;
+	if (viewport->size != size || viewport->head != settings.head || viewport->tail_samples != settings.tail_samples || viewport->reservoir_sets != reservoir_sets || viewport->head_state != head_state || !rb->has_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_RECORD)) {
 		rb->clear_context(RB_SCOPE_DI_RESAMPLED);
 		viewport->size = size;
 		viewport->head = settings.head;
 		viewport->tail_samples = settings.tail_samples;
+		viewport->reservoir_sets = reservoir_sets;
+		viewport->head_state = head_state;
+		viewport->counter = 1;
+		viewport->history_set = 0;
+		viewport->head_state_set = 0;
+		viewport->last_frame = 0;
+		viewport->swap_sets = false;
+		viewport->swap_head_state = false;
+		const uint32_t private_usage = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
+		if (reservoir_sets) {
+			const Size2i tiles = Size2i(Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u));
+			rd->texture_clear(rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_TILES, RD::DATA_FORMAT_R32_UINT, private_usage, RD::TEXTURE_SAMPLES_1, tiles, 1, 1, true), Color(0, 0, 0, 0), 0, 1, 0, 1);
+			rd->texture_clear(rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_SET_HEADER_0, RD::DATA_FORMAT_R32_UINT, private_usage, RD::TEXTURE_SAMPLES_1, size, 1, 1, true), Color(0, 0, 0, 0), 0, 1, 0, 1);
+			rd->texture_clear(rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_SET_HEADER_1, RD::DATA_FORMAT_R32_UINT, private_usage, RD::TEXTURE_SAMPLES_1, size, 1, 1, true), Color(0, 0, 0, 0), 0, 1, 0, 1);
+			rd->texture_clear(rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_SET_VALUES_0, RD::DATA_FORMAT_R32G32_UINT, private_usage, RD::TEXTURE_SAMPLES_1, size, 1, 1, true), Color(0, 0, 0, 0), 0, 1, 0, 1);
+			rd->texture_clear(rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_SET_VALUES_1, RD::DATA_FORMAT_R32G32_UINT, private_usage, RD::TEXTURE_SAMPLES_1, size, 1, 1, true), Color(0, 0, 0, 0), 0, 1, 0, 1);
+		}
+		if (head_state) {
+			rd->texture_clear(rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_HEAD_STATE_0, RD::DATA_FORMAT_R32_UINT, private_usage, RD::TEXTURE_SAMPLES_1, size, 1, 1, true), Color(0, 0, 0, 0), 0, 1, 0, 1);
+			rd->texture_clear(rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_HEAD_STATE_1, RD::DATA_FORMAT_R32_UINT, private_usage, RD::TEXTURE_SAMPLES_1, size, 1, 1, true), Color(0, 0, 0, 0), 0, 1, 0, 1);
+		}
 		rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_ENTRIES, RD::DATA_FORMAT_R32_UINT, RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, size, settings.head + 3 * settings.tail_samples, 1, true);
 		rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_RECORD, RD::DATA_FORMAT_R32G32_UINT, RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT, RD::TEXTURE_SAMPLES_1, size, settings.tail_samples + 1, 1, true);
 	}
@@ -186,12 +244,39 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	const Projection inverse = p_input.projection.inverse();
 	const Projection prev_view_from_view = history ? Projection(p_input.history_camera.affine_inverse() * p_input.camera) : Projection();
 	const Projection prev_projection = history ? p_input.history_projection : Projection();
+	const Projection prev_inverse = prev_projection.inverse();
+	const bool continuous = history && viewport->last_frame != 0 && p_input.frame == viewport->last_frame + 1;
+	if (viewport->last_frame != p_input.frame) {
+		viewport->counter = advance_counter(viewport->counter, continuous);
+		viewport->last_frame = p_input.frame;
+		if (viewport->swap_sets) {
+			viewport->history_set = 1 - viewport->history_set;
+		}
+		if (viewport->swap_head_state) {
+			viewport->head_state_set = 1 - viewport->head_state_set;
+		}
+	}
+	const bool spatial = reservoir_sets && settings.spatial_neighbors > 0;
+	const bool feedback = spatial && settings.reservoirs == RESERVOIRS_U1;
+	const StringName set_headers[2] = { RB_DI_SET_HEADER_0, RB_DI_SET_HEADER_1 };
+	const StringName set_values[2] = { RB_DI_SET_VALUES_0, RB_DI_SET_VALUES_1 };
+	const StringName head_states[2] = { RB_DI_HEAD_STATE_0, RB_DI_HEAD_STATE_1 };
+	const uint32_t history_set = viewport->history_set;
+	const uint32_t head_state_set = viewport->head_state_set;
+	const RID tiles = reservoir_sets ? rb->get_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_TILES) : header_dummy;
+	const RID history_header = reservoir_sets ? rb->get_texture(RB_SCOPE_DI_RESAMPLED, set_headers[history_set]) : header_dummy;
+	const RID history_values = reservoir_sets ? rb->get_texture(RB_SCOPE_DI_RESAMPLED, set_values[history_set]) : history_guide_dummy;
+	const RID current_header = reservoir_sets ? rb->get_texture(RB_SCOPE_DI_RESAMPLED, set_headers[1 - history_set]) : header_dummy;
+	const RID current_values = reservoir_sets ? rb->get_texture(RB_SCOPE_DI_RESAMPLED, set_values[1 - history_set]) : history_guide_dummy;
+	const RID head_state_previous = head_state ? rb->get_texture(RB_SCOPE_DI_RESAMPLED, head_states[head_state_set]) : header_dummy;
+	const RID head_state_next = head_state ? rb->get_texture(RB_SCOPE_DI_RESAMPLED, head_states[1 - head_state_set]) : header_dummy;
 	Params params = {};
 	for (int c = 0; c < 4; c++) {
 		for (int r = 0; r < 4; r++) {
 			params.inv_projection[c * 4 + r] = float(inverse.columns[c][r]);
 			params.prev_view_from_view[c * 4 + r] = float(prev_view_from_view.columns[c][r]);
 			params.prev_projection[c * 4 + r] = float(prev_projection.columns[c][r]);
+			params.prev_inv_projection[c * 4 + r] = float(prev_inverse.columns[c][r]);
 		}
 	}
 	for (int r = 0; r < 3; r++) {
@@ -218,6 +303,19 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	params.history_valid = history ? 1 : 0;
 	params.live_energy = settings.live_energy ? 1 : 0;
 	params.debug_flags = (settings.stale_prior ? DEBUG_FLAG_STALE_PRIOR : 0) | (counting ? DEBUG_FLAG_COUNT : 0);
+	params.reservoirs = settings.reservoirs;
+	params.c_full = settings.c_full;
+	params.m_temporal_cap = settings.m_temporal_cap;
+	params.dynamic_cap = settings.dynamic_cap;
+	params.m_stored_cap = settings.m_stored_cap;
+	params.spatial_neighbors = settings.spatial_neighbors;
+	params.spatial_radius = settings.spatial_radius * float(size.y) / 1440.0f;
+	params.counter = viewport->counter;
+	params.head_rank = head_state ? 1 : 0;
+	params.head_swap_margin = settings.head_swap_margin;
+	params.head_swap_frames = settings.head_swap_frames;
+	params.temporal_reuse = settings.temporal_reuse ? 1 : 0;
+	params.head_window = settings.head_window ? 1 : 0;
 	rd->buffer_update(params_buffer, 0, sizeof(Params), &params);
 
 	RID sampler = RendererRD::MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
@@ -234,7 +332,15 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 9, history ? p_input.history_guide : history_guide_dummy));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, entries));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 11, record));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 13, tiles));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 14, history_header));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 15, history_values));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 16, current_header));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 17, current_values));
+	LocalVector<RD::Uniform> spatial_uniforms(uniforms);
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 12, debug_buffer));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 18, head_state_previous));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 19, head_state_next));
 
 	const RID shader_rid = shader->version_get_shader(shader_version, 0);
 	RD::ComputeListID list = rd->compute_list_begin();
@@ -242,6 +348,16 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	rd->compute_list_bind_uniform_set(list, UniformSetCacheRD::get_singleton()->get_cache_vec(shader_rid, 0, uniforms), 0);
 	rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
 	rd->compute_list_end();
+	if (spatial) {
+		const RID spatial_rid = shader->version_get_shader(shader_version, 1);
+		list = rd->compute_list_begin();
+		rd->compute_list_bind_compute_pipeline(list, spatial_pipeline.get_rid());
+		rd->compute_list_bind_uniform_set(list, UniformSetCacheRD::get_singleton()->get_cache_vec(spatial_rid, 0, spatial_uniforms), 0);
+		rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
+		rd->compute_list_end();
+	}
+	viewport->swap_sets = reservoir_sets && !feedback;
+	viewport->swap_head_state = head_state;
 	if (counting) {
 		debug_pending = true;
 		debug_frame = p_input.frame;
@@ -278,6 +394,7 @@ void DirectResamplerRD::free_device_resources() {
 	}
 	RD *rd = RD::get_singleton();
 	pipeline.free();
+	spatial_pipeline.free();
 	if (shader_version.is_valid()) {
 		shader->version_free(shader_version);
 		shader_version = RID();
@@ -287,7 +404,7 @@ void DirectResamplerRD::free_device_resources() {
 		shader = nullptr;
 	}
 	_flush_debug_line();
-	const RID owned[] = { params_buffer, debug_buffer, history_slots_dummy, history_factors_dummy, history_guide_dummy };
+	const RID owned[] = { params_buffer, debug_buffer, history_slots_dummy, history_factors_dummy, history_guide_dummy, header_dummy };
 	for (const RID &rid : owned) {
 		if (rid.is_valid()) {
 			rd->free_rid(rid);
@@ -298,6 +415,7 @@ void DirectResamplerRD::free_device_resources() {
 	history_slots_dummy = RID();
 	history_factors_dummy = RID();
 	history_guide_dummy = RID();
+	header_dummy = RID();
 	device_ready = false;
 }
 
