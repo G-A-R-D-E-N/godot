@@ -370,7 +370,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	params.history_valid = viewport->last_frame != 0 ? 1 : 0;
 	params.filter_on = settings.filtered() ? 1 : 0;
 	params.force_one = settings.force_one ? 1 : 0;
-	params.cold_frames = external ? 0 : settings.cold_frames;
+	params.cold_frames = external || settings.reference ? 0 : settings.cold_frames;
 	params.history_cap = float(settings.history_cap);
 	params.dynamic_cap = float(settings.dynamic_history_cap);
 	params.clamp_sigmas = settings.clamp_sigmas;
