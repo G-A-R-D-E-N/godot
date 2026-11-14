@@ -710,7 +710,7 @@ vec3 rs_fresh_lo(vec3 p_origin, vec3 p_dir, float p_dist, uint p_seed, out bool 
 	float bias = 0.01 + hit.t * 0.001;
 	bool ddgi_shade = (rf.flags & F_OWN_SAMPLER) == 0u && (rf.flags & F_SHADE_DDGI) != 0u;
 	if (!ddgi_shade) {
-		vec3 irradiance = ray_scene_direct_light(position, normal, bias, rf.sky_distance, ray_scene_hash(rf.frame));
+		vec3 irradiance = ray_scene_direct_light(position, normal, bias, rf.sky_distance, p_seed);
 		return min(material.emission * rf.emission_exposure + material.albedo * irradiance, vec3(RS_LO_CLAMP));
 	}
 	vec3 irradiance = ray_scene_direct_light(position, normal, bias, ddgi.max_distance, p_seed);
