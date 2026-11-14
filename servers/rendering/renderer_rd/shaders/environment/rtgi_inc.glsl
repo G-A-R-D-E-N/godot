@@ -120,3 +120,12 @@ bool rtgi_thin_keeps(uvec2 p_pixel, uint p_frame, uint p_seed, float p_fraction)
 	uvec2 offset = uvec2(hashed & 7u, (hashed >> 3u) & 7u);
 	return rtgi_bayer8(p_pixel + offset) < uint(p_fraction * 64.0 + 0.5);
 }
+
+ivec2 rtgi_anchor_pixel(ivec2 p_trace_pixel, int p_scale, ivec2 p_screen_size) {
+	ivec2 scale = ivec2(max(p_scale, 1));
+	return min(p_trace_pixel * scale + scale / 2, p_screen_size - 1);
+}
+
+uint rtgi_shade_key(ivec2 p_pixel, uint p_frame) {
+	return uint(p_pixel.y) * 65537u + uint(p_pixel.x) + p_frame * 6271u;
+}

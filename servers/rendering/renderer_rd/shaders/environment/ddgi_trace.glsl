@@ -481,8 +481,7 @@ void main() {
 
 	uint tag = uint(trace_pixel.y * rtgi.trace_size.x + trace_pixel.x) ^ rtgi.frame;
 	uint tile = texelFetch(rtgi_tiles, trace_pixel / RTGI_TILE, 0).r;
-	ivec2 scale = ivec2(max(rtgi.scale, 1));
-	ivec2 pixel = min(trace_pixel * scale + scale / 2, rtgi.screen_size - 1);
+	ivec2 pixel = rtgi_anchor_pixel(trace_pixel, rtgi.scale, rtgi.screen_size);
 	float depth = texelFetch(rtgi_depth, pixel, 0).x;
 
 	bool candidate = (tile & RTGI_TILE_TRACE) != 0u && depth != 0.0;
@@ -526,7 +525,7 @@ void main() {
 	uint normal_packed = 0u;
 	uint flags = 0u;
 	float hit_distance = DDGI_MISS_DISTANCE;
-	uint seed = ray_scene_hash(uint(pixel.y) * 65537u + uint(pixel.x) + rtgi.frame * 6271u);
+	uint seed = ray_scene_hash(rtgi_shade_key(pixel, rtgi.frame));
 	if (ray_scene_trace(origin, direction, ddgi.max_distance, false, seed, hit)) {
 		vec4 shaded = shade_hit(origin, direction, hit, seed);
 		radiance = shaded.rgb;

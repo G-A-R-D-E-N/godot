@@ -91,10 +91,16 @@ restir_settings.cpp and reach the probe status only. The editor settings page do
     params.emission_exposure and DDGI_MAX_RADIANCE);
   - ray_scene_inc.glsl: RaySceneHit, ray_scene_hit_material, ray_scene_hit_normal, ray_scene.camera_to_anchor and
     gi_hit_direct_light (one #define to ray_scene_direct_light at the end of ray_scene_inc.glsl);
-  - ddgi_inc.glsl (ddgi_sample_direction, DDGI_NO_VIEW_LIMIT) with DDGI_SET and DDGI_UBO_BINDING defined, so the ddgi
-    buffer is bound; shade_hit reads ddgi.levels[0].spacing;
-  - under MODE_SURFEL_TRACE only: the globals origin_surfel_position and origin_surfel_normal, and surfel_inc.glsl and
-    surfel_gather_inc.glsl (surfel_lookup, surfel_eval_irradiance, surfel_blend, SURFEL_INVALID).
+  - ddgi_inc.glsl (ddgi_sample_direction, DDGI_NO_VIEW_LIMIT) with DDGI_SET, DDGI_UBO_BINDING and DDGI_SAMPLING defined,
+    and the probe, irradiance and distance textures, linear sampler and sky radiance and sampler bound (restir_gi.glsl
+    does this under RESTIR_RAYS in FINAL, SOURCE and VALIDATE, the modes that shade); shade_hit calls
+    ddgi_sample_direction (view limit hit.t * 0.5) at run time when the bounce energy is above 0, but the include is
+    needed at compile time whatever the energy;
+  - under MODE_SURFEL_TRACE only: ddgi.levels[0].spacing, the globals origin_surfel_position and origin_surfel_normal,
+    and surfel_inc.glsl and surfel_gather_inc.glsl (surfel_lookup, surfel_eval_irradiance, surfel_blend,
+    SURFEL_INVALID).
+- The import seed (gi/replay_seed) comes from rtgi_anchor_pixel and rtgi_shade_key in rtgi_inc.glsl, the same helpers R2's
+  MODE_RTGI uses, so the imported tag is R2's seed at that pixel. The engine code notes hold the replay contract.
 - The module never defines MODE_SURFEL_TRACE, so it needs neither surfel include nor the origin_surfel_* globals.
 - A module shader that shades hits defines the four macros, includes restir_core_ray_scene_inc.glsl and
   restir_core_ddgi_inc.glsl, then restir_core_ray_scene_hit_shade_inc.glsl.

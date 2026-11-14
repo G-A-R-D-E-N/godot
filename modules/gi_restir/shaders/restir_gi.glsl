@@ -333,9 +333,7 @@ Reservoir rs_from_candidate(ivec2 p_pixel, Receiver p_r) {
 	res.tag = second.w;
 #ifdef RESTIR_RAYS
 	if ((rf.flags & (F_REPLAY | F_OWN_SAMPLER)) == F_REPLAY) {
-		ivec2 scale = ivec2(max(rf.trace_scale, 1));
-		ivec2 pixel = min(p_pixel * scale + scale / 2, rf.screen_size - 1);
-		res.tag = ray_scene_hash(uint(pixel.y) * 65537u + uint(pixel.x) + rf.frame * 6271u);
+		res.tag = ray_scene_hash(rtgi_shade_key(rtgi_anchor_pixel(p_pixel, rf.trace_scale, rf.screen_size), rf.frame));
 	}
 #endif
 	return res;
