@@ -1,5 +1,6 @@
 #define DI_SAMPLER_PI 3.14159265359
 #define DI_SAMPLER_NO_PICK 0xFFFFFFFFu
+#define DI_MIN_TARGET 5.421011e-20
 
 const vec3 di_luminance_weights = vec3(0.2126, 0.7152, 0.0722);
 
@@ -100,7 +101,7 @@ float di_resample_weight(vec3 p_target, float p_prior, float p_floor) {
 }
 
 bool di_candidate(float p_target) {
-	return p_target > 0.0 && !isinf(p_target);
+	return p_target >= DI_MIN_TARGET && !isinf(p_target);
 }
 
 float di_weight(float p_total, float p_pick_target) {
