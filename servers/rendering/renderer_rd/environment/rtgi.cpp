@@ -357,7 +357,7 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 	if (backend && !backend->is_active()) {
 		backend = nullptr;
 	}
-	if (backend) {
+	if (backend && backend->wants_all_tiles()) {
 		settings.force_trace = true;
 	}
 

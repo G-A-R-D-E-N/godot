@@ -112,6 +112,7 @@ public:
 	virtual ~RtgiResampleBackend() {}
 
 	virtual bool is_active() const = 0;
+	virtual bool wants_all_tiles() const { return true; }
 	virtual bool begin_frame(const RtgiFrameInputs &p_inputs) = 0;
 	virtual void resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutput &r_output) = 0;
 	virtual void release(RenderSceneBuffersRD *p_buffers) = 0;
