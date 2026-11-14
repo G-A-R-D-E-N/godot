@@ -622,4 +622,31 @@ TEST_CASE("[RestirEvents] Pack word carries M only where it packs a candidate") 
 	CHECK(pack_pdf_bits(restir_pack_word(pack_pixel(true, false, false, true, 7u), false, true)) == 0u);
 }
 
+TEST_CASE("[RestirEvents] Route output stays plain with the defaults and without the r2 route") {
+	const RestirRoute defaults = restir_route_output(true, false, false, 8u);
+	CHECK_FALSE(defaults.module_output);
+	CHECK(defaults.n_target == 0u);
+	for (const bool events_on : { false, true }) {
+		for (const bool pack_m : { false, true }) {
+			const RestirRoute off = restir_route_output(false, events_on, pack_m, 8u);
+			CHECK_FALSE(off.module_output);
+			CHECK(off.n_target == 0u);
+		}
+	}
+}
+
+TEST_CASE("[RestirEvents] Route output marks module output under events or frames_and_m, and hands n_target only with M") {
+	const RestirRoute events = restir_route_output(true, true, false, 8u);
+	CHECK(events.module_output);
+	CHECK(events.n_target == 0u);
+	const RestirRoute packed = restir_route_output(true, false, true, 8u);
+	CHECK(packed.module_output);
+	CHECK(packed.n_target == 8u);
+	const RestirRoute both = restir_route_output(true, true, true, 12u);
+	CHECK(both.module_output);
+	CHECK(both.n_target == 12u);
+	CHECK(restir_route_output(true, false, true, 0u).n_target == 1u);
+	CHECK(restir_route_output(true, false, true, 1000u).n_target == 255u);
+}
+
 }

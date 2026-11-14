@@ -59,6 +59,7 @@ struct RestirGiState {
 	uint32_t sky_reread_cuts = 0;
 	RestirSkyEpoch sky_epoch;
 	int64_t sky_epoch_frame = -1;
+	RestirRoute route;
 };
 
 struct RestirGiSummary {
@@ -103,6 +104,7 @@ struct RestirGiSummary {
 	String sky_reread = "off";
 	String tiles = "all";
 	String confidence = "frames";
+	RestirRoute route;
 };
 
 class RestirGiBackend : public RendererRD::RtgiResampleBackend {
@@ -118,6 +120,7 @@ class RestirGiBackend : public RendererRD::RtgiResampleBackend {
 	uint64_t hold_dropped_total = 0;
 	uint32_t hold_fill_max = 0;
 	uint64_t tile_skip_frames_total = 0;
+	uint64_t module_output_frames_total = 0;
 	String refusal_reason;
 
 	void _free_state(RestirGiState &r_state);

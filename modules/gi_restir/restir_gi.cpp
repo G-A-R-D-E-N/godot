@@ -333,6 +333,8 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 			get_core()->run_pack(state.resources, frozen);
 			r_output.denoise = true;
 			r_output.history_cap = uint32_t(CLAMP(_gi_int("denoise_history_cap"), 1, 255));
+			r_output.mode = state.route.module_output ? RTGI_OUTPUT_MODULE : RTGI_OUTPUT_PLAIN;
+			r_output.n_target = state.route.n_target;
 		}
 		return;
 	}
@@ -595,6 +597,8 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	if (denoise) {
 		get_core()->run_pack(state.resources, inputs);
 	}
+	const RestirRoute route = restir_route_output(denoise, events_on, params.pack_m, params.n_target);
+	state.route = route;
 
 	state.have_history = true;
 	state.hardware = p_inputs.hardware;
@@ -664,6 +668,10 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	if (params.tile_skip) {
 		tile_skip_frames_total++;
 	}
+	summary.route = route;
+	if (route.module_output) {
+		module_output_frames_total++;
+	}
 	summary.stats_valid = false;
 	summary.debug_valid = p_inputs.debug_view >= 0 && state.resources.debug.is_valid();
 	float mean_m = float(MIN(state.frames_since_cut, params.n_target));
@@ -703,6 +711,8 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 		route_cap = _ramped_cap(route_cap, MIN(ramp_m_min, route_cap), ramp_frames, ramp_since_cut);
 	}
 	r_output.history_cap = route_cap;
+	r_output.mode = route.module_output ? RTGI_OUTPUT_MODULE : RTGI_OUTPUT_PLAIN;
+	r_output.n_target = route.n_target;
 	summary.history_cap = route_cap;
 }
 
@@ -801,6 +811,9 @@ void RestirGiBackend::get_status(Dictionary &r_status) const {
 	r_status["tiles"] = summary.tiles;
 	r_status["tile_skip_frames_total"] = int64_t(tile_skip_frames_total);
 	r_status["confidence"] = summary.confidence;
+	r_status["module_output"] = summary.route.module_output;
+	r_status["route_n_target"] = int64_t(summary.route.n_target);
+	r_status["module_output_frames_total"] = int64_t(module_output_frames_total);
 	Array cut_counts;
 	for (const KeyValue<RenderSceneBuffersRD *, RestirGiState> &entry : states) {
 		for (uint32_t i = 0; i < RESTIR_CUT_MAX; i++) {

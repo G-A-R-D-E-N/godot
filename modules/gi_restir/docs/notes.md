@@ -655,3 +655,117 @@ Design 2.10 (N7 and "PACK writes M"), 3.2, 3.3, 8.1 rows 12-14; change plan comm
   and the run-time tests change the SPIR-V of TEMPORAL, the four SPATIAL modes, their five sky twins, FINAL and PACK; their
   output must not change. CLEAR, SOURCE, CAPTURE, VALIDATE and SKY_EPOCH see only new #defines, so their SPIR-V should stay
   byte-identical to 45bee90de. No core shader changed.
+
+## R2 side: module output, route coverage, tile memory (change plan commit 10)
+
+Design 2.8 (R2's two restart branches), 2.10, 3.2, 3.3, 8.2 rows 5-8; change plan commit 10. The core part (rtgi.h,
+rtgi.cpp, rtgi.glsl, rtgi_inc.glsl, gi_module_hooks.h, the rtgi/ddgi_wrong_* settings in rendering_server.cpp) never names
+the module; the module part is restir_route_output and its use in restir_gi.cpp.
+- Hook fields. RtgiResampleOutput gains mode (RTGI_OUTPUT_PLAIN, the default, or RTGI_OUTPUT_MODULE) and n_target (0 means
+  none). history_cap was already T_r (gi/denoise_history_cap). Design 8.2's hook table names both.
+- When the module says "module output". restir_route_output(denoise, events_on, pack_m, n_target) in restir_events.cpp:
+  module output when gi/denoise is r2 and either events are on (gi/event_reshade with gi/replay_seed) or gi/confidence is
+  frames_and_m; n_target (gi/n_target, 1..64 from the setting; the function's own 1..255 clamp is never reached) only with frames_and_m. So:
+  - defaults (events off, frames): plain. Bit 256 stays clear, and R2 with the module on does what it did at 697371ea0,
+    restarts included. This is the design's "every new setting defaults to the P4 head's behaviour".
+  - events on, frames: bit 256 set, n_target 0. TEMPORAL skips R2's restarts (design 2.8: the module already restarted the
+    reservoirs, "otherwise events mode restarts twice"); moments.w carries the EMA of 0 (the pdf word is 0); COMPOSE keeps the
+    old form with T = target_samples. RG-1's event arms run here.
+  - frames_and_m (events on or off): bit 256 set and n_target handed over: route form (3.3). RG-2 runs here.
+    With events off the skip of R2's restarts still holds, for design 2.8's other reason: a sphere restart sets R2's count
+    to 0, and in route form that count feeds coverage, which would dip to 1/T_r on every event frame. Nothing local
+    replaces the restart in this arm: the module's reaction to a lamp event is the screen-wide m_light hold, which lowers
+    coverage everywhere through the M term. RG-2 measures this arm; it is a ruling from the design, not a measured result.
+  - The frozen-frame test option reuses the last real frame's route.
+- Core sets RTGI_FRAME_FLAG_MODULE_OUTPUT (256, free between 128 and REPLAY 512) only when the backend's output is used
+  (denoise valid) and mode is RTGI_OUTPUT_MODULE. It is set after the backend runs, so CLASSIFY and the trace never see it; the
+  frame UBO is uploaded again before TEMPORAL (as for every denoise frame).
+- TEMPORAL under bit 256:
+  - the early return is unchanged: zero history gives moments.w 0;
+  - the gather carries tap_moments.w with the bilinear weights, as .x and .y;
+  - the global soft cut and the restart-sphere cap are both skipped. FRAME_FLAG_RESTART_SPHERES and the sphere list are still
+    set and uploaded (R5 reads them), so RTGI_COUNTER_RESTARTED reads 0 on an event frame with the bit set;
+  - the carry store writes the gathered .w; the normal store writes mix(w_previous, min(M / n_target, 1), blend), with the same
+    blend as the other moments and M = uintBitsToFloat(candidate_second.z), the word PACK writes under frames_and_m. With
+    n_target 0, or a word that is not above 0 (NaN included), the new sample is 0.
+  - The CPU soft-cut bookkeeping (frames_since_cut held at soft_cut_count, which feeds the published record's sample_count)
+    still runs; design 3.3 keeps the record "as today".
+- Route form (bit 256 and n_target above 0). Core writes T_r (the route history cap, already in settings.history_cap) into
+  FrameUBO.target_samples and n_target into the new word; plain R2 and the old route keep target_samples. The published
+  record still uses rtgi/target_samples. COMPOSE then sets confidence = min(clamp(n̄ / T_r), clamp(μ̄ / N)) in place of
+  clamp(n̄ / T), with μ̄ the bilateral mean of moments.w over the same taps and weights as n̄ and N = 1. Validity and support
+  multiply as before.
+- Marked tiles in route form. COMPOSE reads R2's tile texture (new COMPOSE binding 10) at the tile of the trace pixel nearest
+  the slot pixel, only while R5 or R6 is on. A marked tile (RTGI_TILE_REASON_DDGI_WRONG, tile bit 64) with n̄ ≥ 2 and a
+  relative deviation sqrt(m2 − m1²) / max(m1, L_floor) below rtgi/ddgi_wrong_noise takes T_r = 1 and
+  N = rtgi/ddgi_wrong_target / n_target (clamped to 1e-3..1, so a target above n_target cannot hold coverage below 1). m1 and m2 are the bilateral means of moments.x and .y over the
+  same taps; design 3.3 says "per-pixel", and these are the slot pixel's own taps.
+- Tile memory (design 3.2). Two R16_UINT textures, "tile_memory_0" and "_1", one texel per tile, ping-pong on R2's frame index
+  (read previous, write current), created with R2's other textures and cleared at creation. Low 8 bits: frames left;
+  bit 8 (256): set by R5; bit 9 (512): set by R6.
+  - Bits in FrameUBO.ddgi_wrong_bits: ACTIVE 4 (R5 or R6 on: the memory is written), READ 8 (no cut this frame and the last
+    frame that ran wrote memory), EVENTS 1 (R5 on and this frame's sphere selection did not overflow), MEMORY 2 (R6 on and
+    no cut). A refused or skipped frame leaves READ clear on the next one, so a stale texture is never read. A cut, resize
+    or trace-scale change therefore reads nothing (the textures are recreated on resize). CUT_MODULE is decided after
+    CLASSIFY, so on that frame the memory is still read.
+  - Reprojection: one trace pixel per tile reads, the centre (local 4, 4), or on a cut-off edge tile the in-range pixel
+    nearest it. If it has geometry it takes its view position to the previous view and clip, rounds to the nearest previous
+    trace pixel, and reads the previous memory at that pixel's tile. It reads nothing when the point is behind the previous
+    camera or off the trace, the previous geo_position there has no geometry, or the previous position lies farther than
+    TEMPORAL's depth tolerance from the plane through the reprojected point (the current normal turned into the previous
+    view; CLASSIFY binds no previous normal). A plane test, as in TEMPORAL: a 3-D distance would also count the rounding
+    offset inside the surface, which at grazing angles exceeds the tolerance once the camera moves. R6's per-pixel history
+    reads use the same test.
+  - Known limits, for RG-2 to record: a tile whose reading pixel is sky reads nothing, so a mark on a silhouette tile lasts
+    one frame; switching gi/confidence or events on a running frame is not a cut, so moments.w starts at 0 and route
+    coverage ramps over about the history cap; with gi/confidence_ramp on, T_r is the ramped cap, not
+    gi/denoise_history_cap (the defaults make them equal); the noise gate's m1 and m2 are bilateral means, so the deviation
+    reads high across texture and shadow edges and the gate shuts there (the slow side).
+  - Per frame: left = stored − 1 (0 stays 0); the marks clear when left reaches 0. R5 sets left = rtgi/ddgi_wrong_frames and
+    bit 8 when any trace pixel of the tile lies inside one of the frame's view-space restart spheres. R6 sets left and bit 9
+    on a tile traced by today's reasons or by memory when its test passes. A tile with left above 0 gets tile reason 64
+    and RTGI_TILE_TRACE. A marked tile is traced on the marking frame and ddgi_wrong_frames − 1 frames after it. Tiles with
+    no geometry write 0.
+  - R5 overflow: when R2's selection dropped spheres (more than 16), EVENTS stays clear that frame and r5_overflow counts it.
+    The list is uploaded for R5 even when R2's own sphere restart is off or the frame is a soft cut; TEMPORAL reads it only
+    under FRAME_FLAG_RESTART_SPHERES, as before.
+  - R6's test (rtgi_tile_disagrees): each trace pixel with geometry reprojects as above and reads last frame's history; if
+    its count is above 0 it adds (luma, luma², 1) to a 64-entry shared array, which thread 0 sums. m_R is the mean, var_R the
+    sample variance (÷ (n − 1)), n_eff = n / (1 + ρ (n − 1)) and SE_R = sqrt(var_R / n_eff). m_D is the mean luma of the classify
+    taps that ran and have DDGI alpha above 0 (shared_ddgi is now vec4[4]: rgb and alpha). Mark when n ≥ 2, at least one tap,
+    |m_R − m_D| / max(m_D, L_floor) > τ and SE_R < τ m_R / 3. Both means are before DDGI's energy factor, which COMPOSE and
+    gi.glsl apply alike.
+- FrameUBO grows by two 16-byte rows after restart_spheres: (ddgi_wrong_frames, ddgi_wrong_bits, n_target, ddgi_wrong_rho) at
+  624 and (ddgi_wrong_tau, _target, _noise, _floor) at 640; 656 bytes, three static_asserts. The ddgi_wrong_* words stay
+  zero unless R5 or R6 is on, and n_target unless the route form runs.
+- Settings (internal, next to the other rtgi/* ones; none is in ProjectSettings.xml, as for every internal rtgi setting):
+
+| Setting | Range | Default |
+|---|---|---|
+| rtgi/ddgi_wrong_events | bool (R5) | false |
+| rtgi/ddgi_wrong_memory | bool (R6) | false |
+| rtgi/ddgi_wrong_frames | int 1..255 | 16 |
+| rtgi/ddgi_wrong_tau | float 0..16 | 0.5 |
+| rtgi/ddgi_wrong_target | float 0..255 (N_w) | 2.0 |
+| rtgi/ddgi_wrong_noise | float 0..16 | 0.25 |
+| rtgi/ddgi_wrong_floor | float (L_floor) | 0.05 |
+| rtgi/ddgi_wrong_rho | float 0..1 (ρ) | 1.0 |
+
+  L_floor and ρ have no setting in design 8.2; they are settings here so RG-2 can set them. ρ 1 makes n_eff 1, the side that
+  marks least, until RG-2 registers ρ. L_floor 0.05 is a placeholder in luma before DDGI energy.
+- Status. R2: ddgi_wrong {bits, r5_frames, r5_overflow}, route {module_output_frames, route_frames, n_target}, and with
+  rtgi/gpu_counters the counters tiles_wrong_events and tiles_wrong_memory (tiles carrying bit 8 or 9 this frame). Module:
+  module_output, route_n_target, module_output_frames_total. no_canonical is already in stats (commit 4). There is no engine
+  spikes key: a spike is a pixel above 10 times its 3x3 median (G-R3(b)), plain R2 has no module stats row, and the
+  registration has the reader count spikes with one method for every arm, so the lab fills that column from the reader.
+- Doctests: "[RestirEvents] Route output ..." in tests/test_restir_events.h cover restir_route_output.
+- Identity. With the module off, or on with the defaults, bit 256 is clear; with R5 and R6 off the new UBO words are 0. Then:
+  - CLASSIFY reads and writes no memory, takes the same tile reasons (alpha from shared_ddgi[i].a, initial alpha 1.0) and
+    writes the same geo and tile texels;
+  - TEMPORAL takes both restart branches as before and stores moments.w 0 in both stores;
+  - COMPOSE keeps clamp(n̄ / T) and reads no tile;
+  - VARIANCE, ATROUS and DEBUG only see the longer UBO block.
+  The SPIR-V of all six rtgi.glsl modes changes (the UBO block; CLASSIFY, TEMPORAL and COMPOSE also their code and bindings;
+  with rtgi/gpu_counters the counter array is 11 words); their outputs must not. ddgi_trace's MODE_RTGI and every module
+  shader see only new #defines in rtgi_inc.glsl, so their SPIR-V should stay byte-identical. R2 allocates the two tile-memory
+  textures (2 x tiles x 2 B) whatever the settings, because CLASSIFY declares them.

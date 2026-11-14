@@ -309,3 +309,15 @@ RestirPackWord restir_pack_word(const RestirPackPixel &p_pixel, bool p_tile_skip
 	}
 	return word;
 }
+
+RestirRoute restir_route_output(bool p_denoise, bool p_events_on, bool p_pack_m, uint32_t p_n_target) {
+	RestirRoute route;
+	if (!p_denoise || !(p_events_on || p_pack_m)) {
+		return route;
+	}
+	route.module_output = true;
+	if (p_pack_m) {
+		route.n_target = CLAMP(p_n_target, 1u, 255u);
+	}
+	return route;
+}

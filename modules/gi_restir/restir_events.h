@@ -150,6 +150,11 @@ struct RestirPackWord {
 	bool radiance = false;
 };
 
+struct RestirRoute {
+	bool module_output = false;
+	uint32_t n_target = 0;
+};
+
 uint32_t restir_event_budget(uint32_t p_width, uint32_t p_height, uint32_t p_percent);
 bool restir_event_first_fire(uint32_t p_since_last, uint32_t p_quiet_frames);
 float restir_event_solid_angle(float p_reach, float p_distance);
@@ -167,3 +172,4 @@ bool restir_sky_epoch_step(RestirSkyEpoch &r_epoch, float p_luma, bool p_history
 RestirTileState restir_plan_tiles(bool p_trace_all, bool p_have_texture, uint32_t p_trace_width, uint32_t p_trace_height, uint32_t p_tiles_width, uint32_t p_tiles_height);
 const char *restir_tile_state_name(RestirTileState p_state);
 RestirPackWord restir_pack_word(const RestirPackPixel &p_pixel, bool p_tile_skip, bool p_pack_m);
+RestirRoute restir_route_output(bool p_denoise, bool p_events_on, bool p_pack_m, uint32_t p_n_target);
