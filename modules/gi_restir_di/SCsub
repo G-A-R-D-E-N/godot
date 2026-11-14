@@ -7,14 +7,15 @@ Import("env_modules")
 env_gi_restir_di = env_modules.Clone()
 
 if "RD_GLSL" in env["BUILDERS"]:
-    env_gi_restir_di.RD_GLSL("shaders/di_resample.glsl")
-    env_gi_restir_di.Depends(
-        "shaders/di_resample.glsl.gen.h",
-        [
-            "#servers/rendering/renderer_rd/shaders/environment/di_sampler_inc.glsl",
-            "#servers/rendering/renderer_rd/shaders/light_data_inc.glsl",
-            "#glsl_builders.py",
-        ],
-    )
+    for shader in ["di_resample", "di_sampler_test"]:
+        env_gi_restir_di.RD_GLSL("shaders/" + shader + ".glsl")
+        env_gi_restir_di.Depends(
+            "shaders/" + shader + ".glsl.gen.h",
+            [
+                "#servers/rendering/renderer_rd/shaders/environment/di_sampler_inc.glsl",
+                "#servers/rendering/renderer_rd/shaders/light_data_inc.glsl",
+                "#glsl_builders.py",
+            ],
+        )
 
 env_gi_restir_di.add_source_files(env.modules_sources, "*.cpp")

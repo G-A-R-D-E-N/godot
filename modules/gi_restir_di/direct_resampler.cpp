@@ -45,6 +45,7 @@ void DirectResamplerRD::register_settings() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("debug/tail_visibility"), PROPERTY_HINT_ENUM, "Traced,Visible,Hashed"), 0);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("debug/stale_prior"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::STRING, DI_RESAMPLED_SETTING("debug/log"), PROPERTY_HINT_GLOBAL_SAVE_FILE, "*.txt"), String());
+	DirectSamplerLab::register_settings();
 }
 
 DirectResamplerRD::Settings DirectResamplerRD::clamp_settings(bool p_enabled, int p_head, int p_tail_samples, float p_floor, int p_energy_arm) {
@@ -132,6 +133,7 @@ void DirectResamplerRD::_flush_debug_line() {
 }
 
 bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
+	sampler_lab.serve();
 	const Settings settings = get_project_settings();
 	const Ref<RenderSceneBuffersRD> &rb = p_input.render_buffers;
 	if (!settings.enabled || rb.is_null() || !_ensure_device()) {
@@ -255,6 +257,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 }
 
 void DirectResamplerRD::release(const Ref<RenderSceneBuffersRD> &p_render_buffers) {
+	sampler_lab.serve();
 	if (p_render_buffers.is_null() || !p_render_buffers->has_custom_data(RB_SCOPE_DI_RESAMPLED)) {
 		return;
 	}
@@ -269,6 +272,7 @@ void DirectResamplerRD::release(const Ref<RenderSceneBuffersRD> &p_render_buffer
 }
 
 void DirectResamplerRD::free_device_resources() {
+	sampler_lab.free_device_resources();
 	if (!device_ready) {
 		return;
 	}

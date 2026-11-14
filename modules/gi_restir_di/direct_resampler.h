@@ -31,6 +31,7 @@
 #pragma once
 
 #include "core/io/file_access.h"
+#include "modules/gi_restir_di/direct_sampler_lab.h"
 #include "modules/gi_restir_di/shaders/di_resample.glsl.gen.h"
 #include "servers/rendering/renderer_rd/environment/direct_resampler_hooks.h"
 #include "servers/rendering/renderer_rd/pipeline_deferred_rd.h"
@@ -121,6 +122,7 @@ private:
 	bool debug_pending = false;
 	uint64_t debug_frame = 0;
 	Size2i debug_size;
+	DirectSamplerLab sampler_lab;
 
 	bool _ensure_device();
 	void _write_debug_line();
