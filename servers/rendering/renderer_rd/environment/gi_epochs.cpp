@@ -258,6 +258,9 @@ GIEpochs::DirtyResult GIEpochs::get_dirty_boxes_since_serial(uint32_t p_since_se
 
 GIEpochs::DirtyResult GIEpochs::get_dirty_boxes(uint32_t p_since_scene_epoch, LocalVector<AABB> &r_boxes) const {
 	r_boxes.clear();
+	if (epochs[SOURCE_SCENE] == 0) {
+		return DIRTY_OVERFLOW;
+	}
 	if (p_since_scene_epoch == epochs[SOURCE_SCENE]) {
 		return DIRTY_NONE;
 	}

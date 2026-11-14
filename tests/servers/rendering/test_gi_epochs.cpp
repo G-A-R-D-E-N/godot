@@ -35,6 +35,7 @@ TEST_FORCE_LINK(test_gi_epochs)
 #ifdef RD_ENABLED
 
 #include "servers/rendering/renderer_rd/environment/gi_epochs.h"
+#include "servers/rendering/renderer_rd/environment/ray_scene.h"
 
 namespace TestGIEpochs {
 
@@ -308,6 +309,52 @@ TEST_CASE("[GIEpochs] A frame overflow, a released feed and an oversized frame r
 	CHECK(epochs.get_structure_generation() == 7);
 	epochs.clear_dirty_feed();
 	CHECK(epochs.get_dirty_boxes_since_serial(2, result) == GIEpochs::DIRTY_OVERFLOW);
+}
+
+TEST_CASE("[GIEpochs] A reader holding a serial from before a release reads overflow after the re-acquire") {
+	using RendererRD::RayScene;
+	CHECK(RayScene::feed_frame_overflow(false, true));
+	CHECK(RayScene::feed_frame_overflow(true, false));
+	CHECK_FALSE(RayScene::feed_frame_overflow(false, false));
+
+	GIEpochs epochs;
+	LocalVector<AABB> boxes;
+	boxes.push_back(AABB(Vector3(0, 0, 0), Vector3(1, 1, 1)));
+	LocalVector<AABB> result;
+	_publish(epochs, 1, LocalVector<AABB>(), RayScene::feed_frame_overflow(false, true));
+	_publish(epochs, 2, boxes, RayScene::feed_frame_overflow(false, false));
+	CHECK(epochs.get_dirty_boxes_since_serial(2, result) == GIEpochs::DIRTY_NONE);
+	CHECK(epochs.get_dirty_boxes_since_serial(1, result) == GIEpochs::DIRTY_BOXES);
+
+	epochs.sync_ray_scene(0, 0);
+	epochs.clear_dirty_feed();
+	_publish(epochs, 3, LocalVector<AABB>(), RayScene::feed_frame_overflow(false, true));
+	CHECK(epochs.get_dirty_boxes_since_serial(2, result) == GIEpochs::DIRTY_OVERFLOW);
+	CHECK(result.is_empty());
+	CHECK(epochs.get_dirty_boxes_since_serial(3, result) == GIEpochs::DIRTY_NONE);
+
+	_publish(epochs, 4, boxes, RayScene::feed_frame_overflow(false, false));
+	CHECK(epochs.get_dirty_boxes_since_serial(3, result) == GIEpochs::DIRTY_BOXES);
+	CHECK(result.size() == 1);
+	CHECK(epochs.get_dirty_boxes_since_serial(2, result) == GIEpochs::DIRTY_OVERFLOW);
+}
+
+TEST_CASE("[GIEpochs] The scene epoch query reads overflow until the scene word moves") {
+	GIEpochs epochs;
+	LocalVector<AABB> boxes;
+	boxes.push_back(AABB(Vector3(0, 0, 0), Vector3(1, 1, 1)));
+	LocalVector<AABB> result;
+	_publish(epochs, 1, LocalVector<AABB>());
+	CHECK(epochs.get(GIEpochs::SOURCE_SCENE) == 0);
+	CHECK(epochs.get_dirty_boxes(0, result) == GIEpochs::DIRTY_OVERFLOW);
+
+	epochs.bump(GIEpochs::SOURCE_SCENE);
+	const uint32_t scene = epochs.get(GIEpochs::SOURCE_SCENE);
+	_publish(epochs, 2, boxes);
+	CHECK(epochs.get_dirty_boxes(scene, result) == GIEpochs::DIRTY_NONE);
+	CHECK(epochs.get_dirty_boxes(0, result) == GIEpochs::DIRTY_BOXES);
+	REQUIRE(result.size() == 1);
+	CHECK(result[0].position.is_equal_approx(Vector3(0, 0, 0)));
 }
 
 } // namespace TestGIEpochs

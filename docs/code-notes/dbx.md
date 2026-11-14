@@ -63,12 +63,18 @@ both at the end of every `update`.
 and the structure generation. A read older than 16 frames, a slot that does not carry the expected serial (the feed was off in
 between) or a feed that is not held gives `DIRTY_OVERFLOW`. The ring is cleared when the last consumer releases the feed.
 Nothing on this branch bumps `GIEpochs::SOURCE_SCENE` and `RayScene` has no scene epoch, so the ring frames carry the word
-as it is (0 until something bumps it) and `get_dirty_boxes(since_scene_epoch)` is only as useful as that word. The serial
-query does not use it.
+as it is (0 until something bumps it). While the word has never moved, `get_dirty_boxes(since_scene_epoch)` returns
+`DIRTY_OVERFLOW`, never `DIRTY_NONE`; it answers from the ring once something bumps the word. The serial query does not use
+the word.
+
+The baseline frame, the first update after the feed is acquired (also after a release and a re-acquire), is published with
+overflow set (`RayScene::feed_frame_overflow`). The feed saw nothing while it was off, so a reader still holding a serial
+from before the release reads `DIRTY_OVERFLOW`, never `DIRTY_NONE`.
 
 ## Settings (`rendering/global_illumination/ray_scene/`)
 
-`dirty_box_cap` 32, `dirty_merge_distance` 0.5 (m), `mover_frames` 3. Internal: `debug_dirty_feed` 0 off, 1 hold the feed,
+`dirty_box_cap` 32, `dirty_merge_distance` 0.5 (m), `mover_frames` 3. The ring keeps at most 32 boxes per frame, so a
+`dirty_box_cap` above 32 gains nothing: every frame with more than 32 merged boxes reads as overflow. Internal: `debug_dirty_feed` 0 off, 1 hold the feed,
 2 hold and write one JSON line per update to the file named by the internal `debug_dirty_feed_path` (probe use; no line is
 written while the path is empty).
 
@@ -78,3 +84,4 @@ written while the path is empty).
   instances enter and leave at its edge, and those show as adds and removes.
 - Several cameras that call `RayScene::update` with different instance sets in one frame make the same instances appear and
   disappear (the TLAS signature flaps the same way).
+- `layer_mask`, `cast_shadows` and material edits change the TLAS signature but publish no boxes.
