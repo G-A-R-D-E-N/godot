@@ -44,6 +44,7 @@ Default: off at build time (config.py is_enabled returns False) and off at run t
 | gi/dump_path | string | "" |
 | gi/denoise | enum off,r2 | r2 |
 | gi/denoise_history_cap | int 1..255 | 4 |
+| gi/trace_all_tiles | bool | true |
 
 The numeric defaults other than the bools are the ADR values. They have no effect while the matching enabled
 setting is off. Every description starts with "Experimental.". Godot shows project-setting help from
@@ -90,9 +91,9 @@ restir_settings.cpp and reach the probe status only. The editor settings page do
 
 ## Contracts for lane S4
 
-- release(nullptr) is called twice at shutdown: once by the renderer (release_all before the device goes) and once by
-  this module's uninitialise (release_all, then unregister_all). Backends must make release(nullptr) idempotent and
-  must not touch the device after the first call.
+- release(nullptr) is called at shutdown only by this module's uninitialise (release_all, then unregister_all); the
+  renderer never calls release_all. Backends must make release(nullptr) idempotent and must not touch the device after
+  the first call.
 - is_active() runs on the render thread every frame: no allocation, no GPU work, no locks.
 - gi/deterministic and gi/dump_path are internal settings: they do not appear in the editor.
 
@@ -238,3 +239,7 @@ cannot re-read the sky by direction. A MISS_SKY sample therefore keeps its store
   scene, as DDGI does.
 - No cloud shadow and no alpha ray scene on this line; the shade passes bind set 2 bindings 0 and 3 to 8 only.
 - Output route: only gi/denoise = r2 is used by RTGI. A frame with gi/denoise off is counted as a refusal and RTGI runs on its own candidates.
+- Tiles: wants_all_tiles() returns gi/trace_all_tiles, and while it is true R2 traces every tile. Off is not a supported mode: R2 then skips the tiles it
+  judges converged, the module does not revalidate those tiles, and the history cap that follows the trace rate overstates their rate. The default stays on.
+- Per-view release: R2's RtgiBuffers::free_data calls release(p_buffers) when the render buffers are cleaned up (destructor, configure,
+  configure_for_reflections).

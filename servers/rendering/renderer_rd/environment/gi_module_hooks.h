@@ -103,7 +103,6 @@ struct RtgiResampleOutput {
 	bool valid = false;
 	bool denoise = false;
 	bool history_cut = false;
-	uint32_t soft_hold_frames = 0;
 	uint32_t history_cap = 0;
 };
 

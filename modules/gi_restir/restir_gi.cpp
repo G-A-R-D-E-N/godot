@@ -545,7 +545,6 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	r_output.valid = true;
 	r_output.denoise = denoise;
 	r_output.history_cut = cut;
-	r_output.soft_hold_frames = light_cap ? state.light_soft_frames + 1u : 0u;
 	uint32_t route_cap = uint32_t(CLAMP(_gi_int("denoise_history_cap"), 1, 255));
 	if (ramp) {
 		route_cap = _ramped_cap(route_cap, MIN(ramp_m_min, route_cap), ramp_frames, ramp_since_cut);
