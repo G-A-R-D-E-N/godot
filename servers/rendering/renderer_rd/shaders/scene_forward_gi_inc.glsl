@@ -69,8 +69,8 @@ void voxel_gi_compute(uint index, vec3 position, vec3 normal, vec3 ref_vec, mat3
 	float blend = clamp(1.0 - max(blendv.x, max(blendv.y, blendv.z)), 0.0, 1.0);
 	//float blend=1.0;
 
-	float max_distance = length(voxel_gi_instances.data[index].bounds);
-	vec3 cell_size = 1.0 / voxel_gi_instances.data[index].bounds;
+	float max_distance = length(voxel_gi_instances.data[index].octree_size);
+	vec3 cell_size = 1.0 / voxel_gi_instances.data[index].octree_size;
 
 	//radiance
 
@@ -132,8 +132,8 @@ void voxel_gi_coat_compute(uint index, vec3 position, vec3 normal, vec3 ref_vec,
 	vec3 blendv = abs(position / voxel_gi_instances.data[index].bounds * 2.0 - 1.0);
 	float blend = clamp(1.0 - max(blendv.x, max(blendv.y, blendv.z)), 0.0, 1.0);
 
-	float max_distance = length(voxel_gi_instances.data[index].bounds);
-	vec3 cell_size = 1.0 / voxel_gi_instances.data[index].bounds;
+	float max_distance = length(voxel_gi_instances.data[index].octree_size);
+	vec3 cell_size = 1.0 / voxel_gi_instances.data[index].octree_size;
 
 	vec4 irr_light = voxel_cone_trace(voxel_gi_textures[index], cell_size, position, ref_vec, tan(roughness * 0.5 * M_PI * 0.99), max_distance, voxel_gi_instances.data[index].bias);
 	if (voxel_gi_instances.data[index].blend_ambient) {
