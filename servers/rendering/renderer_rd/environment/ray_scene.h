@@ -304,6 +304,9 @@ public:
 	static RayScene *get_singleton() { return singleton; }
 	static bool is_needed();
 	static void watch_needed();
+#ifdef TESTS_ENABLED
+	static void reset_needed_for_tests() { needed.clear(); }
+#endif
 
 	void mesh_surface_added(RID p_mesh, uint32_t p_surface, const RenderingServerTypes::SurfaceData &p_surface_data);
 	void mesh_cleared(RID p_mesh);
