@@ -122,6 +122,8 @@ static const RestirSetting restir_table[] = {
 			"Experimental. ReSTIR GI light events: frames a first-fire sphere stays in the spatial hold, counted from its event frame." },
 	{ Variant::BOOL, "gi/sky_reread", PROPERTY_HINT_NONE, "", 0, "", false,
 			"Experimental. ReSTIR GI sky samples take their target weight and radiance from the live sky in the temporal, spatial and final passes instead of a stored radiance, and a sky epoch caps every receiver like a sun jump when the mean sky brightness leaves 0.8 to 1.25 times its value at the epoch's start (the cap needs gi/event_reshade). Needs the DDGI shading inputs; without them it has no effect. A change in whether it applies cuts the history." },
+	{ Variant::INT, "gi/fold_k", PROPERTY_HINT_RANGE, "0,64,1", 0, "", false,
+			"Experimental. ReSTIR GI stored-age bound (Fold): 0 (default) is off; 1 to 3 read as 4, and other values round down to a power of two, 4 to 64. When on, no reservoir in the temporal history carries a candidate older than this many view frames, and each pixel restarts its history on a staggered frame. Applies in B1, B2 and B2k with spatial feedback off; elsewhere it has no effect. A change of the effective bound, or of the mode or spatial feedback while it is set, cuts the history." },
 	{ Variant::BOOL, "gi/own_sampler", PROPERTY_HINT_NONE, "", 0, "", false,
 			"Experimental. ReSTIR GI uses the module's own initial sampler instead of the RTGI candidates (interim)." },
 	{ Variant::BOOL, "gi/deterministic", PROPERTY_HINT_NONE, "", 0, "", true,

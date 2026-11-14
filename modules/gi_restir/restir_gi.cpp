@@ -348,11 +348,20 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	const bool sky_reread_inputs = ray_scene != nullptr && p_inputs.shade.valid && p_inputs.shade.ddgi_ubo.is_valid();
 	const bool sky_reread = sky_reread_asked && sky_reread_inputs && get_core()->is_sky_valid(ray_scene->uses_hardware() ? RestirGiCore::VARIANT_HW : RestirGiCore::VARIANT_SW);
 
+	const uint32_t mode = _gi_mode();
+	const bool feedback = options.spatial_feedback < 0 ? mode == RESTIR_MODE_U1 : options.spatial_feedback > 0;
+	RestirFoldFrame fold;
+	fold.k = restir_fold_k(_gi_int("fold_k"));
+	fold.mode = mode;
+	fold.feedback = feedback;
+	fold.k_eff = restir_fold_k_eff(fold.k, mode != RESTIR_MODE_U1, feedback);
+
 	RestirEpochInputs epoch_inputs;
 	epoch_inputs.have_history = state.have_history;
 	epoch_inputs.have_epochs = state.have_epochs;
 	epoch_inputs.history_cut = p_inputs.history_cut;
 	epoch_inputs.hardware_changed = state.hardware != p_inputs.hardware || state.sky_reread != sky_reread;
+	epoch_inputs.fold_changed = state.have_history && restir_fold_cut(state.fold, fold);
 	epoch_inputs.previous = state.epochs;
 	epoch_inputs.current = p_inputs.epochs;
 	epoch_inputs.anchor = ray_scene ? ray_scene->get_anchor() : Vector3();
@@ -382,11 +391,11 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	params.trace_scale = p_inputs.trace_scale;
 	params.frame_index = p_inputs.frame_index;
 	params.seed = uint32_t(int(GLOBAL_GET("rendering/global_illumination/rtgi/seed"))) + options.seed_offset;
-	params.mode = _gi_mode();
+	params.mode = mode;
 	params.spatial_count = uint32_t(CLAMP(_gi_int("spatial_neighbors"), 0, 8));
 	params.spatial_radius = uint32_t(CLAMP(_gi_int("spatial_radius"), 1, 128));
 	params.spatial_passes = uint32_t(CLAMP(_gi_int("spatial_passes"), 1, 2));
-	params.spatial_feedback = options.spatial_feedback < 0 ? params.mode == RESTIR_MODE_U1 : options.spatial_feedback > 0;
+	params.spatial_feedback = feedback;
 	_apply_selection(params, options);
 	params.m_max = uint32_t(CLAMP(_gi_int("m_max"), 1, 512));
 	params.n_target = uint32_t(CLAMP(_gi_int("n_target"), 1, 64));
@@ -448,6 +457,10 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	const String reval_text = _gi_text("revalidate");
 	const bool reval_budget = reval_text == "budget";
 	const bool reval_share = reval_text == "share";
+	const uint32_t period = uint32_t(CLAMP(_gi_int("revalidate_period"), 2, 16));
+	params.fold_clock = state.frames;
+	params.fold_k_eff = fold.k_eff;
+	params.fold_pre_frame = fold.k_eff != 0u && restir_fold_pre_frame(reval_budget, ray_scene != nullptr, p_inputs.frame_index, period);
 	if (use_history && ray_scene != nullptr && (reval_budget || reval_share)) {
 		params.reval_cut_m = uint32_t(CLAMP(_gi_int("revalidate_cut_m"), 0, 16));
 		params.reval_threshold = float(CLAMP(_gi_int("revalidate_threshold"), 1, 1000)) * 0.01f;
@@ -456,8 +469,7 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 			params.flags |= RESTIR_F_REVAL_SHARE;
 			params.reval_pass = true;
 		} else {
-			const uint32_t period = uint32_t(CLAMP(_gi_int("revalidate_period"), 2, 16));
-			if (p_inputs.frame_index % period == period - 1u) {
+			if (restir_reval_frame(p_inputs.frame_index, period)) {
 				params.flags |= RESTIR_F_REVAL_FRAME;
 				params.reval_pass = true;
 			}
@@ -606,6 +618,7 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	state.epochs = p_inputs.epochs;
 	state.have_epochs = true;
 	state.prev_epoch_tag = params.epoch_tag;
+	state.fold = fold;
 	state.frames++;
 	state.frames_since_cut++;
 	if (use_history) {
@@ -669,6 +682,9 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 		tile_skip_frames_total++;
 	}
 	summary.route = route;
+	summary.fold = fold;
+	summary.fold_clock = params.fold_clock;
+	summary.fold_pre_frame = params.fold_pre_frame;
 	if (route.module_output) {
 		module_output_frames_total++;
 	}
@@ -814,6 +830,10 @@ void RestirGiBackend::get_status(Dictionary &r_status) const {
 	r_status["module_output"] = summary.route.module_output;
 	r_status["route_n_target"] = int64_t(summary.route.n_target);
 	r_status["module_output_frames_total"] = int64_t(module_output_frames_total);
+	r_status["fold_k"] = int64_t(summary.fold.k);
+	r_status["fold_k_eff"] = int64_t(summary.fold.k_eff);
+	r_status["fold_clock"] = int64_t(summary.fold_clock);
+	r_status["fold_pre_frame"] = summary.fold_pre_frame;
 	Array cut_counts;
 	for (const KeyValue<RenderSceneBuffersRD *, RestirGiState> &entry : states) {
 		for (uint32_t i = 0; i < RESTIR_CUT_MAX; i++) {
@@ -876,6 +896,11 @@ void RestirGiBackend::get_status(Dictionary &r_status) const {
 		d["reshade_overflow"] = s.reshade_overflow;
 		d["reshade_edge_stale"] = s.reshade_edge_stale;
 		d["event_capped"] = s.event_capped;
+		d["fold_refused"] = s.fold_refused;
+		d["fold_carried"] = s.fold_carried;
+		d["fold_renewed"] = s.fold_renewed;
+		d["fold_started"] = s.fold_started;
+		d["fold_refused_empty"] = s.fold_refused_empty;
 		d["temporal_shift_tested"] = s.temporal_shift_tested;
 		d["temporal_shift_rejected"] = s.temporal_shift_rejected;
 		d["had_history"] = int64_t(s.had_history);

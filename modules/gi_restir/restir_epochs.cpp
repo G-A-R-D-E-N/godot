@@ -57,6 +57,11 @@ void restir_plan_epochs(const RestirEpochInputs &p_inputs, RestirEpochPlan &r_pl
 		r_plan.reason = RESTIR_CUT_BACKEND;
 		return;
 	}
+	if (p_inputs.fold_changed) {
+		r_plan.cut = true;
+		r_plan.reason = RESTIR_CUT_FOLD;
+		return;
+	}
 	if (r_plan.origin_changed) {
 		r_plan.cut = true;
 		r_plan.reason = RESTIR_CUT_ORIGIN;

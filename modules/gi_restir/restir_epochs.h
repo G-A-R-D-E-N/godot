@@ -44,7 +44,8 @@ enum RestirCutReason : uint32_t {
 	RESTIR_CUT_SCENE_NO_FEED = 5,
 	RESTIR_CUT_SCENE_OVERFLOW = 6,
 	RESTIR_CUT_SCENE_UNLOCALISED = 7,
-	RESTIR_CUT_MAX = 8,
+	RESTIR_CUT_FOLD = 8,
+	RESTIR_CUT_MAX = 9,
 };
 
 struct RestirEpochInputs {
@@ -52,6 +53,7 @@ struct RestirEpochInputs {
 	bool have_epochs = false;
 	bool history_cut = false;
 	bool hardware_changed = false;
+	bool fold_changed = false;
 	RendererRD::GIEpochs::Snapshot previous = {};
 	RendererRD::GIEpochs::Snapshot current = {};
 	Vector3 anchor;

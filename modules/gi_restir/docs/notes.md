@@ -56,6 +56,7 @@ Default: off at build time (config.py is_enabled returns False) and off at run t
 | gi/spatial_hold | enum off,uncapped | uncapped |
 | gi/spatial_hold_frames | int 1..256 | 40 |
 | gi/sky_reread | bool | false |
+| gi/fold_k | int 0..64 (0 off; 1 to 3 read as 4; other values round down to a power of two, 4 to 64) | 0 |
 
 The numeric defaults other than the bools are the ADR values. They have no effect while the matching enabled
 setting is off. Every description starts with "Experimental.". Godot shows project-setting help from
@@ -769,3 +770,138 @@ the module; the module part is restir_route_output and its use in restir_gi.cpp.
   with rtgi/gpu_counters the counter array is 11 words); their outputs must not. ddgi_trace's MODE_RTGI and every module
   shader see only new #defines in rtgi_inc.glsl, so their SPIR-V should stay byte-identical. R2 allocates the two tile-memory
   textures (2 x tiles x 2 B) whatever the settings, because CLASSIFY declares them.
+
+## Fold, the stored-age bound (gi/fold_k, default 0) (change plan commit 11)
+
+FOLD-ENGINE-NOTE sections 1 to 3 (the rule, storage, clock, K and the pre-frame), STAGGER-NOTE section 3 (carry, renewal by
+fold, start from π), B1-NOTE's refusal and proof; change plan row 11 and section 5 items 1 to 9, 11 and 12. Item 10
+(last_lit[view] and the OS window's item 1) is GI's, in ray_scene.cpp, and is not in this commit: nothing here stamps or
+reads a light.
+- Scope and K_eff. gi/fold_k is read through restir_fold_k (restir_fold.cpp): 0 or less is off; otherwise the value is
+  clamped to 4..64 and rounded down to a power of two (5 reads 4, 63 reads 32, 1000 reads 64). K_eff (restir_fold_k_eff) is
+  that K in B1, B2 and B2k with spatial feedback off, and 0 in U1 or with feedback on, whatever made it on (the mode's
+  default or the spatial_feedback test option). _upload takes its three Fold words (flags, clock, K) from one pure function,
+  restir_fold_words (restir_fold.cpp), which rounds the K word again (restir_fold_k) and applies the same gate from
+  RestirFrameParams::mode (U1) and spatial_feedback. In the engine those are the values resample gated with, so the words
+  don't change; a harness dict with K 7 runs at 4, and one with mode U1 or spatial_feedback true (the RestirFrameParams
+  default, so also a dict without the key) runs with Fold off, never at a K or in a mode the fold can't take.
+- Storage. s is reservoir flags bits 8 to 13 (RF_S_SHIFT 8, RF_S_MASK 0x3F) and mv bit 14 (RF_MV), in the high half of layer
+  1's y; bit 15 stays free; RF_FOLD_BITS (0xFF00) names the byte. No size change: 3 RGBA32UI layers, 48 B per pixel per set.
+  A fresh candidate (rs_from_candidate) and rs_empty carry 0 there, and the Fold write after rs_finish is the only writer of
+  those bits in TEMPORAL. VALIDATE re-stores flags << 16 whole (budget, share, replay and event paths) and clears them only
+  on a dead sample, which also has M 0 and reads as a start. SPATIAL copies a neighbour's flags into set 2 (or into the old
+  history set on a second pass), and with feedback off neither becomes history, so the history set holds only Fold's bits.
+- TEMPORAL order (rs_temporal_pixel). hp moves out of the F_HISTORY block (still ivec2(-1) when it isn't computed); h_s and
+  h_mv are read from h where it is loaded, before rule 1 can clear c[1]. had is c[1].present after the fill (or cleared),
+  so a history the fill rejected (the unusable return, a shift limit, B2's REJ_VIS, B2k's kept failures) is present and a
+  carry unless rule 1 clears it; the reason code never classifies.
+- Rule 1 runs right after rs_fill_neighbour, under K_eff > 0 only: it refuses when h_s + 1 ≥ K, or ≥ K − 1 on a pre-frame
+  (rs_fold_refuses). A refusal sets c[1] = rs_cand_none() (so neither its M nor a kept M enters the total), sets cleared,
+  sets REJ_BOUND (13) only when the reason is still REJ_NONE, and leaves INFO_HAD_HISTORY as the load set it.
+- The write, after rs_finish and only under K_eff > 0: result.flags = (flags & ~0xFF00) | rs_fold_bits(...), never an OR,
+  since rs_combine copied the selected technique's bits.
+  - carry (had, not cleared): s = h_s + 1, mv = h_mv or hp != px;
+  - renewal (cleared): u = (v + φ(px)) mod K when h_mv is 0 and hp == px, else ψ_r(px, v) mod K; s = u for u ≤ K/2, else
+    u − K/2; mv = 0;
+  - start (no history: REJ_CUT, REJ_FRAME, a similarity reject, REJ_NO_SAMPLE, REJ_EPOCH, the biased REJ_DIRTY): s =
+    draw(ψ_s(px, v)), mv = 1;
+  - on a pre-frame every birth (renewal or start) is capped at K − 2. A renewal is at most K/2 ≤ K − 2 already, so the cap
+    binds on starts only.
+  The write runs for every valid traced receiver, also when the stored reservoir is empty (a refusal on a pixel with no
+  fresh candidate, c[0].on false: any pixel on a revalidation frame, or one that ray thinning skipped on any frame; or a
+  pixel with neither candidate nor history): its M is 0, so the next frame reads REJ_NO_SAMPLE, a start, and the bits there
+  are never read.
+- The draw (KB9): x = ψ_s mod (3K²/4); s = isqrt(x) if x < K²/4, else K/2 + (x − K²/4) / K. Only x below K²/4 reaches
+  rs_fold_isqrt (at most 1023, at K 64). It is uint(sqrt(float(x))) corrected once each way: a float seed is at most one
+  off there, and the two corrections cover it.
+- Hashes, never rs_rand. φ(px) = rtgi_pcg(px.x + rtgi_pcg(px.y + C1)); ψ_r = rtgi_rng_state(px, v, 0, C2) and ψ_s =
+  rtgi_rng_state(px, v, 1, C2). C1 = 0x68E31DA4 and C2 = 0x2C1B3C6D (RS_FOLD_C1, RS_FOLD_C2 in restir_gi.glsl).
+  rtgi_rng_state hashes dimension + seed first, so Fold's two streams are C2 and C2 + 1. The other callers pass runtime
+  seeds: ddgi_trace's MODE_RTGI and the module's SOURCE take rtgi_rand2(..., RTGI_RNG_DIRECTION, seed) with the
+  rtgi/seed setting (default 1; sums 1 to 8 with the doubled dimension), and rs_rand and rs_rand_frame take dimension 64 +
+  d with seed rtgi_pcg(seed * 0x9E3779B1 + 0x7F4A7C15), seed rtgi/seed + seed_offset or 0x1234567 under F_DETERMINISTIC
+  (0xF5F17964 and 0x56F88133 at the defaults). C2 is about 7.2e8 or more from every one of those sums, and C1 is far from
+  C2. The doctest "[RestirFold] C2 sits at least 5 ..." checks the defaults; a non-default rtgi/seed is the run's to list
+  in run.json. φ's classes are not balanced (FOLD-ENGINE-NOTE section 3); RT GI measures them on the trace grid first.
+- The clock v is RestirGiState::frames, read before resample's frames++ (params.fold_clock), in shade_pad1; K_eff is in
+  shade_pad2. The GLSL names stay shade_pad1 and shade_pad2 (RS_FOLD_CLOCK and RS_FOLD_K alias them inside MODE_TEMPORAL)
+  so no other mode's block changes; the C++ struct calls them fold_clock and fold_k_eff. The freeze return comes before
+  frames++, and a refused begin_frame never reaches resample, so neither advances v. A state rebuild (begin_frame's
+  reallocation, release, R2's free_data and RtgiPass::release, through release) restarts frames at 0 with a
+  RESTIR_CUT_FIRST frame. K divides 2^32, so the uint32 wrap is harmless.
+- The pre-frame flag is rf.flags bit 19 (F_PRE_FRAME, RESTIR_F_PRE_FRAME 524288; restir_fold.h names it
+  RESTIR_FOLD_F_PRE_FRAME and restir_gi_core.cpp asserts the two agree). The revalidation schedule is written once,
+  restir_reval_frame (restir_fold.cpp): frame_index % period == period − 1, false for a period below 2; resample's
+  revalidation test calls it. restir_fold_pre_frame: revalidate is budget, the ray scene is ready, and restir_reval_frame
+  holds for frame_index + 1 (period 2..16, the revalidation period). That equals frame_index % period == period − 2 on
+  every frame, the uint32 wrap included (at frame_index 0xFFFFFFFF both are false for every period 2 to 16). It does not
+  read use_history, so a cut on a pre-frame still caps its starts. resample sets it only with K_eff > 0, and
+  restir_fold_words masks bit 19 out of the caller's flags and sets it from RestirFrameParams::fold_pre_frame only with its
+  gated K above 0, as bits 22 and 26 to 28. The schedule runs on the global frame index (FOLD-ENGINE-NOTE section 3's
+  skipped-pre-frame cases hold).
+- Cuts. restir_fold_cut compares this frame's RestirFoldFrame (K, K_eff, mode, feedback) with the last frame that ran: a
+  change of K_eff is a cut; a change of mode or feedback is a cut while either frame has K above 0. With gi/fold_k 0 on
+  both frames nothing here cuts, so a mode switch at the default behaves as before. The planner files it as
+  RESTIR_CUT_FOLD (8, RESTIR_CUT_MAX now 9) after the request and backend tests; the cut reaches R2 as history_cut
+  (CUT_MODULE), as every module cut does. A cut makes every valid pixel a REJ_CUT start (F_HISTORY clear), so the bound
+  holds from that frame.
+- Stats (pass-stats row 0, TEMPORAL, read with the readback option). PS_STRIDE stays 32, PS_FOLD_REFUSED 22,
+  PS_FOLD_CARRIED 23, PS_FOLD_RENEWED 24, PS_FOLD_STARTED 25 and PS_FOLD_REFUSED_EMPTY 26; slots 27 to 31 stay free.
+  PS_FOLD_REFUSED_EMPTY counts, inside the same refusal branch, each rule-1 refusal whose fresh candidate is absent
+  (c[0].on false, the test TEMPORAL already uses for it); it is a part of fold_refused, not a class of its own. Refusals
+  are counted at rule 1 by event, so one whose reason the fill had set is counted too; REJ_BOUND in temporal_reject counts
+  only those that kept REJ_NONE. Every renewal is a rule-1 refusal under this rule, so fold_renewed equals fold_refused;
+  the reader's disjoint classes are refused = fold_refused, renewed = fold_renewed − fold_refused (0), started =
+  fold_started and carried = fold_carried, and their sum is the frame's valid traced receivers. Status: fold_k,
+  fold_k_eff, fold_clock and fold_pre_frame (the last view to run), and stats fold_refused, fold_carried, fold_renewed,
+  fold_started and fold_refused_empty.
+- Harness. params_to_dict gains clock, k_eff and pre_frame, and params_from_dict reads them. A capture made before Fold has
+  none, so it replays at K_eff 0; a capture made with Fold on replays the frame's rule from its own history layers.
+  run_case's stats dict gains the five counts.
+- How it composes.
+  - B2k: a kept failure (REJ_VIS or REJ_DIRTY through the fill) is present, so it carries and rule 1 tests it; a refusal
+    drops its kept M with the rest of c[1]. Under B2k a dirty history already reaches the fill instead of taking REJ_DIRTY
+    before it (F_KEEP_M's existing behaviour, unchanged here), and Fold relies on that: under B2k a dirty history is a
+    carry where B1 and B2 make it a start. The bound rests on presence, so it holds.
+  - Untraced tiles (F_TILE_SKIP): TEMPORAL stores rs_empty() there (flags 0, so s 0 and mv 0, M 0) and runs no Fold code.
+    The next traced frame reads M 0, REJ_NO_SAMPLE, a start. An invalid receiver is the same.
+  - Sky re-read: TEMPORAL_SKY is the same rs_temporal_pixel with RS_SKY_REREAD, so it has the same rule; rs_store's sky
+    branch zeroes only Lo.
+  - Events, replay and revalidation: VALIDATE runs on the history set before TEMPORAL and keeps flags (s and mv) on every
+    path that keeps the sample; event caps lower M before the fill and don't change the class.
+  - Revalidation budget: the pre-frame refuses at K − 1 and caps births at K − 2, so nothing reaches K on the revalidation
+    frame. No pixel has a fresh candidate there, so a pixel refused there would store an empty reservoir. That is one such
+    case, not the only one: a pixel without a fresh candidate on any frame (ray thinning) is the other (known limits).
+- Doctests, tests/test_restir_fold.h ("[RestirFold] ..."): K rounding and clamping, the K_eff gate, the pre-frame predicate
+  against restir_reval_frame and the draft's form (the wrap at 0xFFFFFFFF included), the upload words (bit 19 from the
+  caller always masked, set only with K above 0 and a pre-frame; clock and K words 0 at K 0; K 7 reads 4; U1 and feedback
+  force 0), the harness dict round trip (clock, k_eff and pre_frame survive; a dict without them reads 0, 0, false), the
+  cut on change, the planner's order (Fold after the request and backend cuts, before the origin and scene cuts). The test
+  also holds a C++ mirror of the shader's integer rule (isqrt, the draw, rule 1, the write, φ and ψ from rtgi_pcg) with
+  known answers: KB9 at every allowed K, the isqrt from a seed one off either way, the bound over every h_s, the bit
+  layout, the static relock within 3K frames, and hash values worked out separately. The mirror is not the shader: it
+  shows the arithmetic, and only a GPU readback of the shader's routine (check 1) shows the shader.
+- Allocations: rf.flags bit 19; reservoir flags bits 8 to 14 (bit 15 free); reject code 13; RestirFrame shade_pad1 (clock)
+  and shade_pad2 (K_eff), no growth (400 bytes); pass-stats slots 22 to 26; cut reason 8; seeds C1 and C2; no new binding,
+  texture or buffer.
+- Identity at gi/fold_k 0 (the default): K_eff is 0, so the UBO words are 0 (_upload writes the clock only with K_eff > 0),
+  bit 19 is clear, rule 1 and the write don't run, and no Fold cut happens. Bits 8 to 15 are then whatever rs_combine
+  copied, as before (0 everywhere, since nothing else writes them). TEMPORAL's float work is unchanged: the hoisted hp
+  keeps its values, and h_s, h_mv and cleared are integer and boolean locals. The new code is inside MODE_TEMPORAL, so the
+  SPIR-V of TEMPORAL and TEMPORAL_SKY changes (every ray variant) and their output must not; every other module mode sees
+  only new #defines and should stay byte-identical to 22c0ee2ac. No core shader changed. Status gains keys and cut_counts
+  one entry; settings snapshot gains gi/fold_k.
+- Known limits, for RT GI's checks: φ is a hash, not a balanced tile; only K 8 and 32 were judged; a stored s needs a
+  debug readout of the history set (check 3), not FINAL's set; starts by situation (check 10) and families (check 12) need
+  commit 12's debug tags; a view that skips the pre-frame can refuse up to the K − 1 starts on its revalidation frame
+  (quality, not soundness); a Fold change while the freeze test option holds takes effect when the freeze ends.
+  - Ray thinning: with the RTGI ray_fraction f below 1, about (1 − f)/K of pixels per frame are refused with no fresh
+    candidate (a pixel ray thinning skipped, RTGI_FLAG_NO_CANDIDATE from ddgi_trace), store an empty reservoir and read
+    coverage 0 (the fallback route) until a candidate arrives. The pre-frame does not cover it; the bound needs the
+    refusal, so it stays. fold_refused_empty counts it, and reader check 1 at commit 12 must include a thinned run.
+  - C2's spacing from the other rtgi_rng_state streams is proven only for the default rtgi/seed, so a run with another
+    seed records it.
+  - fold_renewed always equals fold_refused in this commit: every renewal is a rule-1 refusal.
+  - Debug view 60 scales its heat by 11, so REJ_BOUND (13) shows saturated.
+  - The doctests named "Mirror:" test a C++ copy of the shader's rule; only the GPU readback at commit 12 tests the shader.
+    The hash known answers were recomputed independently from the GLSL text and agree.

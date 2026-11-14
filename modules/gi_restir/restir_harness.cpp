@@ -117,6 +117,9 @@ Dictionary params_to_dict(const RestirFrameParams &p) {
 		boxes.push_back(p.dirty_max[i].z);
 	}
 	d["dirty_boxes"] = boxes;
+	d["clock"] = int64_t(p.fold_clock);
+	d["k_eff"] = int64_t(p.fold_k_eff);
+	d["pre_frame"] = p.fold_pre_frame;
 	if ((p.flags & RESTIR_F_EVENTS) != 0u) {
 		PackedByteArray events;
 		events.resize(sizeof(RestirEventsUBO));
@@ -192,6 +195,11 @@ RestirFrameParams params_from_dict(const Dictionary &p_dict) {
 	RESTIR_GET("prev_epoch_tag", prev_epoch_tag, uint32_t)
 	RESTIR_GET("dirty_count", dirty_count, uint32_t)
 	RESTIR_GET("dirty_margin", dirty_margin, float)
+	RESTIR_GET("clock", fold_clock, uint32_t)
+	RESTIR_GET("k_eff", fold_k_eff, uint32_t)
+	if (p_dict.has("pre_frame")) {
+		p.fold_pre_frame = p_dict["pre_frame"];
+	}
 	p.dirty_count = MIN(p.dirty_count, 64u);
 	if (p_dict.has("dirty_boxes")) {
 		const PackedFloat64Array boxes = p_dict["dirty_boxes"];
@@ -381,6 +389,11 @@ Dictionary run_case(RestirGiCore &p_core, const Dictionary &p_case) {
 	s["compat_h_sum"] = stats.compat_h_sum;
 	s["spatial_combines"] = stats.spatial_combines;
 	s["techniques_present"] = stats.techniques_present;
+	s["fold_refused"] = stats.fold_refused;
+	s["fold_carried"] = stats.fold_carried;
+	s["fold_renewed"] = stats.fold_renewed;
+	s["fold_started"] = stats.fold_started;
+	s["fold_refused_empty"] = stats.fold_refused_empty;
 	result["stats"] = s;
 	if (params.compat) {
 		result["selection"] = _to_packed(RestirGiCore::read_selection(res));

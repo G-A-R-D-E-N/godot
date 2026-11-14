@@ -387,6 +387,72 @@ float rs_event_cap_history(Receiver p_r, Receiver p_q, Reservoir p_h, float p_m)
 	return m;
 }
 
+#define RS_FOLD_CLOCK rf.shade_pad1
+#define RS_FOLD_K rf.shade_pad2
+#define RS_FOLD_C1 0x68E31DA4u
+#define RS_FOLD_C2 0x2C1B3C6Du
+#define RS_FOLD_DIM_RENEW 0u
+#define RS_FOLD_DIM_START 1u
+
+uint rs_fold_isqrt(uint p_x) {
+	uint s = uint(sqrt(float(p_x)));
+	if ((s + 1u) * (s + 1u) <= p_x) {
+		s++;
+	}
+	if (s * s > p_x) {
+		s--;
+	}
+	return s;
+}
+
+uint rs_fold_draw(uint p_psi, uint p_k) {
+	uint quarter = (p_k * p_k) >> 2u;
+	uint x = p_psi % (3u * quarter);
+	if (x < quarter) {
+		return rs_fold_isqrt(x);
+	}
+	return (p_k >> 1u) + (x - quarter) / p_k;
+}
+
+uint rs_fold_phi(uvec2 p_pixel) {
+	return rtgi_pcg(p_pixel.x + rtgi_pcg(p_pixel.y + RS_FOLD_C1));
+}
+
+bool rs_fold_refuses(uint p_h_s) {
+	uint bound = (rf.flags & F_PRE_FRAME) != 0u ? RS_FOLD_K - 1u : RS_FOLD_K;
+	return p_h_s + 1u >= bound;
+}
+
+uint rs_fold_bits(ivec2 p_pixel, ivec2 p_hp, bool p_had, bool p_cleared, uint p_h_s, bool p_h_mv) {
+	uint k = RS_FOLD_K;
+	uint half_k = k >> 1u;
+	uint v = RS_FOLD_CLOCK;
+	uvec2 pixel = uvec2(p_pixel);
+	bool still = all(equal(p_hp, p_pixel));
+	uint s;
+	bool mv;
+	if (p_had && !p_cleared) {
+		s = p_h_s + 1u;
+		mv = p_h_mv || !still;
+		g_stats[PS_FOLD_CARRIED] += 1.0;
+	} else {
+		if (p_cleared) {
+			uint u = (!p_h_mv && still) ? (v + rs_fold_phi(pixel)) % k : rtgi_rng_state(pixel, v, RS_FOLD_DIM_RENEW, RS_FOLD_C2) % k;
+			s = u <= half_k ? u : u - half_k;
+			mv = false;
+			g_stats[PS_FOLD_RENEWED] += 1.0;
+		} else {
+			s = rs_fold_draw(rtgi_rng_state(pixel, v, RS_FOLD_DIM_START, RS_FOLD_C2), k);
+			mv = true;
+			g_stats[PS_FOLD_STARTED] += 1.0;
+		}
+		if ((rf.flags & F_PRE_FRAME) != 0u) {
+			s = min(s, k - 2u);
+		}
+	}
+	return ((s & RF_S_MASK) << RF_S_SHIFT) | (mv ? RF_MV : 0u);
+}
+
 void rs_temporal_pixel(ivec2 px) {
 	Receiver r = rs_receiver_cur(px);
 	if (!r.valid) {
@@ -412,10 +478,13 @@ void rs_temporal_pixel(ivec2 px) {
 
 	uint reason = REJ_CUT;
 	uint info = INFO_VALID;
+	ivec2 hp = ivec2(-1);
+	uint h_s = 0u;
+	bool h_mv = false;
+	bool cleared = false;
 	if ((rf.flags & F_HISTORY) != 0u) {
 		reason = REJ_NONE;
 		vec4 clip = rf.view_to_prev_clip * vec4(r.view, 1.0);
-		ivec2 hp = ivec2(-1);
 		if (clip.w > 1e-6) {
 			vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
 			hp = ivec2(floor(uv * vec2(rf.trace_size)));
@@ -432,6 +501,8 @@ void rs_temporal_pixel(ivec2 px) {
 				reason = similar_reason;
 			} else {
 				Reservoir h = rs_load(hp);
+				h_s = (h.flags >> RF_S_SHIFT) & RF_S_MASK;
+				h_mv = (h.flags & RF_MV) != 0u;
 				uint vis = imageLoad(vis_state, hp).x;
 				if (h.m == 0u) {
 					reason = REJ_NO_SAMPLE;
@@ -462,16 +533,31 @@ void rs_temporal_pixel(ivec2 px) {
 						uint nb_reason;
 						rs_fill_neighbour(h, m_h, usable, dead_reason, dirty, q, r, c[0], c[1], nb_reason);
 						reason = nb_reason;
+						if (RS_FOLD_K != 0u && rs_fold_refuses(h_s)) {
+							c[1] = rs_cand_none();
+							cleared = true;
+							if (reason == REJ_NONE) {
+								reason = REJ_BOUND;
+							}
+							g_stats[PS_FOLD_REFUSED] += 1.0;
+							if (!c[0].on) {
+								g_stats[PS_FOLD_REFUSED_EMPTY] += 1.0;
+							}
+						}
 					}
 				}
 			}
 		}
 	}
+	bool had = c[1].present || cleared;
 
 	int sel;
 	float total_m;
 	Reservoir result = rs_combine(2, uvec2(px), sel, total_m);
 	result = rs_finish(result, sel, total_m, r, RF_TEMPORAL, 1u);
+	if (RS_FOLD_K != 0u) {
+		result.flags = (result.flags & ~RF_FOLD_BITS) | rs_fold_bits(px, hp, had, cleared, h_s, h_mv);
+	}
 	if (sel == 1) {
 		info |= INFO_SEL_TEMPORAL;
 	}

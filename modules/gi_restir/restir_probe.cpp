@@ -220,6 +220,7 @@ Dictionary RestirProbe::plan_epochs(const Dictionary &p_case) const {
 	inputs.have_epochs = bool(p_case.get("have_epochs", true));
 	inputs.history_cut = bool(p_case.get("history_cut", false));
 	inputs.hardware_changed = bool(p_case.get("hardware_changed", false));
+	inputs.fold_changed = bool(p_case.get("fold_changed", false));
 	inputs.previous = _snapshot_from(p_case.get("previous", Dictionary()));
 	inputs.current = current;
 	inputs.anchor = p_case.get("anchor", Vector3());

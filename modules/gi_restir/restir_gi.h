@@ -31,6 +31,7 @@
 #pragma once
 
 #include "restir_epochs.h"
+#include "restir_fold.h"
 #include "restir_gi_core.h"
 #include "restir_test.h"
 
@@ -60,6 +61,7 @@ struct RestirGiState {
 	RestirSkyEpoch sky_epoch;
 	int64_t sky_epoch_frame = -1;
 	RestirRoute route;
+	RestirFoldFrame fold;
 };
 
 struct RestirGiSummary {
@@ -105,6 +107,9 @@ struct RestirGiSummary {
 	String tiles = "all";
 	String confidence = "frames";
 	RestirRoute route;
+	RestirFoldFrame fold;
+	uint32_t fold_clock = 0;
+	bool fold_pre_frame = false;
 };
 
 class RestirGiBackend : public RendererRD::RtgiResampleBackend {

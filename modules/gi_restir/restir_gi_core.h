@@ -65,6 +65,7 @@ enum RestirFlags : uint32_t {
 	RESTIR_F_SHADE_DDGI = 65536,
 	RESTIR_F_DEBUG_OUT = 131072,
 	RESTIR_F_KEEP_BLOCKED = 262144,
+	RESTIR_F_PRE_FRAME = 524288,
 	RESTIR_F_REVAL_FRAME = 1048576,
 	RESTIR_F_REVAL_SHARE = 2097152,
 	RESTIR_F_KEEP_M = 4194304,
@@ -147,6 +148,9 @@ struct RestirFrameParams {
 	bool sky_reread = false;
 	bool tile_skip = false;
 	bool pack_m = false;
+	uint32_t fold_clock = 0;
+	uint32_t fold_k_eff = 0;
+	bool fold_pre_frame = false;
 	Vector3 dirty_min[64];
 	Vector3 dirty_max[64];
 	RestirEventsUBO events = {};
@@ -245,6 +249,11 @@ struct RestirFrameStats {
 	double reshaded = 0.0;
 	double reshade_overflow = 0.0;
 	double reshade_edge_stale = 0.0;
+	double fold_refused = 0.0;
+	double fold_carried = 0.0;
+	double fold_renewed = 0.0;
+	double fold_started = 0.0;
+	double fold_refused_empty = 0.0;
 	uint32_t temporal_reject[16] = {};
 	uint32_t spatial_reject[16] = {};
 	uint32_t had_history = 0;

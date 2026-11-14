@@ -30,6 +30,8 @@
 
 #include "restir_gi_core.h"
 
+#include "restir_fold.h"
+
 #include "core/config/project_settings.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
@@ -85,7 +87,8 @@ struct RestirFrameUBO {
 	float shade_bounce_energy;
 	float shade_exposure;
 	float reval_threshold;
-	uint32_t shade_pad[2];
+	uint32_t fold_clock;
+	uint32_t fold_k_eff;
 	int32_t screen_size[2];
 	int32_t trace_scale;
 	uint32_t replay_pad;
@@ -98,6 +101,7 @@ struct RestirDirtyUBO {
 
 static_assert(sizeof(RestirDirtyUBO) == 2048, "RestirDirtyUBO must match the std140 block in restir_gi_inc.glsl");
 static_assert(sizeof(RestirFrameUBO) == 400, "RestirFrameUBO must match the std140 block in restir_gi_inc.glsl");
+static_assert(RESTIR_FOLD_F_PRE_FRAME == RESTIR_F_PRE_FRAME, "Fold's pre-frame bit must be the flags word's bit 19");
 
 static constexpr uint32_t PASS_STATS_ROWS = 4;
 static constexpr uint32_t PASS_STATS_STRIDE = 32;
@@ -379,7 +383,10 @@ void RestirGiCore::_upload(RID p_ubo, const RestirFrameParams &p, uint32_t p_pas
 	u.trace_size[1] = p.trace_size.y;
 	u.frame = p.frame_index;
 	u.seed = p.seed;
-	u.flags = (p.flags & ~uint32_t(RESTIR_F_KEEP_M | RESTIR_F_SKY_REREAD | RESTIR_F_TILE_SKIP | RESTIR_F_PACK_M)) | (p.mode == RESTIR_MODE_U1 ? RESTIR_F_UNBIASED : 0u) | ((p.mode == RESTIR_MODE_B2 || p.mode == RESTIR_MODE_B2K) ? RESTIR_F_VIS_REUSE : 0u) | (p.mode == RESTIR_MODE_B2K ? RESTIR_F_KEEP_M : 0u) | (p.sky_reread ? RESTIR_F_SKY_REREAD : 0u) | (p.tile_skip ? RESTIR_F_TILE_SKIP : 0u) | (p.pack_m ? RESTIR_F_PACK_M : 0u);
+	const RestirFoldWords fold = restir_fold_words(p.flags, p.fold_k_eff, p.fold_clock, p.fold_pre_frame, p.mode == RESTIR_MODE_U1, p.spatial_feedback);
+	u.flags = (fold.flags & ~uint32_t(RESTIR_F_KEEP_M | RESTIR_F_SKY_REREAD | RESTIR_F_TILE_SKIP | RESTIR_F_PACK_M)) | (p.mode == RESTIR_MODE_U1 ? RESTIR_F_UNBIASED : 0u) | ((p.mode == RESTIR_MODE_B2 || p.mode == RESTIR_MODE_B2K) ? RESTIR_F_VIS_REUSE : 0u) | (p.mode == RESTIR_MODE_B2K ? RESTIR_F_KEEP_M : 0u) | (p.sky_reread ? RESTIR_F_SKY_REREAD : 0u) | (p.tile_skip ? RESTIR_F_TILE_SKIP : 0u) | (p.pack_m ? RESTIR_F_PACK_M : 0u);
+	u.fold_k_eff = fold.k;
+	u.fold_clock = fold.clock;
 	if (p.compat) {
 		u.flags |= RESTIR_F_COMPAT | (p.compat_gate == RESTIR_GATE_NONE ? RESTIR_F_COMPAT_NONE : 0u) | (p.compat_gate == RESTIR_GATE_BINARY ? RESTIR_F_COMPAT_BINARY : 0u) | (p.compat_early_stop ? RESTIR_F_COMPAT_STOP : 0u);
 	}
@@ -808,6 +815,11 @@ RestirFrameStats RestirGiCore::read_stats(const RestirGiResources &p_resources) 
 				stats.temporal_shift_rejected += v[1] + v[2] + v[3];
 				stats.event_capped += v[18];
 				stats.reshade_edge_stale += v[21];
+				stats.fold_refused += v[22];
+				stats.fold_carried += v[23];
+				stats.fold_renewed += v[24];
+				stats.fold_started += v[25];
+				stats.fold_refused_empty += v[26];
 			}
 		}
 		for (uint32_t i = p_resources.group_count * 3; i < p_resources.group_count * PASS_STATS_ROWS; i++) {

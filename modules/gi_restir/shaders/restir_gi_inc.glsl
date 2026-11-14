@@ -6,6 +6,10 @@
 #define RF_BACKFACE 32u
 #define RF_EMISSIVE 64u
 #define RF_TEMPORAL 128u
+#define RF_S_SHIFT 8u
+#define RF_S_MASK 0x3Fu
+#define RF_MV (1u << 14u)
+#define RF_FOLD_BITS 0xFF00u
 
 #define F_UNBIASED 1u
 #define F_VIS_REUSE 2u
@@ -26,6 +30,7 @@
 #define F_SHADE_DDGI 65536u
 #define F_DEBUG_OUT 131072u
 #define F_KEEP_BLOCKED 262144u
+#define F_PRE_FRAME 524288u
 #define F_REVAL_FRAME 1048576u
 #define F_REVAL_SHARE 2097152u
 #define F_KEEP_M 4194304u
@@ -49,6 +54,7 @@
 #define REJ_NO_SAMPLE 10u
 #define REJ_VIS 11u
 #define REJ_NO_COMPAT 12u
+#define REJ_BOUND 13u
 #define REJ_UNTRACED 14u
 
 #define INFO_TEMPORAL_REJECT_MASK 15u
@@ -94,6 +100,11 @@
 #define PS_RESHADED 19
 #define PS_RESHADE_OVERFLOW 20
 #define PS_EDGE_STALE 21
+#define PS_FOLD_REFUSED 22
+#define PS_FOLD_CARRIED 23
+#define PS_FOLD_RENEWED 24
+#define PS_FOLD_STARTED 25
+#define PS_FOLD_REFUSED_EMPTY 26
 #define PS_ROW_VALIDATE 3u
 #define RS_EVENT_VALIDATE_EVENT 1u
 #define RS_EVENT_VALIDATE_ALL 2u
