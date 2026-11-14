@@ -164,7 +164,7 @@ void DirectShadows::_ensure_textures(const Ref<RenderSceneBuffersRD> &p_render_b
 	RD *rd = RD::get_singleton();
 	const uint32_t usage = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
 	const uint32_t layers = factor_layers(p_settings.entries);
-	const uint32_t accum_layers = p_viewport->precise ? p_settings.entries : p_settings.entries - 1;
+	const uint32_t accum_layers = DirectShadows::accum_layers(p_settings.entries, p_viewport->precise);
 	const RD::DataFormat accum_format = p_viewport->precise ? RD::DATA_FORMAT_R32G32_SFLOAT : RD::DATA_FORMAT_R16G16_SFLOAT;
 	const RD::DataFormat rest_format = p_viewport->precise ? RD::DATA_FORMAT_R32G32B32A32_SFLOAT : RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
 	const StringName slots[2] = { RB_DIRECT_SLOTS, RB_DIRECT_SLOTS_OTHER };
