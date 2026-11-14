@@ -66,13 +66,33 @@ restir_settings.cpp and reach the probe status only. The editor settings page do
   includes the copies. Every SCons run reads each core file and rewrites its copy when the bytes differ, so a stale
   or edited copy is healed on every SCons run. The fallback refuses an include outside the core folder.
 - Dependencies: the gen header of the placeholder shader depends on the shim, glsl_builders.py and the transitive
-  include closure of the six core files (nested includes included, thirdparty skipped), for the shim and the fallback.
+  include closure of the core files (CORE_INCLUDES and EXTRA_INCLUDES in restir_shim.py; nested includes included,
+  thirdparty skipped), for the shim and the fallback.
 - Builder: SCsub uses RD_GLSL, guarded by "RD_GLSL" in env["BUILDERS"] like the core shader SCsubs. ADR 7.2 names
   GLSL_HEADER; that line is superseded.
 - Placeholder shader: shaders/restir_shim_check.glsl includes the shim so the engine build proves the includes
   resolve. It is never compiled at run time. restir_probe.cpp includes its generated header, so the header is built in
   every build that builds the module (including custom_modules builds).
 - SCsub loads restir_shim.py by file path (importlib), not through sys.path.
+
+### Shade include contract (ray_scene_hit_shade_inc.glsl)
+
+- In CORE_INCLUDES since GI's review of 14 Nov 2026, listed after ray_scene_inc.glsl. The file has no #include of its own;
+  everything it uses comes from the file that includes it, which must supply, before the include:
+  - the four macros RAY_SCENE_SHADE_MAX_DISTANCE, RAY_SCENE_SHADE_BOUNCE_ENERGY, RAY_SCENE_SHADE_EMISSION_EXPOSURE and
+    RAY_SCENE_SHADE_MAX_RADIANCE (ddgi_trace.glsl sets them to ddgi.max_distance, params.bounce_energy,
+    params.emission_exposure and DDGI_MAX_RADIANCE);
+  - ray_scene_inc.glsl: RaySceneHit, ray_scene_hit_material, ray_scene_hit_normal, ray_scene.camera_to_anchor and
+    gi_hit_direct_light (one #define to ray_scene_direct_light at the end of ray_scene_inc.glsl);
+  - ddgi_inc.glsl (ddgi_sample_direction, DDGI_NO_VIEW_LIMIT) with DDGI_SET and DDGI_UBO_BINDING defined, so the ddgi
+    buffer is bound; shade_hit reads ddgi.levels[0].spacing;
+  - under MODE_SURFEL_TRACE only: the globals origin_surfel_position and origin_surfel_normal, and surfel_inc.glsl and
+    surfel_gather_inc.glsl (surfel_lookup, surfel_eval_irradiance, surfel_blend, SURFEL_INVALID).
+- The module never defines MODE_SURFEL_TRACE, so it needs neither surfel include nor the origin_surfel_* globals.
+- A module shader that shades hits defines the four macros, includes restir_core_ray_scene_inc.glsl and
+  restir_core_ddgi_inc.glsl, then restir_core_ray_scene_hit_shade_inc.glsl.
+- restir_core_inc.glsl now includes the shade file with none of the above defined. Only the placeholder shader includes it,
+  and the placeholder is never compiled, so the build still only proves that the paths resolve.
 
 ## Build cases (ADR 7.4)
 

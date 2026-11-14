@@ -6,6 +6,7 @@ FALLBACK_DIR = "restir_core"
 CORE_INCLUDES = (
     "ray_scene_inc.glsl",
     "rtgi_inc.glsl",
+    "ray_scene_hit_shade_inc.glsl",
 )
 EXTRA_INCLUDES = ("ddgi_inc.glsl",)
 PER_FILE_PREFIX = "restir_core_"
