@@ -322,12 +322,12 @@ bool DirectSamplerLab::build_inputs(Inputs &r_inputs) {
 		}
 		r_inputs.base_sets.push_back(builder.add_set(point, normal, lamps, 0, BASE_SEEDS, false));
 		const Lamp added = make_lamp(random, point, normal, FACING_LIT, unique_id(random, used));
-		LocalVector<uint32_t> grown = lamps;
+		LocalVector<uint32_t> grown(lamps);
 		grown.insert(random.next() % (lamps.size() + 1), builder.add_lamp(added));
 		r_inputs.added_sets.push_back(builder.add_set(point, normal, grown, 0, BASE_SEEDS, false));
 		r_inputs.added_ids.push_back(added.id);
 		for (uint32_t p = 0; p < PERMUTATIONS; p++) {
-			LocalVector<uint32_t> order = lamps;
+			LocalVector<uint32_t> order(lamps);
 			for (uint32_t i = order.size(); i > 1; i--) {
 				const uint32_t j = random.next() % i;
 				SWAP(order[i - 1], order[j]);
