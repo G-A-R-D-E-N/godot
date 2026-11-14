@@ -168,6 +168,10 @@ static String _gi_text(const char *p_name) {
 	return GLOBAL_GET(String(RESTIR_GI) + p_name);
 }
 
+static float _gi_float(const char *p_name) {
+	return float(GLOBAL_GET(String(RESTIR_GI) + p_name));
+}
+
 static uint32_t _ramped_cap(uint32_t p_cap, uint32_t p_m_min, uint32_t p_frames, uint32_t p_since_cut) {
 	if (p_cap <= p_m_min || p_frames == 0u) {
 		return p_cap;
@@ -259,6 +263,23 @@ bool RestirGiBackend::begin_frame(const RtgiFrameInputs &p_inputs) {
 		refusals++;
 		return false;
 	}
+	if (_gi_bool("event_reshade")) {
+		if (!_gi_bool("replay_seed")) {
+			refusal_reason = "event_reshade needs replay_seed";
+			refusals++;
+			return false;
+		}
+		if (!rays) {
+			refusal_reason = "event_reshade needs the ray scene";
+			refusals++;
+			return false;
+		}
+		if (_gi_text("revalidate") == "budget") {
+			refusal_reason = "event_reshade does not run with revalidate budget";
+			refusals++;
+			return false;
+		}
+	}
 	RestirGiState &state = states[p_inputs.buffers];
 	if (!state.resources.allocated || state.size != p_inputs.trace_size) {
 		_free_state(state);
@@ -303,6 +324,10 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 		return;
 	}
 	RayScene *ray_scene = p_inputs.ray_scene && p_inputs.ray_scene->is_ready() ? p_inputs.ray_scene : nullptr;
+	const bool events_on = _gi_bool("event_reshade") && _gi_bool("replay_seed");
+	if (events_on) {
+		state.light_soft_frames = 0;
+	}
 
 	RestirEpochInputs epoch_inputs;
 	epoch_inputs.have_history = state.have_history;
@@ -313,7 +338,7 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	epoch_inputs.current = p_inputs.epochs;
 	epoch_inputs.anchor = ray_scene ? ray_scene->get_anchor() : Vector3();
 	epoch_inputs.light_soft_frames = state.light_soft_frames;
-	epoch_inputs.m_light_frames = uint32_t(CLAMP(_gi_int("m_light_frames"), 0, 64));
+	epoch_inputs.m_light_frames = events_on ? 0u : uint32_t(CLAMP(_gi_int("m_light_frames"), 0, 64));
 	RestirEpochPlan plan;
 	restir_plan_epochs(epoch_inputs, plan);
 	state.light_soft_frames = plan.light_soft_frames;
@@ -401,6 +426,40 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 				params.reval_pass = true;
 			}
 		}
+	}
+	RestirEventPlan event_plan;
+	{
+		RestirEventInputs event_inputs;
+		event_inputs.settings.events_on = events_on;
+		event_inputs.settings.reshade_budget = uint32_t(CLAMP(_gi_int("reshade_budget"), 0, 100));
+		event_inputs.settings.event_m_cap = uint32_t(CLAMP(_gi_int("event_m_cap"), 0, 256));
+		event_inputs.settings.jump_m_cap = uint32_t(CLAMP(_gi_int("jump_m_cap"), 0, 256));
+		event_inputs.settings.reach_scale = CLAMP(_gi_float("event_reach_scale"), 0.0f, 64.0f);
+		event_inputs.settings.solid_angle = CLAMP(_gi_float("event_solid_angle"), 0.0f, float(Math::TAU * 2.0));
+		LocalVector<RestirEventSphere> spheres;
+		if (events_on && p_inputs.events) {
+			const uint32_t count = MIN(p_inputs.event_count, RESTIR_EVENT_MAX);
+			for (uint32_t i = 0; i < count; i++) {
+				RestirEventSphere sphere;
+				sphere.center = p_inputs.events[i].center;
+				sphere.reach = p_inputs.events[i].half;
+				sphere.since_last = p_inputs.events[i].since_last;
+				spheres.push_back(sphere);
+			}
+		}
+		event_inputs.events = spheres.ptr();
+		event_inputs.event_count = spheres.size();
+		event_inputs.events_lost = p_inputs.events_lost;
+		event_inputs.directional_jump = p_inputs.directional_jump;
+		event_inputs.quiet_frames = p_inputs.restart_quiet_frames;
+		event_inputs.trace_width = uint32_t(MAX(p_inputs.trace_size.x, 0));
+		event_inputs.trace_height = uint32_t(MAX(p_inputs.trace_size.y, 0));
+		event_inputs.history = use_history && ray_scene != nullptr;
+		restir_plan_events(event_inputs, event_plan);
+	}
+	if (event_plan.active) {
+		params.flags |= RESTIR_F_EVENTS;
+		params.events = event_plan.ubo;
 	}
 	params.epoch_tag = (p_inputs.epochs.scene & 0xFFu) | ((p_inputs.epochs.light & 0xFFu) << 8u) | ((p_inputs.epochs.origin & 0xFFu) << 16u);
 	params.camera_basis = p_inputs.camera_transform.basis;
@@ -523,6 +582,13 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	summary.size = p_inputs.trace_size;
 	summary.reval_active = params.reval_pass;
 	summary.reval_frames = state.reval_frames;
+	summary.events_on = event_plan.active;
+	summary.jump_frame = event_plan.jump_frame;
+	summary.events_read = p_inputs.events ? MIN(p_inputs.event_count, RESTIR_EVENT_MAX) : 0u;
+	summary.events_lost = p_inputs.events_lost;
+	summary.event_capping = event_plan.capping;
+	summary.event_validate = uint32_t(event_plan.validate);
+	summary.reshade_budget = event_plan.budget;
 	summary.stats_valid = false;
 	summary.debug_valid = p_inputs.debug_view >= 0 && state.resources.debug.is_valid();
 	float mean_m = float(MIN(state.frames_since_cut, params.n_target));
@@ -611,6 +677,13 @@ void RestirGiBackend::get_status(Dictionary &r_status) const {
 	r_status["light_changed"] = summary.light_changed;
 	r_status["sky_changed"] = summary.sky_changed;
 	r_status["origin_changed"] = summary.origin_changed;
+	r_status["event_reshade"] = summary.events_on;
+	r_status["events_read"] = int64_t(summary.events_read);
+	r_status["events_lost"] = int64_t(summary.events_lost);
+	r_status["jump_frame"] = summary.jump_frame;
+	r_status["event_capping_spheres"] = int64_t(summary.event_capping);
+	r_status["event_validate"] = int64_t(summary.event_validate);
+	r_status["reshade_budget_pixels"] = int64_t(summary.reshade_budget);
 	Array cut_counts;
 	for (const KeyValue<RenderSceneBuffersRD *, RestirGiState> &entry : states) {
 		for (uint32_t i = 0; i < RESTIR_CUT_MAX; i++) {
@@ -669,6 +742,10 @@ void RestirGiBackend::get_status(Dictionary &r_status) const {
 		d["no_canonical"] = s.no_canonical;
 		d["rehit_miss"] = s.rehit_miss;
 		d["rehit_mismatch"] = s.rehit_mismatch;
+		d["reshaded"] = s.reshaded;
+		d["reshade_overflow"] = s.reshade_overflow;
+		d["reshade_edge_stale"] = s.reshade_edge_stale;
+		d["event_capped"] = s.event_capped;
 		d["temporal_shift_tested"] = s.temporal_shift_tested;
 		d["temporal_shift_rejected"] = s.temporal_shift_rejected;
 		d["had_history"] = int64_t(s.had_history);

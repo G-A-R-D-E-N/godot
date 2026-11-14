@@ -29,6 +29,7 @@
 #define F_REVAL_FRAME 1048576u
 #define F_REVAL_SHARE 2097152u
 #define F_REPLAY 8388608u
+#define F_EVENTS 16777216u
 
 #define REJ_NONE 0u
 #define REJ_FRAME 1u
@@ -83,7 +84,16 @@
 #define PS_COMPAT_HSUM 15
 #define PS_REHIT_MISS 16
 #define PS_REHIT_MISMATCH 17
+#define PS_EVENT_CAPPED 18
+#define PS_RESHADED 19
+#define PS_RESHADE_OVERFLOW 20
+#define PS_EDGE_STALE 21
 #define PS_ROW_VALIDATE 3u
+#define RS_EVENT_VALIDATE_EVENT 1u
+#define RS_EVENT_VALIDATE_ALL 2u
+#define RS_PASS_EVENT_COUNT 4u
+#define RS_EVENT_KEY_DIM 200u
+#define RS_EVENT_BINS 256u
 #define KIND_NONE 0u
 #define KIND_DIST 1u
 #define KIND_COS 2u
@@ -211,6 +221,68 @@ layout(rgba32ui, set = 0, binding = 8) uniform restrict uimage2DArray res_io;
 
 #ifdef PASS_SPATIAL_COMPAT
 layout(rg32ui, set = 0, binding = 25) uniform restrict writeonly uimage2DArray sel_image;
+#endif
+
+#if defined(MODE_TEMPORAL) || defined(MODE_SPATIAL) || defined(MODE_VALIDATE)
+layout(set = 0, binding = 26, std140) uniform RestirEvents {
+	uvec4 counts;
+	vec4 params;
+	uvec4 gates;
+	vec4 sphere[64];
+	uvec4 since_last[16];
+}
+ev;
+
+bool rs_event_first_fire(uint p_index) {
+	return p_index >= ev.counts.y || ev.since_last[p_index >> 2u][p_index & 3u] >= ev.gates.x;
+}
+
+float rs_event_solid_angle(float p_reach, float p_distance) {
+	if (p_distance <= p_reach || p_distance < 1e-6) {
+		return 4.0 * RS_PI;
+	}
+	float k = p_reach / p_distance;
+	float k2 = k * k;
+	return 2.0 * RS_PI * k2 / (1.0 + sqrt(1.0 - k2));
+}
+
+bool rs_event_caps(vec3 p_position) {
+	uint count = min(ev.counts.x, 64u);
+	for (uint i = 0u; i < count; i++) {
+		if (!rs_event_first_fire(i)) {
+			continue;
+		}
+		vec4 s = ev.sphere[i];
+		float dist = length(p_position - s.xyz);
+		if (dist < ev.params.x * s.w) {
+			return true;
+		}
+		if (rs_event_solid_angle(s.w, dist) > ev.params.y) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool rs_event_holds(vec3 p_sample) {
+	uint count = min(ev.counts.y, 64u);
+	for (uint i = 0u; i < count; i++) {
+		vec4 s = ev.sphere[i];
+		vec3 delta = p_sample - s.xyz;
+		if (dot(delta, delta) <= s.w * s.w) {
+			return true;
+		}
+	}
+	return false;
+}
+#endif
+
+#ifdef MODE_VALIDATE
+layout(set = 0, binding = 28, std430) restrict buffer RestirEventBins {
+	uint bins[];
+}
+event_bins;
+shared uint rs_event_cut;
 #endif
 
 #ifdef MODE_FINAL

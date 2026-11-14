@@ -40,6 +40,7 @@
 #include "servers/rendering/renderer_rd/pipeline_deferred_rd.h"
 #include "servers/rendering/rendering_device.h"
 
+#include "restir_events.h"
 #include "shaders/restir_gi.glsl.gen.h"
 
 namespace RendererRD {
@@ -67,9 +68,11 @@ enum RestirFlags : uint32_t {
 	RESTIR_F_REVAL_FRAME = 1048576,
 	RESTIR_F_REVAL_SHARE = 2097152,
 	RESTIR_F_REPLAY = 8388608,
+	RESTIR_F_EVENTS = 16777216,
 };
 
 static constexpr uint32_t RESTIR_SPATIAL_SMALL_COUNT = 3;
+static constexpr uint32_t RESTIR_PASS_EVENT_COUNT = 4;
 
 enum RestirCompatGate : uint32_t {
 	RESTIR_GATE_SIMILAR = 0,
@@ -137,6 +140,7 @@ struct RestirFrameParams {
 	float dirty_margin = 0.01f;
 	Vector3 dirty_min[64];
 	Vector3 dirty_max[64];
+	RestirEventsUBO events = {};
 };
 
 struct RestirGiInputs {
@@ -179,6 +183,9 @@ struct RestirGiResources {
 	RID sel_dummy;
 	RID ubo[6];
 	RID dirty_ubo;
+	RID count_ubo;
+	RID event_ubo;
+	RID event_bins;
 	uint32_t group_count = 0;
 	uint32_t history_index = 0;
 	uint32_t final_index = 0;
@@ -223,6 +230,10 @@ struct RestirFrameStats {
 	double compat_h_sum = 0.0;
 	double rehit_miss = 0.0;
 	double rehit_mismatch = 0.0;
+	double event_capped = 0.0;
+	double reshaded = 0.0;
+	double reshade_overflow = 0.0;
+	double reshade_edge_stale = 0.0;
 	uint32_t temporal_reject[16] = {};
 	uint32_t spatial_reject[16] = {};
 	uint32_t had_history = 0;

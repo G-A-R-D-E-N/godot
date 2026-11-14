@@ -45,6 +45,13 @@ Default: off at build time (config.py is_enabled returns False) and off at run t
 | gi/denoise | enum off,r2 | r2 |
 | gi/denoise_history_cap | int 1..255 | 4 |
 | gi/trace_all_tiles | bool | true |
+| gi/replay_seed | bool | false |
+| gi/event_reshade | bool | false |
+| gi/reshade_budget | int 0..100 (percent of trace pixels) | 25 |
+| gi/event_m_cap | int 0..256 | 0 |
+| gi/jump_m_cap | int 0..256 | 0 |
+| gi/event_reach_scale | float 0..64 | 2.0 |
+| gi/event_solid_angle | float 0..4π (steradians) | 0.05 |
 
 The numeric defaults other than the bools are the ADR values. They have no effect while the matching enabled
 setting is off. Every description starts with "Experimental.". Godot shows project-setting help from
@@ -292,3 +299,77 @@ cannot re-read the sky by direction. A MISS_SKY sample therefore keeps its store
 - Pass stats: PS_STRIDE 32 and four rows (TEMPORAL, two SPATIAL, VALIDATE). rs_stats_store takes the row.
 - Set gi/replay_seed before a run. A change mid-run cuts no history: samples imported before it keep R2's pixel and frame tag,
   which a replay re-shade then reads as a seed, so they re-shade with other draws until the history turns over.
+- wants_replay() must come from a setting: R2 reads it before begin_frame, to set the trace flag, so it cannot depend on anything
+  the module decides inside the frame.
+- The mirror floor: MODE_RTGI floors the mirrored term at 1e-4/π (about 3.2e-5, ddgi_trace.glsl:520). Where the true p0(m(w)) is 0
+  (m(w) below the shading hemisphere) the floor adds density that is not there. That happens only at near-grazing w, where the pdf
+  word can read up to about 2x p0(w); elsewhere it is negligible (RT GI's review of 998e583da).
+- direct_shadows.glsl does not define RAY_SCENE_REPLAY, so DI-1's picks stay index-keyed. ReSTIR DI must define it (and set the
+  global) if it ever wants to replay a DI-1 pick.
+
+## Events (gi/event_reshade, default off)
+
+Design 2.8, 8.1 rows 5-8, 8.3 row 4; change plan commit 5.
+
+- Needs gi/replay_seed. begin_frame refuses the frame ("event_reshade needs replay_seed"), and R2 then runs plain, when it is off;
+  also without a ready ray scene ("event_reshade needs the ray scene") and with gi/revalidate = budget ("event_reshade does not run
+  with revalidate budget"), because that form drops the frame's candidates and the event path keeps them. off and share are allowed.
+  replay_seed on with event_reshade off is commit 4 exactly.
+- Input. R2's _read_light_changes reads the tracker ring once per frame with its per-buffers cursor and keeps an anchor-relative
+  copy (RayScene::get_anchor subtracted in real_t, then the module stores float) in RtgiBuffers::backend_events, so it outlives the
+  call. RtgiFrameInputs gains events and event_count (that copy, at most 64), events_lost (this frame's growth only; the buffers'
+  counter stays cumulative), directional_jump (RtgiRestarts' jumps > 0, R2's own sun and moon rule, repeats excluded) and
+  restart_quiet_frames (rtgi/restart_quiet_frames). The module keeps no cursor. On a view's first frame no events arrive.
+- The light epoch: with events on, the planner gets m_light_frames 0 and the carried light_soft_frames is zeroed, so light_cap is
+  false and gi/m_light never caps. The light change is still reported (light_changed). The old soft_hold_frames output no longer
+  exists on this line (6d6fa7157), so "the soft hold is off" has nothing more to turn off.
+- R2's own restarts (soft cut, restart spheres) are not touched here; they stop under the module-output bit (commit 10). Until
+  then an event frame restarts in R2 as well.
+- The event UBO, set 0 binding 26, std140, 1328 bytes, declared in TEMPORAL, SPATIAL and VALIDATE and always bound (zeros when
+  off): counts = (sphere count, event count, event_m_cap, jump_m_cap); params = (event_reach_scale, event_solid_angle, 0, 0);
+  gates = (quiet frames, budget B, jump frame 0 or 1, VALIDATE selection 0 none, 1 event, 2 all); sphere[64] = (centre, reach) in
+  metres, anchor-relative, reach = the tracker's half; since_last[16] holds sphere i at [i >> 2][i & 3]. The first event-count
+  spheres are events; slots after them are for dirty-box spheres (centre, half diagonal, since_last UINT32_MAX), none on this line
+  because the module's planner gets no dirty boxes (scene changes still cut). RestirFrame stays 400 bytes. The CPU side packs it in
+  restir_events.cpp (restir_plan_events), with no RD dependency, so the doctests (tests/test_restir_events.h) read the same rules.
+- F_EVENTS is rf.flags bit 24. Bits 19 and 22 stay free for Fold and B2k. The jump frame lives in the UBO, not in a flag.
+- Sample test (VALIDATE): the stored x_s lies in any event sphere, old or new, first fire or repeat: |x_s - c|² <= R², raw reach.
+  Sky samples never.
+- Receiver cap test (TEMPORAL, SPATIAL): over the capping spheres (events with since_last >= quiet frames, UINT32_MAX always, every
+  event at the default quiet 0; plus dirty spheres), d = |x - c| < event_reach_scale R, or the solid angle 2π(1 - sqrt(1 - (R/d)²)),
+  written 2π k²/(1 + sqrt(1 - k²)) with k = R/d for precision, exceeds event_solid_angle. d <= R or d < 1e-6 counts as 4π.
+  Visibility is ignored (over-caps, noise not bias).
+- TEMPORAL: after m_h = min(h.m, m_temporal_cap) (so after the rate scaling and the confidence ramp), a receiver r.pos that passes
+  the cap test takes m_h = min(m_h, event_m_cap); on a jump frame every receiver takes m_h = min(m_h, jump_m_cap). The history stays
+  present; M 0 is weight 0. No reject code is added.
+- SPATIAL: when the receiver passes the cap test, each neighbour that does not pass it at its own position q.pos takes
+  M = min(min(n.m, m_max), event_m_cap); neighbours inside the capped region keep their M (design 2.8 "neighbours inside the capped
+  region keep their M", Q10 H1). This frame only; the hold over later frames is commit 6. The jump cap is TEMPORAL only.
+- Jump frame: directional_jump or events_lost > 0 (commit 8 adds the sky epoch). Candidates are kept (F_REVAL_FRAME is never set).
+  jump_m_cap 0: restart from the fresh candidates and spatial reuse, no event or all re-shade. jump_m_cap > 0: VALIDATE re-shades
+  every stored valid non-sky sample first (selection all: no sphere test, budget or cap-0 skip).
+- VALIDATE event selection, on the previous history set in place, before TEMPORAL. It runs when events are on, the history is used,
+  the ray scene is there and the frame has events (not a jump frame). Early outs as replay: M 0, not RF_VALID, an old epoch tag, an
+  invalid previous receiver, sky, |x_s - o_prev| < 1e-3. No tile skip and no skip on this frame's NO_CANDIDATE. Cap-0 skip: with
+  event_m_cap 0 a flagged sample whose previous receiver q.pos passes the cap test is not re-shaded, since its history takes no part.
+  The re-shade is commit 4's rs_validate_replay unchanged. A share pick (gi/revalidate share) in the same dispatch re-shades as
+  before; a pixel picked by both is re-shaded once.
+- Budget: B = floor(trace_w trace_h reshade_budget / 100). Order: key = rs_rand_frame(px, 200) (dimension 200 is unused; share uses
+  40, combine below 64, spatial and compat 96 to 176), new every frame. A count dispatch of the same VALIDATE shader (its own
+  RestirFrame UBO with pass_index 4) adds each flagged pixel to one of 256 bins, bin = min(key 256, 255), in a 1 KB storage buffer
+  at set 0 binding 28 (cleared each frame). The main dispatch takes, per work group, the cut t = the first bin at which the running
+  sum would pass B, and re-shades flagged pixels with bin < t. Taken <= B always, and taken = flagged when flagged <= B; otherwise it
+  can fall short of B by less than one bin's count. A flagged sample not taken keeps its stale Lo this frame (reshade_overflow).
+- Order with events on: plan epochs (m_light_frames 0), plan events, write the event UBO; SOURCE if own sampler; VALIDATE count,
+  VALIDATE; TEMPORAL; SPATIAL; FINAL; PACK.
+- Counters. Status, always: event_reshade, events_read (events delivered this frame, also with events off), events_lost (this
+  frame's growth), jump_frame, event_capping_spheres, event_validate (0, 1, 2), reshade_budget_pixels. Status stats (probe readback
+  only, F_PROBE_STATS; production has no GPU readback): reshaded (event or all selections re-shaded, pass stats row 3 slot 19; share
+  picks are not counted), reshade_overflow (row 3 slot 20, flagged not taken and not share-picked, plus reshade_edge_stale),
+  reshade_edge_stale (row 0 slot 21: event_m_cap 0, the history sample in an event sphere, the previous receiver capped so VALIDATE
+  skipped it, the current receiver not capped), event_capped (row 0 slot 18: receivers whose history M the event cap lowered).
+  PS_STRIDE stays 32.
+- Identity with event_reshade off: the event UBO is zeros, F_EVENTS is clear, the VALIDATE dispatch condition is today's and no count
+  dispatch runs, so TEMPORAL, SPATIAL and VALIDATE do today's arithmetic in today's order (SPIR-V of those three changes; every other
+  module pass, every DDGI trace variant and both direct-shadow variants are byte-identical, spirv_c5.py).
+- The harness carries the packed UBO in a captured case as "events" when F_EVENTS is set.

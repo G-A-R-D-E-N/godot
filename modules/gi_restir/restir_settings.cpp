@@ -102,6 +102,18 @@ static const RestirSetting restir_table[] = {
 			"Experimental. ReSTIR GI asks the RTGI pass to trace every tile while it runs. Off lets RTGI skip converged tiles, which the module does not read yet." },
 	{ Variant::BOOL, "gi/replay_seed", PROPERTY_HINT_NONE, "", 0, "", false,
 			"Experimental. ReSTIR GI keeps each sample's shade seed and re-shades the sample with it. RTGI's trace then picks lights by id, writes the folded pdf, and re-validation re-hits the stored point locally." },
+	{ Variant::BOOL, "gi/event_reshade", PROPERTY_HINT_NONE, "", 0, "", false,
+			"Experimental. ReSTIR GI light events: re-shades stored samples inside a changed lamp's reach with their stored seed, caps the history count of receivers near a lamp's first fire, and caps every receiver on a sun or moon jump or a frame with lost events. Needs gi/replay_seed, and gi/revalidate must not be budget, or the module refuses the frame. Off keeps the light epoch's gi/m_light cap." },
+	{ Variant::INT, "gi/reshade_budget", PROPERTY_HINT_RANGE, "0,100,1", 25, "", false,
+			"Experimental. ReSTIR GI light events: at most this percent of trace pixels is re-shaded per frame. Flagged samples past it keep their old radiance that frame." },
+	{ Variant::INT, "gi/event_m_cap", PROPERTY_HINT_RANGE, "0,256,1", 0, "", false,
+			"Experimental. ReSTIR GI light events: history count limit for receivers near a lamp's first fire on its event frame, in the temporal pass and on their spatial neighbours. 0 restarts them from the fresh candidates." },
+	{ Variant::INT, "gi/jump_m_cap", PROPERTY_HINT_RANGE, "0,256,1", 0, "", false,
+			"Experimental. ReSTIR GI light events: history count limit for every receiver on a jump frame (sun or moon jump, lost events). 0 restarts from the fresh candidates; above 0 every stored sample is re-shaded first." },
+	{ Variant::FLOAT, "gi/event_reach_scale", PROPERTY_HINT_RANGE, "0,64,0.01", 0, "2.0", false,
+			"Experimental. ReSTIR GI light events: a receiver nearer a first-fire sphere's centre than this many reaches is capped." },
+	{ Variant::FLOAT, "gi/event_solid_angle", PROPERTY_HINT_RANGE, "0,12.566371,0.001", 0, "0.05", false,
+			"Experimental. ReSTIR GI light events: a receiver that sees a first-fire sphere under more than this solid angle, in steradians, is capped." },
 	{ Variant::BOOL, "gi/own_sampler", PROPERTY_HINT_NONE, "", 0, "", false,
 			"Experimental. ReSTIR GI uses the module's own initial sampler instead of the RTGI candidates (interim)." },
 	{ Variant::BOOL, "gi/deterministic", PROPERTY_HINT_NONE, "", 0, "", true,
@@ -126,6 +138,9 @@ void restir_register_settings() {
 				break;
 			case Variant::INT:
 				default_value = setting.int_default;
+				break;
+			case Variant::FLOAT:
+				default_value = String::utf8(setting.text_default).to_float();
 				break;
 			default:
 				default_value = String::utf8(setting.text_default);

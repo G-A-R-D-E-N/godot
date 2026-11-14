@@ -84,6 +84,13 @@ struct RestirGiSummary {
 	uint32_t history_cap = 0;
 	bool reval_active = false;
 	uint32_t reval_frames = 0;
+	bool events_on = false;
+	bool jump_frame = false;
+	uint32_t events_read = 0;
+	uint32_t events_lost = 0;
+	uint32_t event_capping = 0;
+	uint32_t event_validate = 0;
+	uint32_t reshade_budget = 0;
 };
 
 class RestirGiBackend : public RendererRD::RtgiResampleBackend {

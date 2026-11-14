@@ -152,6 +152,7 @@ bool RestirGiResources::allocate(const Size2i &p_size, bool p_debug) {
 	};
 	stats = buffer("stats", group_count * 16 * sizeof(float));
 	pass_stats = buffer("pass_stats", group_count * PASS_STATS_ROWS * PASS_STATS_STRIDE * sizeof(float));
+	event_bins = buffer("event_bins", RESTIR_EVENT_BINS * sizeof(uint32_t));
 	{
 		const uint64_t before = rd->get_memory_usage(RD::MEMORY_TEXTURES);
 		sel_dummy = _create_texture(RD::DATA_FORMAT_R32G32_UINT, Size2i(1, 1), RD::TEXTURE_TYPE_2D_ARRAY, 2);
@@ -163,7 +164,9 @@ bool RestirGiResources::allocate(const Size2i &p_size, bool p_debug) {
 			ubo[i] = rd->uniform_buffer_create(sizeof(RestirFrameUBO));
 		}
 		dirty_ubo = rd->uniform_buffer_create(sizeof(RestirDirtyUBO));
-		alloc_log.push_back({ "uniform buffers", 6 * sizeof(RestirFrameUBO) + sizeof(RestirDirtyUBO), rd->get_memory_usage(RD::MEMORY_BUFFERS) - before, true });
+		count_ubo = rd->uniform_buffer_create(sizeof(RestirFrameUBO));
+		event_ubo = rd->uniform_buffer_create(sizeof(RestirEventsUBO));
+		alloc_log.push_back({ "uniform buffers", 7 * sizeof(RestirFrameUBO) + sizeof(RestirDirtyUBO) + sizeof(RestirEventsUBO), rd->get_memory_usage(RD::MEMORY_BUFFERS) - before, true });
 	}
 	history_index = 0;
 	final_index = 0;
@@ -204,7 +207,7 @@ void RestirGiResources::free_all() {
 			reservoir[i] = RID();
 		}
 	}
-	RID *singles[] = { &vis_state, &info, &radiance, &coverage, &debug, &debug_dummy, &stats, &pass_stats, &sel_image, &sel_dummy };
+	RID *singles[] = { &vis_state, &info, &radiance, &coverage, &debug, &debug_dummy, &stats, &pass_stats, &sel_image, &sel_dummy, &count_ubo, &event_ubo, &event_bins };
 	for (RID *rid : singles) {
 		if (rid->is_valid()) {
 			rd->free_rid(*rid);
@@ -548,13 +551,26 @@ void RestirGiCore::run_frame(RestirGiResources &r_resources, const RestirFramePa
 		}
 		RD::get_singleton()->buffer_update(r_resources.dirty_ubo, 0, sizeof(RestirDirtyUBO), &dirty);
 	}
-	if (params.reval_pass && variant != VARIANT_NONE && (params.flags & RESTIR_F_HISTORY) != 0u) {
+	const bool events = (params.flags & RESTIR_F_EVENTS) != 0u;
+	if (!events) {
+		params.events = RestirEventsUBO();
+	}
+	RD::get_singleton()->buffer_update(r_resources.event_ubo, 0, sizeof(RestirEventsUBO), &params.events);
+	const uint32_t event_validate = events ? params.events.gates[3] : uint32_t(RESTIR_EVENT_VALIDATE_NONE);
+	if ((params.reval_pass || event_validate != RESTIR_EVENT_VALIDATE_NONE) && variant != VARIANT_NONE && (params.flags & RESTIR_F_HISTORY) != 0u) {
 		LocalVector<RD::Uniform> set0;
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 3, p_inputs.previous_geo_position));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 4, p_inputs.previous_geo_normal));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 6, p_inputs.candidate_second));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 8, r_resources.reservoir[hist]));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 23, r_resources.pass_stats));
+		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 26, r_resources.event_ubo));
+		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 28, r_resources.event_bins));
+		if (event_validate == RESTIR_EVENT_VALIDATE_EVENT) {
+			RD::get_singleton()->buffer_clear(r_resources.event_bins, 0, RESTIR_EVENT_BINS * sizeof(uint32_t));
+			_upload(r_resources.count_ubo, params, RESTIR_PASS_EVENT_COUNT);
+			_dispatch(variant, PASS_VALIDATE, r_resources.count_ubo, set0, p_inputs, r_resources.size);
+		}
 		_dispatch(variant, PASS_VALIDATE, r_resources.ubo[0], set0, p_inputs, r_resources.size);
 	}
 	{
@@ -571,6 +587,7 @@ void RestirGiCore::run_frame(RestirGiResources &r_resources, const RestirFramePa
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, r_resources.info));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 23, r_resources.pass_stats));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 24, r_resources.dirty_ubo));
+		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 26, r_resources.event_ubo));
 		_dispatch(variant, PASS_TEMPORAL, r_resources.ubo[0], set0, p_inputs, r_resources.size);
 	}
 
@@ -586,6 +603,7 @@ void RestirGiCore::run_frame(RestirGiResources &r_resources, const RestirFramePa
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 8, r_resources.reservoir[write_set]));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, r_resources.info));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 23, r_resources.pass_stats));
+		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 26, r_resources.event_ubo));
 		if (params.compat) {
 			set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 25, (params.flags & RESTIR_F_PROBE_STATS) != 0u ? r_resources.sel_image : r_resources.sel_dummy));
 		}
@@ -684,13 +702,18 @@ RestirFrameStats RestirGiCore::read_stats(const RestirGiResources &p_resources) 
 			if (i < p_resources.group_count) {
 				stats.temporal_shift_tested += v[0];
 				stats.temporal_shift_rejected += v[1] + v[2] + v[3];
+				stats.event_capped += v[18];
+				stats.reshade_edge_stale += v[21];
 			}
 		}
 		for (uint32_t i = p_resources.group_count * 3; i < p_resources.group_count * PASS_STATS_ROWS; i++) {
 			const float *v = pv + i * PASS_STATS_STRIDE;
 			stats.rehit_miss += v[16];
 			stats.rehit_mismatch += v[17];
+			stats.reshaded += v[19];
+			stats.reshade_overflow += v[20];
 		}
+		stats.reshade_overflow += stats.reshade_edge_stale;
 	}
 	const Vector<uint8_t> info = rd->texture_get_data(p_resources.info, 0);
 	const uint32_t *words = reinterpret_cast<const uint32_t *>(info.ptr());

@@ -341,6 +341,23 @@ Reservoir rs_from_candidate(ivec2 p_pixel, Receiver p_r) {
 	return res;
 }
 
+float rs_event_cap_history(Receiver p_r, Receiver p_q, Reservoir p_h, float p_m) {
+	float m = p_m;
+	float event_cap = float(ev.counts.z);
+	if (rs_event_caps(p_r.pos)) {
+		if (m > event_cap) {
+			g_stats[PS_EVENT_CAPPED] += 1.0;
+		}
+		m = min(m, event_cap);
+	} else if ((rf.flags & F_PROBE_STATS) != 0u && ev.counts.z == 0u && ev.gates.w == RS_EVENT_VALIDATE_EVENT && (p_h.flags & RF_VALID) != 0u && !rs_is_sky(p_h) && rs_event_holds(p_h.xs) && rs_event_caps(p_q.pos)) {
+		g_stats[PS_EDGE_STALE] += 1.0;
+	}
+	if (ev.gates.z != 0u) {
+		m = min(m, float(ev.counts.w));
+	}
+	return m;
+}
+
 void rs_temporal_pixel(ivec2 px) {
 	Receiver r = rs_receiver_cur(px);
 	if (!r.valid) {
@@ -399,6 +416,9 @@ void rs_temporal_pixel(ivec2 px) {
 						reason = REJ_DIRTY;
 					} else {
 						float m_h = float(min(h.m, rf.m_temporal_cap));
+						if ((rf.flags & F_EVENTS) != 0u) {
+							m_h = rs_event_cap_history(r, q, h, m_h);
+						}
 						bool usable = (h.flags & RF_VALID) != 0u;
 						uint dead_reason = REJ_NO_SAMPLE;
 						if (!unbiased && usable && ((vis & 0xFFu) > rf.vis_fail_limit || (vis & 0x100u) != 0u)) {
@@ -622,6 +642,7 @@ void rs_spatial_pixel(ivec2 px) {
 		return;
 	}
 	Reservoir own = rs_load(px);
+	bool event_capped = (rf.flags & F_EVENTS) != 0u && rs_event_caps(r.pos);
 	for (int i = 0; i < MAX_CAND; i++) {
 		c[i] = rs_cand_none();
 	}
@@ -674,7 +695,11 @@ void rs_spatial_pixel(ivec2 px) {
 		}
 		Cand nc;
 		uint nb_reason;
-		rs_fill_neighbour(n, float(min(n.m, rf.m_max)), (n.flags & RF_VALID) != 0u, REJ_NO_SAMPLE, false, q, r, c[0], nc, nb_reason);
+		float m_n = float(min(n.m, rf.m_max));
+		if (event_capped && !rs_event_caps(q.pos)) {
+			m_n = min(m_n, float(ev.counts.z));
+		}
+		rs_fill_neighbour(n, m_n, (n.flags & RF_VALID) != 0u, REJ_NO_SAMPLE, false, q, r, c[0], nc, nb_reason);
 		if (nb_reason != REJ_NONE && nb_reason != REJ_VIS) {
 			spatial_reason = nb_reason;
 		}
@@ -1150,11 +1175,100 @@ void rs_validate_replay(ivec2 px, uvec4 a, uvec4 b, uvec4 c, Receiver q) {
 	b.y = (packHalf2x16(vec2(lo.b, 0.0)) & 0xFFFFu) | (flags << 16u);
 	imageStore(res_io, ivec3(px, 1), b);
 }
+
+bool rs_event_load(ivec2 px, out uvec4 r_a, out uvec4 r_b, out uvec4 r_c, out Receiver r_q) {
+	r_a = imageLoad(res_io, ivec3(px, 0));
+	r_b = imageLoad(res_io, ivec3(px, 1));
+	r_c = imageLoad(res_io, ivec3(px, 2));
+	r_q = rs_receiver_prev(px);
+	uint flags = r_b.y >> 16u;
+	uint m = r_b.w & 0xFFFFu;
+	if (m == 0u || (flags & RF_VALID) == 0u || (flags & RF_SKY) != 0u || r_c.z != rf.prev_epoch_tag || !r_q.valid) {
+		return false;
+	}
+	return length(uintBitsToFloat(r_a.xyz) - r_q.origin) >= 1e-3;
+}
+
+bool rs_event_flagged(uvec4 p_a, Receiver p_q) {
+	if (!rs_event_holds(uintBitsToFloat(p_a.xyz))) {
+		return false;
+	}
+	return ev.counts.z != 0u || !rs_event_caps(p_q.pos);
+}
+
+uint rs_event_bin(ivec2 px) {
+	return min(uint(rs_rand_frame(uvec2(px), RS_EVENT_KEY_DIM) * float(RS_EVENT_BINS)), RS_EVENT_BINS - 1u);
+}
+
+void rs_event_count_pixel(ivec2 px) {
+	if ((rf.flags & F_HISTORY) == 0u || ev.gates.w != RS_EVENT_VALIDATE_EVENT) {
+		return;
+	}
+	uvec4 a;
+	uvec4 b;
+	uvec4 c;
+	Receiver q;
+	if (!rs_event_load(px, a, b, c, q) || !rs_event_flagged(a, q)) {
+		return;
+	}
+	atomicAdd(event_bins.bins[rs_event_bin(px)], 1u);
+}
+
+void rs_validate_events(ivec2 px) {
+	bool share = false;
+	if ((rf.flags & F_REVAL_SHARE) != 0u) {
+		share = rs_rand_frame(uvec2(px), 40u) * float(max(rf.reval_share_denom, 1u)) < 1.0;
+	}
+	uint selection = ev.gates.w;
+	if (!share && selection != RS_EVENT_VALIDATE_EVENT && selection != RS_EVENT_VALIDATE_ALL) {
+		return;
+	}
+	uvec4 a;
+	uvec4 b;
+	uvec4 c;
+	Receiver q;
+	if (!rs_event_load(px, a, b, c, q)) {
+		return;
+	}
+	bool taken = false;
+	if (selection == RS_EVENT_VALIDATE_ALL) {
+		taken = true;
+	} else if (selection == RS_EVENT_VALIDATE_EVENT && rs_event_flagged(a, q)) {
+		if (rs_event_bin(px) < rs_event_cut) {
+			taken = true;
+		} else if (!share) {
+			g_stats[PS_RESHADE_OVERFLOW] += 1.0;
+		}
+	}
+	if (!taken && !share) {
+		return;
+	}
+	if (taken) {
+		g_stats[PS_RESHADED] += 1.0;
+	}
+	rs_validate_replay(px, a, b, c, q);
+}
+
+uint rs_event_cut_bin() {
+	uint total = 0u;
+	for (uint t = 0u; t < RS_EVENT_BINS; t++) {
+		uint n = event_bins.bins[t];
+		if (total + n > ev.gates.y) {
+			return t;
+		}
+		total += n;
+	}
+	return RS_EVENT_BINS;
+}
 #endif
 
 void rs_validate_pixel(ivec2 px) {
 #if defined(RESTIR_RAYS) && defined(RESTIR_SHADE)
 	if ((rf.flags & F_HISTORY) == 0u) {
+		return;
+	}
+	if ((rf.flags & F_EVENTS) != 0u) {
+		rs_validate_events(px);
 		return;
 	}
 	bool replay = (rf.flags & F_REPLAY) != 0u;
@@ -1229,6 +1343,20 @@ void rs_validate_pixel(ivec2 px) {
 void main() {
 	rs_stats_clear();
 	ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+#if defined(RESTIR_RAYS) && defined(RESTIR_SHADE)
+	if (rf.pass_index == RS_PASS_EVENT_COUNT) {
+		if (all(lessThan(px, rf.trace_size))) {
+			rs_event_count_pixel(px);
+		}
+		return;
+	}
+	if ((rf.flags & F_EVENTS) != 0u) {
+		if (gl_LocalInvocationIndex == 0u) {
+			rs_event_cut = ev.gates.w == RS_EVENT_VALIDATE_EVENT ? rs_event_cut_bin() : 0u;
+		}
+		barrier();
+	}
+#endif
 	if (all(lessThan(px, rf.trace_size))) {
 		rs_validate_pixel(px);
 	}

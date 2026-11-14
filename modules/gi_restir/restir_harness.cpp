@@ -117,6 +117,12 @@ Dictionary params_to_dict(const RestirFrameParams &p) {
 		boxes.push_back(p.dirty_max[i].z);
 	}
 	d["dirty_boxes"] = boxes;
+	if ((p.flags & RESTIR_F_EVENTS) != 0u) {
+		PackedByteArray events;
+		events.resize(sizeof(RestirEventsUBO));
+		memcpy(events.ptrw(), &p.events, sizeof(RestirEventsUBO));
+		d["events"] = events;
+	}
 	return d;
 }
 
@@ -192,6 +198,12 @@ RestirFrameParams params_from_dict(const Dictionary &p_dict) {
 		for (uint32_t i = 0; i < p.dirty_count && int(i * 6 + 5) < boxes.size(); i++) {
 			p.dirty_min[i] = Vector3(boxes[i * 6], boxes[i * 6 + 1], boxes[i * 6 + 2]);
 			p.dirty_max[i] = Vector3(boxes[i * 6 + 3], boxes[i * 6 + 4], boxes[i * 6 + 5]);
+		}
+	}
+	if (p_dict.has("events")) {
+		const PackedByteArray events = p_dict["events"];
+		if (events.size() == int64_t(sizeof(RestirEventsUBO))) {
+			memcpy(&p.events, events.ptr(), sizeof(RestirEventsUBO));
 		}
 	}
 	return p;
