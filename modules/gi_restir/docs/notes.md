@@ -92,8 +92,9 @@ restir_settings.cpp and reach the probe status only. The editor settings page do
   - ray_scene_inc.glsl: RaySceneHit, ray_scene_hit_material, ray_scene_hit_normal, ray_scene.camera_to_anchor and
     gi_hit_direct_light (one #define to ray_scene_direct_light at the end of ray_scene_inc.glsl);
   - ddgi_inc.glsl (ddgi_sample_direction, DDGI_NO_VIEW_LIMIT) with DDGI_SET, DDGI_UBO_BINDING and DDGI_SAMPLING defined,
-    and the probe, irradiance and distance textures, linear sampler and sky radiance and sampler bound (restir_gi.glsl
-    does this under RESTIR_RAYS in FINAL, SOURCE and VALIDATE, the modes that shade); shade_hit calls
+    and the probe, irradiance and distance textures and linear sampler bound (restir_gi.glsl does this under RESTIR_RAYS in
+    FINAL, SOURCE and VALIDATE, the modes that shade, and binds the sky radiance and sampler there for its own
+    rs_sky_radiance); shade_hit calls
     ddgi_sample_direction (view limit hit.t * 0.5) at run time when the bounce energy is above 0, but the include is
     needed at compile time whatever the energy;
   - under MODE_SURFEL_TRACE only: ddgi.levels[0].spacing, the globals origin_surfel_position and origin_surfel_normal,
@@ -318,14 +319,28 @@ cannot re-read the sky by direction. A MISS_SKY sample therefore keeps its store
 Design 2.8, 8.1 rows 5-8, 8.3 row 4; change plan commit 5.
 
 - Needs gi/replay_seed. begin_frame refuses the frame ("event_reshade needs replay_seed"), and R2 then runs plain, when it is off;
-  also without a ready ray scene ("event_reshade needs the ray scene") and with gi/revalidate = budget ("event_reshade does not run
-  with revalidate budget"), because that form drops the frame's candidates and the event path keeps them. off and share are allowed.
+  also without a ready ray scene ("event_reshade needs the ray scene"), without valid DDGI shading inputs ("event_reshade
+  needs the DDGI shading inputs", so a re-shade never runs at sky distance with no bounce) and with gi/revalidate = budget
+  ("event_reshade does not run with revalidate budget"), because that form drops the frame's candidates and the event path
+  keeps them. off and share are allowed.
   replay_seed on with event_reshade off is commit 4 exactly.
 - Input. R2's _read_light_changes reads the tracker ring once per frame with its per-buffers cursor and keeps an anchor-relative
   copy (RayScene::get_anchor subtracted in real_t, then the module stores float) in RtgiBuffers::backend_events, so it outlives the
   call. RtgiFrameInputs gains events and event_count (that copy, at most 64), events_lost (this frame's growth only; the buffers'
   counter stays cumulative), directional_jump (RtgiRestarts' jumps > 0, R2's own sun and moon rule, repeats excluded) and
   restart_quiet_frames (rtgi/restart_quiet_frames). The module keeps no cursor. On a view's first frame no events arrive.
+- RtgiFrameInputs::events is valid only during the backend call: the next frame's _read_light_changes refills the vector, so
+  the planner copies what it needs into the event UBO. RESTIR_EVENT_MAX >= DDGILightTracker::MAX_EVENTS is a static_assert,
+  so the copy never drops a delivered event.
+- One tracker ring (64 slots, no view tag) serves every view, each RtgiBuffers with its own cursor. A burst of more than 64
+  events between two reads of this view, written by any view's update, makes events_lost positive here, and the frame is a
+  jump frame (every receiver capped) even with no change near this view. Conservative, not wrong; fires are rate-limited to
+  one per light per 8 frames. If a second live view (SubViewport, probe capture) ever runs RTGI, a region test on lost events
+  would avoid the extra jump frames (RT GI's review of 9ec4439b4).
+- epochs.light lags the events by one frame: the epoch snapshot is taken (render_forward_clustered.cpp) before
+  _read_light_changes bumps SOURCE_LIGHT, so on frame N the module sees N's events and jump, and the light epoch changes on
+  N+1. With events on, m_light_frames is 0 and nothing depends on it; with events off, the epoch path caps from N+1 as
+  before.
 - The light epoch: with events on, the planner gets m_light_frames 0 and the carried light_soft_frames is zeroed, so light_cap is
   false and gi/m_light never caps. The light change is still reported (light_changed). The old soft_hold_frames output no longer
   exists on this line (6d6fa7157), so "the soft hold is off" has nothing more to turn off.
@@ -369,7 +384,9 @@ Design 2.8, 8.1 rows 5-8, 8.3 row 4; change plan commit 5.
 - Order with events on: plan epochs (m_light_frames 0), plan events, write the event UBO; SOURCE if own sampler; VALIDATE count,
   VALIDATE; TEMPORAL; SPATIAL; FINAL; PACK.
 - Counters. Status, always: event_reshade, events_read (events delivered this frame, also with events off), events_lost (this
-  frame's growth), jump_frame, event_capping_spheres, event_validate (0, 1, 2), reshade_budget_pixels. Status stats (probe readback
+  frame's growth), jump_frame, event_capping_spheres, event_validate (0, 1, 2), reshade_budget_pixels, and the backend-lifetime
+  totals event_frames_total (frames with events_read > 0), events_read_total, event_validate_frames_total and
+  event_capping_total, because a lab reads status once, after its last frame. Status stats (probe readback
   only, F_PROBE_STATS; production has no GPU readback): reshaded (event or all selections re-shaded, pass stats row 3 slot 19; share
   picks are not counted), reshade_overflow (row 3 slot 20, flagged not taken and not share-picked, plus reshade_edge_stale),
   reshade_edge_stale (row 0 slot 21: event_m_cap 0, the history sample in an event sphere, the previous receiver capped so VALIDATE

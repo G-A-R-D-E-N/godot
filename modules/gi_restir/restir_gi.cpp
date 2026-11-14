@@ -40,6 +40,8 @@
 
 using namespace RendererRD;
 
+static_assert(RESTIR_EVENT_MAX >= DDGILightTracker::MAX_EVENTS, "The event UBO must hold every event R2 delivers in one frame");
+
 RestirTestOptions &restir_test_options() {
 	static RestirTestOptions options;
 	return options;
@@ -271,6 +273,11 @@ bool RestirGiBackend::begin_frame(const RtgiFrameInputs &p_inputs) {
 		}
 		if (!rays) {
 			refusal_reason = "event_reshade needs the ray scene";
+			refusals++;
+			return false;
+		}
+		if (!p_inputs.shade.valid) {
+			refusal_reason = "event_reshade needs the DDGI shading inputs";
 			refusals++;
 			return false;
 		}
@@ -589,6 +596,14 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	summary.event_capping = event_plan.capping;
 	summary.event_validate = uint32_t(event_plan.validate);
 	summary.reshade_budget = event_plan.budget;
+	if (summary.events_read > 0) {
+		event_frames_total++;
+		events_read_total += summary.events_read;
+	}
+	if (summary.event_validate) {
+		event_validate_frames_total++;
+	}
+	event_capping_total += summary.event_capping;
 	summary.stats_valid = false;
 	summary.debug_valid = p_inputs.debug_view >= 0 && state.resources.debug.is_valid();
 	float mean_m = float(MIN(state.frames_since_cut, params.n_target));
@@ -684,6 +699,10 @@ void RestirGiBackend::get_status(Dictionary &r_status) const {
 	r_status["event_capping_spheres"] = int64_t(summary.event_capping);
 	r_status["event_validate"] = int64_t(summary.event_validate);
 	r_status["reshade_budget_pixels"] = int64_t(summary.reshade_budget);
+	r_status["event_frames_total"] = int64_t(event_frames_total);
+	r_status["events_read_total"] = int64_t(events_read_total);
+	r_status["event_validate_frames_total"] = int64_t(event_validate_frames_total);
+	r_status["event_capping_total"] = int64_t(event_capping_total);
 	Array cut_counts;
 	for (const KeyValue<RenderSceneBuffersRD *, RestirGiState> &entry : states) {
 		for (uint32_t i = 0; i < RESTIR_CUT_MAX; i++) {

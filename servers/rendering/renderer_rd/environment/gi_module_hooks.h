@@ -119,7 +119,6 @@ public:
 
 	virtual bool is_active() const = 0;
 	virtual bool wants_all_tiles() const { return true; }
-	// Must come from a setting: R2 reads it before begin_frame.
 	virtual bool wants_replay() const { return false; }
 	virtual bool begin_frame(const RtgiFrameInputs &p_inputs) = 0;
 	virtual void resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutput &r_output) = 0;

@@ -98,6 +98,10 @@ class RestirGiBackend : public RendererRD::RtgiResampleBackend {
 	HashMap<RenderSceneBuffersRD *, RestirGiState> states;
 	RestirGiSummary summary;
 	uint32_t refusals = 0;
+	uint64_t event_frames_total = 0;
+	uint64_t events_read_total = 0;
+	uint64_t event_validate_frames_total = 0;
+	uint64_t event_capping_total = 0;
 	String refusal_reason;
 
 	void _free_state(RestirGiState &r_state);
