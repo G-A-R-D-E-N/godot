@@ -42,12 +42,14 @@ LocalExposure::LocalExposure() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/local_exposure/range_sigma", PROPERTY_HINT_RANGE, "0.1,4,0.01"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/local_exposure/wide_blend", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/local_exposure/edge_range", PROPERTY_HINT_RANGE, "0.1,6,0.01"), 1.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/local_exposure/temporal_seconds", PROPERTY_HINT_RANGE, "0,2,0.01"), 0.0);
 
 	Vector<String> modes;
 	modes.push_back("\n#define MODE_DOWNSAMPLE\n");
 	modes.push_back("\n#define MODE_BUILD\n");
 	modes.push_back("\n#define MODE_BLUR\n");
 	modes.push_back("\n#define MODE_WIDE\n");
+	modes.push_back("\n#define MODE_TEMPORAL\n");
 
 	shader.initialize(modes);
 	shader_version = shader.version_create();
@@ -85,7 +87,11 @@ void LocalExposure::Buffers::configure(RenderSceneBuffersRD *p_render_buffers) {
 	for (int i = 0; i < 2; i++) {
 		grid[i] = RD::get_singleton()->texture_create(tf, RD::TextureView());
 		RD::get_singleton()->set_resource_name(grid[i], "Local exposure grid");
+		history[i] = RD::get_singleton()->texture_create(tf, RD::TextureView());
+		RD::get_singleton()->set_resource_name(history[i], "Local exposure grid history");
 	}
+	history_index = 0;
+	history_valid = false;
 }
 
 void LocalExposure::Buffers::free_data() {
@@ -102,7 +108,12 @@ void LocalExposure::Buffers::free_data() {
 			RD::get_singleton()->free_rid(grid[i]);
 			grid[i] = RID();
 		}
+		if (history[i].is_valid()) {
+			RD::get_singleton()->free_rid(history[i]);
+			history[i] = RID();
+		}
 	}
+	history_valid = false;
 }
 
 Ref<LocalExposure::Buffers> LocalExposure::get_buffers(Ref<RenderSceneBuffersRD> p_render_buffers) {
@@ -119,12 +130,12 @@ Ref<LocalExposure::Buffers> LocalExposure::get_buffers(Ref<RenderSceneBuffersRD>
 	return buffers;
 }
 
-void LocalExposure::process(RID p_source_texture, const Size2i p_source_size, Ref<Buffers> p_buffers, const Settings &p_settings) {
+RID LocalExposure::process(RID p_source_texture, const Size2i p_source_size, Ref<Buffers> p_buffers, const Settings &p_settings) {
 	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
-	ERR_FAIL_NULL(uniform_set_cache);
+	ERR_FAIL_NULL_V(uniform_set_cache, RID());
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
-	ERR_FAIL_NULL(material_storage);
-	ERR_FAIL_COND(p_buffers.is_null() || p_buffers->log_luminance.is_null());
+	ERR_FAIL_NULL_V(material_storage, RID());
+	ERR_FAIL_COND_V(p_buffers.is_null() || p_buffers->log_luminance.is_null(), RID());
 
 	RID linear_sampler = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 	RID nearest_sampler = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
@@ -201,5 +212,27 @@ void LocalExposure::process(RID p_source_texture, const Size2i p_source_size, Re
 		RD::get_singleton()->compute_list_add_barrier(compute_list);
 	}
 
+	RID result = p_buffers->grid[1];
+	if (p_settings.temporal_alpha < 1.0) {
+		const int next = 1 - p_buffers->history_index;
+		RID mode_shader = shader.version_get_shader(shader_version, MODE_TEMPORAL);
+		push_constant.sigma = p_buffers->history_valid && !p_settings.reset_history ? p_settings.temporal_alpha : 1.0;
+		RD::Uniform u_now(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ nearest_sampler, p_buffers->grid[1] }));
+		RD::Uniform u_before(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, Vector<RID>({ nearest_sampler, p_buffers->history[p_buffers->history_index] }));
+		RD::Uniform u_dest(RD::UNIFORM_TYPE_IMAGE, 0, p_buffers->history[next]);
+		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, pipelines[MODE_TEMPORAL]);
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(mode_shader, 0, u_now, u_before), 0);
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(mode_shader, 1, u_dest), 1);
+		RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(PushConstant));
+		RD::get_singleton()->compute_list_dispatch_threads(compute_list, grid_size.x, grid_size.y, GRID_DEPTH);
+		p_buffers->history_index = next;
+		p_buffers->history_valid = true;
+		result = p_buffers->history[next];
+	} else {
+		p_buffers->history_valid = false;
+	}
+
 	RD::get_singleton()->compute_list_end();
+
+	return result;
 }

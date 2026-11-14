@@ -48,6 +48,8 @@ public:
 	struct Settings {
 		float spatial_sigma = 1.0;
 		float range_sigma = 1.0;
+		float temporal_alpha = 1.0;
+		bool reset_history = false;
 	};
 
 	class Buffers : public RenderBufferCustomDataRD {
@@ -58,7 +60,10 @@ public:
 		Size2i grid_size;
 		RID log_luminance;
 		RID grid[2];
+		RID history[2];
 		RID wide;
+		int history_index = 0;
+		bool history_valid = false;
 
 		virtual void configure(RenderSceneBuffersRD *p_render_buffers) override;
 		virtual void free_data() override;
@@ -70,6 +75,7 @@ private:
 		MODE_BUILD,
 		MODE_BLUR,
 		MODE_WIDE,
+		MODE_TEMPORAL,
 		MODE_MAX
 	};
 
@@ -89,7 +95,7 @@ public:
 	~LocalExposure();
 
 	Ref<Buffers> get_buffers(Ref<RenderSceneBuffersRD> p_render_buffers);
-	void process(RID p_source_texture, const Size2i p_source_size, Ref<Buffers> p_buffers, const Settings &p_settings);
+	RID process(RID p_source_texture, const Size2i p_source_size, Ref<Buffers> p_buffers, const Settings &p_settings);
 };
 
 } // namespace RendererRD

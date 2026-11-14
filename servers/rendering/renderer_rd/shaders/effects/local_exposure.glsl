@@ -33,6 +33,12 @@ layout(set = 0, binding = 0) uniform sampler3D source_grid;
 layout(rgba16f, set = 1, binding = 0) uniform restrict writeonly image2D dest_wide;
 #endif
 
+#ifdef MODE_TEMPORAL
+layout(set = 0, binding = 0) uniform sampler3D source_grid;
+layout(set = 0, binding = 1) uniform sampler3D source_history;
+layout(rgba16f, set = 1, binding = 0) uniform restrict writeonly image3D dest_grid;
+#endif
+
 layout(push_constant, std430) uniform Params {
 	ivec2 source_size;
 	ivec2 dest_size;
@@ -137,5 +143,18 @@ void main() {
 		total += texelFetch(source_grid, ivec3(cell, z), 0).rg;
 	}
 	imageStore(dest_wide, cell, vec4(total.g > 1e-5 ? total.r / total.g : log2(LUMINANCE_FLOOR)));
+#endif
+
+#ifdef MODE_TEMPORAL
+	ivec3 cell = ivec3(gl_GlobalInvocationID);
+	ivec3 size = ivec3(params.dest_size, GRID_DEPTH);
+	if (any(greaterThanEqual(cell, size))) {
+		return;
+	}
+	vec2 now = texelFetch(source_grid, cell, 0).rg;
+	if (params.sigma < 1.0) {
+		now = mix(texelFetch(source_history, cell, 0).rg, now, params.sigma);
+	}
+	imageStore(dest_grid, cell, vec4(now, 0.0, 0.0));
 #endif
 }

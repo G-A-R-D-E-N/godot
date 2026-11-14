@@ -866,6 +866,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 	}
 
 	Ref<RendererRD::LocalExposure::Buffers> local_exposure_buffers;
+	RID local_exposure_grid;
 	RendererEnvironmentStorage::LocalExposure local_exposure_settings;
 	if (local_exposure && can_use_effects && can_use_storage && rb->get_view_count() == 1 && p_render_data->environment.is_valid()) {
 		local_exposure_settings = environment_get_local_exposure(p_render_data->environment);
@@ -877,7 +878,10 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 			RendererRD::LocalExposure::Settings local_exposure_quality;
 			local_exposure_quality.spatial_sigma = GLOBAL_GET_CACHED(float, "rendering/environment/local_exposure/spatial_sigma");
 			local_exposure_quality.range_sigma = GLOBAL_GET_CACHED(float, "rendering/environment/local_exposure/range_sigma");
-			local_exposure->process(rb->get_internal_texture(), rb->get_internal_size(), local_exposure_buffers, local_exposure_quality);
+			const float local_exposure_seconds = GLOBAL_GET_CACHED(float, "rendering/environment/local_exposure/temporal_seconds");
+			local_exposure_quality.temporal_alpha = local_exposure_seconds > 0.0 ? 1.0 - Math::exp(-time_step / local_exposure_seconds) : 1.0;
+			local_exposure_quality.reset_history = rb->get_history_reset();
+			local_exposure_grid = local_exposure->process(rb->get_internal_texture(), rb->get_internal_size(), local_exposure_buffers, local_exposure_quality);
 
 			RD::get_singleton()->draw_command_end_label();
 		}
@@ -986,10 +990,10 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 		if (can_use_effects) {
 			_setup_night_vision(tonemap, p_render_data);
 		}
-		if (local_exposure_buffers.is_valid()) {
+		if (local_exposure_buffers.is_valid() && local_exposure_grid.is_valid()) {
 			tonemap.use_local_exposure = true;
 			tonemap.local_exposure = local_exposure_settings;
-			tonemap.local_exposure_grid = local_exposure_buffers->grid[1];
+			tonemap.local_exposure_grid = local_exposure_grid;
 			tonemap.local_exposure_wide = local_exposure_buffers->wide;
 			tonemap.local_exposure_method = GLOBAL_GET_CACHED(uint32_t, "rendering/environment/local_exposure/method");
 			tonemap.local_exposure_wide_blend = GLOBAL_GET_CACHED(float, "rendering/environment/local_exposure/wide_blend");
