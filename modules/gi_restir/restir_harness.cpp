@@ -92,6 +92,8 @@ Dictionary params_to_dict(const RestirFrameParams &p) {
 	d["camera_to_anchor"] = p.camera_to_anchor;
 	d["previous_camera_to_anchor"] = p.previous_camera_to_anchor;
 	d["view_to_previous_clip"] = p.view_to_previous_clip;
+	d["jitter_shift"] = PackedFloat32Array({ p.jitter_shift[0], p.jitter_shift[1], p.jitter_shift[2], p.jitter_shift[3] });
+	d["previous_jitter_shift"] = PackedFloat32Array({ p.previous_jitter_shift[0], p.previous_jitter_shift[1], p.previous_jitter_shift[2], p.previous_jitter_shift[3] });
 	d["test_sky"] = p.test_sky;
 	d["tol_plane"] = p.tol_plane;
 	d["cos_normal"] = p.cos_normal;
@@ -177,6 +179,18 @@ RestirFrameParams params_from_dict(const Dictionary &p_dict) {
 	}
 	if (p_dict.has("view_to_previous_clip")) {
 		p.view_to_previous_clip = p_dict["view_to_previous_clip"];
+	}
+	if (p_dict.has("jitter_shift")) {
+		const PackedFloat32Array shift = p_dict["jitter_shift"];
+		for (int i = 0; i < 4 && i < shift.size(); i++) {
+			p.jitter_shift[i] = shift[i];
+		}
+	}
+	if (p_dict.has("previous_jitter_shift")) {
+		const PackedFloat32Array shift = p_dict["previous_jitter_shift"];
+		for (int i = 0; i < 4 && i < shift.size(); i++) {
+			p.previous_jitter_shift[i] = shift[i];
+		}
 	}
 	if (p_dict.has("test_sky")) {
 		p.test_sky = p_dict["test_sky"];

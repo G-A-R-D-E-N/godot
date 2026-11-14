@@ -124,6 +124,8 @@ struct RestirFrameParams {
 	Vector3 camera_to_anchor;
 	Vector3 previous_camera_to_anchor;
 	Projection view_to_previous_clip;
+	float jitter_shift[4] = {};
+	float previous_jitter_shift[4] = {};
 	Color test_sky = Color(1, 1, 1, 1);
 	float tol_plane = 0.02f;
 	float cos_normal = 0.9063078f;

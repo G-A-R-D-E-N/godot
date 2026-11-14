@@ -33,6 +33,7 @@
 #include "restir_epochs.h"
 #include "restir_fold.h"
 #include "restir_gi_core.h"
+#include "restir_jitter.h"
 #include "restir_test.h"
 
 #include "core/templates/hash_map.h"
@@ -110,6 +111,8 @@ struct RestirGiSummary {
 	RestirFoldFrame fold;
 	uint32_t fold_clock = 0;
 	bool fold_pre_frame = false;
+	RestirJitterShift jitter;
+	RestirJitterShift previous_jitter;
 };
 
 class RestirGiBackend : public RendererRD::RtgiResampleBackend {
@@ -126,6 +129,7 @@ class RestirGiBackend : public RendererRD::RtgiResampleBackend {
 	uint32_t hold_fill_max = 0;
 	uint64_t tile_skip_frames_total = 0;
 	uint64_t module_output_frames_total = 0;
+	uint64_t jitter_unmatched_frames_total = 0;
 	String refusal_reason;
 
 	void _free_state(RestirGiState &r_state);

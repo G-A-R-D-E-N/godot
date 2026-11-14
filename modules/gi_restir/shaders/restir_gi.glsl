@@ -608,8 +608,8 @@ vec2 rs_spatial_offset(int p_index, uvec2 p_pixel) {
 #define COMPAT_SCALE 0.12615662
 
 float rs_compat_score(Receiver p_r, Receiver p_q) {
-	float scale = length(p_r.view) * COMPAT_SCALE;
-	float hp = exp(-length(p_r.view - p_q.view) / scale);
+	float scale = length(p_r.true_view) * COMPAT_SCALE;
+	float hp = exp(-length(p_r.true_view - p_q.true_view) / scale);
 	float c = clamp(dot(p_r.nrm, p_q.nrm), 0.0, 1.0);
 	float c2 = c * c;
 	float c4 = c2 * c2;

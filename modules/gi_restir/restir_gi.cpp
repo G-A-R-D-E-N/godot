@@ -532,6 +532,14 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	params.camera_to_anchor = p_inputs.camera_transform.origin - anchor;
 	params.previous_camera_to_anchor = p_inputs.previous_camera_transform.origin - anchor;
 	params.view_to_previous_clip = p_inputs.view_to_previous_clip;
+	const RestirJitterShift jitter = restir_jitter_shift(p_inputs.projection, p_inputs.drawn_projection);
+	const RestirJitterShift previous_jitter = restir_jitter_shift(p_inputs.previous_projection, p_inputs.previous_drawn_projection);
+	const double jitter_words[4] = { jitter.ax, jitter.ay, jitter.bx, jitter.by };
+	const double previous_jitter_words[4] = { previous_jitter.ax, previous_jitter.ay, previous_jitter.bx, previous_jitter.by };
+	for (int i = 0; i < 4; i++) {
+		params.jitter_shift[i] = float(jitter_words[i]);
+		params.previous_jitter_shift[i] = float(previous_jitter_words[i]);
+	}
 	params.test_sky = options.sky;
 	if (shade_valid) {
 		for (int i = 0; i < 3; i++) {
@@ -685,6 +693,11 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	summary.fold = fold;
 	summary.fold_clock = params.fold_clock;
 	summary.fold_pre_frame = params.fold_pre_frame;
+	summary.jitter = jitter;
+	summary.previous_jitter = previous_jitter;
+	if (jitter.unmatched || previous_jitter.unmatched) {
+		jitter_unmatched_frames_total++;
+	}
 	if (route.module_output) {
 		module_output_frames_total++;
 	}
@@ -834,6 +847,10 @@ void RestirGiBackend::get_status(Dictionary &r_status) const {
 	r_status["fold_k_eff"] = int64_t(summary.fold.k_eff);
 	r_status["fold_clock"] = int64_t(summary.fold_clock);
 	r_status["fold_pre_frame"] = summary.fold_pre_frame;
+	r_status["jitter_shift"] = PackedFloat64Array({ summary.jitter.ax, summary.jitter.ay, summary.jitter.bx, summary.jitter.by });
+	r_status["jitter_ndc"] = PackedFloat64Array({ summary.jitter.jitter_x, summary.jitter.jitter_y });
+	r_status["jitter_unmatched"] = summary.jitter.unmatched || summary.previous_jitter.unmatched;
+	r_status["jitter_unmatched_frames_total"] = int64_t(jitter_unmatched_frames_total);
 	Array cut_counts;
 	for (const KeyValue<RenderSceneBuffersRD *, RestirGiState> &entry : states) {
 		for (uint32_t i = 0; i < RESTIR_CUT_MAX; i++) {

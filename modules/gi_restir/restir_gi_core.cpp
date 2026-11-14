@@ -92,6 +92,8 @@ struct RestirFrameUBO {
 	int32_t screen_size[2];
 	int32_t trace_scale;
 	uint32_t replay_pad;
+	float jitter_shift[4];
+	float previous_jitter_shift[4];
 };
 
 struct RestirDirtyUBO {
@@ -100,7 +102,7 @@ struct RestirDirtyUBO {
 };
 
 static_assert(sizeof(RestirDirtyUBO) == 2048, "RestirDirtyUBO must match the std140 block in restir_gi_inc.glsl");
-static_assert(sizeof(RestirFrameUBO) == 400, "RestirFrameUBO must match the std140 block in restir_gi_inc.glsl");
+static_assert(sizeof(RestirFrameUBO) == 432, "RestirFrameUBO must match the std140 block in restir_gi_inc.glsl");
 static_assert(RESTIR_FOLD_F_PRE_FRAME == RESTIR_F_PRE_FRAME, "Fold's pre-frame bit must be the flags word's bit 19");
 
 static constexpr uint32_t PASS_STATS_ROWS = 4;
@@ -430,6 +432,10 @@ void RestirGiCore::_upload(RID p_ubo, const RestirFrameParams &p, uint32_t p_pas
 	u.shade_sky_energy = p.shade_sky_energy;
 	u.shade_bounce_energy = p.shade_bounce_energy;
 	u.shade_exposure = p.shade_exposure;
+	for (int i = 0; i < 4; i++) {
+		u.jitter_shift[i] = p.jitter_shift[i];
+		u.previous_jitter_shift[i] = p.previous_jitter_shift[i];
+	}
 	RD::get_singleton()->buffer_update(p_ubo, 0, sizeof(RestirFrameUBO), &u);
 }
 

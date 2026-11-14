@@ -590,6 +590,12 @@ Design 2.9 (N3) and 8.1 row 10; change plan commit 8.
   eabba5d2a. FINAL and VALIDATE gained run-time tests of bit 26, so their SPIR-V changes and their output must not. SOURCE keeps
   its declarations and order through the set 2 restructure. No core shader changed, so every DDGI, RTGI and direct-shadow
   variant stays byte-identical.
+- Measured on a plain sky step (14 Nov 2026, lab scene restir_sky_step, sky energy times 2, RTX 4090). restir-skyraw-4090
+  ran the module's output alone (module cap 1 and rtgi target_samples 1, record confidence 1.0): setting off and on agree
+  to 7e-5 on the open ground, and in both arms the module takes the new sky within one frame of its epoch, 8 frames after
+  the step. Verdict for a plain step: the re-read triggers, does no harm and brings no benefit. The two earlier runs
+  (restir-skystep, its second run) did not isolate the module: its share of the output was 4/6 and 1/6. A slow sky ramp is
+  not tested yet. All of these ran with TAA on and carried the fault in "TAA jitter in the receivers" below.
 
 ## Traced tiles only and M in PACK (gi/trace_all_tiles off, gi/confidence)
 
@@ -905,3 +911,93 @@ reads a light.
   - Debug view 60 scales its heat by 11, so REJ_BOUND (13) shows saturated.
   - The doctests named "Mirror:" test a C++ copy of the shader's rule; only the GPU readback at commit 12 tests the shader.
     The hash known answers were recomputed independently from the GLSL text and agree.
+
+## TAA jitter in the receivers (fix after change plan commit 11)
+
+- What was wrong. R2 writes the geometry position texture (geo_position, view space, one anchor per trace pixel) from the
+  jittered depth buffer with the unjittered inverse projection (rtgi.cpp _fill_frame_ubo: inverse(C * cam_projection), C the
+  depth correction with the y flip). The depth was drawn with get_cam_projection() = C_j * cam_projection, where C_j is C
+  with the TAA jitter added to columns[3][0] and [3][1], so the drawn NDC is the plain NDC plus the jitter. The stored
+  position is therefore moved sideways by the jitter; on a surface seen at a slant that puts it above or below the true
+  surface. R2's own trace does not read that texture for its origin: ddgi_trace MODE_RTGI rebuilds the position with
+  drawn_projection.inverse(). The module did read it: rs_receiver_cur and rs_receiver_prev built r.pos, r.origin and the
+  four origin-offset taps from it, and every visibility ray (rs_visible) starts at r.origin, so on some jitter phases the
+  origins sat under the surface and the rays hit it.
+- Measurement (14 Nov 2026, restir-skydiag-4090 and restir-skyfloor-4090, engine run copies at 697371ea0 and, for one
+  leg, eabba5d2a, which read the same). TAA on: the module's raw output went dark on 5 of every 16 frames (2 of 8 under
+  FSR2, whose jitter cycle is 8); TEMPORAL rejected about 98 % of pixels with REJ_VIS (11) on 11 of 16 frames; M stayed
+  near 1 per pixel. TAA off: no dark frame, M reached 31.6 per pixel. With R2's denoiser after the module the frame read
+  21 % under its TAA-off level. rtgi/origin_floor 0.004 with TAA on removed every dark frame and brought M to 31.6, which
+  places the fault in the ray origins.
+- Every module figure measured with TAA on before this fix carried the fault: the raw output was dark on 5 of 16 frames
+  and temporal reuse was rejected on 11 of 16. That includes the sky-step runs. Those figures are not comparable with runs
+  after this fix.
+- The fix. R2 hands two more projections to backends (gi_module_hooks.h RtgiFrameInputs: drawn_projection and
+  previous_drawn_projection; RtgiBuffers keeps previous_drawn_projection beside previous_projection, with the same
+  have_previous fallback). Nothing in R2's shaders, UBOs or behaviour changes. The module turns each pair (P, D) into a
+  view-space shift with restir_jitter_shift (restir_jitter.cpp, pure, in double): true.xy = view.xy + view.z * a + b and
+  true.z = view.z, where view is rebuilt with inverse(C * P) and true with inverse(D) from the same (uv, depth).
+  - Derivation: D = T * M with M = C * P and T the identity plus (jx, jy) in column 3, rows 0 and 1. A point t = view + d
+    with d.z = 0 lands, under D, where view lands under M exactly when A d = -j w, where A is M's upper-left 2x2 (clip xy
+    from view xy) and w = M[2][3] z + M[3][3] is the clip w. So with q = A^-1 j: a = -q * M[2][3] and b = -q * M[3][3].
+    Indices here are Godot's columns[c][r]: M[2][3] is column 2, row 3. Perspective: a = (jx / M[0][0], jy / M[1][1]),
+    b = 0 (M[1][1] carries the flip). Orthogonal: a = 0, b = -q.
+  - It recovers j from the column whose row-3 entry is largest (column 2 for perspective, 3 for orthogonal) and then
+    checks, to 1e-6 of each row's scale, that D's rows 0 and 1 are M's plus j times M's row 3, that rows 2 and 3 match, that
+    M's z and w rows have no x or y term, and that A is invertible. If any check fails (a y flip, another camera, a depth
+    change) it returns zero and sets unmatched; it never returns a partial shift.
+  - D equal to M entry by entry (an exact comparison) returns zero at once, so a frame without jitter uploads zeros.
+- Plumbing. RestirFrameParams gains jitter_shift and previous_jitter_shift (a.x, a.y, b.x, b.y as floats), from this
+  frame's pair and from the previous pair. RestirFrameUBO grows from 400 to 432 bytes: two vec4 at the end of RestirFrame
+  (jitter_shift, prev_jitter_shift, offset 400 and 416, std140-aligned). params_to_dict and params_from_dict carry both as
+  PackedFloat32Array; a capture without them replays with zeros, as before. Status: jitter_shift (four numbers),
+  jitter_ndc (the recovered jitter), jitter_unmatched (this or the previous pair) and jitter_unmatched_frames_total.
+- Freeze. The freeze return (test option freeze) builds no RestirFrameParams: run_pack uploads nothing and reuses ubo[3]
+  from the last run_frame, which carries that frame's shifts, and PACK reads only geo_position's w, which the shift never
+  touches. So there is nothing for the freeze to hold; its status keeps the last real frame's shift. The previous pair always comes from R2, which runs every frame, so after a
+  freeze the previous shift matches the previous position texture R2 hands over.
+- Shader. One helper, rs_true_view(view, shift) = vec3(view.xy + view.z * shift.xy + shift.zw, view.z). Receiver gains
+  true_view; r.view stays the stored (unshifted) position.
+  - True position (geometry): rs_receiver_cur (current shift) and rs_receiver_prev (previous shift) build r.true_view,
+    r.pos from it, and r.origin through rs_origin_offset_vector with the true centre and the four neighbour taps each
+    shifted with its own z (w kept). Everything downstream reads r.pos or r.origin and so is true: the plane test in
+    rs_similar, the jacobians (rs_shift_jacobian, rs_jacobian_raw), rs_phat and rs_dir_to, every rs_visible ray (TEMPORAL,
+    SPATIAL, FINAL, VALIDATE), the fresh-Lo and replay rays (FINAL, VALIDATE), SOURCE's own-sampler ray, the event and hold
+    spheres (rs_event_caps, rs_hold_caps), the dirty-box segments (rs_dirty_hit), and the replay distance tests in
+    VALIDATE. The compat score (PASS_SPATIAL_COMPAT, rs_compat_score) measures receiver distances, so it reads true_view.
+  - Unshifted: TEMPORAL's reprojection rf.view_to_prev_clip * r.view. That matrix is built from the unjittered projections
+    and maps a pixel centre to a pixel centre, as R2's rtgi_previous_trace_pixel does with the same texture. Also unshifted:
+    r.depth (z is unchanged anyway), rtgi_anchor_pixel (pixel grid), PACK (only w), CAPTURE (copies the raw textures; a
+    replay applies the shifts from its params), CLEAR, SKY_EPOCH and the debug views (no positions). The candidate decode
+    takes R2's hit point as stored; R2 traced it from the true origin, so it is not rebuilt from the receiver.
+- Identity. With both shifts zero every new float operation is x + z * 0 + 0, which returns x for every finite x (a -0 x
+  can come back +0, which compares equal). No other float work moved, there is no setting, and the fix is always on. R2
+  writes a zero position with w 0 for a pixel without geometry; under an orthogonal camera the shift turns that into the
+  finite point (b.x, b.y, 0), which no pass reads, since every reader tests valid first. The UBO grew, so every module
+  mode's SPIR-V changes; no R2 shader changes.
+- Doctests, tests/test_restir_jitter.h ("[RestirJitter] ..."): perspective (60 degrees, 16:9, 0.05 to 2000), an off-axis
+  frustum and two orthogonal cameras, each with jitter (0.3 / 640, -0.45 / 360) * 2 and its sign flips, D built as
+  get_cam_projection builds it; for five uv and five depths the shift maps the inverse(C * P) rebuild onto the inverse(D)
+  rebuild to 1e-9 of the point's length, and the zero shift does not. Zero jitter gives exact zeros; a y-flipped D, a
+  depth change, a zoom and another camera give zeros and unmatched; the orthogonal shift has no z term. Sign: a positive x
+  jitter moves the point toward -x in view space and a positive y jitter (NDC y down after the flip) toward +y. The
+  harness round trip keeps both shifts and an old capture reads zeros. The map tests apply a C++ copy of rs_true_view, so
+  they test the function and the formula, not the shader. The shader's check is on the card: no dark frame with TAA on at
+  origin_floor 0, and status jitter_shift near (jitter_ndc.x / P[0][0], -jitter_ndc.y / P[1][1], 0, 0) for a perspective
+  camera (the y term changes sign through the flip). The tolerances are set for a double real_t; the single-precision
+  ones are untested.
+- Known limits.
+  - The tiny origin offset (origin_scale ULPs plus the raster footprint) still assumes the position is exact; this fix makes
+    the position right but does not widen the offset. origin_floor stays 0 by default.
+  - The anchor is the trace pixel's half-pixel point (trace_pixel * scale + scale / 2); the shift corrects the jitter only,
+    not the sampled depth's own footprint inside a trace pixel.
+  - Orthogonal and off-axis cameras are tested only in the doctests; no GPU run used them.
+  - rs_origin_offset_vector turns a tap normal into world space with the current camera's rotation also for previous
+    receivers (as before this fix), so with a turning camera a previous receiver's offset points slightly off its normal.
+    This fix does not change it.
+  - A pair that does not match (jitter_unmatched true) gets no shift and keeps the old fault for that frame.
+  - restir_jitter_shift rebuilds C with set_depth_correction(true), a second copy of R2's correction. If R2's ever
+    changes, every frame reads unmatched: zero shift, the old fault, and jitter_unmatched_frames_total counting.
+  - R2's own passes are unchanged and still read the stored (unshifted) position: rtgi_previous_trace_pixel, R2's
+    temporal plane test and its DDGI lookup. With denoise r2 after the module, some TAA-on difference from the TAA-off
+    level may remain for that reason; it is R2's to fix.

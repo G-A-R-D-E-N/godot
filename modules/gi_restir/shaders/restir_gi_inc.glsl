@@ -181,6 +181,9 @@ layout(set = 0, binding = 0, std140) uniform RestirFrame {
 	ivec2 screen_size;
 	int trace_scale;
 	uint replay_pad;
+
+	vec4 jitter_shift;
+	vec4 prev_jitter_shift;
 }
 rf;
 
@@ -409,6 +412,7 @@ struct Reservoir {
 
 struct Receiver {
 	vec3 view;
+	vec3 true_view;
 	vec3 pos;
 	vec3 origin;
 	vec3 nrm;
@@ -443,6 +447,10 @@ bool rs_finite3(vec3 p_value) {
 
 mat3 rs_rot(vec4 a, vec4 b, vec4 c) {
 	return mat3(a.xyz, b.xyz, c.xyz);
+}
+
+vec3 rs_true_view(vec3 p_view, vec4 p_shift) {
+	return vec3(p_view.xy + p_view.z * p_shift.xy + p_shift.zw, p_view.z);
 }
 
 #define RS_ORIGIN_VIEW_ULPS 4.0
@@ -497,11 +505,16 @@ Receiver rs_receiver_cur(ivec2 p_pixel) {
 	Receiver r;
 	r.valid = g.w > 0.5;
 	r.view = g.xyz;
-	r.pos = rs_rot(rf.cam_rot0, rf.cam_rot1, rf.cam_rot2) * g.xyz + rf.cam_to_anchor.xyz;
+	r.true_view = rs_true_view(g.xyz, rf.jitter_shift);
+	r.pos = rs_rot(rf.cam_rot0, rf.cam_rot1, rf.cam_rot2) * r.true_view + rf.cam_to_anchor.xyz;
 	r.nrm = normalize(rs_rot(rf.cam_rot0, rf.cam_rot1, rf.cam_rot2) * normalize(n.xyz * 2.0 - 1.0));
 	ivec2 limit = textureSize(geo_pos_cur, 0) - 1;
 	vec3 shading_view = normalize(n.xyz * 2.0 - 1.0);
-	r.origin = r.pos + rs_origin_offset_vector(g.xyz, r.pos, shading_view, r.nrm, texelFetch(geo_pos_cur, clamp(p_pixel + ivec2(-1, 0), ivec2(0), limit), 0), texelFetch(geo_pos_cur, clamp(p_pixel + ivec2(1, 0), ivec2(0), limit), 0), texelFetch(geo_pos_cur, clamp(p_pixel + ivec2(0, -1), ivec2(0), limit), 0), texelFetch(geo_pos_cur, clamp(p_pixel + ivec2(0, 1), ivec2(0), limit), 0));
+	vec4 left = texelFetch(geo_pos_cur, clamp(p_pixel + ivec2(-1, 0), ivec2(0), limit), 0);
+	vec4 right = texelFetch(geo_pos_cur, clamp(p_pixel + ivec2(1, 0), ivec2(0), limit), 0);
+	vec4 up = texelFetch(geo_pos_cur, clamp(p_pixel + ivec2(0, -1), ivec2(0), limit), 0);
+	vec4 down = texelFetch(geo_pos_cur, clamp(p_pixel + ivec2(0, 1), ivec2(0), limit), 0);
+	r.origin = r.pos + rs_origin_offset_vector(r.true_view, r.pos, shading_view, r.nrm, vec4(rs_true_view(left.xyz, rf.jitter_shift), left.w), vec4(rs_true_view(right.xyz, rf.jitter_shift), right.w), vec4(rs_true_view(up.xyz, rf.jitter_shift), up.w), vec4(rs_true_view(down.xyz, rf.jitter_shift), down.w));
 	r.rough = n.w;
 	r.depth = max(-g.z, 0.01);
 	return r;
@@ -515,11 +528,16 @@ Receiver rs_receiver_prev(ivec2 p_pixel) {
 	Receiver r;
 	r.valid = g.w > 0.5;
 	r.view = g.xyz;
-	r.pos = rs_rot(rf.prev_rot0, rf.prev_rot1, rf.prev_rot2) * g.xyz + rf.prev_to_anchor.xyz;
+	r.true_view = rs_true_view(g.xyz, rf.prev_jitter_shift);
+	r.pos = rs_rot(rf.prev_rot0, rf.prev_rot1, rf.prev_rot2) * r.true_view + rf.prev_to_anchor.xyz;
 	r.nrm = normalize(rs_rot(rf.prev_rot0, rf.prev_rot1, rf.prev_rot2) * normalize(n.xyz * 2.0 - 1.0));
 	ivec2 limit = textureSize(geo_pos_prev, 0) - 1;
 	vec3 shading_view = normalize(n.xyz * 2.0 - 1.0);
-	r.origin = r.pos + rs_origin_offset_vector(g.xyz, r.pos, shading_view, r.nrm, texelFetch(geo_pos_prev, clamp(p_pixel + ivec2(-1, 0), ivec2(0), limit), 0), texelFetch(geo_pos_prev, clamp(p_pixel + ivec2(1, 0), ivec2(0), limit), 0), texelFetch(geo_pos_prev, clamp(p_pixel + ivec2(0, -1), ivec2(0), limit), 0), texelFetch(geo_pos_prev, clamp(p_pixel + ivec2(0, 1), ivec2(0), limit), 0));
+	vec4 left = texelFetch(geo_pos_prev, clamp(p_pixel + ivec2(-1, 0), ivec2(0), limit), 0);
+	vec4 right = texelFetch(geo_pos_prev, clamp(p_pixel + ivec2(1, 0), ivec2(0), limit), 0);
+	vec4 up = texelFetch(geo_pos_prev, clamp(p_pixel + ivec2(0, -1), ivec2(0), limit), 0);
+	vec4 down = texelFetch(geo_pos_prev, clamp(p_pixel + ivec2(0, 1), ivec2(0), limit), 0);
+	r.origin = r.pos + rs_origin_offset_vector(r.true_view, r.pos, shading_view, r.nrm, vec4(rs_true_view(left.xyz, rf.prev_jitter_shift), left.w), vec4(rs_true_view(right.xyz, rf.prev_jitter_shift), right.w), vec4(rs_true_view(up.xyz, rf.prev_jitter_shift), up.w), vec4(rs_true_view(down.xyz, rf.prev_jitter_shift), down.w));
 	r.rough = n.w;
 	r.depth = max(-g.z, 0.01);
 	return r;
