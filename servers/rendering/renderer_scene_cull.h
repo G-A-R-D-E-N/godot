@@ -1314,6 +1314,7 @@ public:
 
 	PASS4(environment_set_aerial_perspective, RID, bool, RID, float)
 	PASS9(environment_set_night_vision, RID, bool, float, float, float, const Vector2 &, float, float, float)
+	PASS8(environment_set_local_exposure, RID, bool, float, float, float, float, float, float)
 
 	// Volumentric Fog
 	PASS14(environment_set_volumetric_fog, RID, bool, float, const Color &, const Color &, float, float, float, float, float, bool, float, float, float)

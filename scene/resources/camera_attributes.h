@@ -66,6 +66,14 @@ protected:
 	float auto_exposure_adaptation = 1.0;
 	float auto_exposure_adaptation_pivot = 0.0;
 	void _update_auto_exposure_meter();
+
+	bool auto_exposure_exponential_response = false;
+	float auto_exposure_light_adaptation_time = 0.5;
+	float auto_exposure_dark_adaptation_time = 2.0;
+	float auto_exposure_highlight_percentile = 0.0;
+	float auto_exposure_highlight_ceiling = 2.5;
+	float auto_exposure_highlight_max_shift = 4.0;
+	void _update_auto_exposure_response();
 	virtual void _update_auto_exposure() {}
 
 public:
@@ -93,6 +101,18 @@ public:
 	float get_auto_exposure_histogram_clip_high() const;
 	void set_auto_exposure_center_weight(float p_weight);
 	float get_auto_exposure_center_weight() const;
+	void set_auto_exposure_exponential_response(bool p_exponential);
+	bool is_auto_exposure_exponential_response() const;
+	void set_auto_exposure_light_adaptation_time(float p_time);
+	float get_auto_exposure_light_adaptation_time() const;
+	void set_auto_exposure_dark_adaptation_time(float p_time);
+	float get_auto_exposure_dark_adaptation_time() const;
+	void set_auto_exposure_highlight_percentile(float p_percentile);
+	float get_auto_exposure_highlight_percentile() const;
+	void set_auto_exposure_highlight_ceiling(float p_ceiling);
+	float get_auto_exposure_highlight_ceiling() const;
+	void set_auto_exposure_highlight_max_shift(float p_max_shift);
+	float get_auto_exposure_highlight_max_shift() const;
 	void set_auto_exposure_adaptation(float p_adaptation);
 	float get_auto_exposure_adaptation() const;
 

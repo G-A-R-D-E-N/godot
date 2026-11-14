@@ -18,21 +18,39 @@
 		<member name="auto_exposure_center_weight" type="float" setter="set_auto_exposure_center_weight" getter="get_auto_exposure_center_weight" default="0.0">
 			How strongly the log histogram meter favors the lower middle of the frame, from [code]0.0[/code] to [code]1.0[/code]. Each metered pixel's weight is [code]8 * (1 + 3 * center_weight * g)[/code], rounded, where [code]g[/code] is a Gaussian with a standard deviation of 0.3 frame heights, centered horizontally and 60% of the way down the frame. At [code]0.0[/code] every pixel counts the same; at [code]0.5[/code] the center of that area counts 2.5 times as much as the left and right edges of a 16:9 frame. Only used when [member auto_exposure_meter] is [constant AUTO_EXPOSURE_METER_LOG_HISTOGRAM].
 		</member>
+		<member name="auto_exposure_dark_adaptation_time" type="float" setter="set_auto_exposure_dark_adaptation_time" getter="get_auto_exposure_dark_adaptation_time" default="2.0">
+			Time constant, in seconds, of the adaptation when the metered luminance falls.
+		</member>
 		<member name="auto_exposure_enabled" type="bool" setter="set_auto_exposure_enabled" getter="is_auto_exposure_enabled" default="false">
 			If [code]true[/code], enables the tonemapping auto exposure mode of the scene renderer. If [code]true[/code], the renderer will automatically determine the exposure setting to adapt to the scene's illumination and the observed light.
 			[b]Note:[/b] Auto-exposure is only supported in the Forward+ rendering method, not Mobile or Compatibility.
 			The metered value is the exact arithmetic mean, over every pixel of the rendered frame, of the largest colour channel of each pixel. Use [member auto_exposure_highlight_limit] to stop very small, very bright pixels from dominating that mean. [member auto_exposure_meter] selects a camera-like log histogram meter instead.
+		</member>
+		<member name="auto_exposure_exponential_response" type="bool" setter="set_auto_exposure_exponential_response" getter="is_auto_exposure_exponential_response" default="false">
+			If [code]true[/code], auto exposure moves toward its target in stops with [code]1 - exp(-delta / time)[/code], using [member auto_exposure_light_adaptation_time] when the scene gets brighter and [member auto_exposure_dark_adaptation_time] when it gets darker, so the path does not depend on the frame rate. If [code]false[/code], [member auto_exposure_speed] is used as before. Only the log histogram meter reads this.
+		</member>
+		<member name="auto_exposure_highlight_ceiling" type="float" setter="set_auto_exposure_highlight_ceiling" getter="get_auto_exposure_highlight_ceiling" default="2.5">
+			How many stops above the exposure key the protected luminance may sit before the exposure is lowered.
 		</member>
 		<member name="auto_exposure_highlight_limit" type="float" setter="set_auto_exposure_highlight_limit" getter="get_auto_exposure_highlight_limit" default="0.0">
 			Limits how much a single pixel can raise the metered scene luminance, in EV above the adapted average. Before averaging, each pixel's luminance is capped at the previous frame's adapted average multiplied by [code]2^auto_exposure_highlight_limit[/code]. A value of [code]0.0[/code] disables the limit, which is the stock behavior. The range is [code]0.0[/code] to [code]16.0[/code].
 			The bound: a bright area keeps a bounded effect only while its share of the frame times [code]2^auto_exposure_highlight_limit[/code] stays below [code]1[/code]. At 4 EV that means the area must cover less than 6.25 % of the frame. Above that share, the exposure moves toward the unlimited mean instead of holding at the limit.
 			The limit is not applied on the first frame or after the adapted luminance is reset, because there is no previous average to compare against.
 		</member>
+		<member name="auto_exposure_highlight_max_shift" type="float" setter="set_auto_exposure_highlight_max_shift" getter="get_auto_exposure_highlight_max_shift" default="4.0">
+			The most the highlight rule may lower the exposure below the one the trimmed average asks for, in stops.
+		</member>
+		<member name="auto_exposure_highlight_percentile" type="float" setter="set_auto_exposure_highlight_percentile" getter="get_auto_exposure_highlight_percentile" default="0.0">
+			Share of the weighted frame, by area, whose luminance the highlight rule protects. With [code]0.99[/code] the brightest 1% of the frame is ignored and the luminance below it is kept under [member auto_exposure_highlight_ceiling]. [code]0.0[/code] switches the rule off. Only the log histogram meter reads this.
+		</member>
 		<member name="auto_exposure_histogram_clip_high" type="float" setter="set_auto_exposure_histogram_clip_high" getter="get_auto_exposure_histogram_clip_high" default="0.03">
 			The fraction of the total metering weight, taken from the brightest pixels, that the log histogram meter ignores, from [code]0.0[/code] to [code]0.45[/code]. Only used when [member auto_exposure_meter] is [constant AUTO_EXPOSURE_METER_LOG_HISTOGRAM].
 		</member>
 		<member name="auto_exposure_histogram_clip_low" type="float" setter="set_auto_exposure_histogram_clip_low" getter="get_auto_exposure_histogram_clip_low" default="0.03">
 			The fraction of the total metering weight, taken from the darkest pixels, that the log histogram meter ignores, from [code]0.0[/code] to [code]0.45[/code]. Only used when [member auto_exposure_meter] is [constant AUTO_EXPOSURE_METER_LOG_HISTOGRAM].
+		</member>
+		<member name="auto_exposure_light_adaptation_time" type="float" setter="set_auto_exposure_light_adaptation_time" getter="get_auto_exposure_light_adaptation_time" default="0.5">
+			Time constant, in seconds, of the adaptation when the metered luminance rises.
 		</member>
 		<member name="auto_exposure_meter" type="int" setter="set_auto_exposure_meter" getter="get_auto_exposure_meter" enum="CameraAttributes.AutoExposureMeter" default="0">
 			How the scene luminance is metered for auto-exposure. See [enum AutoExposureMeter].

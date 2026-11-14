@@ -78,6 +78,7 @@ private:
 		TONEMAP_FLAG_CONVERT_TO_SRGB = (1 << 6),
 		TONEMAP_FLAG_USE_NIGHT_VISION = (1 << 7),
 		TONEMAP_FLAG_AGX_LATE_SHOULDER = (1 << 8),
+		TONEMAP_FLAG_USE_LOCAL_EXPOSURE = (1 << 9),
 		TONEMAP_FLAG_HIGHLIGHT_RANGE_SHIFT = 16,
 	};
 
@@ -161,11 +162,25 @@ private:
 	 * better to do using the raster pipeline rather than
 	 * compute, as that framebuffer might be in different formats
 	 */
+	struct LocalExposureUniforms {
+		float strength;
+		float shadow_slope;
+		float highlight_slope;
+		float max_lift;
+		float max_drop;
+		float pivot_log;
+		float wide_blend;
+		float edge_range;
+		uint32_t method;
+		uint32_t pad[3];
+	};
+
 	struct Tonemap {
 		TonemapPushConstant push_constant;
 		TonemapShaderRD shader;
 		RID shader_version;
 		PipelineCacheRD pipelines[TONEMAP_MODE_MAX];
+		RID local_exposure_uniforms;
 	} tonemap;
 
 	struct TonemapMobile {
@@ -227,6 +242,14 @@ public:
 
 		RendererEnvironmentStorage::NightVision night_vision;
 		float night_vision_exposure_normalization = 1.0;
+
+		bool use_local_exposure = false;
+		RendererEnvironmentStorage::LocalExposure local_exposure;
+		RID local_exposure_grid;
+		RID local_exposure_wide;
+		uint32_t local_exposure_method = 0;
+		float local_exposure_wide_blend = 0.0;
+		float local_exposure_edge_range = 1.0;
 	};
 
 	void tonemapper(RID p_source_color, RID p_dst_framebuffer, const TonemapSettings &p_settings);

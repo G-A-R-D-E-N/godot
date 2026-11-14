@@ -1038,6 +1038,73 @@ void Environment::_update_night_vision() {
 	RS::get_singleton()->environment_set_night_vision(environment, night_vision_enabled, night_vision_mesopic_min, night_vision_mesopic_max, night_vision_blue_shift, night_vision_blue_shift_chromaticity, night_vision_desaturation, night_vision_acuity_radius, night_vision_highlight_range);
 }
 
+void Environment::set_local_exposure_enabled(bool p_enabled) {
+	local_exposure_enabled = p_enabled;
+	_update_local_exposure();
+}
+
+bool Environment::is_local_exposure_enabled() const {
+	return local_exposure_enabled;
+}
+
+void Environment::set_local_exposure_strength(float p_strength) {
+	local_exposure_strength = p_strength;
+	_update_local_exposure();
+}
+
+float Environment::get_local_exposure_strength() const {
+	return local_exposure_strength;
+}
+
+void Environment::set_local_exposure_shadow_contrast(float p_contrast) {
+	local_exposure_shadow_contrast = p_contrast;
+	_update_local_exposure();
+}
+
+float Environment::get_local_exposure_shadow_contrast() const {
+	return local_exposure_shadow_contrast;
+}
+
+void Environment::set_local_exposure_highlight_contrast(float p_contrast) {
+	local_exposure_highlight_contrast = p_contrast;
+	_update_local_exposure();
+}
+
+float Environment::get_local_exposure_highlight_contrast() const {
+	return local_exposure_highlight_contrast;
+}
+
+void Environment::set_local_exposure_max_shadow_lift(float p_stops) {
+	local_exposure_max_shadow_lift = p_stops;
+	_update_local_exposure();
+}
+
+float Environment::get_local_exposure_max_shadow_lift() const {
+	return local_exposure_max_shadow_lift;
+}
+
+void Environment::set_local_exposure_max_highlight_drop(float p_stops) {
+	local_exposure_max_highlight_drop = p_stops;
+	_update_local_exposure();
+}
+
+float Environment::get_local_exposure_max_highlight_drop() const {
+	return local_exposure_max_highlight_drop;
+}
+
+void Environment::set_local_exposure_pivot(float p_pivot) {
+	local_exposure_pivot = p_pivot;
+	_update_local_exposure();
+}
+
+float Environment::get_local_exposure_pivot() const {
+	return local_exposure_pivot;
+}
+
+void Environment::_update_local_exposure() {
+	RS::get_singleton()->environment_set_local_exposure(environment, local_exposure_enabled, local_exposure_strength, local_exposure_shadow_contrast, local_exposure_highlight_contrast, local_exposure_max_shadow_lift, local_exposure_max_highlight_drop, local_exposure_pivot);
+}
+
 // Volumetric Fog
 
 void Environment::_update_volumetric_fog() {
@@ -1755,6 +1822,21 @@ void Environment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_night_vision_highlight_range", "range"), &Environment::set_night_vision_highlight_range);
 	ClassDB::bind_method(D_METHOD("get_night_vision_highlight_range"), &Environment::get_night_vision_highlight_range);
 
+	ClassDB::bind_method(D_METHOD("set_local_exposure_enabled", "enabled"), &Environment::set_local_exposure_enabled);
+	ClassDB::bind_method(D_METHOD("is_local_exposure_enabled"), &Environment::is_local_exposure_enabled);
+	ClassDB::bind_method(D_METHOD("set_local_exposure_strength", "strength"), &Environment::set_local_exposure_strength);
+	ClassDB::bind_method(D_METHOD("get_local_exposure_strength"), &Environment::get_local_exposure_strength);
+	ClassDB::bind_method(D_METHOD("set_local_exposure_shadow_contrast", "contrast"), &Environment::set_local_exposure_shadow_contrast);
+	ClassDB::bind_method(D_METHOD("get_local_exposure_shadow_contrast"), &Environment::get_local_exposure_shadow_contrast);
+	ClassDB::bind_method(D_METHOD("set_local_exposure_highlight_contrast", "contrast"), &Environment::set_local_exposure_highlight_contrast);
+	ClassDB::bind_method(D_METHOD("get_local_exposure_highlight_contrast"), &Environment::get_local_exposure_highlight_contrast);
+	ClassDB::bind_method(D_METHOD("set_local_exposure_max_shadow_lift", "stops"), &Environment::set_local_exposure_max_shadow_lift);
+	ClassDB::bind_method(D_METHOD("get_local_exposure_max_shadow_lift"), &Environment::get_local_exposure_max_shadow_lift);
+	ClassDB::bind_method(D_METHOD("set_local_exposure_max_highlight_drop", "stops"), &Environment::set_local_exposure_max_highlight_drop);
+	ClassDB::bind_method(D_METHOD("get_local_exposure_max_highlight_drop"), &Environment::get_local_exposure_max_highlight_drop);
+	ClassDB::bind_method(D_METHOD("set_local_exposure_pivot", "pivot"), &Environment::set_local_exposure_pivot);
+	ClassDB::bind_method(D_METHOD("get_local_exposure_pivot"), &Environment::get_local_exposure_pivot);
+
 	ADD_GROUP("Night Vision", "night_vision_");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "night_vision_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_night_vision_enabled", "is_night_vision_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "night_vision_mesopic_min", PROPERTY_HINT_RANGE, "0.00001,1,0.00001,or_greater,exp,suffix:nt"), "set_night_vision_mesopic_min", "get_night_vision_mesopic_min");
@@ -1764,6 +1846,15 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "night_vision_desaturation", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_night_vision_desaturation", "get_night_vision_desaturation");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "night_vision_acuity_radius", PROPERTY_HINT_RANGE, "0,8,0.01,or_greater,suffix:px"), "set_night_vision_acuity_radius", "get_night_vision_acuity_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "night_vision_highlight_range", PROPERTY_HINT_RANGE, "0,16,0.01,or_greater"), "set_night_vision_highlight_range", "get_night_vision_highlight_range");
+
+	ADD_GROUP("Local Exposure", "local_exposure_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "local_exposure_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_local_exposure_enabled", "is_local_exposure_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "local_exposure_strength", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_local_exposure_strength", "get_local_exposure_strength");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "local_exposure_shadow_contrast", PROPERTY_HINT_RANGE, "0.25,1,0.01"), "set_local_exposure_shadow_contrast", "get_local_exposure_shadow_contrast");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "local_exposure_highlight_contrast", PROPERTY_HINT_RANGE, "0.25,1,0.01"), "set_local_exposure_highlight_contrast", "get_local_exposure_highlight_contrast");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "local_exposure_max_shadow_lift", PROPERTY_HINT_RANGE, "0,6,0.01"), "set_local_exposure_max_shadow_lift", "get_local_exposure_max_shadow_lift");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "local_exposure_max_highlight_drop", PROPERTY_HINT_RANGE, "0,6,0.01"), "set_local_exposure_max_highlight_drop", "get_local_exposure_max_highlight_drop");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "local_exposure_pivot", PROPERTY_HINT_RANGE, "-4,4,0.01"), "set_local_exposure_pivot", "get_local_exposure_pivot");
 
 	// Constants
 

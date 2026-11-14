@@ -72,6 +72,16 @@
 				Sets partial auto-exposure adaptation. Below [param pivot_luminance], in the same luminance unit as the min and max passed to [method camera_attributes_set_auto_exposure], a metered luminance [code]L[/code] becomes [code]pivot_luminance * (L / pivot_luminance)^adaptation[/code] before the clamp. [param adaptation] [code]1.0[/code] or a pivot of [code]0.0[/code] leaves the meter unchanged. This has the same meaning as [member CameraAttributes.auto_exposure_adaptation].
 			</description>
 		</method>
+		<method name="camera_attributes_set_auto_exposure_highlight">
+			<return type="void" />
+			<param index="0" name="camera_attributes" type="RID" />
+			<param index="1" name="percentile" type="float" />
+			<param index="2" name="ceiling" type="float" />
+			<param index="3" name="max_shift" type="float" />
+			<description>
+				Sets the highlight rule of the log histogram meter. See [member CameraAttributes.auto_exposure_highlight_percentile].
+			</description>
+		</method>
 		<method name="camera_attributes_set_auto_exposure_highlight_limit">
 			<return type="void" />
 			<param index="0" name="camera_attributes" type="RID" />
@@ -89,6 +99,16 @@
 			<param index="4" name="center_weight" type="float" />
 			<description>
 				Sets the auto-exposure meter and, for [constant AUTO_EXPOSURE_METER_LOG_HISTOGRAM], the fractions of the darkest and brightest metering weight to ignore (each [code]0.0[/code] to [code]0.45[/code]) and the weight toward the lower middle of the frame ([code]0.0[/code] to [code]1.0[/code]). These have the same meaning as [member CameraAttributes.auto_exposure_meter], [member CameraAttributes.auto_exposure_histogram_clip_low], [member CameraAttributes.auto_exposure_histogram_clip_high] and [member CameraAttributes.auto_exposure_center_weight].
+			</description>
+		</method>
+		<method name="camera_attributes_set_auto_exposure_response">
+			<return type="void" />
+			<param index="0" name="camera_attributes" type="RID" />
+			<param index="1" name="exponential" type="bool" />
+			<param index="2" name="light_adaptation_time" type="float" />
+			<param index="3" name="dark_adaptation_time" type="float" />
+			<description>
+				Sets how auto exposure moves toward its target. See [member CameraAttributes.auto_exposure_exponential_response].
 			</description>
 		</method>
 		<method name="camera_attributes_set_dof_blur">
@@ -1454,6 +1474,20 @@
 			<param index="12" name="glow_map" type="RID" />
 			<description>
 				Configures glow for the specified environment RID. See [code]glow_*[/code] properties in [Environment] for more information.
+			</description>
+		</method>
+		<method name="environment_set_local_exposure">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="strength" type="float" />
+			<param index="3" name="shadow_contrast" type="float" />
+			<param index="4" name="highlight_contrast" type="float" />
+			<param index="5" name="max_shadow_lift" type="float" />
+			<param index="6" name="max_highlight_drop" type="float" />
+			<param index="7" name="pivot" type="float" />
+			<description>
+				Configures per-region exposure adaptation of the tonemapper for the specified environment RID. See [code]local_exposure_*[/code] properties in [Environment] for more information.
 			</description>
 		</method>
 		<method name="environment_set_night_vision">

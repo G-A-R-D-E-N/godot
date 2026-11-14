@@ -522,6 +522,25 @@ RendererEnvironmentStorage::NightVision RendererEnvironmentStorage::environment_
 	return env->night_vision;
 }
 
+void RendererEnvironmentStorage::environment_set_local_exposure(RID p_env, bool p_enable, float p_strength, float p_shadow_contrast, float p_highlight_contrast, float p_max_shadow_lift, float p_max_highlight_drop, float p_pivot) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	LocalExposure &local = env->local_exposure;
+	local.enabled = p_enable;
+	local.strength = CLAMP(p_strength, 0.0f, 1.0f);
+	local.shadow_contrast = CLAMP(p_shadow_contrast, 0.25f, 1.0f);
+	local.highlight_contrast = CLAMP(p_highlight_contrast, 0.25f, 1.0f);
+	local.max_shadow_lift = CLAMP(p_max_shadow_lift, 0.0f, 6.0f);
+	local.max_highlight_drop = CLAMP(p_max_highlight_drop, 0.0f, 6.0f);
+	local.pivot = CLAMP(p_pivot, -4.0f, 4.0f);
+}
+
+RendererEnvironmentStorage::LocalExposure RendererEnvironmentStorage::environment_get_local_exposure(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, LocalExposure());
+	return env->local_exposure;
+}
+
 float RendererEnvironmentStorage::environment_get_fog_depth_begin(RID p_env) const {
 	Environment *env = environment_owner.get_or_null(p_env);
 	ERR_FAIL_NULL_V(env, 0.0);

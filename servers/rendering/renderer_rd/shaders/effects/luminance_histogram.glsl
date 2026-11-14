@@ -40,6 +40,13 @@ layout(push_constant, std430) uniform Params {
 	uint set_immediate;
 	float adaptation;
 	float adaptation_pivot;
+	float highlight_percentile;
+	float highlight_ceiling;
+	float highlight_max_shift;
+	float light_adjust;
+	float dark_adjust;
+	uint exponential;
+	uint pad[2];
 }
 params;
 
@@ -50,6 +57,7 @@ shared uint local_bins[BINS];
 #ifdef RESOLVE
 shared float local_sum[BINS];
 shared float local_kept[BINS];
+shared float local_high[BINS];
 #endif
 
 void main() {
@@ -117,6 +125,14 @@ void main() {
 	float part = max(min(above, hi) - max(below, lo), 0.0);
 	local_sum[t] = part * (MIN_LOG2 + (float(t) + 0.5) * BIN_WIDTH);
 	local_kept[t] = part;
+	float high = -1.0;
+	if (params.highlight_percentile > 0.0 && count > 0u) {
+		float mark = clamp(params.highlight_percentile, 0.0, 1.0) * float(total);
+		if (above >= mark && below < mark) {
+			high = float(t) + (mark - below) / float(count);
+		}
+	}
+	local_high[t] = high;
 	groupMemoryBarrier();
 	barrier();
 
@@ -124,6 +140,7 @@ void main() {
 		if (t < size) {
 			local_sum[t] += local_sum[t + size];
 			local_kept[t] += local_kept[t + size];
+			local_high[t] = max(local_high[t], local_high[t + size]);
 		}
 		groupMemoryBarrier();
 		barrier();
@@ -133,9 +150,17 @@ void main() {
 		float prev = texelFetch(prev_luminance, ivec2(0, 0), 0).r;
 		float result = clamp(prev > 0.0 ? prev : params.min_luminance, params.min_luminance, params.max_luminance);
 		if (local_kept[0] > 0.0) {
-			float target = luminance_adapt(exp2(local_sum[0] / local_kept[0]), params.adaptation, params.adaptation_pivot);
+			float log_target = local_sum[0] / local_kept[0];
+			if (local_high[0] >= 0.0) {
+				float log_high = MIN_LOG2 + local_high[0] * BIN_WIDTH;
+				log_target = clamp(log_high - params.highlight_ceiling, log_target, log_target + params.highlight_max_shift);
+			}
+			float target = luminance_adapt(exp2(log_target), params.adaptation, params.adaptation_pivot);
 			if (params.set_immediate != 0u || !(prev > 0.0)) {
 				result = clamp(target, params.min_luminance, params.max_luminance);
+			} else if (params.exponential != 0u) {
+				float rate = target > prev ? params.light_adjust : params.dark_adjust;
+				result = clamp(prev * exp2(log2(target / prev) * rate), params.min_luminance, params.max_luminance);
 			} else {
 				result = clamp(prev + (target - prev) * params.exposure_adjust, params.min_luminance, params.max_luminance);
 			}

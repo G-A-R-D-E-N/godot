@@ -215,6 +215,27 @@
 			The strength that is used when blurring across the screen to generate the glow effect. This affects the distance and intensity of the blur. When using the Mobile rendering method, this should be increased to compensate for the lower dynamic range.
 			[b]Note:[/b] [member glow_strength] has no effect when using the Compatibility rendering method, due to this rendering method using a simpler glow implementation optimized for low-end devices.
 		</member>
+		<member name="local_exposure_enabled" type="bool" setter="set_local_exposure_enabled" getter="is_local_exposure_enabled" default="false">
+			If [code]true[/code], the tonemapper adapts exposure per region. A low-resolution, edge-aware base of the scene's log luminance is compared with middle gray, and each pixel is brightened or darkened by a bounded number of stops that depends only on that base, so local detail and hue are kept. With [code]false[/code] the image is exactly the globally exposed one.
+		</member>
+		<member name="local_exposure_highlight_contrast" type="float" setter="set_local_exposure_highlight_contrast" getter="get_local_exposure_highlight_contrast" default="0.8">
+			Contrast kept in regions brighter than the pivot. [code]1.0[/code] leaves them alone; lower values pull bright regions toward the pivot.
+		</member>
+		<member name="local_exposure_max_highlight_drop" type="float" setter="set_local_exposure_max_highlight_drop" getter="get_local_exposure_max_highlight_drop" default="1.5">
+			The most a bright region is darkened, in stops.
+		</member>
+		<member name="local_exposure_max_shadow_lift" type="float" setter="set_local_exposure_max_shadow_lift" getter="get_local_exposure_max_shadow_lift" default="2.0">
+			The most a dark region is brightened, in stops.
+		</member>
+		<member name="local_exposure_pivot" type="float" setter="set_local_exposure_pivot" getter="get_local_exposure_pivot" default="0.0">
+			Offset of the pivot from middle gray ([code]0.18[/code] after exposure), in stops.
+		</member>
+		<member name="local_exposure_shadow_contrast" type="float" setter="set_local_exposure_shadow_contrast" getter="get_local_exposure_shadow_contrast" default="0.7">
+			Contrast kept in regions darker than the pivot. [code]1.0[/code] leaves them alone; lower values lift dark regions toward the pivot.
+		</member>
+		<member name="local_exposure_strength" type="float" setter="set_local_exposure_strength" getter="get_local_exposure_strength" default="1.0">
+			Blend between the globally exposed image ([code]0.0[/code]) and the full local adjustment ([code]1.0[/code]).
+		</member>
 		<member name="night_vision_acuity_radius" type="float" setter="set_night_vision_acuity_radius" getter="get_night_vision_acuity_radius" default="1.0">
 			The radius, in pixels of the internal render resolution, of the blur applied to the rod (scotopic) image of fully scotopic pixels. It shrinks linearly to [code]0.0[/code] as a pixel becomes photopic, so dim regions lose fine detail while bright ones stay sharp. [code]0.0[/code] disables the blur and its four extra texture samples.
 			[b]Note:[/b] The blur is not applied when the Mobile rendering method tonemaps in a subpass.

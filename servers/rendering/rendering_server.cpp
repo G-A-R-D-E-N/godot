@@ -3132,6 +3132,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("environment_set_fog_depth", "env", "curve", "begin", "end"), &RenderingServer::environment_set_fog_depth);
 	ClassDB::bind_method(D_METHOD("environment_set_aerial_perspective", "env", "enable", "texture", "max_distance"), &RenderingServer::environment_set_aerial_perspective);
 	ClassDB::bind_method(D_METHOD("environment_set_night_vision", "env", "enable", "mesopic_min", "mesopic_max", "blue_shift", "blue_shift_chromaticity", "desaturation", "acuity_radius", "highlight_range"), &RenderingServer::environment_set_night_vision);
+	ClassDB::bind_method(D_METHOD("environment_set_local_exposure", "env", "enable", "strength", "shadow_contrast", "highlight_contrast", "max_shadow_lift", "max_highlight_drop", "pivot"), &RenderingServer::environment_set_local_exposure);
 	ClassDB::bind_method(D_METHOD("environment_set_sdfgi", "env", "enable", "cascades", "min_cell_size", "y_scale", "use_occlusion", "bounce_feedback", "read_sky", "energy", "normal_bias", "probe_bias"), &RenderingServer::environment_set_sdfgi);
 	ClassDB::bind_method(D_METHOD("environment_set_volumetric_fog", "env", "enable", "density", "albedo", "emission", "emission_energy", "anisotropy", "length", "detail_spread", "gi_inject", "temporal_reprojection", "temporal_reprojection_amount", "ambient_inject", "sky_affect"), &RenderingServer::environment_set_volumetric_fog);
 
@@ -3247,6 +3248,8 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_auto_exposure_highlight_limit", "camera_attributes", "limit"), &RenderingServer::camera_attributes_set_auto_exposure_highlight_limit);
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_auto_exposure_adaptation", "camera_attributes", "adaptation", "pivot_luminance"), &RenderingServer::camera_attributes_set_auto_exposure_adaptation);
 	ClassDB::bind_method(D_METHOD("camera_attributes_set_auto_exposure_meter", "camera_attributes", "meter", "clip_low", "clip_high", "center_weight"), &RenderingServer::camera_attributes_set_auto_exposure_meter);
+	ClassDB::bind_method(D_METHOD("camera_attributes_set_auto_exposure_response", "camera_attributes", "exponential", "light_adaptation_time", "dark_adaptation_time"), &RenderingServer::camera_attributes_set_auto_exposure_response);
+	ClassDB::bind_method(D_METHOD("camera_attributes_set_auto_exposure_highlight", "camera_attributes", "percentile", "ceiling", "max_shift"), &RenderingServer::camera_attributes_set_auto_exposure_highlight);
 
 	BIND_ENUM_CONSTANT(RSE::DOF_BOKEH_BOX);
 	BIND_ENUM_CONSTANT(RSE::DOF_BOKEH_HEXAGON);

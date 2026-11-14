@@ -117,6 +117,13 @@ private:
 		uint32_t set_immediate;
 		float adaptation;
 		float adaptation_pivot;
+		float highlight_percentile;
+		float highlight_ceiling;
+		float highlight_max_shift;
+		float light_adjust;
+		float dark_adjust;
+		uint32_t exponential;
+		uint32_t pad[2];
 	};
 
 	struct LuminanceHistogram {
@@ -126,6 +133,15 @@ private:
 	} luminance_histogram;
 
 public:
+	struct HistogramPolicy {
+		float highlight_percentile = 0.0;
+		float highlight_ceiling = 2.5;
+		float highlight_max_shift = 4.0;
+		bool exponential = false;
+		float light_adjust = 1.0;
+		float dark_adjust = 1.0;
+	};
+
 	class LuminanceBuffers : public RenderBufferCustomDataRD {
 		GDCLASS(LuminanceBuffers, RenderBufferCustomDataRD);
 
@@ -150,7 +166,7 @@ public:
 	Ref<LuminanceBuffers> get_luminance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers);
 	RID get_current_luminance_buffer(Ref<RenderSceneBuffersRD> p_render_buffers);
 	void luminance_reduction(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set = false, float p_highlight_limit = 0.0, float p_adaptation = 1.0, float p_adaptation_pivot = 0.0);
-	void luminance_histogram_meter(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set, float p_clip_low, float p_clip_high, float p_center_weight, float p_adaptation = 1.0, float p_adaptation_pivot = 0.0);
+	void luminance_histogram_meter(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set, float p_clip_low, float p_clip_high, float p_center_weight, float p_adaptation = 1.0, float p_adaptation_pivot = 0.0, const HistogramPolicy &p_policy = HistogramPolicy());
 	static int histogram_stride(const Size2i p_size);
 	bool supports_histogram_meter() const { return !prefer_raster_effects; }
 

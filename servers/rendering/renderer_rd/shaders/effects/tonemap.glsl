@@ -55,6 +55,24 @@ layout(set = 3, binding = 0) uniform sampler2D source_color_correction;
 layout(set = 3, binding = 0) uniform sampler3D source_color_correction;
 #endif
 
+layout(set = 4, binding = 0) uniform sampler3D source_local_grid;
+layout(set = 4, binding = 1) uniform sampler2D source_local_wide;
+layout(set = 4, binding = 2, std140) uniform LocalExposure {
+	float strength;
+	float shadow_slope;
+	float highlight_slope;
+	float max_lift;
+	float max_drop;
+	float pivot_log;
+	float wide_blend;
+	float edge_range;
+	uint method;
+	uint pad0;
+	uint pad1;
+	uint pad2;
+}
+local_exposure;
+
 #define FLAG_USE_BCS (1 << 0)
 #define FLAG_USE_GLOW (1 << 1)
 #define FLAG_USE_AUTO_EXPOSURE (1 << 2)
@@ -64,6 +82,12 @@ layout(set = 3, binding = 0) uniform sampler3D source_color_correction;
 #define FLAG_CONVERT_TO_SRGB (1 << 6)
 #define FLAG_USE_NIGHT_VISION (1 << 7)
 #define FLAG_AGX_LATE_SHOULDER (1 << 8)
+#define FLAG_USE_LOCAL_EXPOSURE (1 << 9)
+
+#define LOCAL_LOG_MIN -20.0
+#define LOCAL_LOG_MAX 16.0
+#define LOCAL_LUMINANCE_FLOOR 9.5367431640625e-07
+#define LOCAL_LUMINANCE_CEILING 65504.0
 
 layout(push_constant, std430) uniform Params {
 	vec3 bcs;
@@ -925,6 +949,32 @@ vec3 screen_space_dither(vec2 frag_coord, float bit_alignment_diviser) {
 	return (dither.rgb - 0.5) / bit_alignment_diviser;
 }
 
+float local_exposure_gain(vec3 p_exposed, vec2 p_uv, float p_exposure) {
+	float scale = max(p_exposure, 1e-20);
+	float luminance = dot(p_exposed, vec3(0.2126, 0.7152, 0.0722)) / scale;
+	float own = log2(luminance > LOCAL_LUMINANCE_FLOOR ? min(luminance, LOCAL_LUMINANCE_CEILING) : LOCAL_LUMINANCE_FLOOR);
+	float wide = textureLod(source_local_wide, p_uv, 0.0).r;
+	float base;
+	if (local_exposure.method == 0u) {
+		vec2 cell = textureLod(source_local_grid, vec3(p_uv, (own - LOCAL_LOG_MIN) / (LOCAL_LOG_MAX - LOCAL_LOG_MIN)), 0.0).rg;
+		base = cell.g > 1e-4 ? cell.r / cell.g : own;
+		base = mix(base, wide, local_exposure.wide_blend);
+	} else {
+		float edge = smoothstep(local_exposure.edge_range, 2.0 * local_exposure.edge_range, abs(own - wide));
+		base = mix(wide, own, edge);
+	}
+	float stops = base + log2(scale) - local_exposure.pivot_log;
+	float shift = 0.0;
+	if (stops < 0.0) {
+		if (local_exposure.max_lift > 0.0) {
+			shift = local_exposure.max_lift * tanh(local_exposure.shadow_slope * stops / local_exposure.max_lift);
+		}
+	} else if (local_exposure.max_drop > 0.0) {
+		shift = local_exposure.max_drop * tanh(local_exposure.highlight_slope * stops / local_exposure.max_drop);
+	}
+	return exp2(local_exposure.strength * shift);
+}
+
 void main() {
 #ifdef USE_MULTIVIEW
 	vec4 color = textureLod(source_color, vec3(uv_interp, ViewIndex), 0.0f);
@@ -942,6 +992,11 @@ void main() {
 	}
 
 	color.rgb *= exposure;
+
+	float local_gain = 1.0;
+	if (bool(params.flags & FLAG_USE_LOCAL_EXPOSURE)) {
+		local_gain = local_exposure_gain(color.rgb, uv_interp, exposure);
+	}
 
 	// Single-pass FXAA and pre-tonemap glow.
 	if (bool(params.flags & FLAG_USE_FXAA)) {
@@ -964,7 +1019,12 @@ void main() {
 
 	if (bool(params.flags & FLAG_USE_NIGHT_VISION)) {
 		color.rgb = apply_night_vision(color.rgb, exposure);
+		if (bool(params.flags & FLAG_USE_LOCAL_EXPOSURE)) {
+			color.rgb *= local_gain;
+		}
 		color.rgb = apply_night_highlights(color.rgb, unpackHalf2x16(params.flags >> 16).x);
+	} else if (bool(params.flags & FLAG_USE_LOCAL_EXPOSURE)) {
+		color.rgb *= local_gain;
 	}
 
 	// Tonemap to lower dynamic range.
