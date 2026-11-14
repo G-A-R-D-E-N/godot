@@ -86,6 +86,9 @@ struct RestirFrameUBO {
 	float shade_exposure;
 	float reval_threshold;
 	uint32_t shade_pad[2];
+	int32_t screen_size[2];
+	int32_t trace_scale;
+	uint32_t replay_pad;
 };
 
 struct RestirDirtyUBO {
@@ -94,7 +97,10 @@ struct RestirDirtyUBO {
 };
 
 static_assert(sizeof(RestirDirtyUBO) == 2048, "RestirDirtyUBO must match the std140 block in restir_gi_inc.glsl");
-static_assert(sizeof(RestirFrameUBO) == 384, "RestirFrameUBO must match the std140 block in restir_gi_inc.glsl");
+static_assert(sizeof(RestirFrameUBO) == 400, "RestirFrameUBO must match the std140 block in restir_gi_inc.glsl");
+
+static constexpr uint32_t PASS_STATS_ROWS = 4;
+static constexpr uint32_t PASS_STATS_STRIDE = 32;
 
 static RID _create_texture(RD::DataFormat p_format, const Size2i &p_size, RD::TextureType p_type, uint32_t p_layers, uint32_t p_extra_usage = 0) {
 	RD::TextureFormat format;
@@ -145,7 +151,7 @@ bool RestirGiResources::allocate(const Size2i &p_size, bool p_debug) {
 		return rid;
 	};
 	stats = buffer("stats", group_count * 16 * sizeof(float));
-	pass_stats = buffer("pass_stats", group_count * 3 * 16 * sizeof(float));
+	pass_stats = buffer("pass_stats", group_count * PASS_STATS_ROWS * PASS_STATS_STRIDE * sizeof(float));
 	{
 		const uint64_t before = rd->get_memory_usage(RD::MEMORY_TEXTURES);
 		sel_dummy = _create_texture(RD::DATA_FORMAT_R32G32_UINT, Size2i(1, 1), RD::TEXTURE_TYPE_2D_ARRAY, 2);
@@ -350,6 +356,9 @@ void RestirGiCore::_upload(RID p_ubo, const RestirFrameParams &p, uint32_t p_pas
 	u.spatial_count = p.spatial_count;
 	u.spatial_radius = p.spatial_radius;
 	u.pass_index = p_pass_index;
+	u.screen_size[0] = p.screen_size.x;
+	u.screen_size[1] = p.screen_size.y;
+	u.trace_scale = MAX(1, p.trace_scale);
 	u.m_temporal_cap = p.m_temporal_cap;
 	u.m_max = p.m_max;
 	u.n_target = p.n_target;
@@ -524,7 +533,7 @@ void RestirGiCore::run_frame(RestirGiResources &r_resources, const RestirFramePa
 		r_resources.sel_image = _create_texture(RD::DATA_FORMAT_R32G32_UINT, r_resources.size, RD::TEXTURE_TYPE_2D_ARRAY, 2);
 	}
 	const uint32_t hist = r_resources.history_index;
-	RD::get_singleton()->buffer_clear(r_resources.pass_stats, 0, r_resources.group_count * 3 * 16 * sizeof(float));
+	RD::get_singleton()->buffer_clear(r_resources.pass_stats, 0, r_resources.group_count * PASS_STATS_ROWS * PASS_STATS_STRIDE * sizeof(float));
 
 	_upload(r_resources.ubo[0], params, 0);
 	{
@@ -545,6 +554,7 @@ void RestirGiCore::run_frame(RestirGiResources &r_resources, const RestirFramePa
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 4, p_inputs.previous_geo_normal));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 6, p_inputs.candidate_second));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 8, r_resources.reservoir[hist]));
+		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 23, r_resources.pass_stats));
 		_dispatch(variant, PASS_VALIDATE, r_resources.ubo[0], set0, p_inputs, r_resources.size);
 	}
 	{
@@ -649,12 +659,12 @@ RestirFrameStats RestirGiCore::read_stats(const RestirGiResources &p_resources) 
 			stats.has_sample += v[15];
 		}
 	}
-	const size_t pass_bytes = p_resources.group_count * 3 * 16 * sizeof(float);
+	const size_t pass_bytes = p_resources.group_count * PASS_STATS_ROWS * PASS_STATS_STRIDE * sizeof(float);
 	const Vector<uint8_t> pass_raw = rd->buffer_get_data(p_resources.pass_stats, 0, pass_bytes);
 	if (size_t(pass_raw.size()) >= pass_bytes) {
 		const float *pv = reinterpret_cast<const float *>(pass_raw.ptr());
 		for (uint32_t i = 0; i < p_resources.group_count * 3; i++) {
-			const float *v = pv + i * 16;
+			const float *v = pv + i * PASS_STATS_STRIDE;
 			stats.shift_tested += v[0];
 			stats.rej_distance += v[1];
 			stats.rej_cos += v[2];
@@ -675,6 +685,11 @@ RestirFrameStats RestirGiCore::read_stats(const RestirGiResources &p_resources) 
 				stats.temporal_shift_tested += v[0];
 				stats.temporal_shift_rejected += v[1] + v[2] + v[3];
 			}
+		}
+		for (uint32_t i = p_resources.group_count * 3; i < p_resources.group_count * PASS_STATS_ROWS; i++) {
+			const float *v = pv + i * PASS_STATS_STRIDE;
+			stats.rehit_miss += v[16];
+			stats.rehit_mismatch += v[17];
 		}
 	}
 	const Vector<uint8_t> info = rd->texture_get_data(p_resources.info, 0);

@@ -28,6 +28,7 @@
 #define F_KEEP_BLOCKED 262144u
 #define F_REVAL_FRAME 1048576u
 #define F_REVAL_SHARE 2097152u
+#define F_REPLAY 8388608u
 
 #define REJ_NONE 0u
 #define REJ_FRAME 1u
@@ -63,7 +64,7 @@
 #define RS_PI 3.14159265359
 #define RS_LO_CLAMP 60000.0
 #define STATS_STRIDE 16
-#define PS_STRIDE 16
+#define PS_STRIDE 32
 #define PS_TESTED 0
 #define PS_REJ_DIST 1
 #define PS_REJ_COS 2
@@ -80,6 +81,9 @@
 #define PS_COMPAT_STOPS 13
 #define PS_COMPAT_EMPTY 14
 #define PS_COMPAT_HSUM 15
+#define PS_REHIT_MISS 16
+#define PS_REHIT_MISMATCH 17
+#define PS_ROW_VALIDATE 3u
 #define KIND_NONE 0u
 #define KIND_DIST 1u
 #define KIND_COS 2u
@@ -146,6 +150,10 @@ layout(set = 0, binding = 0, std140) uniform RestirFrame {
 	float reval_threshold;
 	uint shade_pad1;
 	uint shade_pad2;
+
+	ivec2 screen_size;
+	int trace_scale;
+	uint replay_pad;
 }
 rf;
 
@@ -188,7 +196,7 @@ layout(r32ui, set = 0, binding = 9) uniform restrict uimage2D vis_state;
 layout(r32ui, set = 0, binding = 10) uniform restrict uimage2D info_image;
 #endif
 
-#if defined(MODE_TEMPORAL) || defined(MODE_SPATIAL)
+#if defined(MODE_TEMPORAL) || defined(MODE_SPATIAL) || defined(MODE_VALIDATE)
 layout(set = 0, binding = 23, std430) restrict writeonly buffer PassStatsBuffer {
 	float data[];
 }
@@ -488,6 +496,11 @@ float rs_rand(uvec2 p_pixel, uint p_dimension) {
 	uint frame = (rf.flags & F_DETERMINISTIC) != 0u ? 0u : rf.frame;
 	uint seed = (rf.flags & F_DETERMINISTIC) != 0u ? 0x1234567u : rf.seed;
 	return rtgi_rand1(p_pixel, frame, 64u + p_dimension, rtgi_pcg(seed * 0x9E3779B1u + 0x7F4A7C15u));
+}
+
+float rs_rand_frame(uvec2 p_pixel, uint p_dimension) {
+	uint seed = (rf.flags & F_DETERMINISTIC) != 0u ? 0x1234567u : rf.seed;
+	return rtgi_rand1(p_pixel, rf.frame, 64u + p_dimension, rtgi_pcg(seed * 0x9E3779B1u + 0x7F4A7C15u));
 }
 
 struct Cand {

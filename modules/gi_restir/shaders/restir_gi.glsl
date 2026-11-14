@@ -9,6 +9,9 @@
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 #ifdef RESTIR_RAYS
+#if defined(MODE_FINAL) || defined(MODE_SOURCE) || defined(MODE_VALIDATE)
+#define RAY_SCENE_REPLAY
+#endif
 #define RAY_SCENE_SET 1
 #include "restir_core_ray_scene_inc.glsl"
 #endif
@@ -35,6 +38,25 @@ layout(set = 2, binding = 8) uniform sampler sky_sampler;
 #include "restir_gi_inc.glsl"
 
 #ifdef RESTIR_SHADE
+float rs_shade_max_distance = 0.0;
+float rs_shade_bounce_energy = 0.0;
+float rs_shade_emission_exposure = 0.0;
+#define RAY_SCENE_SHADE_MAX_DISTANCE rs_shade_max_distance
+#define RAY_SCENE_SHADE_BOUNCE_ENERGY rs_shade_bounce_energy
+#define RAY_SCENE_SHADE_EMISSION_EXPOSURE rs_shade_emission_exposure
+#define RAY_SCENE_SHADE_MAX_RADIANCE RS_LO_CLAMP
+#include "restir_core_ray_scene_hit_shade_inc.glsl"
+
+void rs_shade_setup() {
+	ray_scene_replay = (rf.flags & F_REPLAY) != 0u;
+	bool ddgi_shade = (rf.flags & F_OWN_SAMPLER) == 0u && (rf.flags & F_SHADE_DDGI) != 0u;
+	rs_shade_max_distance = ddgi_shade ? ddgi.max_distance : rf.sky_distance;
+	rs_shade_bounce_energy = ddgi_shade ? rf.shade_bounce_energy : 0.0;
+	rs_shade_emission_exposure = ddgi_shade ? rf.shade_exposure : rf.emission_exposure;
+}
+#endif
+
+#ifdef RESTIR_SHADE
 #define RS_SKY_COLOR 1u
 #define RS_SKY_SKY 2u
 #define RS_SKY_SIGN 4u
@@ -59,6 +81,40 @@ vec3 rs_sky_radiance(vec3 p_direction) {
 	}
 	return min(radiance, vec3(RS_LO_CLAMP));
 }
+#endif
+
+#if defined(MODE_TEMPORAL) || defined(MODE_SPATIAL) || defined(MODE_VALIDATE)
+
+void rs_stats_store(uint p_row) {
+	if ((rf.flags & F_PROBE_STATS) == 0u) {
+		return;
+	}
+	uint local = gl_LocalInvocationIndex;
+	for (int k = 0; k < PS_STRIDE; k++) {
+		partial_ps[local * uint(PS_STRIDE) + uint(k)] = g_stats[k];
+	}
+	barrier();
+	if (local == 0u) {
+		uint groups_x = (uint(rf.trace_size.x) + 7u) / 8u;
+		uint groups_y = (uint(rf.trace_size.y) + 7u) / 8u;
+		uint group = gl_WorkGroupID.y * groups_x + gl_WorkGroupID.x;
+		uint base = (p_row * groups_x * groups_y + group) * uint(PS_STRIDE);
+		for (int k = 0; k < PS_STRIDE; k++) {
+			float sum = 0.0;
+			for (uint t = 0u; t < 64u; t++) {
+				sum += partial_ps[t * uint(PS_STRIDE) + uint(k)];
+			}
+			pass_stats.data[base + uint(k)] = sum;
+		}
+	}
+}
+
+void rs_stats_clear() {
+	for (int k = 0; k < PS_STRIDE; k++) {
+		g_stats[k] = 0.0;
+	}
+}
+
 #endif
 
 #if defined(MODE_TEMPORAL) || defined(MODE_SPATIAL)
@@ -198,36 +254,6 @@ bool rs_similar(Receiver p_r, Receiver p_n, out uint r_reason) {
 	return true;
 }
 
-void rs_stats_store() {
-	if ((rf.flags & F_PROBE_STATS) == 0u) {
-		return;
-	}
-	uint local = gl_LocalInvocationIndex;
-	for (int k = 0; k < PS_STRIDE; k++) {
-		partial_ps[local * uint(PS_STRIDE) + uint(k)] = g_stats[k];
-	}
-	barrier();
-	if (local == 0u) {
-		uint groups_x = (uint(rf.trace_size.x) + 7u) / 8u;
-		uint groups_y = (uint(rf.trace_size.y) + 7u) / 8u;
-		uint group = gl_WorkGroupID.y * groups_x + gl_WorkGroupID.x;
-		uint base = (rf.pass_index * groups_x * groups_y + group) * uint(PS_STRIDE);
-		for (int k = 0; k < PS_STRIDE; k++) {
-			float sum = 0.0;
-			for (uint t = 0u; t < 64u; t++) {
-				sum += partial_ps[t * uint(PS_STRIDE) + uint(k)];
-			}
-			pass_stats.data[base + uint(k)] = sum;
-		}
-	}
-}
-
-void rs_stats_clear() {
-	for (int k = 0; k < PS_STRIDE; k++) {
-		g_stats[k] = 0.0;
-	}
-}
-
 Reservoir rs_finish(Reservoir p_result, int p_sel, float p_total_m, Receiver p_r, uint p_source_flag, uint p_age_inc) {
 	Reservoir result = p_result;
 	result.m = uint(min(p_total_m, float(rf.m_max)));
@@ -305,6 +331,13 @@ Reservoir rs_from_candidate(ivec2 p_pixel, Receiver p_r) {
 	res.rnormal = rs_pack_normal(p_r.nrm);
 	res.epoch = rf.epoch_tag;
 	res.tag = second.w;
+#ifdef RESTIR_RAYS
+	if ((rf.flags & (F_REPLAY | F_OWN_SAMPLER)) == F_REPLAY) {
+		ivec2 scale = ivec2(max(rf.trace_scale, 1));
+		ivec2 pixel = min(p_pixel * scale + scale / 2, rf.screen_size - 1);
+		res.tag = ray_scene_hash(uint(pixel.y) * 65537u + uint(pixel.x) + rf.frame * 6271u);
+	}
+#endif
 	return res;
 }
 
@@ -399,7 +432,7 @@ void main() {
 	if (all(lessThan(px, rf.trace_size))) {
 		rs_temporal_pixel(px);
 	}
-	rs_stats_store();
+	rs_stats_store(rf.pass_index);
 }
 
 #endif
@@ -678,7 +711,7 @@ void main() {
 	if (all(lessThan(px, rf.trace_size))) {
 		rs_spatial_pixel(px);
 	}
-	rs_stats_store();
+	rs_stats_store(rf.pass_index);
 }
 
 #endif
@@ -719,6 +752,48 @@ vec3 rs_fresh_lo(vec3 p_origin, vec3 p_dir, float p_dist, uint p_seed, out bool 
 		irradiance += bounce * rf.shade_bounce_energy;
 	}
 	return min(material.emission * rf.shade_exposure + material.albedo * irradiance, vec3(RS_LO_CLAMP));
+}
+
+vec3 rs_fresh_lo_replay(vec3 p_origin, vec3 p_dir, float p_dist, uint p_seed, out bool r_hit_here) {
+	RaySceneHit hit;
+	r_hit_here = false;
+	float eps = 0.02 + 0.002 * p_dist;
+	if (!ray_scene_trace(p_origin, p_dir, p_dist + eps, false, p_seed, hit)) {
+		return vec3(0.0);
+	}
+	if (abs(hit.t - p_dist) > eps) {
+		return vec3(0.0);
+	}
+	r_hit_here = true;
+	rs_shade_setup();
+	return clamp(shade_hit(p_origin, p_dir, hit, p_seed).rgb, vec3(0.0), vec3(RS_LO_CLAMP));
+}
+
+#define RS_REHIT_OK 0u
+#define RS_REHIT_MISS 1u
+#define RS_REHIT_MISMATCH 2u
+
+uint rs_replay_rehit(vec3 p_xs, vec3 p_ns, float p_dist, uint p_seed, out RaySceneHit r_hit) {
+	float eps = 0.02 + 0.002 * p_dist;
+	if (!ray_scene_trace(p_xs + p_ns * eps, -p_ns, 2.0 * eps, false, p_seed, r_hit)) {
+		return RS_REHIT_MISS;
+	}
+	vec3 normal = ray_scene_hit_normal(r_hit);
+	vec3 facing = r_hit.backface ? -normal : normal;
+	if (!(abs(r_hit.t - eps) < 0.5 * eps) || !(dot(facing, p_ns) > 0.99)) {
+		return RS_REHIT_MISMATCH;
+	}
+	return RS_REHIT_OK;
+}
+
+vec4 rs_replay_shade(vec3 p_origin, vec3 p_xs, RaySceneHit p_hit, uint p_seed) {
+	vec3 delta = p_xs - p_origin;
+	float dist = length(delta);
+	RaySceneHit hit = p_hit;
+	hit.t = dist;
+	rs_shade_setup();
+	vec4 shaded = shade_hit(p_origin, delta / dist, hit, p_seed);
+	return vec4(clamp(shaded.rgb, vec3(0.0), vec3(RS_LO_CLAMP)), shaded.a);
 }
 #endif
 
@@ -798,7 +873,12 @@ void main() {
 					vec3 delta = s.xs - origin;
 					float dist = length(delta);
 					bool hit_here;
-					vec3 fresh = rs_fresh_lo(origin, delta / max(dist, 1e-6), dist, uint(px.y) * 65537u + uint(px.x) + rf.frame * 6271u, hit_here);
+					vec3 fresh;
+					if ((rf.flags & F_REPLAY) != 0u) {
+						fresh = rs_fresh_lo_replay(origin, delta / max(dist, 1e-6), dist, s.tag, hit_here);
+					} else {
+						fresh = rs_fresh_lo(origin, delta / max(dist, 1e-6), dist, uint(px.y) * 65537u + uint(px.x) + rf.frame * 6271u, hit_here);
+					}
 					visible = hit_here;
 					if (hit_here) {
 						lo = fresh;
@@ -949,19 +1029,31 @@ void main() {
 	vec3 point;
 	uint normal_packed = 0u;
 	uint flags = 0u;
-	if (ray_scene_trace(origin, direction, rf.sky_distance, false, ray_scene_hash(uint(px.y) * 65537u + uint(px.x) + rf.frame * 6271u + 0x510e527fu), hit)) {
+	uint shade_seed = ray_scene_hash(uint(px.y) * 65537u + uint(px.x) + rf.frame * 6271u);
+	bool replay = (rf.flags & F_REPLAY) != 0u;
+	if (replay) {
+		tag = shade_seed;
+	}
+	if (ray_scene_trace(origin, direction, rf.sky_distance, false, replay ? shade_seed : ray_scene_hash(uint(px.y) * 65537u + uint(px.x) + rf.frame * 6271u + 0x510e527fu), hit)) {
 		RaySceneMaterial material = ray_scene_hit_material(hit);
 		point = origin + direction * hit.t;
 		vec3 normal = ray_scene_hit_normal(hit);
 		normal = hit.backface ? -normal : normal;
 		normal_packed = rtgi_pack_normal(normal);
 		bool two_sided = hit.blend || bool(material.flags & RAY_SCENE_MATERIAL_TWO_SIDED);
-		if (hit.backface && !two_sided) {
+		if (replay) {
+			rs_shade_setup();
+			vec4 shaded = shade_hit(origin, direction, hit, shade_seed);
+			radiance = shaded.rgb;
+			if (shaded.a < 0.0) {
+				flags |= RTGI_FLAG_BACKFACE;
+			}
+		} else if (hit.backface && !two_sided) {
 			radiance = vec3(0.0);
 			flags |= RTGI_FLAG_BACKFACE;
 		} else {
 			float bias = 0.01 + hit.t * 0.001;
-			vec3 irradiance = gi_hit_direct_light(point, normal, bias, rf.sky_distance, ray_scene_hash(uint(px.y) * 65537u + uint(px.x) + rf.frame * 6271u));
+			vec3 irradiance = gi_hit_direct_light(point, normal, bias, rf.sky_distance, shade_seed);
 			radiance = min(material.emission * rf.emission_exposure + material.albedo * irradiance, vec3(RS_LO_CLAMP));
 		}
 		if (dot(material.emission, vec3(1.0)) > 0.0) {
@@ -1032,17 +1124,43 @@ void main() {
 
 #ifdef MODE_VALIDATE
 
-void main() {
-	ivec2 px = ivec2(gl_GlobalInvocationID.xy);
-	if (any(greaterThanEqual(px, rf.trace_size))) {
+#if defined(RESTIR_RAYS) && defined(RESTIR_SHADE)
+void rs_validate_replay(ivec2 px, uvec4 a, uvec4 b, uvec4 c, Receiver q) {
+	uint flags = b.y >> 16u;
+	vec3 xs = uintBitsToFloat(a.xyz);
+	vec3 ns = rtgi_unpack_normal(a.w);
+	float dist = length(xs - q.origin);
+	if (dist < 1e-3) {
 		return;
 	}
+	RaySceneHit hit;
+	uint status = rs_replay_rehit(xs, ns, dist, c.w, hit);
+	vec3 lo = vec3(0.0);
+	if (status == RS_REHIT_OK) {
+		vec4 shaded = rs_replay_shade(q.origin, xs, hit, c.w);
+		lo = rs_finite3(shaded.rgb) ? shaded.rgb : vec3(0.0);
+		flags = shaded.a < 0.0 ? (flags | RF_BACKFACE) : (flags & ~RF_BACKFACE);
+		vec3 normal = ray_scene_hit_normal(hit);
+		a.w = rtgi_pack_normal(hit.backface ? -normal : normal);
+		imageStore(res_io, ivec3(px, 0), a);
+	} else {
+		g_stats[status == RS_REHIT_MISS ? PS_REHIT_MISS : PS_REHIT_MISMATCH] += 1.0;
+	}
+	b.x = packHalf2x16(lo.rg);
+	b.y = (packHalf2x16(vec2(lo.b, 0.0)) & 0xFFFFu) | (flags << 16u);
+	imageStore(res_io, ivec3(px, 1), b);
+}
+#endif
+
+void rs_validate_pixel(ivec2 px) {
 #if defined(RESTIR_RAYS) && defined(RESTIR_SHADE)
 	if ((rf.flags & F_HISTORY) == 0u) {
 		return;
 	}
+	bool replay = (rf.flags & F_REPLAY) != 0u;
 	if ((rf.flags & F_REVAL_SHARE) != 0u) {
-		if (rs_rand(uvec2(px), 40u) * float(max(rf.reval_share_denom, 1u)) >= 1.0) {
+		float pick = replay ? rs_rand_frame(uvec2(px), 40u) : rs_rand(uvec2(px), 40u);
+		if (pick * float(max(rf.reval_share_denom, 1u)) >= 1.0) {
 			return;
 		}
 	} else if ((rtgi_candidate_flags(texelFetch(cand_second, px, 0)) & RTGI_FLAG_NO_CANDIDATE) != 0u) {
@@ -1063,6 +1181,12 @@ void main() {
 	Reservoir h = rs_empty();
 	h.xs = uintBitsToFloat(a.xyz);
 	h.flags = flags;
+	if (replay) {
+		if (!rs_is_sky(h)) {
+			rs_validate_replay(px, a, b, c, q);
+		}
+		return;
+	}
 	vec2 rg = unpackHalf2x16(b.x);
 	vec2 bz = unpackHalf2x16(b.y & 0xFFFFu);
 	vec3 lo_old = vec3(rg.x, rg.y, bz.x);
@@ -1100,6 +1224,15 @@ void main() {
 	}
 	imageStore(res_io, ivec3(px, 1), b);
 #endif
+}
+
+void main() {
+	rs_stats_clear();
+	ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+	if (all(lessThan(px, rf.trace_size))) {
+		rs_validate_pixel(px);
+	}
+	rs_stats_store(PS_ROW_VALIDATE);
 }
 
 #endif

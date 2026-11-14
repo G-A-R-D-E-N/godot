@@ -206,8 +206,8 @@ use it, so an external reference has to use pass_index 1 for the first spatial p
 The first spatial pass of a deterministic frame is a pure function of its inputs, so the synthetic cases in the game probe
 (modes arith, viewcases) compare it with a double-precision CPU reference.
 
-Truncation counters (S4F, F3) and clamp share (F4): the temporal and spatial passes write PS_STRIDE = 16 floats per 8x8
-group per pass into a pass statistics buffer (3 slots: temporal, spatial 1, spatial 2; cleared every frame). Per frame:
+Truncation counters (S4F, F3) and clamp share (F4): the temporal and spatial passes write PS_STRIDE = 32 floats per 8x8
+group per pass into a pass statistics buffer (4 rows: temporal, spatial 1, spatial 2, validate; cleared every frame). Per frame:
 techniques present, techniques kept at weight 0 by a sample-side state, neighbours tested (valid sample reaching the shift
 test), rejected by d_min, by cos_min, by the |J| range, the energy of the tested candidates plus the canonical
 (M * p-hat * W * jac_raw) and the energy of the rejected ones, pdf refusals. jac_raw is the Jacobian without the range test,
@@ -263,3 +263,32 @@ cannot re-read the sky by direction. A MISS_SKY sample therefore keeps its store
   judges converged, the module does not revalidate those tiles, and the history cap that follows the trace rate overstates their rate. The default stays on.
 - Per-view release: R2's RtgiBuffers::free_data calls release(p_buffers) when the render buffers are cleaned up (destructor, configure,
   configure_for_reflections).
+
+## Replay (gi/replay_seed, default off)
+
+- R2 side: wants_replay() returns gi/replay_seed. R2 then sets RTGI_FRAME_FLAG_REPLAY (512) in the trace UBO's flags only. MODE_RTGI
+  defines RAY_SCENE_REPLAY and sets ray_scene_replay from that bit in main, so the hit light pick is the id-keyed race and the pdf word is
+  the folded density p0(w) + p0(m(w)) whenever the mirror path is on and its 0.999 test passes (both terms floored at 1e-4, as the CPU
+  toy's RestirFold.Pdf). With the bit clear the pick and the pdf word are today's.
+- Module side: FINAL, SOURCE and VALIDATE define RAY_SCENE_REPLAY, and rs_shade_setup sets ray_scene_replay from F_REPLAY before
+  every replay shade, so a re-shade takes the same id-keyed race, area-light point and shadow seeds as R2's candidate shade. The
+  non-replay paths never call rs_shade_setup, so the global stays false there and their pick and seeds are today's.
+- Seed at import: s = ray_scene_hash(pixel.y * 65537 + pixel.x + rf.frame * 6271) with pixel = min(trace_pixel * scale + scale / 2,
+  screen_size - 1), R2's expression in MODE_RTGI. rf.frame is R2's frame_index on this line. It goes into the reservoir's tag word. Under
+  gi/own_sampler, SOURCE writes its own shade seed into the candidate's tag and the import keeps it; SOURCE's trace then takes the same
+  seed. RestirFrame grows by one uvec4 (screen_size, trace_scale, a spare word): 400 bytes.
+- Shared shade: the module includes ray_scene_hit_shade_inc.glsl with the four macros bound to globals that rs_shade_setup fills: DDGI
+  max distance, bounce energy and emission exposure when DDGI shading is on and the own sampler off, else rf.sky_distance, no bounce
+  and rf.emission_exposure. Max radiance is RS_LO_CLAMP (60000, the same value as DDGI_MAX_RADIANCE). The old copies (rs_fresh_lo and
+  SOURCE's) stay for replay off, so its output is unchanged.
+- VALIDATE in replay mode: a short re-hit from x_s + n_s * eps along -n_s, length 2 eps, eps = 0.02 + 0.002 * d (d from the previous
+  receiver), with the stored seed. The hit is the stored surface only if |t - eps| < 0.5 eps and its facing normal has dot > 0.99 with
+  n_s. Then it is shaded from the previous receiver with t = |x_s - o_prev| and the stored seed, and the new Lo, the re-hit's facing
+  normal and the backface bit (shade alpha below 0) are written. A miss or a mismatch writes Lo = 0 and keeps M and the flags, counted
+  as rehit_miss or rehit_mismatch (pass stats row 3, slots 16 and 17). A re-shade that is not finite writes Lo = 0 the same way,
+  uncounted. No 10x limit and no change cut. Sky samples are left alone.
+  The share selection draws with rf.frame in deterministic mode too (rs_rand_frame).
+- FINAL with gi/fresh_lo in replay mode traces from the receiver with the sample's stored seed and shades through the shared shade.
+- Pass stats: PS_STRIDE 32 and four rows (TEMPORAL, two SPATIAL, VALIDATE). rs_stats_store takes the row.
+- Set gi/replay_seed before a run. A change mid-run cuts no history: samples imported before it keep R2's pixel and frame tag,
+  which a replay re-shade then reads as a seed, so they re-shade with other draws until the history turns over.

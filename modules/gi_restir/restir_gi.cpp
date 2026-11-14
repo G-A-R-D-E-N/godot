@@ -218,6 +218,10 @@ bool RestirGiBackend::wants_all_tiles() const {
 	return _gi_bool("trace_all_tiles");
 }
 
+bool RestirGiBackend::wants_replay() const {
+	return _gi_bool("replay_seed");
+}
+
 void RestirGiBackend::_free_state(RestirGiState &r_state) {
 	r_state.resources.free_all();
 }
@@ -327,6 +331,8 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 
 	RestirFrameParams params;
 	params.trace_size = p_inputs.trace_size;
+	params.screen_size = p_inputs.screen_size;
+	params.trace_scale = p_inputs.trace_scale;
 	params.frame_index = p_inputs.frame_index;
 	params.seed = uint32_t(int(GLOBAL_GET("rendering/global_illumination/rtgi/seed"))) + options.seed_offset;
 	params.mode = _gi_mode();
@@ -375,6 +381,9 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	}
 	const bool real_sky = shade_valid && (own_sampler ? !options.constant_sky : true);
 	params.flags = (own_sampler ? RESTIR_F_OWN_SAMPLER : 0u) | (real_sky ? RESTIR_F_REAL_SKY : 0u) | (shade_valid ? RESTIR_F_SHADE_DDGI : 0u) | (use_history ? RESTIR_F_HISTORY : 0u) | (fresh_lo ? RESTIR_F_FRESH_LO : 0u) | (_gi_bool("deterministic") ? RESTIR_F_DETERMINISTIC : 0u) | (_gi_bool("visibility_reuse") ? RESTIR_F_VIS_REUSE : 0u) | (_gi_bool("blocked_keeps_coverage") ? RESTIR_F_KEEP_BLOCKED : 0u) | (options.readback ? RESTIR_F_PROBE_STATS : 0u) | (options.pixel_detail ? RESTIR_F_PROBE_PIXELS : 0u);
+	if (_gi_bool("replay_seed")) {
+		params.flags |= RESTIR_F_REPLAY;
+	}
 	const String reval_text = _gi_text("revalidate");
 	const bool reval_budget = reval_text == "budget";
 	const bool reval_share = reval_text == "share";
@@ -658,6 +667,8 @@ void RestirGiBackend::get_status(Dictionary &r_status) const {
 		d["spatial_combines"] = s.spatial_combines;
 		d["lo_refused"] = s.lo_refused;
 		d["no_canonical"] = s.no_canonical;
+		d["rehit_miss"] = s.rehit_miss;
+		d["rehit_mismatch"] = s.rehit_mismatch;
 		d["temporal_shift_tested"] = s.temporal_shift_tested;
 		d["temporal_shift_rejected"] = s.temporal_shift_rejected;
 		d["had_history"] = int64_t(s.had_history);

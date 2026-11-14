@@ -66,6 +66,7 @@ enum RestirFlags : uint32_t {
 	RESTIR_F_KEEP_BLOCKED = 262144,
 	RESTIR_F_REVAL_FRAME = 1048576,
 	RESTIR_F_REVAL_SHARE = 2097152,
+	RESTIR_F_REPLAY = 8388608,
 };
 
 static constexpr uint32_t RESTIR_SPATIAL_SMALL_COUNT = 3;
@@ -84,6 +85,8 @@ enum RestirMode : uint32_t {
 
 struct RestirFrameParams {
 	Size2i trace_size;
+	Size2i screen_size;
+	int32_t trace_scale = 1;
 	uint32_t frame_index = 0;
 	uint32_t seed = 0;
 	uint32_t flags = 0;
@@ -218,6 +221,8 @@ struct RestirFrameStats {
 	double compat_early_stops = 0.0;
 	double compat_empty = 0.0;
 	double compat_h_sum = 0.0;
+	double rehit_miss = 0.0;
+	double rehit_mismatch = 0.0;
 	uint32_t temporal_reject[16] = {};
 	uint32_t spatial_reject[16] = {};
 	uint32_t had_history = 0;

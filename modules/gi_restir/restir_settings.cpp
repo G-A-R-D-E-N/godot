@@ -100,6 +100,8 @@ static const RestirSetting restir_table[] = {
 			"Experimental. ReSTIR GI re-validation: the reservoir count after a radiance cut (0 resets the reservoir)." },
 	{ Variant::BOOL, "gi/trace_all_tiles", PROPERTY_HINT_NONE, "", 1, "", false,
 			"Experimental. ReSTIR GI asks the RTGI pass to trace every tile while it runs. Off lets RTGI skip converged tiles, which the module does not read yet." },
+	{ Variant::BOOL, "gi/replay_seed", PROPERTY_HINT_NONE, "", 0, "", false,
+			"Experimental. ReSTIR GI keeps each sample's shade seed and re-shades the sample with it. RTGI's trace then picks lights by id, writes the folded pdf, and re-validation re-hits the stored point locally." },
 	{ Variant::BOOL, "gi/own_sampler", PROPERTY_HINT_NONE, "", 0, "", false,
 			"Experimental. ReSTIR GI uses the module's own initial sampler instead of the RTGI candidates (interim)." },
 	{ Variant::BOOL, "gi/deterministic", PROPERTY_HINT_NONE, "", 0, "", true,

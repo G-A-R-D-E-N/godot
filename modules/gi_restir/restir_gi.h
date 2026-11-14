@@ -98,6 +98,7 @@ class RestirGiBackend : public RendererRD::RtgiResampleBackend {
 public:
 	virtual bool is_active() const override;
 	virtual bool wants_all_tiles() const override;
+	virtual bool wants_replay() const override;
 	virtual bool begin_frame(const RendererRD::RtgiFrameInputs &p_inputs) override;
 	virtual void resample(const RendererRD::RtgiFrameInputs &p_inputs, RendererRD::RtgiResampleOutput &r_output) override;
 	virtual void release(RenderSceneBuffersRD *p_buffers) override;
