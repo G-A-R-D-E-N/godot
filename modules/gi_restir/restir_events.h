@@ -35,6 +35,7 @@
 
 static constexpr uint32_t RESTIR_EVENT_MAX = 64;
 static constexpr uint32_t RESTIR_EVENT_BINS = 256;
+static constexpr uint32_t RESTIR_HOLD_MAX = 64;
 
 enum RestirEventValidate : uint32_t {
 	RESTIR_EVENT_VALIDATE_NONE = 0,
@@ -48,9 +49,11 @@ struct RestirEventsUBO {
 	uint32_t gates[4];
 	float sphere[RESTIR_EVENT_MAX][4];
 	uint32_t since_last[RESTIR_EVENT_MAX];
+	float held[RESTIR_HOLD_MAX][4];
+	uint32_t hold[4];
 };
 
-static_assert(sizeof(RestirEventsUBO) == 1328, "RestirEventsUBO must match the std140 block in restir_gi_inc.glsl");
+static_assert(sizeof(RestirEventsUBO) == 2368, "RestirEventsUBO must match the std140 block in restir_gi_inc.glsl");
 
 struct RestirEventSphere {
 	Vector3 center;
@@ -89,6 +92,24 @@ struct RestirEventPlan {
 	RestirEventsUBO ubo = {};
 };
 
+struct RestirHoldEntry {
+	Vector3 center;
+	float reach = 0.0f;
+	uint32_t age = 0;
+};
+
+struct RestirHoldRing {
+	RestirHoldEntry entries[RESTIR_HOLD_MAX];
+	uint32_t count = 0;
+};
+
+struct RestirHoldUpdate {
+	uint32_t added = 0;
+	uint32_t refreshed = 0;
+	uint32_t expired = 0;
+	uint32_t dropped = 0;
+};
+
 uint32_t restir_event_budget(uint32_t p_width, uint32_t p_height, uint32_t p_percent);
 bool restir_event_first_fire(uint32_t p_since_last, uint32_t p_quiet_frames);
 float restir_event_solid_angle(float p_reach, float p_distance);
@@ -97,3 +118,7 @@ bool restir_event_holds(const RestirEventsUBO &p_ubo, const Vector3 &p_sample);
 uint32_t restir_event_bin(float p_key);
 uint32_t restir_event_cut_bin(const uint32_t *p_bins, uint32_t p_budget);
 void restir_plan_events(const RestirEventInputs &p_inputs, RestirEventPlan &r_plan);
+void restir_hold_clear(RestirHoldRing &r_ring);
+RestirHoldUpdate restir_hold_update(RestirHoldRing &r_ring, const RestirEventSphere *p_spheres, uint32_t p_count, const Vector3 &p_anchor, uint32_t p_quiet_frames, uint32_t p_hold_frames);
+void restir_hold_pack(const RestirHoldRing &p_ring, const Vector3 &p_anchor, RestirEventsUBO &r_ubo);
+bool restir_hold_caps(const RestirEventsUBO &p_ubo, const Vector3 &p_position);

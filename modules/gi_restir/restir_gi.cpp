@@ -435,6 +435,9 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 		}
 	}
 	RestirEventPlan event_plan;
+	bool hold_on = false;
+	uint32_t hold_frames = 0;
+	RestirHoldUpdate hold_update;
 	{
 		RestirEventInputs event_inputs;
 		event_inputs.settings.events_on = events_on;
@@ -463,9 +466,22 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 		event_inputs.trace_height = uint32_t(MAX(p_inputs.trace_size.y, 0));
 		event_inputs.history = use_history && ray_scene != nullptr;
 		restir_plan_events(event_inputs, event_plan);
+		hold_on = event_plan.active && ray_scene != nullptr && _gi_text("spatial_hold") == "uncapped";
+		hold_frames = uint32_t(CLAMP(_gi_int("spatial_hold_frames"), 1, 256));
+		if (!hold_on || !event_inputs.history || event_plan.jump_frame) {
+			restir_hold_clear(state.hold);
+		}
+		if (hold_on) {
+			const Vector3 hold_anchor = ray_scene->get_anchor();
+			hold_update = restir_hold_update(state.hold, spheres.ptr(), spheres.size(), hold_anchor, event_inputs.quiet_frames, hold_frames);
+			restir_hold_pack(state.hold, hold_anchor, event_plan.ubo);
+		}
 	}
 	if (event_plan.active) {
 		params.flags |= RESTIR_F_EVENTS;
+		if (hold_on && state.hold.count > 0u) {
+			params.flags |= RESTIR_F_SPATIAL_HOLD;
+		}
 		params.events = event_plan.ubo;
 	}
 	params.epoch_tag = (p_inputs.epochs.scene & 0xFFu) | ((p_inputs.epochs.light & 0xFFu) << 8u) | ((p_inputs.epochs.origin & 0xFFu) << 16u);
@@ -604,6 +620,15 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 		event_validate_frames_total++;
 	}
 	event_capping_total += summary.event_capping;
+	summary.hold_on = hold_on;
+	summary.hold_frames = hold_frames;
+	summary.hold_fill = hold_on ? state.hold.count : 0u;
+	summary.hold_update = hold_update;
+	if (summary.hold_fill > 0u) {
+		hold_frames_total++;
+	}
+	hold_dropped_total += hold_update.dropped;
+	hold_fill_max = MAX(hold_fill_max, summary.hold_fill);
 	summary.stats_valid = false;
 	summary.debug_valid = p_inputs.debug_view >= 0 && state.resources.debug.is_valid();
 	float mean_m = float(MIN(state.frames_since_cut, params.n_target));
@@ -703,6 +728,16 @@ void RestirGiBackend::get_status(Dictionary &r_status) const {
 	r_status["events_read_total"] = int64_t(events_read_total);
 	r_status["event_validate_frames_total"] = int64_t(event_validate_frames_total);
 	r_status["event_capping_total"] = int64_t(event_capping_total);
+	r_status["spatial_hold"] = summary.hold_on;
+	r_status["spatial_hold_frames"] = int64_t(summary.hold_frames);
+	r_status["hold_fill"] = int64_t(summary.hold_fill);
+	r_status["hold_added"] = int64_t(summary.hold_update.added);
+	r_status["hold_refreshed"] = int64_t(summary.hold_update.refreshed);
+	r_status["hold_expired"] = int64_t(summary.hold_update.expired);
+	r_status["hold_dropped"] = int64_t(summary.hold_update.dropped);
+	r_status["hold_frames_total"] = int64_t(hold_frames_total);
+	r_status["hold_dropped_total"] = int64_t(hold_dropped_total);
+	r_status["hold_fill_max"] = int64_t(hold_fill_max);
 	Array cut_counts;
 	for (const KeyValue<RenderSceneBuffersRD *, RestirGiState> &entry : states) {
 		for (uint32_t i = 0; i < RESTIR_CUT_MAX; i++) {

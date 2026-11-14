@@ -50,25 +50,114 @@ float restir_event_solid_angle(float p_reach, float p_distance) {
 	return 2.0f * float(Math::PI) * k2 / (1.0f + Math::sqrt(1.0f - k2));
 }
 
+static bool _sphere_caps(const RestirEventsUBO &p_ubo, const float *p_sphere, const Vector3 &p_position) {
+	const float dx = float(p_position.x) - p_sphere[0];
+	const float dy = float(p_position.y) - p_sphere[1];
+	const float dz = float(p_position.z) - p_sphere[2];
+	const float distance = Math::sqrt(dx * dx + dy * dy + dz * dz);
+	const float reach = p_sphere[3];
+	if (distance < p_ubo.params[0] * reach) {
+		return true;
+	}
+	return restir_event_solid_angle(reach, distance) > p_ubo.params[1];
+}
+
 bool restir_event_caps(const RestirEventsUBO &p_ubo, const Vector3 &p_position) {
 	const uint32_t count = MIN(p_ubo.counts[0], RESTIR_EVENT_MAX);
 	for (uint32_t i = 0; i < count; i++) {
 		if (i < p_ubo.counts[1] && !restir_event_first_fire(p_ubo.since_last[i], p_ubo.gates[0])) {
 			continue;
 		}
-		const float dx = float(p_position.x) - p_ubo.sphere[i][0];
-		const float dy = float(p_position.y) - p_ubo.sphere[i][1];
-		const float dz = float(p_position.z) - p_ubo.sphere[i][2];
-		const float distance = Math::sqrt(dx * dx + dy * dy + dz * dz);
-		const float reach = p_ubo.sphere[i][3];
-		if (distance < p_ubo.params[0] * reach) {
-			return true;
-		}
-		if (restir_event_solid_angle(reach, distance) > p_ubo.params[1]) {
+		if (_sphere_caps(p_ubo, p_ubo.sphere[i], p_position)) {
 			return true;
 		}
 	}
 	return false;
+}
+
+bool restir_hold_caps(const RestirEventsUBO &p_ubo, const Vector3 &p_position) {
+	const uint32_t count = MIN(p_ubo.hold[0], RESTIR_HOLD_MAX);
+	for (uint32_t i = 0; i < count; i++) {
+		if (_sphere_caps(p_ubo, p_ubo.held[i], p_position)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void restir_hold_clear(RestirHoldRing &r_ring) {
+	r_ring.count = 0;
+}
+
+RestirHoldUpdate restir_hold_update(RestirHoldRing &r_ring, const RestirEventSphere *p_spheres, uint32_t p_count, const Vector3 &p_anchor, uint32_t p_quiet_frames, uint32_t p_hold_frames) {
+	RestirHoldUpdate update;
+	if (p_hold_frames == 0u) {
+		update.expired = r_ring.count;
+		r_ring.count = 0;
+		return update;
+	}
+	uint32_t kept = 0;
+	for (uint32_t i = 0; i < r_ring.count; i++) {
+		RestirHoldEntry entry = r_ring.entries[i];
+		entry.age++;
+		if (entry.age >= p_hold_frames) {
+			update.expired++;
+			continue;
+		}
+		r_ring.entries[kept++] = entry;
+	}
+	r_ring.count = kept;
+	const uint32_t count = p_spheres ? MIN(p_count, RESTIR_EVENT_MAX) : 0u;
+	for (uint32_t i = 0; i < count; i++) {
+		const RestirEventSphere &sphere = p_spheres[i];
+		if (!restir_event_first_fire(sphere.since_last, p_quiet_frames)) {
+			continue;
+		}
+		const Vector3 center = sphere.center + p_anchor;
+		const float reach = MAX(sphere.reach, 0.0f);
+		bool refreshed = false;
+		for (uint32_t j = 0; j < r_ring.count; j++) {
+			RestirHoldEntry &entry = r_ring.entries[j];
+			if (entry.reach >= reach && (center - entry.center).length_squared() <= real_t(entry.reach) * real_t(entry.reach)) {
+				entry.age = 0;
+				refreshed = true;
+				break;
+			}
+		}
+		if (refreshed) {
+			update.refreshed++;
+			continue;
+		}
+		uint32_t slot = r_ring.count;
+		if (slot == RESTIR_HOLD_MAX) {
+			slot = 0;
+			for (uint32_t j = 1; j < RESTIR_HOLD_MAX; j++) {
+				if (r_ring.entries[j].age > r_ring.entries[slot].age) {
+					slot = j;
+				}
+			}
+			update.dropped++;
+		} else {
+			r_ring.count++;
+		}
+		r_ring.entries[slot].center = center;
+		r_ring.entries[slot].reach = reach;
+		r_ring.entries[slot].age = 0;
+		update.added++;
+	}
+	return update;
+}
+
+void restir_hold_pack(const RestirHoldRing &p_ring, const Vector3 &p_anchor, RestirEventsUBO &r_ubo) {
+	const uint32_t count = MIN(p_ring.count, RESTIR_HOLD_MAX);
+	for (uint32_t i = 0; i < count; i++) {
+		const Vector3 local = p_ring.entries[i].center - p_anchor;
+		r_ubo.held[i][0] = float(local.x);
+		r_ubo.held[i][1] = float(local.y);
+		r_ubo.held[i][2] = float(local.z);
+		r_ubo.held[i][3] = p_ring.entries[i].reach;
+	}
+	r_ubo.hold[0] = count;
 }
 
 bool restir_event_holds(const RestirEventsUBO &p_ubo, const Vector3 &p_sample) {

@@ -54,6 +54,7 @@ struct RestirGiState {
 	uint32_t history_uses = 0;
 	uint32_t history_cuts = 0;
 	uint32_t reval_frames = 0;
+	RestirHoldRing hold;
 };
 
 struct RestirGiSummary {
@@ -91,6 +92,10 @@ struct RestirGiSummary {
 	uint32_t event_capping = 0;
 	uint32_t event_validate = 0;
 	uint32_t reshade_budget = 0;
+	bool hold_on = false;
+	uint32_t hold_frames = 0;
+	uint32_t hold_fill = 0;
+	RestirHoldUpdate hold_update;
 };
 
 class RestirGiBackend : public RendererRD::RtgiResampleBackend {
@@ -102,6 +107,9 @@ class RestirGiBackend : public RendererRD::RtgiResampleBackend {
 	uint64_t events_read_total = 0;
 	uint64_t event_validate_frames_total = 0;
 	uint64_t event_capping_total = 0;
+	uint64_t hold_frames_total = 0;
+	uint64_t hold_dropped_total = 0;
+	uint32_t hold_fill_max = 0;
 	String refusal_reason;
 
 	void _free_state(RestirGiState &r_state);

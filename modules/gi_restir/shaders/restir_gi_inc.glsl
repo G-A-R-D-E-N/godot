@@ -30,6 +30,7 @@
 #define F_REVAL_SHARE 2097152u
 #define F_REPLAY 8388608u
 #define F_EVENTS 16777216u
+#define F_SPATIAL_HOLD 33554432u
 
 #define REJ_NONE 0u
 #define REJ_FRAME 1u
@@ -230,6 +231,8 @@ layout(set = 0, binding = 26, std140) uniform RestirEvents {
 	uvec4 gates;
 	vec4 sphere[64];
 	uvec4 since_last[16];
+	vec4 held[64];
+	uvec4 hold;
 }
 ev;
 
@@ -253,6 +256,21 @@ bool rs_event_caps(vec3 p_position) {
 			continue;
 		}
 		vec4 s = ev.sphere[i];
+		float dist = length(p_position - s.xyz);
+		if (dist < ev.params.x * s.w) {
+			return true;
+		}
+		if (rs_event_solid_angle(s.w, dist) > ev.params.y) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool rs_hold_caps(vec3 p_position) {
+	uint count = min(ev.hold.x, 64u);
+	for (uint i = 0u; i < count; i++) {
+		vec4 s = ev.held[i];
 		float dist = length(p_position - s.xyz);
 		if (dist < ev.params.x * s.w) {
 			return true;

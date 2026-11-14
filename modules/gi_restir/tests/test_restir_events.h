@@ -254,4 +254,180 @@ TEST_CASE("[RestirEvents] Jump frames") {
 	CHECK(jump_no_history.validate == RESTIR_EVENT_VALIDATE_NONE);
 }
 
+RestirHoldUpdate hold_step(RestirHoldRing &r_ring, const LocalVector<RestirEventSphere> &p_spheres, uint32_t p_hold_frames, uint32_t p_quiet = 0, const Vector3 &p_anchor = Vector3()) {
+	return restir_hold_update(r_ring, p_spheres.ptr(), p_spheres.size(), p_anchor, p_quiet, p_hold_frames);
+}
+
+TEST_CASE("[RestirEvents] Hold keeps a sphere for its frames from the event frame") {
+	RestirHoldRing ring;
+	LocalVector<RestirEventSphere> fire;
+	fire.push_back(make_sphere(Vector3(1, 2, 3), 0.5f));
+	const LocalVector<RestirEventSphere> none;
+	RestirHoldUpdate first = hold_step(ring, fire, 40);
+	CHECK(first.added == 1u);
+	CHECK(ring.count == 1u);
+	CHECK(ring.entries[0].age == 0u);
+	for (uint32_t k = 1; k < 40; k++) {
+		hold_step(ring, none, 40);
+		CHECK(ring.count == 1u);
+		CHECK(ring.entries[0].age == k);
+	}
+	RestirHoldUpdate gone = hold_step(ring, none, 40);
+	CHECK(gone.expired == 1u);
+	CHECK(ring.count == 0u);
+
+	hold_step(ring, fire, 1);
+	CHECK(ring.count == 1u);
+	CHECK(hold_step(ring, none, 1).expired == 1u);
+	CHECK(ring.count == 0u);
+
+	hold_step(ring, fire, 40);
+	RestirHoldUpdate zero = hold_step(ring, fire, 0);
+	CHECK(zero.expired == 1u);
+	CHECK(zero.added == 0u);
+	CHECK(ring.count == 0u);
+}
+
+TEST_CASE("[RestirEvents] Hold refreshes a held sphere that holds the new one") {
+	RestirHoldRing ring;
+	LocalVector<RestirEventSphere> big;
+	big.push_back(make_sphere(Vector3(0, 0, 0), 2.0f));
+	const LocalVector<RestirEventSphere> none;
+	hold_step(ring, big, 40);
+	for (int k = 0; k < 10; k++) {
+		hold_step(ring, none, 40);
+	}
+	CHECK(ring.entries[0].age == 10u);
+	LocalVector<RestirEventSphere> inside;
+	inside.push_back(make_sphere(Vector3(1.5, 0, 0), 1.0f));
+	RestirHoldUpdate refresh = hold_step(ring, inside, 40);
+	CHECK(refresh.refreshed == 1u);
+	CHECK(refresh.added == 0u);
+	CHECK(ring.count == 1u);
+	CHECK(ring.entries[0].age == 0u);
+	CHECK(ring.entries[0].reach == 2.0f);
+
+	LocalVector<RestirEventSphere> larger;
+	larger.push_back(make_sphere(Vector3(0.5, 0, 0), 3.0f));
+	CHECK(hold_step(ring, larger, 40).added == 1u);
+	CHECK(ring.count == 2u);
+
+	LocalVector<RestirEventSphere> outside;
+	outside.push_back(make_sphere(Vector3(2.5, 0, 0), 0.5f));
+	RestirHoldRing lone;
+	hold_step(lone, big, 40);
+	CHECK(hold_step(lone, outside, 40).added == 1u);
+	CHECK(lone.count == 2u);
+
+	LocalVector<RestirEventSphere> pair;
+	pair.push_back(make_sphere(Vector3(4, 5, 6), 1.0f, 12));
+	pair.push_back(make_sphere(Vector3(4, 5, 6), 1.0f, 12));
+	RestirHoldRing flicker;
+	RestirHoldUpdate both = hold_step(flicker, pair, 40);
+	CHECK(both.added == 1u);
+	CHECK(both.refreshed == 1u);
+	CHECK(flicker.count == 1u);
+}
+
+TEST_CASE("[RestirEvents] Hold takes first fires only") {
+	RestirHoldRing ring;
+	LocalVector<RestirEventSphere> repeat;
+	repeat.push_back(make_sphere(Vector3(0, 0, 0), 1.0f, 10));
+	CHECK(hold_step(ring, repeat, 40, 30).added == 0u);
+	CHECK(ring.count == 0u);
+	CHECK(hold_step(ring, repeat, 40, 10).added == 1u);
+	CHECK(ring.count == 1u);
+	RestirHoldRing empty;
+	CHECK(restir_hold_update(empty, nullptr, 5, Vector3(), 0, 40).added == 0u);
+	CHECK(empty.count == 0u);
+}
+
+TEST_CASE("[RestirEvents] Hold drops the oldest when the ring is full") {
+	RestirHoldRing ring;
+	for (uint32_t i = 0; i < RESTIR_HOLD_MAX; i++) {
+		LocalVector<RestirEventSphere> one;
+		one.push_back(make_sphere(Vector3(real_t(i) * 10.0, 0, 0), 1.0f));
+		CHECK(hold_step(ring, one, 256).dropped == 0u);
+	}
+	CHECK(ring.count == RESTIR_HOLD_MAX);
+	CHECK(ring.entries[0].age == RESTIR_HOLD_MAX - 1u);
+	LocalVector<RestirEventSphere> extra;
+	extra.push_back(make_sphere(Vector3(0, 100, 0), 1.0f));
+	RestirHoldUpdate full = hold_step(ring, extra, 256);
+	CHECK(full.dropped == 1u);
+	CHECK(full.added == 1u);
+	CHECK(ring.count == RESTIR_HOLD_MAX);
+	CHECK(ring.entries[0].center.is_equal_approx(Vector3(0, 100, 0)));
+	CHECK(ring.entries[0].age == 0u);
+	CHECK(ring.entries[1].age == RESTIR_HOLD_MAX - 1u);
+}
+
+TEST_CASE("[RestirEvents] Hold clears, and breaks an age tie at the lowest index") {
+	RestirHoldRing ring;
+	LocalVector<RestirEventSphere> many;
+	for (uint32_t i = 0; i < RESTIR_HOLD_MAX; i++) {
+		many.push_back(make_sphere(Vector3(real_t(i) * 10.0, 0, 0), 1.0f));
+	}
+	CHECK(hold_step(ring, many, 40).added == RESTIR_HOLD_MAX);
+	LocalVector<RestirEventSphere> extra;
+	extra.push_back(make_sphere(Vector3(0, 100, 0), 1.0f));
+	RestirHoldUpdate tie = hold_step(ring, extra, 40);
+	CHECK(tie.dropped == 1u);
+	CHECK(ring.entries[0].center.is_equal_approx(Vector3(0, 100, 0)));
+	CHECK(ring.entries[1].center.is_equal_approx(Vector3(10, 0, 0)));
+	restir_hold_clear(ring);
+	CHECK(ring.count == 0u);
+	const LocalVector<RestirEventSphere> none;
+	CHECK(hold_step(ring, none, 40).expired == 0u);
+	CHECK(ring.count == 0u);
+}
+
+TEST_CASE("[RestirEvents] Hold keeps world positions across an anchor move") {
+	RestirHoldRing ring;
+	LocalVector<RestirEventSphere> fire;
+	fire.push_back(make_sphere(Vector3(1, 0, 0), 0.5f));
+	hold_step(ring, fire, 40, 0, Vector3(100, 0, 0));
+	CHECK(ring.entries[0].center.is_equal_approx(Vector3(101, 0, 0)));
+	LocalVector<RestirEventSphere> moved;
+	moved.push_back(make_sphere(Vector3(11.2, 0, 0), 0.25f));
+	RestirHoldUpdate again = hold_step(ring, moved, 40, 0, Vector3(90, 0, 0));
+	CHECK(again.refreshed == 1u);
+	CHECK(ring.count == 1u);
+	LocalVector<RestirEventSphere> stale;
+	stale.push_back(make_sphere(Vector3(1, 0, 0), 0.25f));
+	CHECK(hold_step(ring, stale, 40, 0, Vector3(90, 0, 0)).added == 1u);
+	CHECK(ring.count == 2u);
+	RestirEventsUBO ubo = {};
+	restir_hold_pack(ring, Vector3(90, 0, 0), ubo);
+	CHECK(ubo.hold[0] == 2u);
+	CHECK(ubo.held[1][0] == doctest::Approx(1.0f));
+	CHECK(ubo.held[0][0] == doctest::Approx(11.0f));
+	CHECK(ubo.held[0][3] == 0.5f);
+}
+
+TEST_CASE("[RestirEvents] Hold caps by reach and solid angle like the event test") {
+	RestirHoldRing ring;
+	LocalVector<RestirEventSphere> fire;
+	fire.push_back(make_sphere(Vector3(0, 0, 0), 5.0f));
+	hold_step(ring, fire, 40);
+	RestirEventsUBO ubo = {};
+	ubo.params[0] = 2.0f;
+	ubo.params[1] = 0.05f;
+	CHECK_FALSE(restir_hold_caps(ubo, Vector3(1, 0, 0)));
+	restir_hold_pack(ring, Vector3(), ubo);
+	CHECK(restir_hold_caps(ubo, Vector3(9.9, 0, 0)));
+	CHECK(restir_hold_caps(ubo, Vector3(39, 0, 0)));
+	CHECK_FALSE(restir_hold_caps(ubo, Vector3(41, 0, 0)));
+	RestirEventsUBO as_event = ubo;
+	as_event.counts[0] = 1;
+	as_event.counts[1] = 1;
+	as_event.since_last[0] = UINT32_MAX;
+	for (int i = 0; i < 4; i++) {
+		as_event.sphere[0][i] = ubo.held[0][i];
+	}
+	for (real_t x = 0.0; x < 60.0; x += 0.5) {
+		CHECK(restir_hold_caps(ubo, Vector3(x, 0, 0)) == restir_event_caps(as_event, Vector3(x, 0, 0)));
+	}
+}
+
 }

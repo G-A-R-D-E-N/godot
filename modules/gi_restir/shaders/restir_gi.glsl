@@ -641,6 +641,8 @@ void rs_spatial_pixel(ivec2 px) {
 	}
 	Reservoir own = rs_load(px);
 	bool event_capped = (rf.flags & F_EVENTS) != 0u && rs_event_caps(r.pos);
+	bool hold_on = (rf.flags & F_SPATIAL_HOLD) != 0u;
+	bool hold_capped = hold_on && rs_hold_caps(r.pos);
 	for (int i = 0; i < MAX_CAND; i++) {
 		c[i] = rs_cand_none();
 	}
@@ -694,7 +696,7 @@ void rs_spatial_pixel(ivec2 px) {
 		Cand nc;
 		uint nb_reason;
 		float m_n = float(min(n.m, rf.m_max));
-		if (event_capped && !rs_event_caps(q.pos)) {
+		if ((event_capped || hold_capped) && !rs_event_caps(q.pos) && !(hold_on && rs_hold_caps(q.pos))) {
 			m_n = min(m_n, float(ev.counts.z));
 		}
 		rs_fill_neighbour(n, m_n, (n.flags & RF_VALID) != 0u, REJ_NO_SAMPLE, false, q, r, c[0], nc, nb_reason);

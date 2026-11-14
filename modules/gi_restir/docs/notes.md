@@ -52,6 +52,8 @@ Default: off at build time (config.py is_enabled returns False) and off at run t
 | gi/jump_m_cap | int 0..256 | 0 |
 | gi/event_reach_scale | float 0..64 | 2.0 |
 | gi/event_solid_angle | float 0..4π (steradians) | 0.05 |
+| gi/spatial_hold | enum off,uncapped | uncapped |
+| gi/spatial_hold_frames | int 1..256 | 40 |
 
 The numeric defaults other than the bools are the ADR values. They have no effect while the matching enabled
 setting is off. Every description starts with "Experimental.". Godot shows project-setting help from
@@ -346,7 +348,8 @@ Design 2.8, 8.1 rows 5-8, 8.3 row 4; change plan commit 5.
   exists on this line (6d6fa7157), so "the soft hold is off" has nothing more to turn off.
 - R2's own restarts (soft cut, restart spheres) are not touched here; they stop under the module-output bit (commit 10). Until
   then an event frame restarts in R2 as well.
-- The event UBO, set 0 binding 26, std140, 1328 bytes, declared in TEMPORAL, SPATIAL and VALIDATE and always bound (zeros when
+- The event UBO, set 0 binding 26, std140, 2368 bytes since the SPATIAL hold (1328 before it, without held[64] and hold),
+  declared in TEMPORAL, SPATIAL and VALIDATE and always bound (zeros when
   off): counts = (sphere count, event count, event_m_cap, jump_m_cap); params = (event_reach_scale, event_solid_angle, 0, 0);
   gates = (quiet frames, budget B, jump frame 0 or 1, VALIDATE selection 0 none, 1 event, 2 all); sphere[64] = (centre, reach) in
   metres, anchor-relative, reach = the tracker's half; since_last[16] holds sphere i at [i >> 2][i & 3]. The first event-count
@@ -365,7 +368,8 @@ Design 2.8, 8.1 rows 5-8, 8.3 row 4; change plan commit 5.
   present; M 0 is weight 0. No reject code is added.
 - SPATIAL: when the receiver passes the cap test, each neighbour that does not pass it at its own position q.pos takes
   M = min(min(n.m, m_max), event_m_cap); neighbours inside the capped region keep their M (design 2.8 "neighbours inside the capped
-  region keep their M", Q10 H1). This frame only; the hold over later frames is commit 6. The jump cap is TEMPORAL only.
+  region keep their M", Q10 H1). This is the event frame; the SPATIAL hold below carries it over later frames. The jump cap
+  is TEMPORAL only.
 - Jump frame: directional_jump or events_lost > 0 (commit 8 adds the sky epoch). Candidates are kept (F_REVAL_FRAME is never set).
   jump_m_cap 0: restart from the fresh candidates and spatial reuse, no event or all re-shade. jump_m_cap > 0: VALIDATE re-shades
   every stored valid non-sky sample first (selection all: no sphere test, budget or cap-0 skip).
@@ -396,3 +400,43 @@ Design 2.8, 8.1 rows 5-8, 8.3 row 4; change plan commit 5.
   dispatch runs, so TEMPORAL, SPATIAL and VALIDATE do today's arithmetic in today's order (SPIR-V of those three changes; every other
   module pass, every DDGI trace variant and both direct-shadow variants are byte-identical, spirv_c5.py).
 - The harness carries the packed UBO in a captured case as "events" when F_EVENTS is set.
+- Later item (MC #131, 14 Nov): R2's tracker fires two events per lamp change, the old and the new state
+  (`ddgi_light_tracker.cpp` `fire` twice), and R2's select merges them into one sphere for a light that doesn't move. The module
+  takes both as capping spheres, so a stationary flicker reads events_read 2 and event_capping_spheres 2 per changed frame
+  (flicker lab, 2f01e4725: 32 frames, 64 events). The M cap is a min, so the output is the same, but the count dispatch and the
+  per-workgroup cut test each sphere twice. Dropping exact duplicate spheres in the event plan is left for later.
+
+## SPATIAL hold (gi/spatial_hold, default uncapped)
+
+Design 2.8(b), change plan row 6. It runs only with the event path on (gi/event_reshade and gi/replay_seed), so with events off
+nothing changes.
+- The ring. Each view's RestirGiState keeps a RestirHoldRing of 64 entries: centre in world space (the event centre plus the ray
+  scene anchor, so an anchor move doesn't shift a held sphere), reach, age. Ages stay on the CPU; the GPU gets centres and reaches
+  only.
+- The update, once per frame after the event plan (restir_hold_update): every entry ages by 1 and leaves at age
+  spatial_hold_frames, so a sphere is held on its event frame and the next spatial_hold_frames - 1 frames (40 frames at the
+  default). Then each of the frame's capping spheres, the first fires (since_last >= restart_quiet_frames, the same test as the
+  cap), either refreshes the first entry whose sphere holds its centre and whose reach is at least its own (age back to 0, no new
+  slot), or takes a new slot. A full ring replaces its oldest entry (the highest age, the lowest index on a tie), counted as
+  hold_dropped. R2's old-and-new pair for one change lands as one entry and one refresh. Dirty boxes are not in the event list
+  yet, so they are not held either.
+- The ring is cleared when the hold is off, when events are off, on a frame without history (a cut), and on a jump frame; the
+  frame's own first fires then go in. spatial_hold_frames 0 cannot be set (range 1..256); the function clears the ring for it.
+- The GPU side. The event UBO (set 0 binding 26) gains vec4 held[64] (anchor-relative centre, reach) and uvec4 hold (x = count),
+  2368 bytes in all (static_assert in restir_events.h). F_SPATIAL_HOLD (bit 25) is set when the hold is on and the ring is not
+  empty. rs_hold_caps is the event cap test (reach scale and solid angle) over the held spheres, without a first-fire check
+  (every held sphere was one).
+- SPATIAL: the receiver counts as capped when it passes the event cap or the hold test; a neighbour q then takes
+  M = min(min(n.m, m_max), event_m_cap) unless q passes the event cap or the hold test itself ("neighbours inside the capped
+  region keep their M"), on the event frame and after it alike. With the hold off this is commit 5's rule. The event list stays
+  in both tests because a first fire that refreshed a larger held sphere is not in the ring, and its own reach-scale and
+  solid-angle region can reach past the larger sphere's. TEMPORAL and VALIDATE don't read the ring.
+- The hold needs a ready ray scene: the event centres are relative to the ray scene's anchor, so without one the ring is cleared
+  and nothing is stored.
+- Counters. Status, always: spatial_hold, spatial_hold_frames, hold_fill (entries after this frame's update), hold_added,
+  hold_refreshed, hold_expired, hold_dropped (this frame, the last view to run), and the backend-lifetime hold_frames_total
+  (view-frames with a non-empty ring), hold_dropped_total and hold_fill_max, summed or maxed over every view's ring.
+- Identity: with gi/spatial_hold off, or with no first fire since the last clear, F_SPATIAL_HOLD is clear and hold.x is 0, so
+  SPATIAL does commit 5's arithmetic. The UBO grew, so the SPIR-V of every pass that declares it (TEMPORAL, SPATIAL, VALIDATE)
+  changes; the other module passes and every DDGI and RTGI variant don't. A capture made before this commit carries a 1328-byte
+  "events" blob, which the harness no longer loads.
