@@ -158,10 +158,10 @@ static uint32_t _gi_mode() {
 	if (mode == "U1") {
 		return RESTIR_MODE_U1;
 	}
-	if (mode == "B2") {
-		return RESTIR_MODE_B2;
+	if (mode == "B1") {
+		return RESTIR_MODE_B1;
 	}
-	return RESTIR_MODE_B1;
+	return RESTIR_MODE_B2;
 }
 
 static String _gi_text(const char *p_name) {

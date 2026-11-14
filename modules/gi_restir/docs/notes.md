@@ -19,7 +19,7 @@ Default: off at build time (config.py is_enabled returns False) and off at run t
 | Name (under rendering/global_illumination/restir/) | Type | Default |
 |---|---|---|
 | gi/enabled | bool | false |
-| gi/mode | enum B1,B2,U1 | B1 |
+| gi/mode | enum B1,B2,U1 | B2 |
 | gi/spatial_neighbors | int 0..8 | 3 |
 | gi/spatial_radius | int 1..128 | 24 |
 | gi/spatial_passes | int 1..2 | 1 |
@@ -28,7 +28,7 @@ Default: off at build time (config.py is_enabled returns False) and off at run t
 | gi/n_target | int 1..64 | 8 |
 | gi/visibility_reuse | bool | false |
 | gi/fresh_lo | bool | false |
-| gi/blocked_keeps_coverage | bool | false |
+| gi/blocked_keeps_coverage | bool | true |
 | gi/confidence_ramp | bool | false |
 | gi/ramp_m_min | int 1..255 | 4 |
 | gi/ramp_frames | int 1..4096 | 64 |
@@ -42,6 +42,8 @@ Default: off at build time (config.py is_enabled returns False) and off at run t
 | gi/own_sampler | bool | false |
 | gi/deterministic | bool | false |
 | gi/dump_path | string | "" |
+| gi/denoise | enum off,r2 | r2 |
+| gi/denoise_history_cap | int 1..255 | 4 |
 
 The numeric defaults other than the bools are the ADR values. They have no effect while the matching enabled
 setting is off. Every description starts with "Experimental.". Godot shows project-setting help from
