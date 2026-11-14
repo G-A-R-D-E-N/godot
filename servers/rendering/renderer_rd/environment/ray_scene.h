@@ -179,6 +179,9 @@ public:
 
 private:
 	static RayScene *singleton;
+	static bool needed_latched;
+	static bool needed;
+	static bool _settings_need();
 
 	struct MeshEntry {
 		LocalVector<Vector3> positions;
@@ -299,6 +302,8 @@ private:
 
 public:
 	static RayScene *get_singleton() { return singleton; }
+	static bool is_needed();
+	static void latch_needed();
 
 	void mesh_surface_added(RID p_mesh, uint32_t p_surface, const RenderingServerTypes::SurfaceData &p_surface_data);
 	void mesh_cleared(RID p_mesh);

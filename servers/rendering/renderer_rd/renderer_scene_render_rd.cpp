@@ -1590,7 +1590,7 @@ void RendererSceneRenderRD::_post_prepass_render(RenderDataRD *p_render_data, bo
 }
 
 AABB RendererSceneRenderRD::ray_scene_get_region(const Vector3 &p_camera_position) const {
-	if (!RendererRD::RayScene::get_singleton() || !RendererRD::DDGI::is_enabled()) {
+	if (!RendererRD::RayScene::get_singleton() || !RendererRD::RayScene::is_needed()) {
 		return AABB();
 	}
 	const RendererRD::DDGI::Settings settings = RendererRD::DDGI::get_project_settings();
@@ -1812,6 +1812,7 @@ void RendererSceneRenderRD::set_debug_draw_mode(RSE::ViewportDebugDraw p_debug_d
 }
 
 void RendererSceneRenderRD::update() {
+	RendererRD::RayScene::latch_needed();
 	sky.publish_completed_cycles();
 	sky.update_dirty_skys();
 }

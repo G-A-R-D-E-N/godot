@@ -51,6 +51,27 @@
 using namespace RendererRD;
 
 RayScene *RayScene::singleton = nullptr;
+bool RayScene::needed_latched = false;
+bool RayScene::needed = false;
+
+bool RayScene::_settings_need() {
+	return DDGI::is_enabled() || GLOBAL_GET_CACHED(bool, "rendering/global_illumination/direct/enabled");
+}
+
+bool RayScene::is_needed() {
+	return needed_latched ? needed : _settings_need();
+}
+
+void RayScene::latch_needed() {
+	if (!needed_latched) {
+		needed = _settings_need();
+		needed_latched = true;
+		return;
+	}
+	if (!needed && _settings_need()) {
+		WARN_PRINT_ONCE("The ray scene was off when the first frame was drawn. DDGI and direct shadows turned on later stay off until the next start.");
+	}
+}
 
 RayScene::RayScene() {
 	singleton = this;
@@ -245,7 +266,7 @@ void RayScene::build_bvh(LocalVector<BuildPrimitive> &p_primitives, uint32_t p_m
 
 void RayScene::mesh_surface_added(RID p_mesh, uint32_t p_surface, const RenderingServerTypes::SurfaceData &p_surface_data) {
 	MutexLock lock(mesh_mutex);
-	if (!meshes.has(p_mesh) && (p_surface != 0 || !DDGI::is_enabled())) {
+	if (!meshes.has(p_mesh) && (p_surface != 0 || !is_needed())) {
 		return;
 	}
 	_capture_surface(meshes[p_mesh], p_surface, p_surface_data);

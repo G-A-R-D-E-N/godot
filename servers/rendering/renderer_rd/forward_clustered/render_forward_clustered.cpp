@@ -32,6 +32,7 @@
 
 #include "core/config/project_settings.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
+#include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/framebuffer_cache_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/mesh_storage.h"
@@ -2276,7 +2277,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	bool using_sdfgi = false;
 	bool using_voxelgi = false;
 	bool using_ddgi = false;
-	const bool using_direct_lights = !is_reflection_probe && rb_data.is_valid() && get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_UNSHADED && GLOBAL_GET_CACHED(bool, "rendering/global_illumination/direct/enabled") && RendererRD::DDGI::is_enabled();
+	const bool using_direct_lights = !is_reflection_probe && rb_data.is_valid() && get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_UNSHADED && GLOBAL_GET_CACHED(bool, "rendering/global_illumination/direct/enabled") && RendererRD::RayScene::is_needed();
 	bool reverse_cull = p_render_data->scene_data->cam_transform.basis.determinant() < 0;
 	bool using_ssil = !is_reflection_probe && p_render_data->environment.is_valid() && environment_get_ssil_enabled(p_render_data->environment);
 	bool using_bounce_source = false;
