@@ -257,6 +257,7 @@ bool RtgiPass::process(const Ref<RenderSceneBuffersRD> &p_render_buffers, DDGI &
 		buffers = p_render_buffers->get_custom_data(RB_SCOPE_RTGI);
 	} else {
 		buffers.instantiate();
+		buffers->owner = p_render_buffers.ptr();
 		p_render_buffers->set_custom_data(RB_SCOPE_RTGI, buffers);
 	}
 
@@ -327,6 +328,8 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 	RayScene *ray_scene = RayScene::get_singleton();
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
 	TextureStorage *texture_storage = TextureStorage::get_singleton();
+	const bool backend_ran_before = p_buffers->backend_ran;
+	p_buffers->backend_ran = false;
 
 	if (GLOBAL_GET_CACHED(bool, "rendering/global_illumination/compositor/debug_provider")) {
 		_refuse(p_buffers, "compositor debug_provider is on");
@@ -570,7 +573,7 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 		backend_inputs.frame_index = inputs.frame_index;
 		backend_inputs.epochs = inputs.epochs;
 		backend_inputs.dirty_source = nullptr;
-		backend_inputs.history_cut = (flags & (FRAME_FLAG_HISTORY_CUT | FRAME_FLAG_CAMERA_CUT)) != 0u;
+		backend_inputs.history_cut = !backend_ran_before || (flags & (FRAME_FLAG_HISTORY_CUT | FRAME_FLAG_CAMERA_CUT)) != 0u;
 		backend_inputs.hardware = ray_scene->uses_hardware();
 		backend_inputs.deterministic = false;
 		backend_inputs.physical_units = inputs.physical_units;
@@ -596,16 +599,12 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 		if (backend->begin_frame(backend_inputs)) {
 			RENDER_TIMESTAMP("RTGI Backend");
 			backend->resample(backend_inputs, backend_output);
+			p_buffers->backend_ran = true;
 			denoise = backend_output.valid && backend_output.denoise && backend_output.radiance.is_valid() && backend_output.coverage.is_valid();
 		}
 		if (denoise) {
 			if (backend_output.history_cap > 0u) {
 				settings.history_cap = CLAMP(backend_output.history_cap, 1u, 255u);
-			}
-			if (backend_output.soft_hold_frames > 0u && cut == CUT_NONE && (flags & FRAME_FLAG_SOFT_CUT) == 0u) {
-				flags |= FRAME_FLAG_SOFT_CUT;
-				p_buffers->soft_cuts++;
-				p_buffers->frames_since_cut = MIN(p_buffers->frames_since_cut, settings.soft_cut_count);
 			}
 		} else {
 			p_buffers->backend_refusals++;
@@ -739,6 +738,16 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 	return true;
 }
 
+void RtgiPass::RtgiBuffers::free_data() {
+	backend_ran = false;
+	if (owner == nullptr) {
+		return;
+	}
+	if (RtgiResampleBackend *backend = GIModuleHooks::get_singleton()->get_rtgi_backend()) {
+		backend->release(owner);
+	}
+}
+
 void RtgiPass::release(const Ref<RenderSceneBuffersRD> &p_render_buffers) {
 	if (p_render_buffers.is_null() || !p_render_buffers->has_custom_data(RB_SCOPE_RTGI)) {
 		return;
@@ -799,6 +808,7 @@ void RtgiPass::_write_status(const Ref<RenderSceneBuffersRD> &p_render_buffers, 
 	cuts["camera"] = int64_t(p_buffers->cut_counts[CUT_CAMERA]);
 	cuts["backend"] = int64_t(p_buffers->cut_counts[CUT_BACKEND]);
 	cuts["request"] = int64_t(p_buffers->cut_counts[CUT_REQUEST]);
+	cuts["module"] = int64_t(p_buffers->cut_counts[CUT_MODULE]);
 	status["cuts"] = cuts;
 	status["screen_width"] = p_buffers->screen_size.width;
 	status["screen_height"] = p_buffers->screen_size.height;

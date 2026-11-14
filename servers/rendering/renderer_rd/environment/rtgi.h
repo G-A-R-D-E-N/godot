@@ -249,9 +249,11 @@ public:
 		bool backend_active = false;
 		uint64_t backend_frames = 0;
 		uint64_t backend_refusals = 0;
+		bool backend_ran = false;
+		RenderSceneBuffersRD *owner = nullptr;
 
-		virtual void configure(RenderSceneBuffersRD *p_render_buffers) override {}
-		virtual void free_data() override {}
+		virtual void configure(RenderSceneBuffersRD *p_render_buffers) override { owner = p_render_buffers; }
+		virtual void free_data() override;
 	};
 
 private:
