@@ -143,7 +143,8 @@ public:
 			task_id = WorkerThreadPool::get_singleton()->get_caller_task_id();
 			Ref<ResourceLoader::LoadToken> middle = ResourceLoader::_load_start("user://parent.loader_lifetime", "Resource",
 					ResourceLoader::LOAD_THREAD_SPAWN_SINGLE, ResourceLoader::CACHE_MODE_IGNORE);
-			while (parent_task_id == WorkerThreadPool::INVALID_TASK_ID || !WorkerThreadPool::get_singleton()->is_task_completed(parent_task_id)) {
+			uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 10000;
+			while ((parent_task_id == WorkerThreadPool::INVALID_TASK_ID || !WorkerThreadPool::get_singleton()->is_task_completed(parent_task_id)) && OS::get_singleton()->get_ticks_msec() < deadline) {
 				OS::get_singleton()->delay_usec(100);
 			}
 			entered.post();
@@ -169,6 +170,25 @@ public:
 		return resource;
 	}
 };
+
+static void wait_completed(WorkerThreadPool *p_pool, WorkerThreadPool::TaskID p_id) {
+	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 20000;
+	while (!p_pool->is_task_completed(p_id) && OS::get_singleton()->get_ticks_msec() < deadline) {
+		OS::get_singleton()->delay_usec(100);
+	}
+	CHECK_MESSAGE(p_pool->is_task_completed(p_id), "Worker task did not complete before the deadline");
+}
+
+static bool wait_entered(Semaphore &p_sem) {
+	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 20000;
+	while (OS::get_singleton()->get_ticks_msec() < deadline) {
+		if (p_sem.try_wait()) {
+			return true;
+		}
+		OS::get_singleton()->delay_usec(100);
+	}
+	return false;
+}
 
 TEST_CASE("[ResourceLoader] Last worker reference retires its token") {
 	Ref<GatedLoader> loader;
@@ -200,9 +220,7 @@ TEST_CASE("[ResourceLoader] Last worker reference retires its token") {
 	token.unref();
 	loader->release.post();
 	auto *pool = WorkerThreadPool::get_singleton();
-	while (!pool->is_task_completed(loader->task_id)) {
-		OS::get_singleton()->delay_usec(100);
-	}
+	wait_completed(pool, loader->task_id);
 	MessageQueue::get_main_singleton()->flush();
 	Object *remaining = ObjectDB::get_instance(id);
 	CHECK_MESSAGE(remaining == nullptr, "Completed loader worker left its zero-reference token alive");
@@ -246,14 +264,9 @@ TEST_CASE("[ResourceLoader] Nested connections survive task retirement") {
 	CHECK_MESSAGE(entered, "Nested child did not enter before the deadline");
 	if (!entered) {
 		loader->release.post();
-		while (!loader->entered.try_wait()) {
-			OS::get_singleton()->delay_usec(100);
-		}
 	}
 	auto *pool = WorkerThreadPool::get_singleton();
-	while (!pool->is_task_completed(loader->parent_task_id)) {
-		OS::get_singleton()->delay_usec(100);
-	}
+	wait_completed(pool, loader->parent_task_id);
 	ObjectID parent_id = parent->get_instance_id();
 	if (!child_first) {
 		parent.unref();
@@ -264,9 +277,7 @@ TEST_CASE("[ResourceLoader] Nested connections survive task retirement") {
 	if (loader->child_token.is_valid()) {
 		ObjectID child_id = loader->child_token->get_instance_id();
 		loader->release.post();
-		while (!pool->is_task_completed(loader->task_id)) {
-			OS::get_singleton()->delay_usec(100);
-		}
+		wait_completed(pool, loader->task_id);
 		Error error;
 		Ref<Resource> resource = ResourceLoader::_load_complete(*loader->child_token.ptr(), &error);
 		CHECK(error == OK);
@@ -350,6 +361,10 @@ TEST_CASE("[ResourceLoader] Propagated child connections survive parent retireme
 }
 
 TEST_CASE("[ResourceLoader] Retired child connections follow a live parent") {
+	if (WorkerThreadPool::get_singleton()->get_thread_count() * 3 / 10 < 2) {
+		MESSAGE("Needs two low-priority worker slots; the grandparent load holds one while the parent runs");
+		return;
+	}
 	Ref<AwaitingLoader> loader;
 	loader.instantiate();
 	ResourceLoader::add_resource_format_loader(loader, true);
@@ -522,9 +537,7 @@ TEST_CASE("[ResourceLoader] Full deferred queue preserves native task ownership"
 	token.unref();
 	loader->release.post();
 	auto *pool = WorkerThreadPool::get_singleton();
-	while (!pool->is_task_completed(loader->task_id)) {
-		OS::get_singleton()->delay_usec(100);
-	}
+	wait_completed(pool, loader->task_id);
 	CHECK(ObjectDB::get_instance(id) != nullptr);
 	queue->clear();
 	if (shutdown) {
@@ -535,10 +548,8 @@ TEST_CASE("[ResourceLoader] Full deferred queue preserves native task ownership"
 				ResourceLoader::LOAD_THREAD_SPAWN_SINGLE, ResourceLoader::CACHE_MODE_IGNORE);
 		CHECK(recovery.is_valid());
 		if (recovery.is_valid()) {
-			loader->entered.wait();
-			while (!pool->is_task_completed(loader->task_id)) {
-				OS::get_singleton()->delay_usec(100);
-			}
+			CHECK_MESSAGE(wait_entered(loader->entered), "Recovery load did not enter before the deadline");
+			wait_completed(pool, loader->task_id);
 			recovery.unref();
 			queue->flush();
 		}
