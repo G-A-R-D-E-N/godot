@@ -172,6 +172,10 @@ public:
 };
 
 static void wait_completed(WorkerThreadPool *p_pool, WorkerThreadPool::TaskID p_id) {
+	if (p_id == WorkerThreadPool::INVALID_TASK_ID) {
+		FAIL("Worker task was never started");
+		return;
+	}
 	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 20000;
 	while (!p_pool->is_task_completed(p_id) && OS::get_singleton()->get_ticks_msec() < deadline) {
 		OS::get_singleton()->delay_usec(100);
