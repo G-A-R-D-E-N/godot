@@ -123,6 +123,13 @@ layout(set = 0, binding = 20, std430) restrict buffer LabCounts {
 }
 lab_counts;
 
+#ifndef MODE_SPATIAL
+layout(set = 0, binding = 21, std430) restrict buffer LabMask {
+	uint bits[];
+}
+lab_mask;
+#endif
+
 #define LAB_PATH 0
 #define LAB_PRESENT 1
 #define LAB_DROPPED 2
@@ -775,6 +782,10 @@ void main() {
 	if (reservoir) {
 #ifdef LAB_COUNTS
 		atomicAdd(lab_counts.words[LAB_PATH], 1u);
+		uint lab_index = uint(pixel.y) * uint(params.size.x) + uint(pixel.x);
+		if ((lab_index >> 5u) < uint(lab_mask.bits.length())) {
+			atomicOr(lab_mask.bits[lab_index >> 5u], 1u << (lab_index & 31u));
+		}
 #endif
 		resample_reservoir(pixel, cluster_offset, cluster_z);
 	}

@@ -174,6 +174,7 @@ bool DirectResamplerRD::_ensure_device() {
 	params_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(Params));
 	debug_buffer = RD::get_singleton()->storage_buffer_create(DEBUG_BYTES);
 	lab_buffer = RD::get_singleton()->storage_buffer_create(LAB_BYTES);
+	lab_mask_buffer = RD::get_singleton()->storage_buffer_create(LAB_MASK_BYTES);
 	history_slots_dummy = _dummy(RD::DATA_FORMAT_R16_UNORM, RD::TEXTURE_TYPE_2D_ARRAY, "Direct Resampled History Slots Dummy");
 	history_factors_dummy = _dummy(RD::DATA_FORMAT_R16_UNORM, RD::TEXTURE_TYPE_2D_ARRAY, "Direct Resampled History Factors Dummy");
 	history_guide_dummy = _dummy(RD::DATA_FORMAT_R32G32_UINT, RD::TEXTURE_TYPE_2D, "Direct Resampled History Guide Dummy");
@@ -226,6 +227,22 @@ void DirectResamplerRD::_write_lab_line() {
 	lab_file->flush();
 }
 
+void DirectResamplerRD::_write_lab_mask() {
+	if (!lab_pending || lab_path.is_empty()) {
+		return;
+	}
+	const Vector<uint8_t> data = RD::get_singleton()->buffer_get_data(lab_mask_buffer);
+	Ref<FileAccess> file = FileAccess::open(lab_path + ".mask", FileAccess::WRITE);
+	if (file.is_null() || data.size() < int(LAB_MASK_BYTES)) {
+		ERR_PRINT(vformat("The direct resampler's lab mask %s.mask could not be written.", lab_path));
+		return;
+	}
+	file->store_32(uint32_t(lab_size.x));
+	file->store_32(uint32_t(lab_size.y));
+	file->store_64(lab_frame);
+	file->store_buffer(data.ptr(), LAB_MASK_BYTES);
+}
+
 void DirectResamplerRD::_flush_lab_line() {
 	if (lab_pending && lab_file.is_valid()) {
 		_write_lab_line();
@@ -261,6 +278,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	}
 
 	if (settings.lab_log != lab_path) {
+		_write_lab_mask();
 		_flush_lab_line();
 		lab_file.unref();
 		lab_path = settings.lab_log;
@@ -276,6 +294,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	if (lab) {
 		_flush_lab_line();
 		rd->buffer_clear(lab_buffer, 0, LAB_BYTES);
+		rd->buffer_clear(lab_mask_buffer, 0, LAB_MASK_BYTES);
 		const String text = lab_settings_text(settings);
 		if (text != lab_settings) {
 			lab_settings = text;
@@ -433,6 +452,9 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 12, debug_buffer));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 18, head_state_previous));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 19, head_state_next));
+	if (lab) {
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 21, lab_mask_buffer));
+	}
 
 	const RID shader_rid = shader->version_get_shader(shader_version, lab ? 2 : 0);
 	RD::ComputeListID list = rd->compute_list_begin();
@@ -504,7 +526,7 @@ void DirectResamplerRD::free_device_resources() {
 	}
 	_flush_debug_line();
 	_flush_lab_line();
-	const RID owned[] = { params_buffer, debug_buffer, lab_buffer, history_slots_dummy, history_factors_dummy, history_guide_dummy, header_dummy };
+	const RID owned[] = { params_buffer, debug_buffer, lab_buffer, lab_mask_buffer, history_slots_dummy, history_factors_dummy, history_guide_dummy, header_dummy };
 	for (const RID &rid : owned) {
 		if (rid.is_valid()) {
 			rd->free_rid(rid);
@@ -513,6 +535,7 @@ void DirectResamplerRD::free_device_resources() {
 	params_buffer = RID();
 	debug_buffer = RID();
 	lab_buffer = RID();
+	lab_mask_buffer = RID();
 	history_slots_dummy = RID();
 	history_factors_dummy = RID();
 	history_guide_dummy = RID();

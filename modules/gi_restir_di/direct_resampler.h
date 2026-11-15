@@ -125,6 +125,7 @@ public:
 	static constexpr uint32_t DEBUG_BYTES = (DEBUG_HEADER_WORDS + DEBUG_SLOTS) * 4;
 	static constexpr uint32_t LAB_HEADER_WORDS = 8;
 	static constexpr uint32_t LAB_BYTES = (LAB_HEADER_WORDS + DEBUG_SLOTS) * 4;
+	static constexpr uint32_t LAB_MASK_BYTES = 2560 * 1440 / 8;
 
 	static void register_settings();
 	static Settings clamp_settings(bool p_enabled, int p_head, int p_tail_samples, float p_floor, int p_energy_arm);
@@ -175,6 +176,7 @@ private:
 	RID history_guide_dummy;
 	RID debug_buffer;
 	RID lab_buffer;
+	RID lab_mask_buffer;
 	bool device_ready = false;
 	Ref<FileAccess> debug_file;
 	String debug_path;
@@ -193,6 +195,7 @@ private:
 	void _write_debug_line();
 	void _flush_debug_line();
 	void _write_lab_line();
+	void _write_lab_mask();
 	void _flush_lab_line();
 	RID _dummy(RD::DataFormat p_format, RD::TextureType p_type, const char *p_name);
 };
