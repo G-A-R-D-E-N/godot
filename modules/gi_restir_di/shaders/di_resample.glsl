@@ -140,6 +140,7 @@ lab_mask;
 
 #define DEBUG_STALE_PRIOR 1u
 #define DEBUG_COUNT 2u
+#define DEBUG_NO_STAMP 4u
 #define RECORD_EXACT_CHECK 0x80000000u
 #define RESERVOIRS_OFF 0u
 #define RESERVOIRS_B1 1u
@@ -749,7 +750,11 @@ void main() {
 	stream_seed = di_hash(uint(pixel.y) * 65537u + uint(pixel.x)) ^ di_hash(params.frame ^ 0x68e31da4u);
 	if (params.reservoirs != RESERVOIRS_OFF && params.temporal_reuse != 0u && has_history) {
 		uint held = imageLoad(history_header, history_pixel).r;
+#ifdef LAB_COUNTS
+		if ((params.debug_flags & DEBUG_NO_STAMP) != 0u ? (((held >> 24u) & 1u) == reservoir_arm() && ((held >> 16u) & 0xFFu) != 0u) : reservoir_reads(held, params.counter - 1u)) {
+#else
 		if (reservoir_reads(held, params.counter - 1u)) {
+#endif
 			uvec2 values = imageLoad(history_values, history_pixel).xy;
 			other_present[0] = true;
 			other_slot[0] = held & 0xFFFFu;

@@ -182,6 +182,9 @@ TEST_CASE("[DirectResampler] The lab mass bound is the registered one at the gat
 	settings.c_full = 255;
 	CHECK(DirectResamplerRD::lab_mass_bound(settings) == 1570);
 	CHECK(DirectResamplerRD::lab_settings_text(settings).ends_with(" mass_bound=1570"));
+	CHECK(DirectResamplerRD::lab_settings_text(settings).contains(" stale_prior=0 no_stamp=0 mass_bound="));
+	settings.no_stamp = true;
+	CHECK(DirectResamplerRD::lab_settings_text(settings).contains(" no_stamp=1 mass_bound=1570"));
 }
 
 } // namespace TestDirectResampler

@@ -58,6 +58,7 @@ public:
 		bool live_energy = false;
 		uint32_t tail_visibility = 0;
 		bool stale_prior = false;
+		bool no_stamp = false;
 		String debug_log;
 		String lab_log;
 		uint32_t reservoirs = 0;
@@ -120,6 +121,7 @@ public:
 
 	static constexpr uint32_t DEBUG_FLAG_STALE_PRIOR = 1;
 	static constexpr uint32_t DEBUG_FLAG_COUNT = 2;
+	static constexpr uint32_t DEBUG_FLAG_NO_STAMP = 4;
 	static constexpr uint32_t DEBUG_HEADER_WORDS = 4;
 	static constexpr uint32_t DEBUG_SLOTS = 65536;
 	static constexpr uint32_t DEBUG_BYTES = (DEBUG_HEADER_WORDS + DEBUG_SLOTS) * 4;

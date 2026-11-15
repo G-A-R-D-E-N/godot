@@ -55,6 +55,7 @@ void DirectResamplerRD::register_settings() {
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("debug/head_swap_window"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("debug/tail_visibility"), PROPERTY_HINT_ENUM, "Traced,Visible,Hashed"), 0);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("debug/stale_prior"), false);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("debug/no_stamp"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::STRING, DI_RESAMPLED_SETTING("debug/log"), PROPERTY_HINT_GLOBAL_SAVE_FILE, "*.txt"), String());
 	GLOBAL_DEF(PropertyInfo(Variant::STRING, DI_RESAMPLED_SETTING("debug/lab_log"), PROPERTY_HINT_GLOBAL_SAVE_FILE, "*.txt"), String());
 	DirectSamplerLab::register_settings();
@@ -94,6 +95,7 @@ DirectResamplerRD::Settings DirectResamplerRD::get_project_settings() {
 	Settings settings = clamp_settings(GLOBAL_GET(DI_RESAMPLED_SETTING("enabled")), GLOBAL_GET(DI_RESAMPLED_SETTING("head")), GLOBAL_GET(DI_RESAMPLED_SETTING("tail_samples")), GLOBAL_GET(DI_RESAMPLED_SETTING("floor")), GLOBAL_GET(DI_RESAMPLED_SETTING("energy_arm")));
 	settings.tail_visibility = uint32_t(CLAMP(int(GLOBAL_GET(DI_RESAMPLED_SETTING("debug/tail_visibility"))), 0, 2));
 	settings.stale_prior = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/stale_prior"));
+	settings.no_stamp = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/no_stamp"));
 	settings.debug_log = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/log"));
 	settings.lab_log = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/lab_log"));
 	clamp_reservoir_settings(settings, GLOBAL_GET(DI_RESAMPLED_SETTING("reservoirs")), GLOBAL_GET(DI_RESAMPLED_SETTING("temporal_reuse")), GLOBAL_GET(DI_RESAMPLED_SETTING("spatial_neighbors")), GLOBAL_GET(DI_RESAMPLED_SETTING("spatial_radius")), GLOBAL_GET(DI_RESAMPLED_SETTING("c_full")), GLOBAL_GET(DI_RESAMPLED_SETTING("m_temporal_cap")), GLOBAL_GET(DI_RESAMPLED_SETTING("m_stored_cap")), GLOBAL_GET("rendering/global_illumination/direct/dynamic_history_cap"), GLOBAL_GET(DI_RESAMPLED_SETTING("head_rank")), GLOBAL_GET(DI_RESAMPLED_SETTING("head_swap_margin")), GLOBAL_GET(DI_RESAMPLED_SETTING("head_swap_frames")), GLOBAL_GET(DI_RESAMPLED_SETTING("debug/head_swap_window")));
@@ -126,6 +128,7 @@ String DirectResamplerRD::lab_settings_text(const Settings &p_settings) {
 	text += " energy_arm=" + String(p_settings.live_energy ? "Live" : "Mean");
 	text += " tail_visibility=" + String(visibility[MIN(p_settings.tail_visibility, 2u)]);
 	text += " stale_prior=" + itos(p_settings.stale_prior ? 1 : 0);
+	text += " no_stamp=" + itos(p_settings.no_stamp ? 1 : 0);
 	text += " mass_bound=" + itos(lab_mass_bound(p_settings));
 	return text;
 }
@@ -410,7 +413,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	params.tail_samples = settings.tail_samples;
 	params.history_valid = history ? 1 : 0;
 	params.live_energy = settings.live_energy ? 1 : 0;
-	params.debug_flags = (settings.stale_prior ? DEBUG_FLAG_STALE_PRIOR : 0) | (counting ? DEBUG_FLAG_COUNT : 0);
+	params.debug_flags = (settings.stale_prior ? DEBUG_FLAG_STALE_PRIOR : 0) | (counting ? DEBUG_FLAG_COUNT : 0) | (settings.no_stamp ? DEBUG_FLAG_NO_STAMP : 0);
 	params.reservoirs = settings.reservoirs;
 	params.c_full = settings.c_full;
 	params.m_temporal_cap = settings.m_temporal_cap;
