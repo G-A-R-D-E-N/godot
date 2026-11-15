@@ -45,6 +45,7 @@ class XRInterface;
 #endif // XR_DISABLED
 
 class Image;
+class RenderGeometryInstance;
 class RenderSceneBuffers;
 
 class RenderingMethod {
@@ -123,6 +124,7 @@ public:
 	virtual void instance_geometry_get_shader_parameter_list(RID p_instance, List<PropertyInfo> *p_parameters) const = 0;
 	virtual Variant instance_geometry_get_shader_parameter(RID p_instance, const StringName &p_parameter) const = 0;
 	virtual Variant instance_geometry_get_shader_parameter_default_value(RID p_instance, const StringName &p_parameter) const = 0;
+	virtual RenderGeometryInstance *instance_get_geometry_instance(RID p_instance) const = 0;
 
 	/* PIPELINES */
 

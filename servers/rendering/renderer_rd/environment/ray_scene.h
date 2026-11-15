@@ -38,6 +38,7 @@
 #include "core/templates/hash_set.h"
 #include "core/templates/local_vector.h"
 #include "core/templates/paged_array.h"
+#include "core/templates/safe_refcount.h"
 #include "servers/rendering/rendering_device.h"
 #include "servers/rendering/rendering_server_enums.h"
 #include "servers/rendering/rendering_server_types.h"
@@ -46,8 +47,16 @@ class RenderGeometryInstance;
 
 namespace RendererRD {
 
+class RayAccel;
+
 class RayScene {
 public:
+	enum Backend {
+		BACKEND_SOFTWARE,
+		BACKEND_HARDWARE,
+		BACKEND_AUTO,
+	};
+
 	static constexpr uint32_t BLAS_LEAF_SIZE = 4;
 	static constexpr uint32_t TLAS_LEAF_SIZE = 1;
 	static constexpr uint32_t BLAS_MAX_DEPTH = 24;
@@ -60,8 +69,26 @@ public:
 	enum MaterialFlags {
 		MATERIAL_FLAG_TWO_SIDED = 1,
 		MATERIAL_FLAG_SKIP = 2,
+		MATERIAL_FLAG_BLEND = 4,
 		MATERIAL_FLAG_SHADOW_PASS = 8,
+		MATERIAL_FLAG_SHADOW_ONLY = 16,
 	};
+
+	static constexpr uint32_t CANDIDATE_FLAGS = MATERIAL_FLAG_SKIP | MATERIAL_FLAG_BLEND | MATERIAL_FLAG_SHADOW_PASS | MATERIAL_FLAG_SHADOW_ONLY;
+
+	enum InstanceClass {
+		INSTANCE_CLASS_OPAQUE,
+		INSTANCE_CLASS_CANDIDATE,
+		INSTANCE_CLASS_SPLIT,
+	};
+
+	static constexpr uint32_t INSTANCE_CLASS_MASK = 3;
+	static constexpr uint32_t INSTANCE_REMAP_SHIFT = 2;
+	static constexpr uint32_t HW_GROUP_COUNT = 7;
+	static constexpr uint32_t HW_BLEND_INSTANCES = 8;
+	static constexpr uint32_t HW_HEADER_WORDS = 9;
+	static constexpr uint32_t HW_ALL_GROUPS = 0x80;
+	static constexpr uint32_t ALL_CASTERS = 0xFFFFFFFF;
 
 	struct Node {
 		float bmin[3];
@@ -87,7 +114,7 @@ public:
 
 	struct Material {
 		float albedo[3];
-		float pad;
+		float coverage;
 		float emission[3];
 		uint32_t flags;
 	};
@@ -111,6 +138,7 @@ public:
 
 	static_assert(sizeof(Light) == 96);
 	static_assert(sizeof(Instance) == 64);
+	static_assert((uint64_t(TLAS_LEAF_SIZE) << TLAS_MAX_DEPTH) <= (uint64_t(1) << 24), "A hardware instance custom index is 24 bits.");
 
 	struct LightCensus {
 		uint32_t candidates = 0;
@@ -145,9 +173,15 @@ public:
 	static void build_bvh(LocalVector<BuildPrimitive> &p_primitives, uint32_t p_max_leaf, uint32_t p_max_depth, LocalVector<Node> &r_nodes);
 	static float light_energy(float p_energy, float p_intensity, RSE::LightType p_type, bool p_physical_units, float p_exposure, const Vector2 &p_area_size, bool p_area_normalize);
 	static void pack_area(const Basis &p_basis, const Vector2 &p_area_size, Light &r_light);
+	static uint32_t shadow_cast_flags(RSE::ShadowCastingSetting p_setting);
+	static uint64_t surface_candidates(uint32_t p_surface, uint32_t p_flags);
+	static uint32_t instance_class(uint64_t p_candidates, uint64_t p_split);
+	static uint32_t hw_instance_mask(uint32_t p_layer_mask, const uint32_t *p_groups, uint32_t p_group_count);
 
 private:
 	static RayScene *singleton;
+	static SafeFlag needed;
+	static bool _settings_need();
 
 	struct MeshEntry {
 		LocalVector<Vector3> positions;
@@ -160,6 +194,11 @@ private:
 		uint32_t node_offset = 0;
 		uint32_t triangle_offset = 0;
 		AABB aabb;
+		uint64_t hw_generation = 0;
+		uint64_t hw_split = 0;
+		uint32_t hw_opaque = 0;
+		uint32_t hw_region = 0;
+		LocalVector<uint32_t> hw_order;
 	};
 
 	Mutex mesh_mutex;
@@ -171,6 +210,11 @@ private:
 	LocalVector<Triangle> triangles;
 
 	LocalVector<Instance> instances;
+	struct ShellRange {
+		uint32_t offset = 0;
+		uint32_t count = 0;
+	};
+	HashMap<RID, ShellRange> shell_ranges;
 	struct CachedMaterial {
 		Material entry;
 		int32_t scale_index = -1;
@@ -217,6 +261,25 @@ private:
 	uint32_t material_capacity = 0;
 	uint32_t light_capacity = 0;
 
+	RayAccel *accel = nullptr;
+	int32_t backend_requested = -1;
+	bool backend_warned = false;
+	bool hardware_refused = false;
+	LocalVector<uint32_t> hw_remap;
+	RID hw_remap_buffer;
+	uint32_t hw_remap_capacity = 0;
+	bool hw_remap_dirty = false;
+	uint64_t hw_mesh_generation = 0;
+	LocalVector<uint32_t> hw_order;
+	LocalVector<Transform3D> hw_transforms;
+	LocalVector<RID> hw_meshes;
+	LocalVector<uint32_t> hw_classes;
+	LocalVector<uint8_t> hw_usable;
+	uint32_t hw_skipped_unbuilt = 0;
+	uint32_t hw_skipped_cap = 0;
+	uint32_t hw_groups[HW_GROUP_COUNT] = {};
+	uint32_t hw_group_count = 0;
+
 	MeshEntry *_capture_mesh(RID p_mesh);
 	void _capture_surface(MeshEntry &r_mesh, uint32_t p_surface, const RenderingServerTypes::SurfaceData &p_surface_data);
 	void _build_blas(MeshEntry &p_mesh);
@@ -228,17 +291,35 @@ private:
 	void _select_lights(const Vector3 &p_camera);
 	void _print_census();
 	static void _ensure_buffer(RID &r_buffer, uint32_t &r_capacity, uint32_t p_count, uint32_t p_stride, const char *p_name);
+	void _backend_tick();
+	void _hw_begin();
+	void _hw_instance(RID p_mesh_rid, MeshEntry &r_mesh, uint64_t p_material_candidates, uint64_t p_candidates, const Transform3D &p_transform, Instance &r_instance);
+	void _hw_update(const LocalVector<BuildPrimitive> &p_primitives, bool p_rebuilt);
+	void _hw_assembled();
+	void _hw_mesh_removed(RID p_mesh);
+	void _hw_free();
+	bool _hw_ready() const;
 
 public:
 	static RayScene *get_singleton() { return singleton; }
+	static bool is_needed();
+	static void watch_needed();
+	static void reset_needed_for_tests() { needed.clear(); }
 
 	void mesh_surface_added(RID p_mesh, uint32_t p_surface, const RenderingServerTypes::SurfaceData &p_surface_data);
 	void mesh_cleared(RID p_mesh);
 
 	void update(const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const Vector<RID> &p_directional_lights, RID p_camera_attributes, const Vector3 &p_camera_position);
 
-	bool is_ready() const { return scene_data_buffer.is_valid() && blas_node_buffer.is_valid() && tlas_node_buffer.is_valid(); }
+	bool is_ready() const { return scene_data_buffer.is_valid() && blas_node_buffer.is_valid() && tlas_node_buffer.is_valid() && (!accel || _hw_ready()); }
+	bool uses_hardware() const { return accel != nullptr; }
+	void refuse_hardware(const String &p_reason);
+	RID get_tlas() const;
+	RID get_hw_remap_buffer() const { return hw_remap_buffer; }
+	void append_uniforms(LocalVector<RD::Uniform> &r_uniforms) const;
 	Vector3 get_anchor() const { return anchor; }
+	bool shell_material_range(RID p_instance, uint32_t &r_offset, uint32_t &r_count) const;
+	void collect_moved_instances(uint64_t &r_signature, Vector3 &r_anchor, HashMap<uint64_t, AABB> &r_known, LocalVector<AABB> &r_moved) const;
 	RID get_blas_node_buffer() const { return blas_node_buffer; }
 	RID get_triangle_buffer() const { return triangle_buffer; }
 	RID get_instance_buffer() const { return instance_buffer; }

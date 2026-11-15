@@ -764,6 +764,7 @@ void RendererSceneCull::instance_set_base(RID p_instance, RID p_base) {
 				geom->geometry_instance->set_use_lightmap(RID(), instance->lightmap_uv_scale, instance->lightmap_slice_index);
 				geom->geometry_instance->set_instance_shader_uniforms_offset(instance->instance_uniforms.location());
 				geom->geometry_instance->set_cast_double_sided_shadows(instance->cast_shadows == RSE::SHADOW_CASTING_SETTING_DOUBLE_SIDED);
+				geom->geometry_instance->set_cast_shadows_setting(instance->cast_shadows);
 				if (instance->lightmap_sh.size() == 9) {
 					geom->geometry_instance->set_lightmap_capture(instance->lightmap_sh.ptr());
 				}
@@ -1389,6 +1390,7 @@ void RendererSceneCull::instance_geometry_set_cast_shadows_setting(RID p_instanc
 		ERR_FAIL_NULL(geom->geometry_instance);
 
 		geom->geometry_instance->set_cast_double_sided_shadows(instance->cast_shadows == RSE::SHADOW_CASTING_SETTING_DOUBLE_SIDED);
+		geom->geometry_instance->set_cast_shadows_setting(instance->cast_shadows);
 	}
 
 	_instance_queue_update(instance, false, true);
@@ -1627,6 +1629,14 @@ Variant RendererSceneCull::instance_geometry_get_shader_parameter_default_value(
 	ERR_FAIL_NULL_V(instance, Variant());
 
 	return instance->instance_uniforms.get_default(p_parameter);
+}
+
+RenderGeometryInstance *RendererSceneCull::instance_get_geometry_instance(RID p_instance) const {
+	const Instance *instance = instance_owner.get_or_null(p_instance);
+	if (!instance || instance->base_type != RSE::INSTANCE_MESH || !instance->base_data) {
+		return nullptr;
+	}
+	return static_cast<const InstanceGeometryData *>(instance->base_data)->geometry_instance;
 }
 
 void RendererSceneCull::mesh_generate_pipelines(RID p_mesh, bool p_background_compilation) {

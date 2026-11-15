@@ -33,6 +33,8 @@
 #include "core/config/project_settings.h"
 #include "core/math/geometry_3d.h"
 #include "core/os/os.h"
+#include "servers/rendering/renderer_rd/environment/ddgi.h"
+#include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
 #include "servers/rendering/rendering_server_globals.h"
@@ -223,6 +225,7 @@ void LightStorage::light_free(RID p_rid) {
 
 	// delete the texture
 	Light *light = light_owner.get_or_null(p_rid);
+	_release_direct_shells(light->direct);
 	light->dependency.deleted_notify(p_rid);
 	light_owner.free(p_rid);
 }
@@ -348,6 +351,49 @@ void LightStorage::light_set_shadow_caster_mask(RID p_light, uint32_t p_caster_m
 
 	light->version++;
 	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
+}
+
+void LightStorage::light_set_direct_shadow(RID p_light, bool p_owned, float p_movement, float p_size, float p_clearance, const TypedArray<RID> &p_shells, const PackedInt32Array &p_surfaces) {
+	Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL(light);
+	ERR_FAIL_COND(p_shells.size() != p_surfaces.size());
+	ERR_FAIL_COND(p_shells.size() > int(DirectLightTable::MAX_SHELLS));
+	for (int i = 0; i < p_surfaces.size(); i++) {
+		ERR_FAIL_COND(p_surfaces[i] < DirectLightTable::WHOLE_SHELL);
+		const RID shell = p_shells[i];
+		ERR_FAIL_COND(!shell.is_valid());
+	}
+
+	light->direct.owned = p_owned;
+	light->direct.movement = MAX(p_movement, 0.0f);
+	light->direct.size = p_size;
+	light->direct.clearance = MAX(p_clearance, 0.0f);
+	_release_direct_shells(light->direct);
+	light->direct.shell_count = p_shells.size();
+	for (uint32_t i = 0; i < light->direct.shell_count; i++) {
+		const RID shell = p_shells[i];
+		light->direct.shell_instance[i] = shell;
+		light->direct.shell_surface[i] = p_surfaces[i];
+		uint32_t *count = direct_shells.getptr(shell);
+		if (count) {
+			(*count)++;
+		} else {
+			direct_shells.insert(shell, 1);
+		}
+	}
+}
+
+void LightStorage::_release_direct_shells(const DirectLightTable::Setting &p_setting) {
+	for (uint32_t i = 0; i < p_setting.shell_count; i++) {
+		uint32_t *count = direct_shells.getptr(p_setting.shell_instance[i]);
+		if (!count) {
+			continue;
+		}
+		(*count)--;
+		if (*count == 0) {
+			direct_shells.erase(p_setting.shell_instance[i]);
+		}
+	}
 }
 
 uint32_t LightStorage::light_get_shadow_caster_mask(RID p_light) const {
@@ -1155,6 +1201,14 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 
 	bool using_forward_ids = forward_id_storage->uses_forward_ids();
 
+	const bool direct_lights_enabled = !using_forward_ids && GLOBAL_GET_CACHED(bool, "rendering/global_illumination/direct/enabled") && RayScene::is_needed();
+	const bool track_direct_lights = direct_lights_enabled && p_render_data->reflection_probe.is_null();
+	if (!direct_lights_enabled) {
+		direct_lights.clear();
+	} else if (track_direct_lights) {
+		direct_lights.begin_frame(RSG::rasterizer->get_frame_number());
+	}
+
 	for (uint32_t i = 0; i < (omni_light_count + spot_light_count + area_light_count); i++) {
 		uint32_t index;
 		LightData *light_data_ptr;
@@ -1277,6 +1331,30 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 			}
 		}
 		light_data.mask = light->cull_mask;
+
+		light_data.flags = 0;
+		if (track_direct_lights && DirectLightTable::owns(light->direct.owned, type == RSE::LIGHT_AREA, light->cull_mask, energy, light->projector.is_valid())) {
+			DirectLightTable::Lamp lamp;
+			lamp.position = light_transform.origin;
+			lamp.range = radius;
+			lamp.movement = light->direct.movement;
+			lamp.size = light->direct.resolved_size(size);
+			lamp.caster_mask = light->shadow_caster_mask;
+			lamp.type = type;
+			lamp.clearance = light->direct.clearance;
+			lamp.shell_count = light->direct.shell_count;
+			const RayScene *ray_scene = RayScene::get_singleton();
+			for (uint32_t k = 0; k < lamp.shell_count; k++) {
+				lamp.shell_instance[k] = light->direct.shell_instance[k];
+				lamp.shell_surface[k] = light->direct.shell_surface[k];
+				uint32_t offset = 0;
+				uint32_t count = 0;
+				if (ray_scene && ray_scene->shell_material_range(lamp.shell_instance[k], offset, count)) {
+					lamp.resolved |= 1u << k;
+				}
+			}
+			light_data.flags = DirectLightTable::pack_flags(direct_lights.observe(light_instance->self, lamp), shadow_opacity_fade);
+		}
 
 		light_data.sscs_index = 0xffffffff;
 		for (uint32_t j = 0; j < p_render_data->local_contact_shadows.size(); j++) {

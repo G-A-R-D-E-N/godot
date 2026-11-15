@@ -340,7 +340,11 @@ void ShaderRD::_build_variant_code(StringBuilder &builder, uint32_t p_variant, c
 				}
 			} break;
 			case StageTemplate::Chunk::TYPE_TEXT: {
-				builder.append(chunk.text.get_data());
+				if (strstr(general_defines.get_data(), "#define SHADER_GLSL_VERSION_460") && strstr(chunk.text.get_data(), "#version 450")) {
+					builder.append(String::utf8(chunk.text.get_data()).replace("#version 450", "#version 460"));
+				} else {
+					builder.append(chunk.text.get_data());
+				}
 			} break;
 		}
 	}

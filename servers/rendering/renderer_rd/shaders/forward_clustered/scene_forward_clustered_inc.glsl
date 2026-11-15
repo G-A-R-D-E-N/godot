@@ -166,6 +166,10 @@ bool sc_use_far_shadow() {
 	return ((sc_packed_1() >> 13) & 1U) != 0;
 }
 
+bool sc_use_direct_shadow() {
+	return ((sc_packed_1() >> 14) & 1U) != 0;
+}
+
 float sc_luminance_multiplier() {
 	// Not used in clustered renderer but we share some code with the mobile renderer that requires this.
 	return 1.0;
@@ -542,6 +546,9 @@ layout(set = 1, binding = 48) uniform texture2DArray far_shadow_heights[FAR_SHAD
 layout(set = 1, binding = 49) uniform texture2DArray far_shadow_bands[FAR_SHADOW_SLOTS];
 layout(set = 1, binding = 50) uniform texture2DArray far_shadow_near[FAR_SHADOW_SLOTS];
 layout(set = 1, binding = 51) uniform texture2DArray far_shadow_terrain[FAR_SHADOW_SLOTS];
+
+layout(set = 1, binding = 52) uniform texture2DArray direct_shadow_slots;
+layout(set = 1, binding = 53) uniform texture2DArray direct_shadow_factors;
 
 layout(set = 1, binding = 43, std430) buffer restrict readonly SkySHBuffer {
 	vec4 coefficients[9];
