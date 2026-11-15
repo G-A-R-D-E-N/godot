@@ -331,6 +331,9 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	params.kernel_floor = settings.kernel_floor;
 	params.range_scale = settings.range_sigmas > 0.0f ? 0.5f / (settings.range_sigmas * settings.range_sigmas) : 0.0f;
 	params.world_per_pixel = 2.0f * Math::abs(float(inverse.columns[1][1])) / float(size.y);
+	const String dump_request = GLOBAL_GET("rendering/global_illumination/direct/dump_request");
+	viewport->counted = !dump_request.is_empty() && dump_request != served_request;
+	params.count = viewport->counted ? 1 : 0;
 	rd->buffer_update(params_buffer, 0, sizeof(Params), &params);
 	rd->buffer_clear(counter_buffer, 0, COUNTER_BYTES);
 
@@ -462,7 +465,7 @@ void DirectShadows::serve_dump_request(const Ref<RenderSceneBuffersRD> &p_render
 		return;
 	}
 	Ref<ViewportData> viewport = p_render_buffers->get_custom_data(RB_SCOPE_DIRECT_SHADOWS);
-	if (served_request == request || viewport->size != largest_size_before || !p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SLOTS) || viewport->last_frame == 0) {
+	if (served_request == request || viewport->size != largest_size_before || !p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SLOTS) || viewport->last_frame == 0 || !viewport->counted) {
 		return;
 	}
 	served_request = request;

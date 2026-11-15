@@ -353,7 +353,9 @@ void main() {
 	vec3 relative = to_world(vertex);
 	if (any(greaterThan(abs(relative), params.region_half))) {
 		write_empty(pixel, factor_layers);
-		atomicAdd(counters.past_region_pixels, 1u);
+		if (params.count != 0u) {
+			atomicAdd(counters.past_region_pixels, 1u);
+		}
 		return;
 	}
 
@@ -374,16 +376,20 @@ void main() {
 	uint cluster_z = uint(clamp((-vertex.z / params.z_far) * 32.0, 0.0, 31.0));
 	walk_cluster(cluster_offset, cluster_z, false, vertex, normal, view, roughness);
 	walk_cluster(cluster_offset + params.cluster_type_size, cluster_z, true, vertex, normal, view, roughness);
-	atomicAdd(counters.walked_lights, walked);
-	atomicMax(counters.most_walked, walked);
+	if (params.count != 0u) {
+		atomicAdd(counters.walked_lights, walked);
+		atomicMax(counters.most_walked, walked);
+	}
 
 	if (own_count + rest_count == 0u) {
 		write_empty(pixel, factor_layers);
 		return;
 	}
-	atomicAdd(counters.lit_pixels, 1u);
-	atomicMax(counters.most_lamps, own_count + rest_count);
-	atomicAdd(counters.passed_lights, own_count + rest_count);
+	if (params.count != 0u) {
+		atomicAdd(counters.lit_pixels, 1u);
+		atomicMax(counters.most_lamps, own_count + rest_count);
+		atomicAdd(counters.passed_lights, own_count + rest_count);
+	}
 
 	ivec2 history_pixel;
 	bool has_history = find_history(pixel, vertex, normal, view, history_pixel);
@@ -412,7 +418,9 @@ void main() {
 	bool has_rest = rest_count > 0u;
 	uint rest_key_value = max(rest_key & 0xFFFFu, 1u);
 	if (has_rest) {
-		atomicAdd(counters.rest_pixels, 1u);
+		if (params.count != 0u) {
+			atomicAdd(counters.rest_pixels, 1u);
+		}
 		if (has_history && !rest_reset && uint(round(imageLoad(history_slots, ivec3(history_pixel, int(own_limit))).r * 65535.0)) == rest_key_value) {
 			rest_accum = imageLoad(history_rest, history_pixel);
 		}
@@ -507,7 +515,9 @@ void main() {
 #endif
 	}
 	imageStore(ray_image, pixel, uvec4(ray_record));
-	atomicAdd(counters.rays, traced_rays);
+	if (params.count != 0u) {
+		atomicAdd(counters.rays, traced_rays);
+	}
 
 	vec3 shown = vec3(0.0);
 	float shown_weight = 0.0;

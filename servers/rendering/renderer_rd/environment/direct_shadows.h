@@ -108,6 +108,7 @@ private:
 		bool precise = false;
 		bool flip = false;
 		uint64_t last_frame = 0;
+		bool counted = false;
 		uint64_t table_generation = 0;
 		Transform3D last_camera;
 		Projection last_projection;
@@ -147,7 +148,8 @@ private:
 		float world_per_pixel;
 		float range_scale;
 		float dynamic_cap;
-		uint32_t pad[2];
+		uint32_t count;
+		uint32_t pad;
 	};
 
 	static constexpr uint32_t COUNTER_BYTES = 32;
