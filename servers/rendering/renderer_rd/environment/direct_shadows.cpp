@@ -417,7 +417,14 @@ void DirectShadows::_filter(const Ref<RenderSceneBuffersRD> &p_render_buffers, R
 		rd->compute_list_end();
 	};
 
-	if (p_settings.clamp_sigmas > 0.0f) {
+	bool any_dynamic = false;
+	for (const DirectLightTable::GpuSlot &lamp : lamp_data) {
+		if (lamp.dynamic != 0) {
+			any_dynamic = true;
+			break;
+		}
+	}
+	if (p_settings.clamp_sigmas > 0.0f && any_dynamic) {
 		LocalVector<RD::Uniform> uniforms;
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 9, accum));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 18, ray));

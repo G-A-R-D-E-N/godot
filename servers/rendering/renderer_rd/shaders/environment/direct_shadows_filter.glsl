@@ -80,23 +80,28 @@ void main() {
 	if (any(greaterThanEqual(pixel, params.size)) || imageLoad(guide_image, pixel).x == 0u) {
 		return;
 	}
-	Guide center = read_guide(pixel);
 	uint own_limit = params.entries - 1u;
 	uint slots[MAX_ENTRIES];
 	float rays[MAX_ENTRIES];
 	float hits[MAX_ENTRIES];
+	bool wanted = false;
 	for (uint i = 0u; i < own_limit; i++) {
 		slots[i] = read_slot(pixel, i);
+		if (slots[i] != 0u && direct_lamps.data[slots[i]].dynamic == 0u) {
+			slots[i] = 0u;
+		}
+		wanted = wanted || slots[i] != 0u;
 		rays[i] = 0.0;
 		hits[i] = 0.0;
 	}
+	if (!wanted) {
+		return;
+	}
+	Guide center = read_guide(pixel);
 	for (int dy = -CLAMP_RADIUS; dy <= CLAMP_RADIUS; dy++) {
 		for (int dx = -CLAMP_RADIUS; dx <= CLAMP_RADIUS; dx++) {
 			ivec2 at = pixel + ivec2(dx, dy);
 			if (any(lessThan(at, ivec2(0))) || any(greaterThanEqual(at, params.size))) {
-				continue;
-			}
-			if ((dx != 0 || dy != 0) && geometry_weight(center, read_guide(at)) < 0.5) {
 				continue;
 			}
 			uint ray = imageLoad(ray_image, at).x;
@@ -104,17 +109,25 @@ void main() {
 			if (slot == 0u) {
 				continue;
 			}
+			int match = -1;
 			for (uint i = 0u; i < own_limit; i++) {
 				if (slots[i] == slot) {
-					rays[i] += 1.0;
-					hits[i] += float(ray & 1u);
+					match = int(i);
 					break;
 				}
 			}
+			if (match < 0) {
+				continue;
+			}
+			if ((dx != 0 || dy != 0) && geometry_weight(center, read_guide(at)) < 0.5) {
+				continue;
+			}
+			rays[match] += 1.0;
+			hits[match] += float(ray & 1u);
 		}
 	}
 	for (uint i = 0u; i < own_limit; i++) {
-		if (slots[i] == 0u || rays[i] < params.clamp_min_rays || direct_lamps.data[slots[i]].dynamic == 0u) {
+		if (slots[i] == 0u || rays[i] < params.clamp_min_rays) {
 			continue;
 		}
 		vec2 accum = imageLoad(accum_image, ivec3(pixel, int(i))).rg;
@@ -192,6 +205,16 @@ void main() {
 	const int step_size = 2;
 #endif
 	const float kernel[3] = float[3](0.25, 0.5, 0.25);
+	float ring_weight[MAX_ENTRIES * 3];
+	for (uint i = 0u; i < own_limit; i++) {
+		if (slots[i] == 0u) {
+			continue;
+		}
+		for (uint r = 0u; r < 3u; r++) {
+			float dist2 = float(r) * float(step_size * step_size);
+			ring_weight[i * 3u + r] = exp(-dist2 * inv_two_sigma[i]);
+		}
+	}
 	for (int dy = -1; dy <= 1; dy++) {
 		for (int dx = -1; dx <= 1; dx++) {
 			ivec2 at = pixel + ivec2(dx, dy) * step_size;
@@ -205,7 +228,7 @@ void main() {
 					continue;
 				}
 			}
-			float dist2 = float(dx * dx + dy * dy) * float(step_size * step_size);
+			uint ring = uint(dx * dx + dy * dy);
 			for (uint j = 0u; j < own_limit; j++) {
 				uint slot = read_slot(at, j);
 				if (slot == 0u) {
@@ -215,7 +238,7 @@ void main() {
 					if (slots[i] != slot) {
 						continue;
 					}
-					float weight = base * exp(-dist2 * inv_two_sigma[i]);
+					float weight = base * ring_weight[i * 3u + ring];
 #ifdef MODE_FIRST
 					vec2 accum = imageLoad(accum_image, ivec3(at, int(j))).rg;
 					if (accum.y > 0.0) {
