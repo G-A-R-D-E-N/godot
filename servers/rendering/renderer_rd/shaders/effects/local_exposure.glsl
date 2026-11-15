@@ -11,6 +11,7 @@
 #define LUMINANCE_CEILING 65504.0
 #define BLUR_RADIUS 4
 #define MEDIAN_NONE 1.0e30
+#define MEDIAN_BATCH 8
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -169,9 +170,29 @@ void main() {
 
 #ifdef MODE_MEDIAN
 	int z = int(gl_LocalInvocationIndex);
-	vec2 total = vec2(0.0);
+	precise vec2 total = vec2(0.0);
+	int batched = params.dest_size.x - params.dest_size.x % MEDIAN_BATCH;
 	for (int y = 0; y < params.dest_size.y; y++) {
-		for (int x = 0; x < params.dest_size.x; x++) {
+		int x = 0;
+		for (; x < batched; x += MEDIAN_BATCH) {
+			vec2 c0 = texelFetch(source_grid, ivec3(x, y, z), 0).rg;
+			vec2 c1 = texelFetch(source_grid, ivec3(x + 1, y, z), 0).rg;
+			vec2 c2 = texelFetch(source_grid, ivec3(x + 2, y, z), 0).rg;
+			vec2 c3 = texelFetch(source_grid, ivec3(x + 3, y, z), 0).rg;
+			vec2 c4 = texelFetch(source_grid, ivec3(x + 4, y, z), 0).rg;
+			vec2 c5 = texelFetch(source_grid, ivec3(x + 5, y, z), 0).rg;
+			vec2 c6 = texelFetch(source_grid, ivec3(x + 6, y, z), 0).rg;
+			vec2 c7 = texelFetch(source_grid, ivec3(x + 7, y, z), 0).rg;
+			total += c0;
+			total += c1;
+			total += c2;
+			total += c3;
+			total += c4;
+			total += c5;
+			total += c6;
+			total += c7;
+		}
+		for (; x < params.dest_size.x; x++) {
 			total += texelFetch(source_grid, ivec3(x, y, z), 0).rg;
 		}
 	}
