@@ -172,6 +172,13 @@ TEST_CASE("[DirectResampler] The frame counter steps by one on a continuous fram
 	}
 }
 
+TEST_CASE("[DirectResampler] Default settings are off and use the live energy arm") {
+	const DirectResamplerRD::Settings settings;
+	CHECK_FALSE(settings.enabled);
+	CHECK(settings.live_energy);
+}
+
+#ifdef DI_RESAMPLER_LAB
 TEST_CASE("[DirectResampler] The lab mass bound is the registered one at the gated settings") {
 	DirectResamplerRD::Settings settings;
 	settings.c_full = 8;
@@ -186,5 +193,6 @@ TEST_CASE("[DirectResampler] The lab mass bound is the registered one at the gat
 	settings.no_stamp = true;
 	CHECK(DirectResamplerRD::lab_settings_text(settings).contains(" no_stamp=1 mass_bound=1570"));
 }
+#endif
 
 } // namespace TestDirectResampler

@@ -33,6 +33,7 @@
 #include "core/config/project_settings.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
+#include "servers/rendering/rendering_server_globals.h"
 
 #define DI_RESAMPLED_SETTING(m_name) ("rendering/global_illumination/direct/resampled/" m_name)
 
@@ -41,7 +42,7 @@ void DirectResamplerRD::register_settings() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("head"), PROPERTY_HINT_RANGE, "0,6,1"), 4);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("tail_samples"), PROPERTY_HINT_RANGE, "1,7,1"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, DI_RESAMPLED_SETTING("floor"), PROPERTY_HINT_RANGE, "0.0001,1,0.0001"), 0.0625);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("energy_arm"), PROPERTY_HINT_ENUM, "Mean,Live"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("energy_arm"), PROPERTY_HINT_ENUM, "Mean,Live"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("reservoirs"), PROPERTY_HINT_ENUM, "Off,B1,U1"), 0);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("temporal_reuse"), true);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("spatial_neighbors"), PROPERTY_HINT_RANGE, "0,4,1"), 2);
@@ -55,10 +56,14 @@ void DirectResamplerRD::register_settings() {
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("debug/head_swap_window"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("debug/tail_visibility"), PROPERTY_HINT_ENUM, "Traced,Visible,Hashed"), 0);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("debug/stale_prior"), false);
+#ifdef DI_RESAMPLER_LAB
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("debug/no_stamp"), false);
+#endif
 	GLOBAL_DEF(PropertyInfo(Variant::STRING, DI_RESAMPLED_SETTING("debug/log"), PROPERTY_HINT_GLOBAL_SAVE_FILE, "*.txt"), String());
+#ifdef DI_RESAMPLER_LAB
 	GLOBAL_DEF(PropertyInfo(Variant::STRING, DI_RESAMPLED_SETTING("debug/lab_log"), PROPERTY_HINT_GLOBAL_SAVE_FILE, "*.txt"), String());
 	DirectSamplerLab::register_settings();
+#endif
 }
 
 DirectResamplerRD::Settings DirectResamplerRD::clamp_settings(bool p_enabled, int p_head, int p_tail_samples, float p_floor, int p_energy_arm) {
@@ -95,13 +100,16 @@ DirectResamplerRD::Settings DirectResamplerRD::get_project_settings() {
 	Settings settings = clamp_settings(GLOBAL_GET(DI_RESAMPLED_SETTING("enabled")), GLOBAL_GET(DI_RESAMPLED_SETTING("head")), GLOBAL_GET(DI_RESAMPLED_SETTING("tail_samples")), GLOBAL_GET(DI_RESAMPLED_SETTING("floor")), GLOBAL_GET(DI_RESAMPLED_SETTING("energy_arm")));
 	settings.tail_visibility = uint32_t(CLAMP(int(GLOBAL_GET(DI_RESAMPLED_SETTING("debug/tail_visibility"))), 0, 2));
 	settings.stale_prior = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/stale_prior"));
-	settings.no_stamp = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/no_stamp"));
 	settings.debug_log = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/log"));
+#ifdef DI_RESAMPLER_LAB
+	settings.no_stamp = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/no_stamp"));
 	settings.lab_log = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/lab_log"));
+#endif
 	clamp_reservoir_settings(settings, GLOBAL_GET(DI_RESAMPLED_SETTING("reservoirs")), GLOBAL_GET(DI_RESAMPLED_SETTING("temporal_reuse")), GLOBAL_GET(DI_RESAMPLED_SETTING("spatial_neighbors")), GLOBAL_GET(DI_RESAMPLED_SETTING("spatial_radius")), GLOBAL_GET(DI_RESAMPLED_SETTING("c_full")), GLOBAL_GET(DI_RESAMPLED_SETTING("m_temporal_cap")), GLOBAL_GET(DI_RESAMPLED_SETTING("m_stored_cap")), GLOBAL_GET("rendering/global_illumination/direct/dynamic_history_cap"), GLOBAL_GET(DI_RESAMPLED_SETTING("head_rank")), GLOBAL_GET(DI_RESAMPLED_SETTING("head_swap_margin")), GLOBAL_GET(DI_RESAMPLED_SETTING("head_swap_frames")), GLOBAL_GET(DI_RESAMPLED_SETTING("debug/head_swap_window")));
 	return settings;
 }
 
+#ifdef DI_RESAMPLER_LAB
 uint32_t DirectResamplerRD::lab_mass_bound(const Settings &p_settings) {
 	return 2 * (p_settings.c_full + p_settings.m_temporal_cap) + p_settings.spatial_neighbors * p_settings.m_stored_cap;
 }
@@ -132,6 +140,7 @@ String DirectResamplerRD::lab_settings_text(const Settings &p_settings) {
 	text += " mass_bound=" + itos(lab_mass_bound(p_settings));
 	return text;
 }
+#endif
 
 bool DirectResamplerRD::is_enabled() const {
 	return GLOBAL_GET(DI_RESAMPLED_SETTING("enabled"));
@@ -162,22 +171,28 @@ bool DirectResamplerRD::_ensure_device() {
 	Vector<String> modes;
 	modes.push_back("\n");
 	modes.push_back("\n#define MODE_SPATIAL\n");
+#ifdef DI_RESAMPLER_LAB
 	modes.push_back("\n#define LAB_COUNTS\n");
 	modes.push_back("\n#define MODE_SPATIAL\n#define LAB_COUNTS\n");
+#endif
 	shader->initialize(modes);
 	shader_version = shader->version_create();
 	if (!shader->version_is_valid(shader_version)) {
 		return false;
 	}
-	pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, 0));
-	spatial_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, 1));
-	lab_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, 2));
-	lab_spatial_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, 3));
+	pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_MAIN));
+	spatial_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_SPATIAL));
+#ifdef DI_RESAMPLER_LAB
+	lab_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_MAIN_LAB));
+	lab_spatial_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_SPATIAL_LAB));
+#endif
 	header_dummy = _dummy(RD::DATA_FORMAT_R32_UINT, RD::TEXTURE_TYPE_2D, "Direct Resampled Header Dummy");
 	params_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(Params));
 	debug_buffer = RD::get_singleton()->storage_buffer_create(DEBUG_BYTES);
+#ifdef DI_RESAMPLER_LAB
 	lab_buffer = RD::get_singleton()->storage_buffer_create(LAB_BYTES);
 	lab_mask_buffer = RD::get_singleton()->storage_buffer_create(LAB_MASK_BYTES);
+#endif
 	history_slots_dummy = _dummy(RD::DATA_FORMAT_R16_UNORM, RD::TEXTURE_TYPE_2D_ARRAY, "Direct Resampled History Slots Dummy");
 	history_factors_dummy = _dummy(RD::DATA_FORMAT_R16_UNORM, RD::TEXTURE_TYPE_2D_ARRAY, "Direct Resampled History Factors Dummy");
 	history_guide_dummy = _dummy(RD::DATA_FORMAT_R32G32_UINT, RD::TEXTURE_TYPE_2D, "Direct Resampled History Guide Dummy");
@@ -208,6 +223,7 @@ void DirectResamplerRD::_flush_debug_line() {
 	debug_pending = false;
 }
 
+#ifdef DI_RESAMPLER_LAB
 void DirectResamplerRD::_write_lab_line() {
 	const Vector<uint8_t> data = RD::get_singleton()->buffer_get_data(lab_buffer);
 	if (data.size() < int(LAB_BYTES)) {
@@ -252,9 +268,12 @@ void DirectResamplerRD::_flush_lab_line() {
 	}
 	lab_pending = false;
 }
+#endif
 
 bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
+#ifdef DI_RESAMPLER_LAB
 	sampler_lab.serve();
+#endif
 	const Settings settings = get_project_settings();
 	const Ref<RenderSceneBuffersRD> &rb = p_input.render_buffers;
 	if (!settings.enabled || rb.is_null() || !_ensure_device()) {
@@ -280,6 +299,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		rd->buffer_clear(debug_buffer, 0, DEBUG_BYTES);
 	}
 
+#ifdef DI_RESAMPLER_LAB
 	if (settings.lab_log != lab_path) {
 		_write_lab_mask();
 		_flush_lab_line();
@@ -304,6 +324,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 			lab_file->store_line(text);
 		}
 	}
+#endif
 
 	Ref<ResampledViewportData> viewport;
 	if (rb->has_custom_data(RB_SCOPE_DI_RESAMPLED)) {
@@ -413,7 +434,10 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	params.tail_samples = settings.tail_samples;
 	params.history_valid = history ? 1 : 0;
 	params.live_energy = settings.live_energy ? 1 : 0;
-	params.debug_flags = (settings.stale_prior ? DEBUG_FLAG_STALE_PRIOR : 0) | (counting ? DEBUG_FLAG_COUNT : 0) | (settings.no_stamp ? DEBUG_FLAG_NO_STAMP : 0);
+	params.debug_flags = (settings.stale_prior ? DEBUG_FLAG_STALE_PRIOR : 0) | (counting ? DEBUG_FLAG_COUNT : 0);
+#ifdef DI_RESAMPLER_LAB
+	params.debug_flags |= settings.no_stamp ? DEBUG_FLAG_NO_STAMP : 0;
+#endif
 	params.reservoirs = settings.reservoirs;
 	params.c_full = settings.c_full;
 	params.m_temporal_cap = settings.m_temporal_cap;
@@ -448,38 +472,62 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 15, history_values));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 16, current_header));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 17, current_values));
+#ifdef DI_RESAMPLER_LAB
 	if (lab) {
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 20, lab_buffer));
 	}
+#endif
 	LocalVector<RD::Uniform> spatial_uniforms(uniforms);
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 12, debug_buffer));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 18, head_state_previous));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 19, head_state_next));
+#ifdef DI_RESAMPLER_LAB
 	if (lab) {
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 21, lab_mask_buffer));
 	}
+#endif
 
-	const RID shader_rid = shader->version_get_shader(shader_version, lab ? 2 : 0);
+	int main_variant = VARIANT_MAIN;
+	int spatial_variant = VARIANT_SPATIAL;
+	PipelineDeferredRD *main_pipeline = &pipeline;
+	PipelineDeferredRD *active_spatial_pipeline = &spatial_pipeline;
+#ifdef DI_RESAMPLER_LAB
+	if (lab) {
+		main_variant = VARIANT_MAIN_LAB;
+		spatial_variant = VARIANT_SPATIAL_LAB;
+		main_pipeline = &lab_pipeline;
+		active_spatial_pipeline = &lab_spatial_pipeline;
+	}
+#endif
+	const RID shader_rid = shader->version_get_shader(shader_version, main_variant);
+	RENDER_TIMESTAMP("Direct Resample Entries");
+	rd->draw_command_begin_label("Direct Resample Entries");
 	RD::ComputeListID list = rd->compute_list_begin();
-	rd->compute_list_bind_compute_pipeline(list, lab ? lab_pipeline.get_rid() : pipeline.get_rid());
+	rd->compute_list_bind_compute_pipeline(list, main_pipeline->get_rid());
 	rd->compute_list_bind_uniform_set(list, UniformSetCacheRD::get_singleton()->get_cache_vec(shader_rid, 0, uniforms), 0);
 	rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
 	rd->compute_list_end();
+	rd->draw_command_end_label();
 	if (spatial) {
-		const RID spatial_rid = shader->version_get_shader(shader_version, lab ? 3 : 1);
+		const RID spatial_rid = shader->version_get_shader(shader_version, spatial_variant);
+		RENDER_TIMESTAMP("Direct Resample Spatial");
+		rd->draw_command_begin_label("Direct Resample Spatial");
 		list = rd->compute_list_begin();
-		rd->compute_list_bind_compute_pipeline(list, lab ? lab_spatial_pipeline.get_rid() : spatial_pipeline.get_rid());
+		rd->compute_list_bind_compute_pipeline(list, active_spatial_pipeline->get_rid());
 		rd->compute_list_bind_uniform_set(list, UniformSetCacheRD::get_singleton()->get_cache_vec(spatial_rid, 0, spatial_uniforms), 0);
 		rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
 		rd->compute_list_end();
+		rd->draw_command_end_label();
 	}
 	viewport->swap_sets = reservoir_sets && !feedback;
 	viewport->swap_head_state = head_state;
+#ifdef DI_RESAMPLER_LAB
 	if (lab) {
 		lab_pending = true;
 		lab_frame = p_input.frame;
 		lab_size = size;
 	}
+#endif
 	if (counting) {
 		debug_pending = true;
 		debug_frame = p_input.frame;
@@ -495,7 +543,9 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 }
 
 void DirectResamplerRD::release(const Ref<RenderSceneBuffersRD> &p_render_buffers) {
+#ifdef DI_RESAMPLER_LAB
 	sampler_lab.serve();
+#endif
 	if (p_render_buffers.is_null() || !p_render_buffers->has_custom_data(RB_SCOPE_DI_RESAMPLED)) {
 		return;
 	}
@@ -510,15 +560,19 @@ void DirectResamplerRD::release(const Ref<RenderSceneBuffersRD> &p_render_buffer
 }
 
 void DirectResamplerRD::free_device_resources() {
+#ifdef DI_RESAMPLER_LAB
 	sampler_lab.free_device_resources();
+#endif
 	if (!device_ready) {
 		return;
 	}
 	RD *rd = RD::get_singleton();
 	pipeline.free();
 	spatial_pipeline.free();
+#ifdef DI_RESAMPLER_LAB
 	lab_pipeline.free();
 	lab_spatial_pipeline.free();
+#endif
 	if (shader_version.is_valid()) {
 		shader->version_free(shader_version);
 		shader_version = RID();
@@ -528,18 +582,33 @@ void DirectResamplerRD::free_device_resources() {
 		shader = nullptr;
 	}
 	_flush_debug_line();
+#ifdef DI_RESAMPLER_LAB
 	_write_lab_mask();
 	_flush_lab_line();
-	const RID owned[] = { params_buffer, debug_buffer, lab_buffer, lab_mask_buffer, history_slots_dummy, history_factors_dummy, history_guide_dummy, header_dummy };
+#endif
+	const RID owned[] = {
+		params_buffer,
+		debug_buffer,
+#ifdef DI_RESAMPLER_LAB
+		lab_buffer,
+		lab_mask_buffer,
+#endif
+		history_slots_dummy,
+		history_factors_dummy,
+		history_guide_dummy,
+		header_dummy,
+	};
 	for (const RID &rid : owned) {
 		if (rid.is_valid()) {
 			rd->free_rid(rid);
 		}
 	}
-	params_buffer = RID();
-	debug_buffer = RID();
+#ifdef DI_RESAMPLER_LAB
 	lab_buffer = RID();
 	lab_mask_buffer = RID();
+#endif
+	params_buffer = RID();
+	debug_buffer = RID();
 	history_slots_dummy = RID();
 	history_factors_dummy = RID();
 	history_guide_dummy = RID();

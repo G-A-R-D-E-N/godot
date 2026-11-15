@@ -2311,7 +2311,7 @@
 			<param index="0" name="light" type="RID" />
 			<param index="1" name="energy" type="float" />
 			<description>
-				Sets the flicker-mean energy of this 3D omni or spot light for the resampled direct lighting, in the same units as [constant LIGHT_PARAM_ENERGY]. Resampled tail lamps are shaded at this energy in place of their live energy, so a single sample does not carry the lamp's flicker. A negative value clears it, and the light is then shaded at its live energy. Call it only when the mean changes, not every frame.
+				Sets the flicker-mean energy of this 3D omni or spot light for the resampled direct lighting, in the same units as [constant LIGHT_PARAM_ENERGY]. The resampler ranks head lamps and picks tail lamps by this energy, so a flickering lamp keeps its place. With [member ProjectSettings.rendering/global_illumination/direct/resampled/energy_arm] set to [code]Mean[/code], resampled tail lamps are also shaded at this energy in place of their live energy, so a single sample does not carry the lamp's flicker; with the default, [code]Live[/code], they are shaded at their live energy. A negative value clears it, and the light is then shaded at its live energy. Call it only when the mean changes, not every frame.
 			</description>
 		</method>
 		<method name="light_set_direct_shadow">

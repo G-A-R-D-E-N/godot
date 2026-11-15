@@ -2169,6 +2169,8 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 				input.tail_samples = resample_output.tail_samples;
 				input.tail_visibility = resample_output.tail_visibility;
 				record = resample_output.record;
+				RENDER_TIMESTAMP("Direct Shadows Trace");
+				RD::get_singleton()->draw_command_begin_label("Direct Shadows Trace");
 			}
 		} else if (resampler) {
 			resampler->release(rb);
