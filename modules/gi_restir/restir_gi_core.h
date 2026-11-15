@@ -280,6 +280,8 @@ struct RestirFrameStats {
 	double fold_refused_empty = 0.0;
 	double fold_hp_eq_px = 0.0;
 	double fold_phase0 = 0.0;
+	double fold_phase0_start = 0.0;
+	double fold_refused_off = 0.0;
 	uint32_t temporal_reject[16] = {};
 	uint32_t spatial_reject[16] = {};
 	uint32_t had_history = 0;

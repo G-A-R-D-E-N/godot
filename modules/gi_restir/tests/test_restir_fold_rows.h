@@ -114,9 +114,10 @@ TEST_CASE("[RestirFoldRows] n_valid sums the temporal reject histogram and cut_r
 	CHECK(restir_fold_cut_rej(reject) == int64_t(0xFFFFFFFFu));
 }
 
-TEST_CASE("[RestirFoldRows] The row names are the 32 fields in order") {
+TEST_CASE("[RestirFoldRows] The row names are the 42 fields in order") {
+	CHECK(RESTIR_FOLD_ROW_FIELDS == 42);
 	const char *const *names = restir_fold_row_names();
-	const char *const expected[RESTIR_FOLD_ROW_FIELDS] = { "record", "frame", "tag", "serial", "clock", "k", "k_eff", "mode", "feedback", "cut", "cut_reason", "pre_frame", "reval", "history_used", "trace_w", "trace_h", "n_valid", "cut_rej", "had_history", "refused", "renewed_raw", "started", "carried", "refused_empty", "hp_eq_px", "expected_phase0", "s_max", "n_over", "hist_texels", "lineage_refusals", "lineage_unknown", "lineage_families" };
+	const char *const expected[RESTIR_FOLD_ROW_FIELDS] = { "record", "frame", "tag", "serial", "clock", "k", "k_eff", "mode", "feedback", "cut", "cut_reason", "pre_frame", "reval", "history_used", "trace_w", "trace_h", "n_valid", "cut_rej", "had_history", "refused", "renewed_raw", "started", "carried", "refused_empty", "hp_eq_px", "expected_phase0", "s_max", "n_over", "hist_texels", "lineage_refusals", "lineage_unknown", "lineage_families", "phase0_start", "refused_off", "start_cut", "start_frame", "start_plane", "start_normal", "start_class", "start_no_sample", "start_vis", "start_other" };
 	for (int i = 0; i < RESTIR_FOLD_ROW_FIELDS; i++) {
 		CHECK(String(names[i]) == String(expected[i]));
 	}
@@ -151,7 +152,7 @@ TEST_CASE("[RestirFoldRows] A record packs to the known row, renewed exported ra
 	record.stats.fold_refused_empty = 3.0;
 	int64_t row[RESTIR_FOLD_ROW_FIELDS] = {};
 	restir_fold_pack_row(record, 4, row);
-	const int64_t expected[RESTIR_FOLD_ROW_FIELDS] = { 4, 77, 3, 2, 100, 8, 8, 1, 0, 1, 0, 0, 1, 0, 640, 360, 231017, 230000, 999, 12, 12, 230005, 1000, 3, -1, -1, -1, -1, -1, -1, -1, -1 };
+	const int64_t expected[RESTIR_FOLD_ROW_FIELDS] = { 4, 77, 3, 2, 100, 8, 8, 1, 0, 1, 0, 0, 1, 0, 640, 360, 231017, 230000, 999, 12, 12, 230005, 1000, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
 	for (int i = 0; i < RESTIR_FOLD_ROW_FIELDS; i++) {
 		CHECK(row[i] == expected[i]);
 	}
@@ -172,6 +173,32 @@ TEST_CASE("[RestirFoldRows] A record without Fold fields packs -1 there and zero
 	}
 	for (int i = 24; i < RESTIR_FOLD_ROW_FIELDS; i++) {
 		CHECK(row[i] == -1);
+	}
+}
+
+TEST_CASE("[RestirFoldRows] The split and start-class fields pack after lineage_families, the older fields unmoved") {
+	RestirFrameRecord record;
+	record.fold.hp_eq_px = 230400;
+	record.fold.expected_phase0 = 28000;
+	record.fold.lineage_families = 9;
+	record.fold.phase0_start = 790;
+	record.fold.refused_off = 70;
+	record.fold.start_cut = 1;
+	record.fold.start_frame = 2;
+	record.fold.start_plane = 3;
+	record.fold.start_normal = 4;
+	record.fold.start_class = 5;
+	record.fold.start_no_sample = 6;
+	record.fold.start_vis = 7;
+	record.fold.start_other = 8;
+	int64_t row[RESTIR_FOLD_ROW_FIELDS] = {};
+	restir_fold_pack_row(record, 0, row);
+	CHECK(row[24] == 230400);
+	CHECK(row[25] == 28000);
+	CHECK(row[31] == 9);
+	const int64_t tail[10] = { 790, 70, 1, 2, 3, 4, 5, 6, 7, 8 };
+	for (int i = 0; i < 10; i++) {
+		CHECK(row[32 + i] == tail[i]);
 	}
 }
 

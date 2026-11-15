@@ -40,23 +40,74 @@ namespace TestRestirFoldDump {
 constexpr uint32_t DUMP_KS[] = { 4u, 8u, 16u, 32u, 64u };
 
 TEST_CASE("[RestirFoldDump] Start classes and histogram index") {
+	CHECK(RESTIR_FOLD_START_CUT == 0u);
+	CHECK(RESTIR_FOLD_START_FRAME == 1u);
+	CHECK(RESTIR_FOLD_START_PLANE == 2u);
+	CHECK(RESTIR_FOLD_START_NORMAL == 3u);
+	CHECK(RESTIR_FOLD_START_CLASS == 4u);
+	CHECK(RESTIR_FOLD_START_NO_SAMPLE == 5u);
+	CHECK(RESTIR_FOLD_START_VIS == 6u);
+	CHECK(RESTIR_FOLD_START_OTHER == 7u);
+	CHECK(RESTIR_FOLD_START_PRE == 8u);
+	CHECK(RESTIR_FOLD_START_CLASSES == 16u);
+	CHECK(RESTIR_FOLD_REJ_CODES == 16u);
+	const uint32_t expected[16] = { 7u, 1u, 2u, 3u, 4u, 7u, 7u, 7u, 7u, 0u, 5u, 6u, 7u, 7u, 7u, 7u };
+	for (uint32_t reason = 0u; reason < RESTIR_FOLD_REJ_CODES; reason++) {
+		CHECK(restir_fold_start_class(reason, false) == expected[reason]);
+		CHECK(restir_fold_start_class(reason, true) == expected[reason] + 8u);
+	}
 	CHECK(restir_fold_start_class(RESTIR_FOLD_REJ_CUT_CODE, false) == 0u);
 	CHECK(restir_fold_start_class(RESTIR_FOLD_REJ_FRAME_CODE, false) == 1u);
-	CHECK(restir_fold_start_class(10u, false) == 2u);
-	CHECK(restir_fold_start_class(0u, false) == 2u);
-	CHECK(restir_fold_start_class(RESTIR_FOLD_REJ_CUT_CODE, true) == 3u);
-	CHECK(restir_fold_start_class(RESTIR_FOLD_REJ_FRAME_CODE, true) == 4u);
-	CHECK(restir_fold_start_class(10u, true) == 5u);
+	CHECK(restir_fold_start_class(RESTIR_FOLD_REJ_PLANE_CODE, false) == 2u);
+	CHECK(restir_fold_start_class(RESTIR_FOLD_REJ_NORMAL_CODE, false) == 3u);
+	CHECK(restir_fold_start_class(RESTIR_FOLD_REJ_CLASS_CODE, false) == 4u);
+	CHECK(restir_fold_start_class(RESTIR_FOLD_REJ_NO_SAMPLE_CODE, false) == 5u);
+	CHECK(restir_fold_start_class(RESTIR_FOLD_REJ_VIS_CODE, false) == 6u);
+	CHECK(restir_fold_start_class(RESTIR_FOLD_REJ_CUT_CODE, true) == 8u);
+	CHECK(restir_fold_start_class(RESTIR_FOLD_REJ_VIS_CODE, true) == 14u);
+	CHECK(restir_fold_start_class(15u, true) == 15u);
+	CHECK(restir_fold_start_class(99u, false) == 7u);
 	CHECK(restir_fold_start_index(0u, 0u, 0u) == 0u);
 	CHECK(restir_fold_start_index(0u, 0u, 1u) == 1u);
 	CHECK(restir_fold_start_index(0u, 1u, 0u) == 64u);
 	CHECK(restir_fold_start_index(1u, 0u, 0u) == 4096u);
-	CHECK(restir_fold_start_index(5u, 63u, 63u) == 24575u);
-	CHECK(RESTIR_FOLD_START_COUNT == 24576u);
-	CHECK(RESTIR_FOLD_DUMP_BYTES == 98320u);
+	CHECK(restir_fold_start_index(15u, 63u, 63u) == 65535u);
+	CHECK(RESTIR_FOLD_START_COUNT == 65536u);
+	CHECK(RESTIR_FOLD_DUMP_BYTES == 262160u);
 	CHECK(RESTIR_FOLD_DUMP_BINDING == 32u);
 	CHECK(RESTIR_FOLD_SLOT_HP_EQ_PX == 27u);
 	CHECK(RESTIR_FOLD_SLOT_PHASE0 == 28u);
+	CHECK(RESTIR_FOLD_SLOT_PHASE0_START == 29u);
+	CHECK(RESTIR_FOLD_SLOT_REFUSED_OFF == 30u);
+}
+
+TEST_CASE("[RestirFoldDump] Start sums fold each pre-frame class into its base class") {
+	Vector<uint32_t> frame;
+	frame.resize(int64_t(RESTIR_FOLD_START_COUNT));
+	frame.fill(0u);
+	frame.set(int64_t(restir_fold_start_index(RESTIR_FOLD_START_CUT, 0u, 0u)), 3u);
+	frame.set(int64_t(restir_fold_start_index(RESTIR_FOLD_START_CUT, 63u, 63u)), 4u);
+	frame.set(int64_t(restir_fold_start_index(RESTIR_FOLD_START_CUT + RESTIR_FOLD_START_PRE, 5u, 2u)), 10u);
+	frame.set(int64_t(restir_fold_start_index(RESTIR_FOLD_START_CLASS, 1u, 1u)), 7u);
+	frame.set(int64_t(restir_fold_start_index(RESTIR_FOLD_START_VIS + RESTIR_FOLD_START_PRE, 0u, 9u)), 2u);
+	frame.set(int64_t(restir_fold_start_index(RESTIR_FOLD_START_OTHER, 0u, 0u)), 1u);
+	frame.set(int64_t(restir_fold_start_index(RESTIR_FOLD_START_OTHER + RESTIR_FOLD_START_PRE, 63u, 63u)), 6u);
+	int64_t sums[RESTIR_FOLD_START_PRE];
+	REQUIRE(restir_fold_start_sums(frame, sums));
+	const int64_t expected[8] = { 17, 0, 0, 0, 7, 0, 2, 7 };
+	int64_t total = 0;
+	for (uint32_t c = 0u; c < RESTIR_FOLD_START_PRE; c++) {
+		CHECK(sums[c] == expected[c]);
+		total += sums[c];
+	}
+	CHECK(total == 33);
+	Vector<uint32_t> short_frame;
+	short_frame.resize(int64_t(RESTIR_FOLD_START_COUNT) - 1);
+	short_frame.fill(1u);
+	CHECK_FALSE(restir_fold_start_sums(short_frame, sums));
+	for (uint32_t c = 0u; c < RESTIR_FOLD_START_PRE; c++) {
+		CHECK(sums[c] == -1);
+	}
 }
 
 TEST_CASE("[RestirFoldDump] Self-test compare finds a planted difference") {
@@ -241,7 +292,7 @@ TEST_CASE("[RestirFoldDump] Cut-frame start mirror") {
 			Vector<uint32_t> starts;
 			restir_fold_start_mirror(info.ptr(), info.size(), width, k, clock, pre == 1, starts);
 			REQUIRE(starts.size() == int64_t(RESTIR_FOLD_START_COUNT));
-			const uint32_t start_class = pre == 1 ? 3u : 0u;
+			const uint32_t start_class = pre == 1 ? 8u : 0u;
 			uint64_t total = 0u;
 			uint64_t in_class = 0u;
 			uint64_t past_cap = 0u;

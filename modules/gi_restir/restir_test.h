@@ -127,6 +127,16 @@ struct RestirFoldRecord {
 	int64_t lineage_refusals = -1;
 	int64_t lineage_unknown = -1;
 	int64_t lineage_families = -1;
+	int64_t phase0_start = -1;
+	int64_t refused_off = -1;
+	int64_t start_cut = -1;
+	int64_t start_frame = -1;
+	int64_t start_plane = -1;
+	int64_t start_normal = -1;
+	int64_t start_class = -1;
+	int64_t start_no_sample = -1;
+	int64_t start_vis = -1;
+	int64_t start_other = -1;
 };
 
 struct RestirFrameRecord {
@@ -135,7 +145,7 @@ struct RestirFrameRecord {
 	RestirFoldRecord fold;
 };
 
-static constexpr int RESTIR_FOLD_ROW_FIELDS = 32;
+static constexpr int RESTIR_FOLD_ROW_FIELDS = 42;
 
 const char *const *restir_fold_row_names();
 int64_t restir_fold_n_valid(const uint32_t *p_temporal_reject);

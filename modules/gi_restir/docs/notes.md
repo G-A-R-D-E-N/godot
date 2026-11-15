@@ -1190,14 +1190,18 @@ self-test shader and the probe methods that read them. With the dump off nothing
     thread reads hs = (rs_load(px).flags >> 8) & 0x3F from the history set (res_in, binding 7). One work-group reduction
     in shared memory, then one atomicMax and two atomicAdd per group. n_over counts hs > K − 1. Only when RS_FOLD_K is
     not 0, so at K 0 all three stay 0 and texels is 0.
-  - Relock counts: in rs_temporal_pixel, after hp is known and before had is formed, for a valid receiver with hp ==
-    px: slot 27 += 1, and slot 28 += 1 when (RS_FOLD_CLOCK + φ(px)) mod K == 0. Only when K is not 0. hp is −1 without
-    F_HISTORY, so cut frames add 0.
+  - Relock counts: in rs_temporal_pixel, for a valid receiver with hp == px: slot 27 += 1, and slot 28 += 1 when
+    (RS_FOLD_CLOCK + φ(px)) mod K == 0. Only when K is not 0. hp is −1 without F_HISTORY, so cut frames add 0. In 12b
+    the call sat before had was formed; since Fold check 6 (b) it sits right after had and splits the phase-0 count
+    (slot 28 with had, slot 29 without; below).
   - Start histogram: inside if (RS_FOLD_K != 0), right after rs_fold_bits writes the flags, when !had (the start
     branch): s = (flags >> 8) & 0x3F after the K − 2 cap, u = (v + φ(px)) mod K with v = RS_FOLD_CLOCK (Q10),
     class c from the TEMPORAL reason, then atomicAdd(starts[(c · 64 + s) · 64 + u], 1).
-  - Class codes: 0 cut (REJ_CUT 9), 1 frame edge (REJ_FRAME 1), 2 any other start; plus 3 on a pre-frame (F_PRE_FRAME):
-    3 cut, 4 frame edge, 5 other. RS_FOLD_START_CUT 0, _FRAME 1, _OTHER 2, _PRE 3, _S 64, _U 64.
+  - Class codes (since Fold check 6 (b), below): 0 cut (REJ_CUT 9), 1 frame edge (REJ_FRAME 1), 2 plane (REJ_PLANE 2),
+    3 normal (REJ_NORMAL 3), 4 class (REJ_CLASS 4), 5 no sample (REJ_NO_SAMPLE 10), 6 visibility (REJ_VIS 11), 7 any
+    other reason (0, 5 to 8, 12 to 15); plus 8 on a pre-frame (F_PRE_FRAME), 16 classes. RS_FOLD_START_CUT 0, _FRAME 1,
+    _PLANE 2, _NORMAL 3, _CLASS 4, _NO_SAMPLE 5, _VIS 6, _OTHER 7, _PRE 8, _S 64, _U 64. In 12b the codes were 0 cut,
+    1 frame edge, 2 other, plus 3 on a pre-frame (6 classes).
 - Dump shader objects (item c). The dump is its own RestirGiShaderRD per variant (RestirFoldDumpObjects, heap, made on
   the first dump frame and never at start), with the core's general defines for that variant plus #define RS_FOLD_DUMP
   and two modes: MODE_TEMPORAL and MODE_TEMPORAL + SKY_REREAD (SW and HW only; VARIANT_NONE has the first only). It
@@ -1206,15 +1210,15 @@ self-test shader and the probe methods that read them. With the dump off nothing
   the shade set, each through UniformSetCacheRD with the dump shader's RID. Timestamps "ReSTIR Temporal Fold Dump" and
   "ReSTIR Temporal Sky Fold Dump". If the dump shader, a pipeline or a set is not valid, the normal TEMPORAL pass runs
   and the frame reads as not dumped.
-- Dump buffer and read-back (item d). RestirGiResources::fold_dump, 98,320 bytes (16-byte header + 6 · 64 · 64
-  words), made by ensure_fold_dump(true) and freed by ensure_fold_dump(false) or free_all; alloc_log entry "fold_dump".
+- Dump buffer and read-back (item d). RestirGiResources::fold_dump, 262,160 bytes (16-byte header + 16 · 64 · 64
+  words; 98,320 bytes with 6 classes in 12b), made by ensure_fold_dump(true) and freed by ensure_fold_dump(false) or free_all; alloc_log entry "fold_dump".
   run_frame clears it (buffer_clear) just before the dump dispatch and sets RestirGiResources::fold_dump_ran only when
   the dump pipeline was bound and dispatched. read_fold_dump reads header and starts with buffer_get_data.
   read_stats adds v[27] and v[28] to RestirFrameStats::fold_hp_eq_px and fold_phase0 (always 0 without the dump).
 - Backend. resample calls ensure_fold_dump(fold_dump and readback), so no buffer exists unless the lab asks. The dump is
   read back only in the readback block: when fold_dump_ran, record.fold.hp_eq_px and expected_phase0 come from slots 27
   and 28, s_max, n_over and hist_texels from the header, and the starts are added to a module-wide accumulator
-  (restir_fold_starts, uint64 × 24,576, under restir_fold_starts_mutex; restir_test.h). Status: fold_dump_active (this
+  (restir_fold_starts, uint64 × 65,536, under restir_fold_starts_mutex; restir_test.h). Status: fold_dump_active (this
   frame's dump really ran), fold_dump_frames_total (frames where it ran).
 - Self-test (item e). shaders/restir_fold_test.glsl, its own ShaderRD (RestirFoldTestShaderRD), one variant, built on
   the first run_fold_test call. Push constant FoldTestParams { sub, k, count, v0, grid_w, grid_h, stride, frames }
@@ -1240,12 +1244,12 @@ self-test shader and the probe methods that read them. With the dump off nothing
     error, sub, k, count, v0, grid_w, grid_h, stride, frames, word_count, words (PackedInt64Array), mirror_mismatches,
     first_mismatch}; for the GPU run mirror_mismatches is compare(GPU, mirror) and first_mismatch its first index (−1
     when none); for the mirror it is 0.
-  - get_fold_starts() returns the 24,576 accumulated start counts (index (c · 64 + s) · 64 + u; zeros before any dump
+  - get_fold_starts() returns the 65,536 accumulated start counts (index (c · 64 + s) · 64 + u; zeros before any dump
     frame); get_fold_starts_frames() the number of dump frames added since the last reset; reset_fold_starts() clears
     both. reset_records does not.
-  - mirror_fold_starts(info: PackedByteArray, width, k, clock, pre_frame) returns the 24,576 counts a cut frame must
+  - mirror_fold_starts(info: PackedByteArray, width, k, clock, pre_frame) returns the 65,536 counts a cut frame must
     give: for every texel of the info image with the valid bit (bit 14), s = draw(ψ_s(px, clock), k), capped at
-    K − 2 on a pre-frame, u = (clock + φ(px)) mod K, class 0 (3 on a pre-frame). CPU only. An empty array means the
+    K − 2 on a pre-frame, u = (clock + φ(px)) mod K, class 0 (8 on a pre-frame). CPU only. An empty array means the
     arguments were refused (size not width × height × 4 bytes, k not a power of two from 4 to 64, clock below 0).
     run_case returns info, so the known-answer cut case compares its fold_dump starts with this count by count.
   - Self-test arguments outside 0 to 2^32 − 1 give ok false with error "argument out of range" (no wrap). Without a
@@ -1259,16 +1263,17 @@ self-test shader and the probe methods that read them. With the dump off nothing
   - record s_max, n_over: static, pan, dolly and cut scenarios (check 3); n_over above 0 only in the known-answer case
     P5 (one texel at s = K).
   - record hp_eq_px, expected_phase0: static (every receiver relocks) and pan (check 6).
-  - get_fold_starts: the cut scenario (class 0), pan frame edges (class 1), other starts in pan and dolly
-    (class 2), the preframe scenario (class 3 only: its pose is static, so a pre-frame there starts pixels by a cut).
-    Classes 4 and 5 need a frame edge or a disocclusion on a pre-frame; no planned leg makes one, and the reader
-    needs only the sum of 3 to 5. If revalidation is on a budget, a pre-frame can fall on another scenario's first
-    frame and move its cut starts from class 0 to class 3; the lab reads the pre_frame column before it names a class.
+  - get_fold_starts (12b's 6 classes; the 16 classes since Fold check 6 (b) are below): the cut scenario (class 0),
+    pan frame edges (class 1), other starts in pan and dolly (class 2), the preframe scenario (class 3 only: its pose
+    is static, so a pre-frame there starts pixels by a cut). Classes 4 and 5 need a frame edge or a disocclusion on a
+    pre-frame; no planned leg makes one, and the reader needs only the sum of 3 to 5. If revalidation is on a budget,
+    a pre-frame can fall on another scenario's first frame and move its cut starts from class 0 to class 3; the lab
+    reads the pre_frame column before it names a class.
   - K 0 with the dump on (scan and relock return early, texels 0, slots 27 and 28 zero): the lab's dump-on identity
     case adds one K 0 frame.
   - fold self-test: run once per run per K for draw.csv, phi_classes.csv, psi.csv and the isqrt sweep.
 - Doctests. tests/test_restir_fold_dump.h ("[RestirFoldDump] ..."): start classes and the histogram index ((5, 63, 63)
-  is 24,575, dump 98,320 bytes, binding 32, slots 27 and 28); compare finds a planted difference (one word, two words,
+  is 24,575, dump 98,320 bytes, binding 32, slots 27 and 28; Fold check 6 (b) changed these, below); compare finds a planted difference (one word, two words,
   a short array); the draw weights over one period at every K (1 at s = 0, 2s + 1 below K/2, K from K/2); the isqrt
   sub over 2^24 gives {0, 0xFFFFFFFF}; φ counts sum to the grid and a ψ word packs its three fields; argument checks;
   the start accumulator adds two frames, counts them and ignores a short one; the cut-frame start mirror puts every
@@ -1281,7 +1286,7 @@ self-test shader and the probe methods that read them. With the dump off nothing
     a negative share), so such rows never reach s_max.csv, relock.csv or preframe.csv.
   - Start windows are proved by identities, VOID on a miss: over a window, the sum of get_fold_starts over all
     classes equals the sum of the rows' started over the same frames, and get_fold_starts_frames equals the number of
-    rows; on a cut row the class 0 (or 3) total equals that row's n_valid and started. Starts are added before the
+    rows; on a cut row the class 0 (or 3; 8 since Fold check 6 (b)) total equals that row's n_valid and started. Starts are added before the
     row is pushed, so once row N is visible frame N's starts are in.
   - The first dump frame of a variant compiles the dump shader and its pipelines on the render thread and can take
     seconds (hardware variant most). The lab warms the dump once before the counted frames and takes no timing from
@@ -1289,9 +1294,10 @@ self-test shader and the probe methods that read them. With the dump off nothing
   - Dump on against dump off (identity case): hashes first. The dump pass is a different pipeline, so a driver may
     schedule floats differently; a hash miss falls back to the float compare at the registration bar before it is
     called a failure.
-  - expected_phase0 (slot 28) counts every valid receiver with hp == px at phase 0; refused counts only receivers that
-    reached the refusal test. A few pixels of difference on a judged frame are history rejections (plane, normal,
-    no sample, epoch, dirty), not a dump fault.
+  - In 12b expected_phase0 (slot 28) counted every valid receiver with hp == px at phase 0; refused counts only
+    receivers that reached the refusal test. A few pixels of difference on a judged frame are history rejections
+    (plane, normal, no sample, epoch, dirty), not a dump fault. Since Fold check 6 (b) slot 28 counts only those with
+    history, and the rest go to slot 29 (phase0_start).
 - Known limits.
   - The dump runs only with readback on. Starts accumulate across every view and leg in the process; the lab calls
     reset_fold_starts at the start of a leg and runs one RTGI view.
@@ -1376,7 +1382,8 @@ lineage off nothing a frame computes or binds changes, and the 12b dump objects 
   - It returns the frame's {refusals, unknown, families}, which go into the row's RestirFoldRecord fields
     lineage_refusals, lineage_unknown and lineage_families. They are −1 on a row without the lineage pass (or whose
     read-back failed), like s_max, n_over and the other dump fields. They are row fields 29 to 31 of get_fold_rows,
-    named in get_fold_row_fields; RESTIR_FOLD_ROW_FIELDS is 32. run_case's fold_dump dictionary does not carry them.
+    named in get_fold_row_fields; RESTIR_FOLD_ROW_FIELDS was 32 in 12c (42 since Fold check 6 (b), fields 32 to 41
+    after these). run_case's fold_dump dictionary does not carry them.
   - A frame's families are added before its row is pushed, and the row carries the tag, so the families of a tag cover
     exactly the lineage rows of that tag.
   - restir_fold_families(ids, count, r_sizes) (restir_fold_mirror.cpp, pure): skips 0; counts every other id as a
@@ -1429,3 +1436,42 @@ lineage off nothing a frame computes or binds changes, and the 12b dump objects 
   - Lineage is not in run_case or the case files; P7 (12b against 12c, lineage off) uses the existing paths.
   - A lineage object that fails to build is tried once per variant and core; the dump object then runs in its place,
     fold_lineage_active stays false and status reports reason code 3.
+
+## Fold check 6 (b): gated phase-0 counts and start reasons
+
+Registration D:\claude\rtgi\plan\restir-gi\FOLD-B-REG.md (14 Nov 2026), on 0f7705509. Dump path only: every change is
+under #ifdef RS_FOLD_DUMP or in code that runs only when the dump ran, so the plain TEMPORAL variants keep their
+preprocessed token stream (the shader cache misses once, as the source text changed).
+
+- Slots (pass-stats row 0, stride 32 unchanged):
+  - 27 PS_FOLD_HP_EQ_PX: unchanged, every valid receiver with hp == px and K not 0, with or without history.
+  - 28 PS_FOLD_PHASE0: a phase-0 ((RS_FOLD_CLOCK + φ(px)) mod K == 0) hp == px receiver with had (c[1].present or
+    cleared). The rs_fold_dump_relock call moved from just before `bool had` to just after it and takes had as its
+    third argument. Nothing between the two places returns or changes px, hp, c[1] or cleared, so slot 28 + slot 29
+    equals 12b's slot 28 on every frame.
+  - 29 PS_FOLD_PHASE0_START (new): the same phase-0 hp == px receivers without had.
+  - 30 PS_FOLD_REFUSED_OFF (new): in the rule-1 refusal branch (where slot 22 PS_FOLD_REFUSED adds 1), receivers whose
+    own pixel is not at phase 0: (RS_FOLD_CLOCK + φ(px)) mod K != 0. No hp == px condition.
+  - C++: RESTIR_FOLD_SLOT_PHASE0_START 29, RESTIR_FOLD_SLOT_REFUSED_OFF 30; read_stats adds them to
+    RestirFrameStats::fold_phase0_start and fold_refused_off. The static_assert checks slot 30 against the stride.
+- Start classes: CUT 0, FRAME 1, PLANE 2, NORMAL 3, CLASS 4, NO_SAMPLE 5, VIS 6, OTHER 7, plus PRE 8 on a pre-frame,
+  16 classes (RESTIR_FOLD_START_CLASSES). Reason to class: 9 CUT, 1 FRAME, 2 PLANE, 3 NORMAL, 4 CLASS, 10 NO_SAMPLE,
+  11 VIS, every other code (0, 5, 6, 7, 8, 12, 13, 14, 15) OTHER, so no start is lost. rs_fold_start_class (shader)
+  and restir_fold_start_class (restir_fold_mirror.cpp) hold the same table; reason codes RESTIR_FOLD_REJ_*_CODE.
+- Start buffer: 16 · 64 · 64 = 65,536 words after the 16-byte header, RESTIR_FOLD_DUMP_BYTES 262,160. The shader's
+  starts[] is a runtime array; storage_buffer_create, buffer_clear, read_fold_dump, the module accumulator,
+  get_fold_starts, mirror_fold_starts and run_case's starts all size from RESTIR_FOLD_START_COUNT or
+  RESTIR_FOLD_DUMP_BYTES. Index (c · 64 + s) · 64 + u as before.
+- restir_fold_start_sums(starts, sums) (restir_fold_mirror.cpp, pure): eight per-class totals over s and u, class
+  c + 8 added into c. False and all −1 when the array is not 65,536 words.
+- Rows: RESTIR_FOLD_ROW_FIELDS 42. Fields 0 to 31 are unchanged (expected_phase0 stays field 25 and now carries the
+  gated slot 28). New: 32 phase0_start, 33 refused_off, 34 start_cut, 35 start_frame, 36 start_plane, 37 start_normal,
+  38 start_class, 39 start_no_sample, 40 start_vis, 41 start_other. All −1 unless the frame's dump was read, like
+  s_max; the start sums are that frame's dump starts (pre-frame twins folded in), not the accumulator.
+- run_case's fold_dump dictionary adds phase0_start and refused_off (from the stats, like hp_eq_px).
+- Identities for the lab: hp_eq_px ≥ expected_phase0 + phase0_start; the eight start sums add up to the row's
+  started on a dump row (every !had start is in exactly one class); refused_off ≤ refused.
+- Doctests: test_restir_fold_dump.h checks the class table for every reason 0 to 15, plain and pre-frame, the class
+  ids, (15, 63, 63) = 65,535, 65,536 starts, 262,160 bytes, slots 27 to 30, the cut mirror in class 0 (8 on a
+  pre-frame), and the start sums (twins folded, a short array refused). test_restir_fold_rows.h checks the 42 names,
+  the −1 defaults of fields 24 to 41 and the packing of fields 32 to 41.

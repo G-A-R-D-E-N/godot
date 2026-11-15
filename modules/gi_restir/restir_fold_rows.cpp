@@ -67,6 +67,16 @@ const char *const *restir_fold_row_names() {
 		"lineage_refusals",
 		"lineage_unknown",
 		"lineage_families",
+		"phase0_start",
+		"refused_off",
+		"start_cut",
+		"start_frame",
+		"start_plane",
+		"start_normal",
+		"start_class",
+		"start_no_sample",
+		"start_vis",
+		"start_other",
 	};
 	return names;
 }
@@ -118,4 +128,14 @@ void restir_fold_pack_row(const RestirFrameRecord &p_record, int64_t p_index, in
 	r_row[29] = f.lineage_refusals;
 	r_row[30] = f.lineage_unknown;
 	r_row[31] = f.lineage_families;
+	r_row[32] = f.phase0_start;
+	r_row[33] = f.refused_off;
+	r_row[34] = f.start_cut;
+	r_row[35] = f.start_frame;
+	r_row[36] = f.start_plane;
+	r_row[37] = f.start_normal;
+	r_row[38] = f.start_class;
+	r_row[39] = f.start_no_sample;
+	r_row[40] = f.start_vis;
+	r_row[41] = f.start_other;
 }

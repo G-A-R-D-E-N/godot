@@ -458,7 +458,22 @@ void rs_fold_dump_scan(ivec2 p_pixel) {
 }
 
 uint rs_fold_start_class(uint p_reason) {
-	uint base = p_reason == REJ_CUT ? RS_FOLD_START_CUT : (p_reason == REJ_FRAME ? RS_FOLD_START_FRAME : RS_FOLD_START_OTHER);
+	uint base = RS_FOLD_START_OTHER;
+	if (p_reason == REJ_CUT) {
+		base = RS_FOLD_START_CUT;
+	} else if (p_reason == REJ_FRAME) {
+		base = RS_FOLD_START_FRAME;
+	} else if (p_reason == REJ_PLANE) {
+		base = RS_FOLD_START_PLANE;
+	} else if (p_reason == REJ_NORMAL) {
+		base = RS_FOLD_START_NORMAL;
+	} else if (p_reason == REJ_CLASS) {
+		base = RS_FOLD_START_CLASS;
+	} else if (p_reason == REJ_NO_SAMPLE) {
+		base = RS_FOLD_START_NO_SAMPLE;
+	} else if (p_reason == REJ_VIS) {
+		base = RS_FOLD_START_VIS;
+	}
 	return base + ((rf.flags & F_PRE_FRAME) != 0u ? RS_FOLD_START_PRE : 0u);
 }
 
@@ -469,13 +484,17 @@ void rs_fold_dump_start(ivec2 p_pixel, uint p_reason, uint p_flags) {
 	atomicAdd(rs_fold_dump.starts[(c * RS_FOLD_START_S + s) * RS_FOLD_START_U + u], 1u);
 }
 
-void rs_fold_dump_relock(ivec2 p_pixel, ivec2 p_hp) {
+void rs_fold_dump_relock(ivec2 p_pixel, ivec2 p_hp, bool p_had) {
 	if (RS_FOLD_K == 0u || !all(equal(p_hp, p_pixel))) {
 		return;
 	}
 	g_stats[PS_FOLD_HP_EQ_PX] += 1.0;
 	if ((RS_FOLD_CLOCK + rs_fold_phi(uvec2(p_pixel))) % RS_FOLD_K == 0u) {
-		g_stats[PS_FOLD_PHASE0] += 1.0;
+		if (p_had) {
+			g_stats[PS_FOLD_PHASE0] += 1.0;
+		} else {
+			g_stats[PS_FOLD_PHASE0_START] += 1.0;
+		}
 	}
 }
 
@@ -600,6 +619,11 @@ void rs_temporal_pixel(ivec2 px) {
 								reason = REJ_BOUND;
 							}
 							g_stats[PS_FOLD_REFUSED] += 1.0;
+#ifdef RS_FOLD_DUMP
+							if ((RS_FOLD_CLOCK + rs_fold_phi(uvec2(px))) % RS_FOLD_K != 0u) {
+								g_stats[PS_FOLD_REFUSED_OFF] += 1.0;
+							}
+#endif
 							if (!c[0].on) {
 								g_stats[PS_FOLD_REFUSED_EMPTY] += 1.0;
 							}
@@ -609,10 +633,10 @@ void rs_temporal_pixel(ivec2 px) {
 			}
 		}
 	}
-#ifdef RS_FOLD_DUMP
-	rs_fold_dump_relock(px, hp);
-#endif
 	bool had = c[1].present || cleared;
+#ifdef RS_FOLD_DUMP
+	rs_fold_dump_relock(px, hp, had);
+#endif
 
 	int sel;
 	float total_m;

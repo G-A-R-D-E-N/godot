@@ -859,9 +859,22 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 			if (RestirGiCore::read_fold_dump(state.resources, dump)) {
 				record.fold.hp_eq_px = int64_t(summary.stats.fold_hp_eq_px);
 				record.fold.expected_phase0 = int64_t(summary.stats.fold_phase0);
+				record.fold.phase0_start = int64_t(summary.stats.fold_phase0_start);
+				record.fold.refused_off = int64_t(summary.stats.fold_refused_off);
 				record.fold.s_max = int64_t(dump.s_max);
 				record.fold.n_over = int64_t(dump.n_over);
 				record.fold.hist_texels = int64_t(dump.texels);
+				int64_t start_sums[RESTIR_FOLD_START_PRE];
+				if (restir_fold_start_sums(dump.starts, start_sums)) {
+					record.fold.start_cut = start_sums[RESTIR_FOLD_START_CUT];
+					record.fold.start_frame = start_sums[RESTIR_FOLD_START_FRAME];
+					record.fold.start_plane = start_sums[RESTIR_FOLD_START_PLANE];
+					record.fold.start_normal = start_sums[RESTIR_FOLD_START_NORMAL];
+					record.fold.start_class = start_sums[RESTIR_FOLD_START_CLASS];
+					record.fold.start_no_sample = start_sums[RESTIR_FOLD_START_NO_SAMPLE];
+					record.fold.start_vis = start_sums[RESTIR_FOLD_START_VIS];
+					record.fold.start_other = start_sums[RESTIR_FOLD_START_OTHER];
+				}
 				restir_fold_starts_add(dump.starts);
 			}
 		}

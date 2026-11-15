@@ -429,6 +429,8 @@ Dictionary run_case(RestirGiCore &p_core, const Dictionary &p_case) {
 		d["had_history"] = int64_t(stats.had_history);
 		d["hp_eq_px"] = int64_t(stats.fold_hp_eq_px);
 		d["expected_phase0"] = int64_t(stats.fold_phase0);
+		d["phase0_start"] = int64_t(stats.fold_phase0_start);
+		d["refused_off"] = int64_t(stats.fold_refused_off);
 		RestirFoldDump dump;
 		if (res.fold_dump_ran && RestirGiCore::read_fold_dump(res, dump)) {
 			d["s_max"] = int64_t(dump.s_max);

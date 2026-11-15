@@ -109,8 +109,8 @@ static_assert(RESTIR_FOLD_F_PRE_FRAME == RESTIR_F_PRE_FRAME, "Fold's pre-frame b
 static constexpr uint32_t PASS_STATS_ROWS = 4;
 static constexpr uint32_t PASS_STATS_STRIDE = 32;
 
-static_assert(RESTIR_FOLD_SLOT_PHASE0 < PASS_STATS_STRIDE, "The Fold dump slots must fit the pass-stats stride");
-static_assert(RESTIR_FOLD_DUMP_BYTES == 98320u, "The Fold dump buffer is a 16-byte header and 6 x 64 x 64 start counts");
+static_assert(RESTIR_FOLD_SLOT_REFUSED_OFF < PASS_STATS_STRIDE, "The Fold dump slots must fit the pass-stats stride");
+static_assert(RESTIR_FOLD_DUMP_BYTES == 262160u, "The Fold dump buffer is a 16-byte header and 16 x 64 x 64 start counts");
 static_assert(RESTIR_FOLD_LINEAGE_IN_BINDING == RESTIR_FOLD_DUMP_BINDING + 1u && RESTIR_FOLD_REFUSED_ID_BINDING == RESTIR_FOLD_DUMP_BINDING + 3u, "The Fold lineage bindings follow the dump binding");
 
 static constexpr int RESTIR_FOLD_DUMP_MODES = 2;
@@ -1135,6 +1135,8 @@ RestirFrameStats RestirGiCore::read_stats(const RestirGiResources &p_resources) 
 				stats.fold_refused_empty += v[26];
 				stats.fold_hp_eq_px += v[RESTIR_FOLD_SLOT_HP_EQ_PX];
 				stats.fold_phase0 += v[RESTIR_FOLD_SLOT_PHASE0];
+				stats.fold_phase0_start += v[RESTIR_FOLD_SLOT_PHASE0_START];
+				stats.fold_refused_off += v[RESTIR_FOLD_SLOT_REFUSED_OFF];
 			}
 		}
 		for (uint32_t i = p_resources.group_count * 3; i < p_resources.group_count * PASS_STATS_ROWS; i++) {

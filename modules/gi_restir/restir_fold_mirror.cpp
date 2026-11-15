@@ -32,6 +32,9 @@
 
 #include "core/math/math_funcs.h"
 
+static_assert(RESTIR_FOLD_START_CLASSES == 2u * RESTIR_FOLD_START_PRE, "Every start class has one pre-frame twin");
+static_assert(RESTIR_FOLD_START_OTHER + 1u == RESTIR_FOLD_START_PRE, "OTHER is the last plain start class");
+
 uint32_t restir_fold_pcg(uint32_t p_value) {
 	const uint32_t state = p_value * 747796405u + 2891336453u;
 	const uint32_t word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
@@ -99,12 +102,60 @@ Vector<uint32_t> restir_fold_other_seeds(uint32_t p_rtgi_seed, uint32_t p_seed_o
 }
 
 uint32_t restir_fold_start_class(uint32_t p_reason, bool p_pre_frame) {
-	const uint32_t base = p_reason == RESTIR_FOLD_REJ_CUT_CODE ? RESTIR_FOLD_START_CUT : (p_reason == RESTIR_FOLD_REJ_FRAME_CODE ? RESTIR_FOLD_START_FRAME : RESTIR_FOLD_START_OTHER);
+	uint32_t base = RESTIR_FOLD_START_OTHER;
+	switch (p_reason) {
+		case RESTIR_FOLD_REJ_CUT_CODE:
+			base = RESTIR_FOLD_START_CUT;
+			break;
+		case RESTIR_FOLD_REJ_FRAME_CODE:
+			base = RESTIR_FOLD_START_FRAME;
+			break;
+		case RESTIR_FOLD_REJ_PLANE_CODE:
+			base = RESTIR_FOLD_START_PLANE;
+			break;
+		case RESTIR_FOLD_REJ_NORMAL_CODE:
+			base = RESTIR_FOLD_START_NORMAL;
+			break;
+		case RESTIR_FOLD_REJ_CLASS_CODE:
+			base = RESTIR_FOLD_START_CLASS;
+			break;
+		case RESTIR_FOLD_REJ_NO_SAMPLE_CODE:
+			base = RESTIR_FOLD_START_NO_SAMPLE;
+			break;
+		case RESTIR_FOLD_REJ_VIS_CODE:
+			base = RESTIR_FOLD_START_VIS;
+			break;
+		default:
+			break;
+	}
 	return base + (p_pre_frame ? RESTIR_FOLD_START_PRE : 0u);
 }
 
 uint32_t restir_fold_start_index(uint32_t p_class, uint32_t p_s, uint32_t p_u) {
 	return (p_class * RESTIR_FOLD_START_S + p_s) * RESTIR_FOLD_START_U + p_u;
+}
+
+bool restir_fold_start_sums(const Vector<uint32_t> &p_starts, int64_t *r_sums) {
+	for (uint32_t c = 0u; c < RESTIR_FOLD_START_PRE; c++) {
+		r_sums[c] = -1;
+	}
+	if (p_starts.size() != int64_t(RESTIR_FOLD_START_COUNT)) {
+		return false;
+	}
+	for (uint32_t c = 0u; c < RESTIR_FOLD_START_PRE; c++) {
+		r_sums[c] = 0;
+	}
+	const uint32_t *w = p_starts.ptr();
+	constexpr uint32_t class_words = RESTIR_FOLD_START_S * RESTIR_FOLD_START_U;
+	for (uint32_t c = 0u; c < RESTIR_FOLD_START_CLASSES; c++) {
+		int64_t sum = 0;
+		const uint32_t *row = w + restir_fold_start_index(c, 0u, 0u);
+		for (uint32_t i = 0u; i < class_words; i++) {
+			sum += int64_t(row[i]);
+		}
+		r_sums[c % RESTIR_FOLD_START_PRE] += sum;
+	}
+	return true;
 }
 
 void restir_fold_start_mirror(const uint32_t *p_info, int64_t p_count, int64_t p_width, uint32_t p_k, uint32_t p_clock, bool p_pre_frame, Vector<uint32_t> &r_starts) {
