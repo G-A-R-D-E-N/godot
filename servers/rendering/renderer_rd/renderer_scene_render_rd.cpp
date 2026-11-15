@@ -868,6 +868,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 	Ref<RendererRD::LocalExposure::Buffers> local_exposure_buffers;
 	RID local_exposure_grid;
 	RendererEnvironmentStorage::LocalExposure local_exposure_settings;
+	bool local_exposure_frame_median = false;
 	if (local_exposure && can_use_effects && can_use_storage && rb->get_view_count() == 1 && p_render_data->environment.is_valid()) {
 		local_exposure_settings = environment_get_local_exposure(p_render_data->environment);
 		if (local_exposure_settings.enabled && local_exposure_settings.strength > 0.0) {
@@ -882,6 +883,8 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 			local_exposure_quality.temporal_alpha = local_exposure_seconds > 0.0 ? 1.0 - Math::exp(-time_step / local_exposure_seconds) : 1.0;
 			local_exposure_quality.reset_history = rb->get_history_reset();
 			local_exposure_quality.frame = RSG::rasterizer->get_frame_number();
+			local_exposure_frame_median = GLOBAL_GET_CACHED(uint32_t, "rendering/environment/local_exposure/pivot_source") == 1;
+			local_exposure_quality.frame_median = local_exposure_frame_median;
 			local_exposure_grid = local_exposure->process(rb->get_internal_texture(), rb->get_internal_size(), local_exposure_buffers, local_exposure_quality);
 
 			RD::get_singleton()->draw_command_end_label();
@@ -996,6 +999,8 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 			tonemap.local_exposure = local_exposure_settings;
 			tonemap.local_exposure_grid = local_exposure_grid;
 			tonemap.local_exposure_wide = local_exposure_buffers->wide;
+			tonemap.local_exposure_pivot_source = local_exposure_frame_median ? 1 : 0;
+			tonemap.local_exposure_median = local_exposure_frame_median ? local_exposure_buffers->median : RID();
 			tonemap.local_exposure_method = MIN(GLOBAL_GET_CACHED(uint32_t, "rendering/environment/local_exposure/method"), 1u);
 			tonemap.local_exposure_wide_blend = CLAMP(GLOBAL_GET_CACHED(float, "rendering/environment/local_exposure/wide_blend"), 0.0f, 1.0f);
 			tonemap.local_exposure_edge_range = CLAMP(GLOBAL_GET_CACHED(float, "rendering/environment/local_exposure/edge_range"), 0.1f, 6.0f);

@@ -61,4 +61,20 @@ TEST_CASE("[LocalExposureLimits] Strength, contrast and shift stay inside their 
 	CHECK(LocalExposureLimits::shift(9.0f) == LocalExposureLimits::MAX_SHIFT_STOPS);
 }
 
+TEST_CASE("[LocalExposureLimits] The frame median is the bin holding half the weight") {
+	const float weight[4] = { 1.0f, 2.0f, 4.0f, 1.0f };
+	const float sum[4] = { -8.0f, -10.0f, -8.0f, 1.0f };
+	CHECK(LocalExposureLimits::median_log(weight, sum, 4, 99.0f) == doctest::Approx(-2.0f));
+	const float dark[3] = { 3.0f, 1.0f, 1.0f };
+	const float dark_sum[3] = { -36.0f, -6.0f, -1.0f };
+	CHECK(LocalExposureLimits::median_log(dark, dark_sum, 3, 99.0f) == doctest::Approx(-12.0f));
+}
+
+TEST_CASE("[LocalExposureLimits] A frame with no weight has no median") {
+	const float weight[3] = { 0.0f, 0.0f, 0.0f };
+	const float sum[3] = { 0.0f, 0.0f, 0.0f };
+	CHECK(LocalExposureLimits::median_log(weight, sum, 3, 99.0f) == 99.0f);
+	CHECK(LocalExposureLimits::median_log(weight, sum, 0, 99.0f) == 99.0f);
+}
+
 } // namespace TestLocalExposureLimits

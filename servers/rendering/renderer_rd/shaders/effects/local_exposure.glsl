@@ -10,6 +10,7 @@
 #define LUMINANCE_FLOOR 9.5367431640625e-07
 #define LUMINANCE_CEILING 65504.0
 #define BLUR_RADIUS 4
+#define MEDIAN_NONE 1.0e30
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -37,6 +38,14 @@ layout(rgba16f, set = 1, binding = 0) uniform restrict writeonly image2D dest_wi
 layout(set = 0, binding = 0) uniform sampler3D source_grid;
 layout(set = 0, binding = 1) uniform sampler3D source_history;
 layout(rgba32f, set = 1, binding = 0) uniform restrict writeonly image3D dest_grid;
+#endif
+
+#ifdef MODE_MEDIAN
+layout(set = 0, binding = 0) uniform sampler3D source_grid;
+layout(r32f, set = 1, binding = 0) uniform restrict writeonly image2D dest_median;
+
+shared float bin_weight[GRID_DEPTH];
+shared float bin_sum[GRID_DEPTH];
 #endif
 
 layout(push_constant, std430) uniform Params {
@@ -156,5 +165,36 @@ void main() {
 		now = mix(texelFetch(source_history, cell, 0).rg, now, params.sigma);
 	}
 	imageStore(dest_grid, cell, vec4(now, 0.0, 0.0));
+#endif
+
+#ifdef MODE_MEDIAN
+	int z = int(gl_LocalInvocationIndex);
+	vec2 total = vec2(0.0);
+	for (int y = 0; y < params.dest_size.y; y++) {
+		for (int x = 0; x < params.dest_size.x; x++) {
+			total += texelFetch(source_grid, ivec3(x, y, z), 0).rg;
+		}
+	}
+	bin_sum[z] = total.r;
+	bin_weight[z] = total.g;
+	barrier();
+	if (z == 0) {
+		float all = 0.0;
+		for (int i = 0; i < GRID_DEPTH; i++) {
+			all += bin_weight[i];
+		}
+		float median = MEDIAN_NONE;
+		if (all > 1e-5) {
+			float running = 0.0;
+			for (int i = 0; i < GRID_DEPTH; i++) {
+				running += bin_weight[i];
+				if (running >= 0.5 * all) {
+					median = bin_sum[i] / bin_weight[i];
+					break;
+				}
+			}
+		}
+		imageStore(dest_median, ivec2(0), vec4(median));
+	}
 #endif
 }

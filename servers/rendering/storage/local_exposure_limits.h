@@ -56,4 +56,22 @@ constexpr float pivot(float p_stops) {
 	return limit(p_stops, -MAX_PIVOT_STOPS, MAX_PIVOT_STOPS);
 }
 
+constexpr float median_log(const float *p_weight, const float *p_sum, int p_count, float p_none) {
+	float total = 0.0f;
+	for (int i = 0; i < p_count; i++) {
+		total += p_weight[i];
+	}
+	if (!(total > 1e-5f)) {
+		return p_none;
+	}
+	float running = 0.0f;
+	for (int i = 0; i < p_count; i++) {
+		running += p_weight[i];
+		if (running >= 0.5f * total) {
+			return p_sum[i] / p_weight[i];
+		}
+	}
+	return p_none;
+}
+
 } // namespace LocalExposureLimits

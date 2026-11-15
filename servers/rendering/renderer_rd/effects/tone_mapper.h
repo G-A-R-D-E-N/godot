@@ -172,7 +172,9 @@ private:
 		float wide_blend;
 		float edge_range;
 		uint32_t method;
-		uint32_t pad[3];
+		uint32_t pivot_source;
+		float pivot_offset;
+		uint32_t pad;
 	};
 
 	struct Tonemap {
@@ -247,7 +249,9 @@ public:
 		RendererEnvironmentStorage::LocalExposure local_exposure;
 		RID local_exposure_grid;
 		RID local_exposure_wide;
+		RID local_exposure_median;
 		uint32_t local_exposure_method = 0;
+		uint32_t local_exposure_pivot_source = 0;
 		float local_exposure_wide_blend = 0.0;
 		float local_exposure_edge_range = 1.0;
 	};

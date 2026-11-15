@@ -3011,6 +3011,9 @@
 			The filter that builds the regional luminance base used by [member Environment.local_exposure_enabled]. [code]Bilateral Grid[/code] splats log luminance into a low-resolution grid over screen position and luminance, blurs it and looks each pixel up at its own luminance, so the base follows edges. [code]Edge-Checked Blur[/code] uses one blurred value per screen region and falls back to the pixel's own luminance where the two differ by more than [member rendering/environment/local_exposure/edge_range].
 			[b]Note:[/b] Only used by the Forward+ rendering method, on viewports with a single view.
 		</member>
+		<member name="rendering/environment/local_exposure/pivot_source" type="int" setter="" getter="" default="0">
+			Where the level that local exposure leaves unchanged comes from. [code]Fixed[/code] uses middle gray offset by [member Environment.local_exposure_pivot]. [code]Frame Median[/code] uses the median log luminance of the current frame, taken from the regional luminance grid and offset by the same amount, so the frame's typical region keeps its global exposure and local exposure only moves light between regions. Falls back to [code]Fixed[/code] for a frame with no luminance.
+		</member>
 		<member name="rendering/environment/local_exposure/range_sigma" type="float" setter="" getter="" default="1.0">
 			Width, in stops, of the blur along the luminance axis of the bilateral grid. Higher values let regions of more different brightness share one base, which adapts more smoothly and protects edges less.
 		</member>

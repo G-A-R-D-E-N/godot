@@ -220,12 +220,16 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 		local.wide_blend = p_settings.local_exposure_wide_blend;
 		local.edge_range = p_settings.local_exposure_edge_range;
 		local.method = p_settings.local_exposure_method;
+		local.pivot_source = p_settings.local_exposure_pivot_source == 1 && p_settings.local_exposure_median.is_valid() ? 1 : 0;
+		local.pivot_offset = p_settings.local_exposure.pivot;
 		RD::get_singleton()->buffer_update(tonemap.local_exposure_uniforms, 0, sizeof(LocalExposureUniforms), &local);
 	}
 	TextureStorage *texture_storage = TextureStorage::get_singleton();
 	RD::Uniform u_local_grid(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ default_sampler, use_local_exposure ? p_settings.local_exposure_grid : texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_3D_WHITE) }));
 	RD::Uniform u_local_wide(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, Vector<RID>({ default_sampler, use_local_exposure ? p_settings.local_exposure_wide : texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_WHITE) }));
 	RD::Uniform u_local_uniforms(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 2, tonemap.local_exposure_uniforms);
+	const bool use_local_median = use_local_exposure && p_settings.local_exposure_median.is_valid();
+	RD::Uniform u_local_median(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, Vector<RID>({ nearest_sampler, use_local_median ? p_settings.local_exposure_median : texture_storage->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_WHITE) }));
 
 	RD::Uniform u_source_color(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ p_settings.bilinear_filtering ? default_sampler : nearest_sampler, p_source_color }));
 
@@ -262,7 +266,7 @@ void ToneMapper::tonemapper(RID p_source_color, RID p_dst_framebuffer, const Ton
 	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 1, u_exposure_texture), 1);
 	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 2, u_glow_texture, u_glow_map), 2);
 	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 3, u_color_correction_texture), 3);
-	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 4, u_local_grid, u_local_wide, u_local_uniforms), 4);
+	RD::get_singleton()->draw_list_bind_uniform_set(draw_list, uniform_set_cache->get_cache(shader, 4, u_local_grid, u_local_wide, u_local_uniforms, u_local_median), 4);
 
 	RD::get_singleton()->draw_list_set_push_constant(draw_list, &tonemap.push_constant, sizeof(TonemapPushConstant));
 	RD::get_singleton()->draw_list_draw(draw_list, false, 1u, 3u);

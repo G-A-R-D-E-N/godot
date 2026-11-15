@@ -57,6 +57,7 @@ layout(set = 3, binding = 0) uniform sampler3D source_color_correction;
 
 layout(set = 4, binding = 0) uniform sampler3D source_local_grid;
 layout(set = 4, binding = 1) uniform sampler2D source_local_wide;
+layout(set = 4, binding = 3) uniform sampler2D source_local_median;
 layout(set = 4, binding = 2, std140) uniform LocalExposure {
 	float strength;
 	float shadow_slope;
@@ -67,9 +68,9 @@ layout(set = 4, binding = 2, std140) uniform LocalExposure {
 	float wide_blend;
 	float edge_range;
 	uint method;
-	uint pad0;
-	uint pad1;
-	uint pad2;
+	uint pivot_source;
+	float pivot_offset;
+	uint pad;
 }
 local_exposure;
 
@@ -963,7 +964,14 @@ float local_exposure_gain(vec3 p_exposed, vec2 p_uv, float p_exposure) {
 		float edge = smoothstep(local_exposure.edge_range, 2.0 * local_exposure.edge_range, abs(own - wide));
 		base = mix(wide, own, edge);
 	}
-	float stops = base + log2(scale) - local_exposure.pivot_log;
+	float pivot = local_exposure.pivot_log;
+	if (local_exposure.pivot_source == 1u) {
+		float median = textureLod(source_local_median, vec2(0.5), 0.0).r;
+		if (median < LOCAL_LOG_MAX) {
+			pivot = median + log2(scale) + local_exposure.pivot_offset;
+		}
+	}
+	float stops = base + log2(scale) - pivot;
 	float shift = 0.0;
 	if (stops < 0.0) {
 		if (local_exposure.max_lift > 0.0) {

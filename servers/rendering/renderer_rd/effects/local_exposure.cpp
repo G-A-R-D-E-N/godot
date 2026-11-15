@@ -43,6 +43,7 @@ LocalExposure::LocalExposure() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/local_exposure/wide_blend", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/local_exposure/edge_range", PROPERTY_HINT_RANGE, "0.1,6,0.01"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/local_exposure/temporal_seconds", PROPERTY_HINT_RANGE, "0,2,0.01"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/local_exposure/pivot_source", PROPERTY_HINT_ENUM, "Fixed,Frame Median"), 0);
 
 	Vector<String> modes;
 	modes.push_back("\n#define MODE_DOWNSAMPLE\n");
@@ -50,6 +51,7 @@ LocalExposure::LocalExposure() {
 	modes.push_back("\n#define MODE_BLUR\n");
 	modes.push_back("\n#define MODE_WIDE\n");
 	modes.push_back("\n#define MODE_TEMPORAL\n");
+	modes.push_back("\n#define MODE_MEDIAN\n");
 
 	shader.initialize(modes);
 	shader_version = shader.version_create();
@@ -82,6 +84,13 @@ void LocalExposure::Buffers::configure(RenderSceneBuffersRD *p_render_buffers) {
 	wide = RD::get_singleton()->texture_create(tf, RD::TextureView());
 	RD::get_singleton()->set_resource_name(wide, "Local exposure wide base");
 
+	RD::TextureFormat median_format = tf;
+	median_format.format = RD::DATA_FORMAT_R32_SFLOAT;
+	median_format.width = 1;
+	median_format.height = 1;
+	median = RD::get_singleton()->texture_create(median_format, RD::TextureView());
+	RD::get_singleton()->set_resource_name(median, "Local exposure frame median");
+
 	tf.texture_type = RD::TEXTURE_TYPE_3D;
 	tf.depth = GRID_DEPTH;
 	RD::TextureFormat history_format = tf;
@@ -104,6 +113,10 @@ void LocalExposure::Buffers::free_data() {
 	if (wide.is_valid()) {
 		RD::get_singleton()->free_rid(wide);
 		wide = RID();
+	}
+	if (median.is_valid()) {
+		RD::get_singleton()->free_rid(median);
+		median = RID();
 	}
 	for (int i = 0; i < 2; i++) {
 		if (grid[i].is_valid()) {
@@ -229,15 +242,27 @@ RID LocalExposure::process(RID p_source_texture, const Size2i p_source_size, Ref
 		p_buffers->history_valid = false;
 	}
 
+	const RID base_grid = p_settings.temporal_alpha < 1.0 ? result : p_buffers->grid[0];
 	{
 		RID wide_shader = shader.version_get_shader(shader_version, MODE_WIDE);
-		RD::Uniform u_wide_source(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ nearest_sampler, p_settings.temporal_alpha < 1.0 ? result : p_buffers->grid[0] }));
+		RD::Uniform u_wide_source(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ nearest_sampler, base_grid }));
 		RD::Uniform u_wide_dest(RD::UNIFORM_TYPE_IMAGE, 0, p_buffers->wide);
 		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, pipelines[MODE_WIDE]);
 		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(wide_shader, 0, u_wide_source), 0);
 		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(wide_shader, 1, u_wide_dest), 1);
 		RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(PushConstant));
 		RD::get_singleton()->compute_list_dispatch_threads(compute_list, grid_size.x, grid_size.y, 1);
+	}
+
+	if (p_settings.frame_median && p_buffers->median.is_valid()) {
+		RID median_shader = shader.version_get_shader(shader_version, MODE_MEDIAN);
+		RD::Uniform u_median_source(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ nearest_sampler, base_grid }));
+		RD::Uniform u_median_dest(RD::UNIFORM_TYPE_IMAGE, 0, p_buffers->median);
+		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, pipelines[MODE_MEDIAN]);
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(median_shader, 0, u_median_source), 0);
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(median_shader, 1, u_median_dest), 1);
+		RD::get_singleton()->compute_list_set_push_constant(compute_list, &push_constant, sizeof(PushConstant));
+		RD::get_singleton()->compute_list_dispatch(compute_list, 1, 1, 1);
 	}
 
 	RD::get_singleton()->compute_list_end();

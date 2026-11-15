@@ -50,6 +50,7 @@ public:
 		float range_sigma = 1.0;
 		float temporal_alpha = 1.0;
 		bool reset_history = false;
+		bool frame_median = false;
 		uint64_t frame = 0;
 	};
 
@@ -63,6 +64,7 @@ public:
 		RID grid[2];
 		RID history[2];
 		RID wide;
+		RID median;
 		int history_index = 0;
 		bool history_valid = false;
 		uint64_t last_frame = 0;
@@ -78,6 +80,7 @@ private:
 		MODE_BLUR,
 		MODE_WIDE,
 		MODE_TEMPORAL,
+		MODE_MEDIAN,
 		MODE_MAX
 	};
 
