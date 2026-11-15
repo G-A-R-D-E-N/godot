@@ -206,6 +206,9 @@ void consider(LightData p_light, bool p_spot, vec3 p_vertex, vec3 p_normal, vec3
 		return;
 	}
 	vec3 rel = p_light.position - p_vertex;
+	if (dot(rel, rel) * p_light.inv_radius * p_light.inv_radius >= 1.001 && p_light.attenuation >= 0.0 && p_light.attenuation <= 9.0) {
+		return;
+	}
 	float distance = length(rel);
 	float attenuation = lamp_attenuation(distance, p_light.inv_radius, p_light.attenuation);
 	if (attenuation <= 0.0) {
