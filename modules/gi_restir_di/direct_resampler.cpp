@@ -525,6 +525,7 @@ void DirectResamplerRD::free_device_resources() {
 		shader = nullptr;
 	}
 	_flush_debug_line();
+	_write_lab_mask();
 	_flush_lab_line();
 	const RID owned[] = { params_buffer, debug_buffer, lab_buffer, lab_mask_buffer, history_slots_dummy, history_factors_dummy, history_guide_dummy, header_dummy };
 	for (const RID &rid : owned) {
