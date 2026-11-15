@@ -46,6 +46,7 @@
 #include "servers/rendering/rendering_server_default.h"
 #include "servers/rendering/rendering_server_enums.h"
 #include "servers/rendering/shader_include_db.h"
+#include "servers/rendering/storage/auto_exposure_guard.h"
 #include "servers/rendering/storage/camera_attributes_storage.h"
 
 void get_vogel_disk(float *r_kernel, int p_sample_count) {
@@ -710,6 +711,8 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 		if (GLOBAL_GET_CACHED(bool, "rendering/environment/auto_exposure/clamp_adjust")) {
 			step = CLAMP(step, 0.0, 1.0);
 		}
+		const bool auto_exposure_hold = !set_immediate && RSG::camera_attributes->camera_attributes_get_auto_exposure_hold(p_render_data->camera_attributes);
+		const float auto_exposure_light_limit = AutoExposureGuard::light_factor(RSG::camera_attributes->camera_attributes_get_auto_exposure_light_adaptation_limit(p_render_data->camera_attributes), time_step, set_immediate);
 		float auto_exposure_min_sensitivity = RSG::camera_attributes->camera_attributes_get_auto_exposure_min_sensitivity(p_render_data->camera_attributes);
 		float auto_exposure_max_sensitivity = RSG::camera_attributes->camera_attributes_get_auto_exposure_max_sensitivity(p_render_data->camera_attributes);
 		const bool auto_exposure_log = GLOBAL_GET_CACHED(bool, "rendering/environment/auto_exposure/debug_log");
@@ -724,6 +727,8 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 			histogram_policy.highlight_ceiling = RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_ceiling(p_render_data->camera_attributes);
 			histogram_policy.highlight_max_shift = RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_max_shift(p_render_data->camera_attributes);
 			histogram_policy.exponential = RSG::camera_attributes->camera_attributes_get_auto_exposure_exponential_response(p_render_data->camera_attributes);
+			histogram_policy.light_limit = auto_exposure_light_limit;
+			histogram_policy.hold = auto_exposure_hold;
 			if (histogram_policy.exponential) {
 				histogram_policy.light_adjust = 1.0 - Math::exp(-time_step / MAX(RSG::camera_attributes->camera_attributes_get_auto_exposure_light_adaptation_time(p_render_data->camera_attributes), 0.001));
 				histogram_policy.dark_adjust = 1.0 - Math::exp(-time_step / MAX(RSG::camera_attributes->camera_attributes_get_auto_exposure_dark_adaptation_time(p_render_data->camera_attributes), 0.001));
@@ -737,14 +742,14 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 			if (auto_exposure_meter == RSE::AUTO_EXPOSURE_METER_LOG_HISTOGRAM) {
 				WARN_PRINT_ONCE("The log histogram auto-exposure meter needs the compute effects path; using the mean meter.");
 			}
-			luminance->luminance_reduction(rb->get_internal_texture(), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate, RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_limit(p_render_data->camera_attributes), auto_exposure_adaptation, auto_exposure_adaptation_pivot);
+			luminance->luminance_reduction(rb->get_internal_texture(), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate, RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_limit(p_render_data->camera_attributes), auto_exposure_adaptation, auto_exposure_adaptation_pivot, auto_exposure_light_limit, auto_exposure_hold);
 		}
 		if (auto_exposure_log) {
 			const float luminance_multiplier = rb->get_luminance_multiplier();
 			String head = vformat("AEX_LOG drawn %d size %dx%d step %s speed %s adjust_raw %s adjust_used %s immediate %d min_l %s max_l %s lum_mult %s scale %s",
 					Engine::get_singleton()->get_frames_drawn(), rb->get_internal_size().x, rb->get_internal_size().y, time_step, auto_exposure_speed, step_raw, step, set_immediate ? 1 : 0,
 					auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, luminance_multiplier, RSG::camera_attributes->camera_attributes_get_auto_exposure_scale(p_render_data->camera_attributes));
-			head += vformat(" meter %s adaptation %s pivot_l %s", auto_exposure_histogram ? "log_histogram" : "mean", auto_exposure_adaptation, auto_exposure_adaptation_pivot);
+			head += vformat(" meter %s adaptation %s pivot_l %s light_limit %s hold %d", auto_exposure_histogram ? "log_histogram" : "mean", auto_exposure_adaptation, auto_exposure_adaptation_pivot, auto_exposure_light_limit, auto_exposure_hold ? 1 : 0);
 			if (auto_exposure_log_hdr) {
 				const AutoExposureHdrScan scan = auto_exposure_scan_hdr(rb->get_internal_texture(), rb->get_base_data_format(), rb->get_internal_size());
 				if (scan.valid) {

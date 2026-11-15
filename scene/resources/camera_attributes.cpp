@@ -111,6 +111,7 @@ void CameraAttributes::_update_auto_exposure_meter() {
 
 void CameraAttributes::_update_auto_exposure_response() {
 	RS::get_singleton()->camera_attributes_set_auto_exposure_response(camera_attributes, auto_exposure_exponential_response, auto_exposure_light_adaptation_time, auto_exposure_dark_adaptation_time);
+	RS::get_singleton()->camera_attributes_set_auto_exposure_guard(camera_attributes, auto_exposure_light_adaptation_limit, auto_exposure_hold);
 	RS::get_singleton()->camera_attributes_set_auto_exposure_highlight(camera_attributes, auto_exposure_highlight_percentile, auto_exposure_highlight_ceiling, auto_exposure_highlight_max_shift);
 	emit_changed();
 }
@@ -177,6 +178,24 @@ void CameraAttributes::set_auto_exposure_dark_adaptation_time(float p_time) {
 
 float CameraAttributes::get_auto_exposure_dark_adaptation_time() const {
 	return auto_exposure_dark_adaptation_time;
+}
+
+void CameraAttributes::set_auto_exposure_light_adaptation_limit(float p_stops_per_second) {
+	auto_exposure_light_adaptation_limit = p_stops_per_second;
+	_update_auto_exposure_response();
+}
+
+float CameraAttributes::get_auto_exposure_light_adaptation_limit() const {
+	return auto_exposure_light_adaptation_limit;
+}
+
+void CameraAttributes::set_auto_exposure_hold(bool p_hold) {
+	auto_exposure_hold = p_hold;
+	RS::get_singleton()->camera_attributes_set_auto_exposure_guard(camera_attributes, auto_exposure_light_adaptation_limit, auto_exposure_hold);
+}
+
+bool CameraAttributes::is_auto_exposure_hold() const {
+	return auto_exposure_hold;
 }
 
 void CameraAttributes::set_auto_exposure_highlight_percentile(float p_percentile) {
@@ -262,6 +281,10 @@ void CameraAttributes::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_auto_exposure_light_adaptation_time"), &CameraAttributes::get_auto_exposure_light_adaptation_time);
 	ClassDB::bind_method(D_METHOD("set_auto_exposure_dark_adaptation_time", "time"), &CameraAttributes::set_auto_exposure_dark_adaptation_time);
 	ClassDB::bind_method(D_METHOD("get_auto_exposure_dark_adaptation_time"), &CameraAttributes::get_auto_exposure_dark_adaptation_time);
+	ClassDB::bind_method(D_METHOD("set_auto_exposure_light_adaptation_limit", "stops_per_second"), &CameraAttributes::set_auto_exposure_light_adaptation_limit);
+	ClassDB::bind_method(D_METHOD("get_auto_exposure_light_adaptation_limit"), &CameraAttributes::get_auto_exposure_light_adaptation_limit);
+	ClassDB::bind_method(D_METHOD("set_auto_exposure_hold", "hold"), &CameraAttributes::set_auto_exposure_hold);
+	ClassDB::bind_method(D_METHOD("is_auto_exposure_hold"), &CameraAttributes::is_auto_exposure_hold);
 	ClassDB::bind_method(D_METHOD("set_auto_exposure_highlight_percentile", "percentile"), &CameraAttributes::set_auto_exposure_highlight_percentile);
 	ClassDB::bind_method(D_METHOD("get_auto_exposure_highlight_percentile"), &CameraAttributes::get_auto_exposure_highlight_percentile);
 	ClassDB::bind_method(D_METHOD("set_auto_exposure_highlight_ceiling", "ceiling"), &CameraAttributes::set_auto_exposure_highlight_ceiling);
@@ -287,6 +310,8 @@ void CameraAttributes::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_exposure_exponential_response"), "set_auto_exposure_exponential_response", "is_auto_exposure_exponential_response");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_light_adaptation_time", PROPERTY_HINT_RANGE, "0.01,30,0.01,or_greater,suffix:s"), "set_auto_exposure_light_adaptation_time", "get_auto_exposure_light_adaptation_time");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_dark_adaptation_time", PROPERTY_HINT_RANGE, "0.01,60,0.01,or_greater,suffix:s"), "set_auto_exposure_dark_adaptation_time", "get_auto_exposure_dark_adaptation_time");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_light_adaptation_limit", PROPERTY_HINT_RANGE, "0,64,0.1,or_greater"), "set_auto_exposure_light_adaptation_limit", "get_auto_exposure_light_adaptation_limit");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_exposure_hold"), "set_auto_exposure_hold", "is_auto_exposure_hold");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_highlight_percentile", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_auto_exposure_highlight_percentile", "get_auto_exposure_highlight_percentile");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_highlight_ceiling", PROPERTY_HINT_RANGE, "0,8,0.01"), "set_auto_exposure_highlight_ceiling", "get_auto_exposure_highlight_ceiling");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_highlight_max_shift", PROPERTY_HINT_RANGE, "0,12,0.01"), "set_auto_exposure_highlight_max_shift", "get_auto_exposure_highlight_max_shift");

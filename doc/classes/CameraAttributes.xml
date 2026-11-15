@@ -49,6 +49,12 @@
 		<member name="auto_exposure_histogram_clip_low" type="float" setter="set_auto_exposure_histogram_clip_low" getter="get_auto_exposure_histogram_clip_low" default="0.03">
 			The fraction of the total metering weight, taken from the darkest pixels, that the log histogram meter ignores, from [code]0.0[/code] to [code]0.45[/code]. Only used when [member auto_exposure_meter] is [constant AUTO_EXPOSURE_METER_LOG_HISTOGRAM].
 		</member>
+		<member name="auto_exposure_hold" type="bool" setter="set_auto_exposure_hold" getter="is_auto_exposure_hold" default="false">
+			If [code]true[/code], auto exposure keeps its current value exactly and does not move toward its target, with either meter. A history reset still sets it at once, and a stored value of zero is not held. Changing this property does not emit [signal Resource.changed]. Meant to be raised for the length of a known short event, such as a lightning flash, and lowered afterwards.
+		</member>
+		<member name="auto_exposure_light_adaptation_limit" type="float" setter="set_auto_exposure_light_adaptation_limit" getter="get_auto_exposure_light_adaptation_limit" default="0.0">
+			The fastest the metered luminance may rise when the scene gets brighter, in stops per second, with either meter. [code]0.0[/code] disables the limit. The limit acts on the value after [member auto_exposure_adaptation], which is the value that sets the exposure. With a limit of [code]4.0[/code], a flash of three frames at 60 Hz moves the exposure by at most 0.2 stops. The limit is not applied when the scene gets darker, on the first frame, after a reset or while the stored value is zero.
+		</member>
 		<member name="auto_exposure_light_adaptation_time" type="float" setter="set_auto_exposure_light_adaptation_time" getter="get_auto_exposure_light_adaptation_time" default="0.5">
 			Time constant, in seconds, of the adaptation when the metered luminance rises.
 		</member>

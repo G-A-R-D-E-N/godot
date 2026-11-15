@@ -274,6 +274,25 @@ float RendererCameraAttributes::camera_attributes_get_auto_exposure_dark_adaptat
 	return cam_attributes->auto_exposure_dark_adaptation_time;
 }
 
+void RendererCameraAttributes::camera_attributes_set_auto_exposure_guard(RID p_camera_attributes, float p_light_adaptation_limit, bool p_hold) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL(cam_attributes);
+	cam_attributes->auto_exposure_light_adaptation_limit = MAX(p_light_adaptation_limit, 0.0f);
+	cam_attributes->auto_exposure_hold = p_hold;
+}
+
+float RendererCameraAttributes::camera_attributes_get_auto_exposure_light_adaptation_limit(RID p_camera_attributes) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL_V(cam_attributes, 0.0);
+	return cam_attributes->auto_exposure_light_adaptation_limit;
+}
+
+bool RendererCameraAttributes::camera_attributes_get_auto_exposure_hold(RID p_camera_attributes) {
+	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
+	ERR_FAIL_NULL_V(cam_attributes, false);
+	return cam_attributes->auto_exposure_hold;
+}
+
 void RendererCameraAttributes::camera_attributes_set_auto_exposure_highlight(RID p_camera_attributes, float p_percentile, float p_ceiling, float p_max_shift) {
 	CameraAttributes *cam_attributes = camera_attributes_owner.get_or_null(p_camera_attributes);
 	ERR_FAIL_NULL(cam_attributes);

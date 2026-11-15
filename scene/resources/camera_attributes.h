@@ -70,6 +70,8 @@ protected:
 	bool auto_exposure_exponential_response = false;
 	float auto_exposure_light_adaptation_time = 0.5;
 	float auto_exposure_dark_adaptation_time = 2.0;
+	float auto_exposure_light_adaptation_limit = 0.0;
+	bool auto_exposure_hold = false;
 	float auto_exposure_highlight_percentile = 0.0;
 	float auto_exposure_highlight_ceiling = 2.5;
 	float auto_exposure_highlight_max_shift = 4.0;
@@ -107,6 +109,10 @@ public:
 	float get_auto_exposure_light_adaptation_time() const;
 	void set_auto_exposure_dark_adaptation_time(float p_time);
 	float get_auto_exposure_dark_adaptation_time() const;
+	void set_auto_exposure_light_adaptation_limit(float p_stops_per_second);
+	float get_auto_exposure_light_adaptation_limit() const;
+	void set_auto_exposure_hold(bool p_hold);
+	bool is_auto_exposure_hold() const;
 	void set_auto_exposure_highlight_percentile(float p_percentile);
 	float get_auto_exposure_highlight_percentile() const;
 	void set_auto_exposure_highlight_ceiling(float p_ceiling);

@@ -57,6 +57,8 @@ private:
 		bool auto_exposure_exponential_response = false;
 		float auto_exposure_light_adaptation_time = 0.5;
 		float auto_exposure_dark_adaptation_time = 2.0;
+		float auto_exposure_light_adaptation_limit = 0.0;
+		bool auto_exposure_hold = false;
 		float auto_exposure_highlight_percentile = 0.0;
 		float auto_exposure_highlight_ceiling = 2.5;
 		float auto_exposure_highlight_max_shift = 4.0;
@@ -131,6 +133,9 @@ public:
 	bool camera_attributes_get_auto_exposure_exponential_response(RID p_camera_attributes);
 	float camera_attributes_get_auto_exposure_light_adaptation_time(RID p_camera_attributes);
 	float camera_attributes_get_auto_exposure_dark_adaptation_time(RID p_camera_attributes);
+	void camera_attributes_set_auto_exposure_guard(RID p_camera_attributes, float p_light_adaptation_limit, bool p_hold);
+	float camera_attributes_get_auto_exposure_light_adaptation_limit(RID p_camera_attributes);
+	bool camera_attributes_get_auto_exposure_hold(RID p_camera_attributes);
 	void camera_attributes_set_auto_exposure_highlight(RID p_camera_attributes, float p_percentile, float p_ceiling, float p_max_shift);
 	float camera_attributes_get_auto_exposure_highlight_percentile(RID p_camera_attributes);
 	float camera_attributes_get_auto_exposure_highlight_ceiling(RID p_camera_attributes);

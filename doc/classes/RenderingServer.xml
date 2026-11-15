@@ -72,6 +72,15 @@
 				Sets partial auto-exposure adaptation. Below [param pivot_luminance], in the same luminance unit as the min and max passed to [method camera_attributes_set_auto_exposure], a metered luminance [code]L[/code] becomes [code]pivot_luminance * (L / pivot_luminance)^adaptation[/code] before the clamp. [param adaptation] [code]1.0[/code] or a pivot of [code]0.0[/code] leaves the meter unchanged. This has the same meaning as [member CameraAttributes.auto_exposure_adaptation].
 			</description>
 		</method>
+		<method name="camera_attributes_set_auto_exposure_guard">
+			<return type="void" />
+			<param index="0" name="camera_attributes" type="RID" />
+			<param index="1" name="light_adaptation_limit" type="float" />
+			<param index="2" name="hold" type="bool" />
+			<description>
+				Sets the fastest auto exposure may follow a brightening scene, in stops per second, and whether it holds its current value. See [member CameraAttributes.auto_exposure_light_adaptation_limit] and [member CameraAttributes.auto_exposure_hold].
+			</description>
+		</method>
 		<method name="camera_attributes_set_auto_exposure_highlight">
 			<return type="void" />
 			<param index="0" name="camera_attributes" type="RID" />

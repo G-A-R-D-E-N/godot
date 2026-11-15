@@ -189,7 +189,7 @@ RID Luminance::get_current_luminance_buffer(Ref<RenderSceneBuffersRD> p_render_b
 	return RID();
 }
 
-void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set, float p_highlight_limit, float p_adaptation, float p_adaptation_pivot) {
+void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set, float p_highlight_limit, float p_adaptation, float p_adaptation_pivot, float p_light_limit, bool p_hold) {
 	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
 	ERR_FAIL_NULL(uniform_set_cache);
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
@@ -213,6 +213,8 @@ void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_
 		push_constant.highlight_limit = highlight_multiplier;
 		push_constant.adaptation = p_adaptation;
 		push_constant.adaptation_pivot = p_adaptation_pivot;
+		push_constant.light_limit = p_set ? 0.0f : p_light_limit;
+		push_constant.hold = (p_hold && !p_set) ? 1 : 0;
 
 		Size2i dest_size = p_source_size;
 
@@ -257,6 +259,8 @@ void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_
 		push_constant.highlight_limit = highlight_multiplier;
 		push_constant.adaptation = p_adaptation;
 		push_constant.adaptation_pivot = p_adaptation_pivot;
+		push_constant.light_limit = p_set ? 0.0f : p_light_limit;
+		push_constant.hold = (p_hold && !p_set) ? 1 : 0;
 
 		RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 
@@ -343,6 +347,8 @@ void Luminance::luminance_histogram_meter(RID p_source_texture, const Size2i p_s
 	push_constant.light_adjust = p_policy.light_adjust;
 	push_constant.dark_adjust = p_policy.dark_adjust;
 	push_constant.exponential = p_policy.exponential ? 1 : 0;
+	push_constant.light_limit = p_set ? 0.0f : p_policy.light_limit;
+	push_constant.hold = (p_policy.hold && !p_set) ? 1 : 0;
 
 	RD::get_singleton()->buffer_clear(p_luminance_buffers->histogram, 0, LUMINANCE_HISTOGRAM_BINS * sizeof(uint32_t));
 

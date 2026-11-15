@@ -46,7 +46,8 @@ layout(push_constant, std430) uniform Params {
 	float light_adjust;
 	float dark_adjust;
 	uint exponential;
-	uint pad[2];
+	float light_limit;
+	uint hold;
 }
 params;
 
@@ -164,6 +165,12 @@ void main() {
 			} else {
 				result = clamp(prev + (target - prev) * params.exposure_adjust, params.min_luminance, params.max_luminance);
 			}
+			if (params.light_limit > 0.0 && prev > 0.0) {
+				result = max(min(result, prev * params.light_limit), params.min_luminance);
+			}
+		}
+		if (params.hold != 0u && prev > 0.0) {
+			result = prev;
 		}
 		imageStore(dest_luminance, ivec2(0, 0), vec4(result));
 	}
