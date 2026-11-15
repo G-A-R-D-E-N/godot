@@ -36,6 +36,7 @@
 #include "core/io/json.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
+#include "servers/rendering/storage/utilities.h"
 #include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
 
 using namespace RendererRD;
@@ -414,6 +415,7 @@ void DirectShadows::_filter(const Ref<RenderSceneBuffersRD> &p_render_buffers, R
 		LocalVector<RD::Uniform> uniforms;
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 9, accum));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 18, ray));
+		RENDER_TIMESTAMP("Direct Shadows Clamp");
 		run(FILTER_CLAMP, uniforms);
 	}
 	{
@@ -421,6 +423,7 @@ void DirectShadows::_filter(const Ref<RenderSceneBuffersRD> &p_render_buffers, R
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 8, scratch));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 9, accum));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, rest));
+		RENDER_TIMESTAMP("Direct Shadows Filter First");
 		run(FILTER_FIRST, uniforms);
 	}
 	{
@@ -429,6 +432,7 @@ void DirectShadows::_filter(const Ref<RenderSceneBuffersRD> &p_render_buffers, R
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 9, accum));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 11, _debug_target(p_render_buffers, p_settings)));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 19, scratch));
+		RENDER_TIMESTAMP("Direct Shadows Filter Second");
 		run(FILTER_SECOND, uniforms);
 	}
 }
@@ -525,6 +529,9 @@ void DirectShadows::serve_dump_request(const Ref<RenderSceneBuffersRD> &p_render
 		report["rays"] = values[2];
 		report["past_region_pixels"] = values[3];
 		report["most_lamps"] = values[4];
+		report["walked_lights"] = values[5];
+		report["most_walked"] = values[6];
+		report["passed_lights"] = values[7];
 	}
 	Ref<FileAccess> json = FileAccess::open(request, FileAccess::WRITE);
 	if (json.is_valid()) {

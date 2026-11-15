@@ -60,7 +60,9 @@ layout(set = 0, binding = 12, std430) restrict buffer Counters {
 	uint rays;
 	uint past_region_pixels;
 	uint most_lamps;
-	uint pad[3];
+	uint walked_lights;
+	uint most_walked;
+	uint passed_lights;
 }
 counters;
 
@@ -111,6 +113,7 @@ uint rest_seen = 0u;
 uint rest_picks = 1u;
 
 uint rng_state = 0u;
+uint walked = 0u;
 
 float random_value() {
 	rng_state = ray_scene_hash(rng_state);
@@ -238,6 +241,7 @@ void walk_cluster(uint p_cluster_offset, uint p_cluster_z, bool p_spot, vec3 p_v
 			uint bit = findLSB(mask);
 			mask &= ~(1u << bit);
 			uint index = 32u * i + bit;
+			walked++;
 			consider(p_spot ? spot_lights.data[index] : omni_lights.data[index], p_spot, p_vertex, p_normal, p_view, p_roughness);
 		}
 	}
@@ -370,6 +374,8 @@ void main() {
 	uint cluster_z = uint(clamp((-vertex.z / params.z_far) * 32.0, 0.0, 31.0));
 	walk_cluster(cluster_offset, cluster_z, false, vertex, normal, view, roughness);
 	walk_cluster(cluster_offset + params.cluster_type_size, cluster_z, true, vertex, normal, view, roughness);
+	atomicAdd(counters.walked_lights, walked);
+	atomicMax(counters.most_walked, walked);
 
 	if (own_count + rest_count == 0u) {
 		write_empty(pixel, factor_layers);
@@ -377,6 +383,7 @@ void main() {
 	}
 	atomicAdd(counters.lit_pixels, 1u);
 	atomicMax(counters.most_lamps, own_count + rest_count);
+	atomicAdd(counters.passed_lights, own_count + rest_count);
 
 	ivec2 history_pixel;
 	bool has_history = find_history(pixel, vertex, normal, view, history_pixel);
