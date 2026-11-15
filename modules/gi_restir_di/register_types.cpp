@@ -32,7 +32,16 @@
 
 #include "direct_resampler.h"
 
+#include "core/object/callable_mp.h"
+#include "servers/rendering/rendering_server.h"
+
 static DirectResamplerRD *direct_resampler = nullptr;
+
+static void _free_direct_resampler_device() {
+	if (direct_resampler) {
+		direct_resampler->free_device_resources();
+	}
+}
 
 void initialize_gi_restir_di_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SERVERS) {
@@ -46,6 +55,10 @@ void initialize_gi_restir_di_module(ModuleInitializationLevel p_level) {
 void uninitialize_gi_restir_di_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SERVERS) {
 		return;
+	}
+	if (direct_resampler && RenderingServer::get_singleton()) {
+		RenderingServer::get_singleton()->call_on_render_thread(callable_mp_static(&_free_direct_resampler_device));
+		RenderingServer::get_singleton()->sync();
 	}
 	RendererRD::DirectResamplerHooks::set_resampler(nullptr);
 	if (direct_resampler) {

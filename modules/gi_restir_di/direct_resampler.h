@@ -143,8 +143,8 @@ public:
 	~DirectResamplerRD();
 
 private:
-	class ViewportData : public RenderBufferCustomDataRD {
-		GDCLASS(ViewportData, RenderBufferCustomDataRD)
+	class ResampledViewportData : public RenderBufferCustomDataRD {
+		GDCLASS(ResampledViewportData, RenderBufferCustomDataRD)
 
 	public:
 		Size2i size;

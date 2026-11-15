@@ -302,7 +302,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		}
 	}
 
-	Ref<ViewportData> viewport;
+	Ref<ResampledViewportData> viewport;
 	if (rb->has_custom_data(RB_SCOPE_DI_RESAMPLED)) {
 		viewport = rb->get_custom_data(RB_SCOPE_DI_RESAMPLED);
 	} else {
@@ -496,7 +496,7 @@ void DirectResamplerRD::release(const Ref<RenderSceneBuffersRD> &p_render_buffer
 	if (p_render_buffers.is_null() || !p_render_buffers->has_custom_data(RB_SCOPE_DI_RESAMPLED)) {
 		return;
 	}
-	Ref<ViewportData> viewport = p_render_buffers->get_custom_data(RB_SCOPE_DI_RESAMPLED);
+	Ref<ResampledViewportData> viewport = p_render_buffers->get_custom_data(RB_SCOPE_DI_RESAMPLED);
 	if (viewport->tail_samples == 0) {
 		return;
 	}
