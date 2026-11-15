@@ -36,8 +36,9 @@
 #include "core/io/json.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
-#include "servers/rendering/storage/utilities.h"
 #include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
+#include "servers/rendering/rendering_server_globals.h"
+#include "servers/rendering/storage/utilities.h"
 
 using namespace RendererRD;
 
@@ -224,6 +225,8 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	const Settings settings = get_project_settings();
 	Ref<ViewportData> viewport = _viewport(p_input.render_buffers);
 	_ensure_textures(p_input.render_buffers, viewport, settings);
+	const String dump_request = GLOBAL_GET("rendering/global_illumination/direct/dump_request");
+	viewport->counted = !dump_request.is_empty() && dump_request != served_request;
 
 	const Size2i frame_size = p_input.render_buffers->get_internal_size();
 	if (p_input.frame != size_frame) {
@@ -254,7 +257,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	Shells shells;
 	shells.scene = ray_scene;
 	p_table.write_slots(lamp_data, exclude_data, &shells);
-	if (!String(GLOBAL_GET("rendering/global_illumination/direct/dump_request")).is_empty()) {
+	if (!dump_request.is_empty()) {
 		p_table.write_lamps(lamp_dump);
 		dump_hard_resets = p_table.get_hard_resets();
 		dump_dynamic_lamp_frames = p_table.get_dynamic_lamp_frames();
@@ -331,11 +334,11 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	params.kernel_floor = settings.kernel_floor;
 	params.range_scale = settings.range_sigmas > 0.0f ? 0.5f / (settings.range_sigmas * settings.range_sigmas) : 0.0f;
 	params.world_per_pixel = 2.0f * Math::abs(float(inverse.columns[1][1])) / float(size.y);
-	const String dump_request = GLOBAL_GET("rendering/global_illumination/direct/dump_request");
-	viewport->counted = !dump_request.is_empty() && dump_request != served_request;
 	params.count = viewport->counted ? 1 : 0;
 	rd->buffer_update(params_buffer, 0, sizeof(Params), &params);
-	rd->buffer_clear(counter_buffer, 0, COUNTER_BYTES);
+	if (viewport->counted) {
+		rd->buffer_clear(counter_buffer, 0, COUNTER_BYTES);
+	}
 
 	RID sampler = MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 	const int trace_mode = viewport->precise ? TRACE_PRECISE : TRACE_CAPPED;
