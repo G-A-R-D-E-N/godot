@@ -64,6 +64,9 @@ const char *const *restir_fold_row_names() {
 		"s_max",
 		"n_over",
 		"hist_texels",
+		"lineage_refusals",
+		"lineage_unknown",
+		"lineage_families",
 	};
 	return names;
 }
@@ -112,4 +115,7 @@ void restir_fold_pack_row(const RestirFrameRecord &p_record, int64_t p_index, in
 	r_row[26] = f.s_max;
 	r_row[27] = f.n_over;
 	r_row[28] = f.hist_texels;
+	r_row[29] = f.lineage_refusals;
+	r_row[30] = f.lineage_unknown;
+	r_row[31] = f.lineage_families;
 }

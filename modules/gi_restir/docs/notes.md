@@ -1299,3 +1299,133 @@ self-test shader and the probe methods that read them. With the dump off nothing
     the main thread, as the debug texture's entry already does. The lab toggles fold_dump only between legs.
   - run_fold_test uses the probe's own core (the one run_case uses), never the backend's.
   - A dump that fails to build is tried once per variant and core; fold_dump_active stays false after that.
+
+## Commit 12c: Fold lineage
+
+Change plan commit 12, sub-commit 12c (C12-DESIGN section 2.3): a debug-only lineage per pixel and a refused-id image, so
+the lab can count how many receivers clear one lineage on one frame (fanin.csv, check 12, and the 4d bar). With
+lineage off nothing a frame computes or binds changes, and the 12b dump objects are unchanged.
+
+- Shader objects. Lineage is a third set of TEMPORAL objects next to the core's and the dump's: a RestirGiShaderRD per
+  variant (RestirGiCore::lineage_objects, the same RestirFoldDumpObjects type, heap, made on the first lineage frame),
+  with the core's general defines plus "#define RS_FOLD_DUMP" and "#define RS_FOLD_LINEAGE", and the same two modes as
+  the dump (MODE_TEMPORAL; MODE_TEMPORAL + SKY_REREAD for SW and HW). So the lineage pass is the dump pass plus the
+  lineage writes: binding 32, the history scan, slots 27 and 28 and the start histogram all run in it.
+  - C12-DESIGN 2.3 named a mode pair PASS_TEMPORAL_LINEAGE and PASS_TEMPORAL_SKY_LINEAGE. 12b did not add PassMode
+    values for the dump (it has its own objects and _dispatch_dump), so 12c follows the code: _ensure_dump and
+    _dispatch_dump take a lineage flag, and PassMode, PASS_MAX, the pipeline table and the marker names are unchanged.
+    The dump objects' define string stays "\n#define RS_FOLD_DUMP\n" byte for byte. Timestamps "ReSTIR Temporal Fold
+    Lineage" and "ReSTIR Temporal Sky Fold Lineage".
+  - All new GLSL is under #ifdef RS_FOLD_LINEAGE (constants in restir_gi_inc.glsl sit inside the existing
+    #ifdef RS_FOLD_DUMP block; the image declarations need MODE_TEMPORAL, RS_FOLD_DUMP and RS_FOLD_LINEAGE). No existing
+    variant or 12b dump object defines it, so their preprocessed token streams are the ones at 760782cd8. The same
+    proof as 12b applies (no SPIR-V debug info, both sides compiled fresh, matched by variant and mode); the shader cache
+    misses once for every ReSTIR object because the source text changed.
+- Bindings (set 0, TEMPORAL lineage objects only):
+  - 33 rs_fold_lineage_in, rg32ui uimage2D, readonly: fold_lineage[hist], the history side.
+  - 34 rs_fold_lineage_out, rg32ui uimage2D, writeonly: fold_lineage[hist ^ 1].
+  - 35 rs_fold_refused_id, r32ui uimage2D, writeonly.
+  - The two lineage images ping-pong with the reservoir index: TEMPORAL reads reservoir[hist] and lineage[hist], and
+    writes reservoir[hist ^ 1] and lineage[hist ^ 1]. history_index is always 0 or 1, so two images are enough.
+- Lineage word (rg32ui). x = birth pixel index + 1 = y · trace_w + x + 1, so 0 means "no lineage known"; y = the birth
+  clock v (RS_FOLD_CLOCK). Per in-grid thread, in TEMPORAL:
+  - not traced, no valid receiver, or K 0: word (0, 0), id 0.
+  - start (!had): word (own pixel + 1, v), id 0.
+  - carried (had and not cleared): word = lineage_in at hp, id 0.
+  - refusal (cleared, the same branch that adds 1 to PS_FOLD_REFUSED): id = lineage id of lineage_in at hp; then the
+    renewal writes (own pixel + 1, v).
+  - Every in-grid texel of lineage_out and refused_id is written on every lineage frame, so neither holds a stale word.
+- Lineage id (r32ui, C12-DESIGN calls it "hash"). id = ((v_birth & 0xFF) << 24) | (pixel + 1), and 0xFF000000 when the
+  word's pixel field is 0 or above 0xFFFFFF (an unknown lineage). It is never 0, a real id never has its low 24 bits
+  zero, and it is exact, not a hash: inside one frame every refused lineage was born at most K + 1 ≤ 65 frames earlier
+  (a carry adds 1 to s and refuses at s + 1 ≥ K, or K − 1 on a pre-frame), so 8 clock bits keep two lineages of one
+  pixel apart, and two different refused lineages never share an id. The price is the trace limit: lineage runs only
+  when trace_w · trace_h ≤ 0xFFFFFF (16,777,215 texels); above it ensure_fold_lineage makes nothing,
+  fold_lineage_active stays false and status reports reason code 2 (below). CPU mirror restir_fold_lineage_id,
+  restir_fold_lineage_pixel.
+- Resources. RestirGiResources::fold_lineage[2] (R32G32_UINT, trace size) and fold_refused_id (R32_UINT), made by
+  ensure_fold_lineage(true) and freed by ensure_fold_lineage(false), free_fold_lineage or free_all (the same places the
+  12b dump buffer is freed); alloc_log entries "fold_lineage 0", "fold_lineage 1", "fold_refused_id". The backend calls
+  ensure_fold_lineage(fold_lineage and fold_dump and readback) right after ensure_fold_dump. run_case never makes them,
+  so the harness runs the plain dump.
+  - The three images count as present only when all three RIDs are valid. If any one fails to create, all three are
+    freed, RestirGiResources::fold_lineage_failed is set, lineage stays off with reason code 3, and one warning is
+    printed (WARN_PRINT_ONCE). While the flag is set nothing is created again, so nothing logs per frame. The flag
+    clears in free_all (resize or state rebuild) and when lineage is no longer wanted.
+  - RestirGiResources::fold_lineage_refusal is set by every ensure_fold_lineage call (0, 2 or 3) and set to 3 by
+    run_frame when the lineage dispatch did not run (lineage objects failed to build). The backend copies it to
+    RestirGiSummary::fold_lineage_refusal after run_frame.
+- Stale words. RestirGiResources::fold_lineage_written holds the index of the lineage image the last lineage dispatch
+  wrote (−1 for none). Before a lineage dispatch, if it is not hist, run_frame clears lineage[hist] to 0 (texture_clear),
+  so every carried word reads as unknown, never as a word from an older frame. It is −1 after creation, after
+  clear_history, after a frame without the lineage pass (lineage off, the dump object ran instead, or the plain TEMPORAL
+  ran) and after free; a frame where history_index did not become the written image (spatial feedback on) also misses.
+  - First frame after a cut: F_HISTORY is off, every valid receiver starts and writes its own word, nothing is read.
+  - Resize or resample: the state is rebuilt (allocate calls free_all), the images are new, the first frame is a cut.
+  - Change of K, of mode or of feedback: restir_fold_cut cuts on any k_eff change, so the same as a cut. While k_eff is
+    0 (feedback on) the lineage pass writes word 0 everywhere, so if K came back without a cut the carried words
+    would read as unknown.
+  - Lineage turned on mid-scenario: until the next cut, pixels carried from before have word 0 and their refusals
+    count as unknown (below), never in a family.
+- Read-back and families. When the lineage pass ran and readback is on, the readback block reads fold_refused_id with
+  texture_get_data (trace_w · trace_h · 4 bytes, 921,600 at 640 × 360; RestirGiCore::read_fold_refused_ids hands back
+  the read-back bytes and the texel count, with no second copy) and calls restir_fold_families_add(options.fold_tag,
+  ids, texels) on that buffer (the tag passed is record.fold.tag, the same value). It groups the frame's ids outside any lock, then, under restir_frame_records_mutex (the
+  lock the record push takes), adds them to the accumulator of that tag: restir_fold_family_tags, HashMap tag →
+  RestirFoldFamilyTag {sizes: HashMap size → count, totals: {frames, refusals, unknown, families}} (restir_test.h).
+  - It returns the frame's {refusals, unknown, families}, which go into the row's RestirFoldRecord fields
+    lineage_refusals, lineage_unknown and lineage_families. They are −1 on a row without the lineage pass (or whose
+    read-back failed), like s_max, n_over and the other dump fields. They are row fields 29 to 31 of get_fold_rows,
+    named in get_fold_row_fields; RESTIR_FOLD_ROW_FIELDS is 32. run_case's fold_dump dictionary does not carry them.
+  - A frame's families are added before its row is pushed, and the row carries the tag, so the families of a tag cover
+    exactly the lineage rows of that tag.
+  - restir_fold_families(ids, count, r_sizes) (restir_fold_mirror.cpp, pure): skips 0; counts every other id as a
+    refusal; an id with its low 24 bits zero is unknown and is not grouped; equal remaining ids form a family; for each
+    family r_sizes[size] += 1. Returns {refusals, unknown, families}. Families are per frame: in Fold every descendant
+    of one lineage carries the same s, so a lineage is refused on one frame only, and per-frame grouping is the toy's
+    "receivers clearing one lineage on one frame" (RestirToyFold Families).
+- Probe and status.
+  - configure({"fold_lineage": true}) turns lineage on only if fold_dump is already on (or set earlier in the same
+    call: fold_dump is read first). Otherwise lineage stays off and RestirTestOptions::fold_lineage_refusal is code 1;
+    a later accepted fold_lineage key sets it back to 0. configure({"fold_dump": false}) also turns lineage off.
+  - Reason codes (RestirFoldLineageRefusal, restir_fold_mirror.h): 0 none; 1 lineage asked without the dump; 2 trace
+    grid above 16,777,215 texels; 3 lineage images or lineage shader objects not available. The options hold an int,
+    not a String, so configure and get_status share no string. get_status reports the options code when it is not 0,
+    else the render side's code from the last frame, and builds the text with restir_fold_lineage_refusal_text.
+  - get_fold_families(tag): PackedInt64Array of (family_size, count) pairs for that fold tag, sizes ascending.
+    get_fold_family_totals(tag): {frames, refusals, unknown, families} for that tag. A tag with no lineage frame gives
+    empty pairs and all zeros, frames 0. reset_fold_families() clears every tag. reset_records and reset_fold_starts
+    do not touch families, and reset_fold_families does not touch records or starts.
+  - Status: fold_lineage_active (this frame's lineage pass really ran), fold_lineage_frames_total,
+    fold_lineage_refusal (text, empty for code 0) and fold_lineage_refusal_code (int).
+- Doctests. tests/test_restir_fold_lineage.h ("[RestirFoldLineage] ..."): bindings 33 to 35, the pixel word and id
+  packing (unknown for pixel 0 and above the mask, the texel limit); the known answer {5, 5, 5, 7, 0, 7, 9} gives
+  sizes {3: 1, 2: 1, 1: 1}, 6 refusals, 3 families, and twice gives {3: 2, 2: 2, 1: 2}; unknown ids are counted and not
+  grouped; ids over a 64 × 36 grid and 66 consecutive clocks are all distinct; the accumulator adds frames, counts an
+  empty frame and sums totals; per tag, {5, 5, 7} on tag 1 gives pairs (1, 1), (2, 1), refusals 3, families 2, and
+  {9, 9, 9} on tag 2 gives (3, 1), refusals 3, families 1, an unknown tag gives zeros, and reset clears both.
+  tests/test_restir_fold_rows.h checks the 32 row names and the −1 defaults of the three lineage fields.
+- Rules for the lab that reads these.
+  - Give each case of a lineage leg its own fold_tag, never reused in the process unless reset_records and
+    reset_fold_families both ran. There is no reset at the cut: the families of a tag are read after all of the case's
+    rows are in. The tag added to is the row's own tag (record.fold.tag, read once from options.fold_tag), so a
+    configure between the two cannot split a frame.
+  - A lineage window is proved by identities, VOID on a miss: get_fold_family_totals(tag).frames equals the number of
+    rows of that tag with lineage_refusals ≥ 0, refusals equals the sum of refused over those rows and also the sum of
+    their lineage_refusals, unknown equals the sum of their lineage_unknown, and families the sum of their
+    lineage_families. unknown is 0 when the tag's rows start at or after a cut that lineage saw. If the lab wants only
+    the rows from the cut on, it sums the per-row fields over those rows; the tag's pairs then cover the whole tag.
+  - fold_lineage_active must be true on every row of a lineage window; the first lineage frame of a variant compiles
+    the lineage shader on the render thread (seconds), so the lab warms it before the counted frames.
+  - fanin.csv rows: case, family_size, count with count = the number of families of that size, straight from the
+    pairs of the case's tag. The engine does not know the case; the lab maps tags to cases.
+- Known limits.
+  - Families accumulate per tag over every view and every lineage frame in the process, cut frames included (they add
+    no refusals).
+  - The read-back stalls the render thread on every lineage frame (texture_get_data); no timing comes from a lineage
+    leg.
+  - ensure_fold_lineage edits alloc_log on the render thread, as ensure_fold_dump does; the lab toggles lineage only
+    between legs.
+  - Lineage is not in run_case or the case files; P7 (12b against 12c, lineage off) uses the existing paths.
+  - A lineage object that fails to build is tried once per variant and core; the dump object then runs in its place,
+    fold_lineage_active stays false and status reports reason code 3.

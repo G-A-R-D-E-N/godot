@@ -114,9 +114,9 @@ TEST_CASE("[RestirFoldRows] n_valid sums the temporal reject histogram and cut_r
 	CHECK(restir_fold_cut_rej(reject) == int64_t(0xFFFFFFFFu));
 }
 
-TEST_CASE("[RestirFoldRows] The row names are the 29 fields in order") {
+TEST_CASE("[RestirFoldRows] The row names are the 32 fields in order") {
 	const char *const *names = restir_fold_row_names();
-	const char *const expected[RESTIR_FOLD_ROW_FIELDS] = { "record", "frame", "tag", "serial", "clock", "k", "k_eff", "mode", "feedback", "cut", "cut_reason", "pre_frame", "reval", "history_used", "trace_w", "trace_h", "n_valid", "cut_rej", "had_history", "refused", "renewed_raw", "started", "carried", "refused_empty", "hp_eq_px", "expected_phase0", "s_max", "n_over", "hist_texels" };
+	const char *const expected[RESTIR_FOLD_ROW_FIELDS] = { "record", "frame", "tag", "serial", "clock", "k", "k_eff", "mode", "feedback", "cut", "cut_reason", "pre_frame", "reval", "history_used", "trace_w", "trace_h", "n_valid", "cut_rej", "had_history", "refused", "renewed_raw", "started", "carried", "refused_empty", "hp_eq_px", "expected_phase0", "s_max", "n_over", "hist_texels", "lineage_refusals", "lineage_unknown", "lineage_families" };
 	for (int i = 0; i < RESTIR_FOLD_ROW_FIELDS; i++) {
 		CHECK(String(names[i]) == String(expected[i]));
 	}
@@ -151,7 +151,7 @@ TEST_CASE("[RestirFoldRows] A record packs to the known row, renewed exported ra
 	record.stats.fold_refused_empty = 3.0;
 	int64_t row[RESTIR_FOLD_ROW_FIELDS] = {};
 	restir_fold_pack_row(record, 4, row);
-	const int64_t expected[RESTIR_FOLD_ROW_FIELDS] = { 4, 77, 3, 2, 100, 8, 8, 1, 0, 1, 0, 0, 1, 0, 640, 360, 231017, 230000, 999, 12, 12, 230005, 1000, 3, -1, -1, -1, -1, -1 };
+	const int64_t expected[RESTIR_FOLD_ROW_FIELDS] = { 4, 77, 3, 2, 100, 8, 8, 1, 0, 1, 0, 0, 1, 0, 640, 360, 231017, 230000, 999, 12, 12, 230005, 1000, 3, -1, -1, -1, -1, -1, -1, -1, -1 };
 	for (int i = 0; i < RESTIR_FOLD_ROW_FIELDS; i++) {
 		CHECK(row[i] == expected[i]);
 	}

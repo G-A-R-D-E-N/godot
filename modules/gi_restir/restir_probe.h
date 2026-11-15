@@ -71,6 +71,9 @@ public:
 	bool fold_test_ready() const;
 	Dictionary get_fold_test_result() const;
 	Dictionary mirror_fold_test(const Dictionary &p_args) const;
+	PackedInt64Array get_fold_families(int p_tag) const;
+	Dictionary get_fold_family_totals(int p_tag) const;
+	void reset_fold_families();
 	~RestirProbe();
 
 private:

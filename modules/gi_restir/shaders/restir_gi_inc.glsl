@@ -114,6 +114,12 @@
 #define RS_FOLD_START_PRE 3u
 #define RS_FOLD_START_S 64u
 #define RS_FOLD_START_U 64u
+#ifdef RS_FOLD_LINEAGE
+#define RS_FOLD_LINEAGE_PIXEL_MASK 0x00FFFFFFu
+#define RS_FOLD_LINEAGE_CLOCK_SHIFT 24u
+#define RS_FOLD_LINEAGE_CLOCK_MASK 0xFFu
+#define RS_FOLD_LINEAGE_UNKNOWN 0xFF000000u
+#endif
 #endif
 #define PS_ROW_VALIDATE 3u
 #define RS_EVENT_VALIDATE_EVENT 1u
@@ -356,6 +362,12 @@ layout(set = 0, binding = 32, std430) restrict buffer RestirFoldDump {
 	uint starts[];
 }
 rs_fold_dump;
+#endif
+
+#if defined(MODE_TEMPORAL) && defined(RS_FOLD_DUMP) && defined(RS_FOLD_LINEAGE)
+layout(rg32ui, set = 0, binding = 33) uniform restrict readonly uimage2D rs_fold_lineage_in;
+layout(rg32ui, set = 0, binding = 34) uniform restrict writeonly uimage2D rs_fold_lineage_out;
+layout(r32ui, set = 0, binding = 35) uniform restrict writeonly uimage2D rs_fold_refused_id;
 #endif
 
 #ifdef MODE_SKY_EPOCH

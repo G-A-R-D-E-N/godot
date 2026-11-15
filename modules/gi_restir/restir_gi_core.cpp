@@ -111,6 +111,7 @@ static constexpr uint32_t PASS_STATS_STRIDE = 32;
 
 static_assert(RESTIR_FOLD_SLOT_PHASE0 < PASS_STATS_STRIDE, "The Fold dump slots must fit the pass-stats stride");
 static_assert(RESTIR_FOLD_DUMP_BYTES == 98320u, "The Fold dump buffer is a 16-byte header and 6 x 64 x 64 start counts");
+static_assert(RESTIR_FOLD_LINEAGE_IN_BINDING == RESTIR_FOLD_DUMP_BINDING + 1u && RESTIR_FOLD_REFUSED_ID_BINDING == RESTIR_FOLD_DUMP_BINDING + 3u, "The Fold lineage bindings follow the dump binding");
 
 static constexpr int RESTIR_FOLD_DUMP_MODES = 2;
 
@@ -241,9 +242,79 @@ void RestirGiResources::ensure_fold_dump(bool p_needed) {
 	}
 }
 
+void RestirGiResources::ensure_fold_lineage(bool p_needed) {
+	fold_lineage_refusal = RESTIR_FOLD_LINEAGE_REFUSAL_NONE;
+	if (!allocated) {
+		return;
+	}
+	const uint64_t texels = uint64_t(size.x) * uint64_t(size.y);
+	if (!p_needed) {
+		fold_lineage_failed = false;
+		free_fold_lineage();
+		return;
+	}
+	if (texels > RESTIR_FOLD_LINEAGE_MAX_TEXELS) {
+		fold_lineage_refusal = RESTIR_FOLD_LINEAGE_REFUSAL_GRID;
+		free_fold_lineage();
+		return;
+	}
+	if (fold_lineage_failed) {
+		fold_lineage_refusal = RESTIR_FOLD_LINEAGE_REFUSAL_UNAVAILABLE;
+		return;
+	}
+	if (fold_lineage[0].is_valid() && fold_lineage[1].is_valid() && fold_refused_id.is_valid()) {
+		return;
+	}
+	free_fold_lineage();
+	RD *rd = RD::get_singleton();
+	const char *names[2] = { "fold_lineage 0", "fold_lineage 1" };
+	for (int i = 0; i < 2; i++) {
+		const uint64_t before = rd->get_memory_usage(RD::MEMORY_TEXTURES);
+		fold_lineage[i] = _create_texture(RD::DATA_FORMAT_R32G32_UINT, size, RD::TEXTURE_TYPE_2D, 1);
+		alloc_log.push_back({ names[i], texels * 8u, rd->get_memory_usage(RD::MEMORY_TEXTURES) - before, false });
+	}
+	const uint64_t before = rd->get_memory_usage(RD::MEMORY_TEXTURES);
+	fold_refused_id = _create_texture(RD::DATA_FORMAT_R32_UINT, size, RD::TEXTURE_TYPE_2D, 1);
+	alloc_log.push_back({ "fold_refused_id", texels * 4u, rd->get_memory_usage(RD::MEMORY_TEXTURES) - before, false });
+	if (fold_lineage[0].is_null() || fold_lineage[1].is_null() || fold_refused_id.is_null()) {
+		free_fold_lineage();
+		fold_lineage_failed = true;
+		fold_lineage_refusal = RESTIR_FOLD_LINEAGE_REFUSAL_UNAVAILABLE;
+		WARN_PRINT_ONCE("gi_restir: the Fold lineage images could not be created, so lineage stays off");
+		return;
+	}
+	fold_lineage_written = -1;
+}
+
+void RestirGiResources::free_fold_lineage() {
+	fold_lineage_ran = false;
+	fold_lineage_written = -1;
+	if (fold_lineage[0].is_null() && fold_lineage[1].is_null() && fold_refused_id.is_null()) {
+		return;
+	}
+	RD *rd = RD::get_singleton();
+	RID *rids[3] = { &fold_lineage[0], &fold_lineage[1], &fold_refused_id };
+	for (RID *rid : rids) {
+		if (rid->is_valid() && rd) {
+			rd->free_rid(*rid);
+		}
+		*rid = RID();
+	}
+	for (uint32_t i = 0; i < alloc_log.size();) {
+		const String name = String(alloc_log[i].name);
+		if (name == "fold_lineage 0" || name == "fold_lineage 1" || name == "fold_refused_id") {
+			alloc_log.remove_at(i);
+		} else {
+			i++;
+		}
+	}
+}
+
 void RestirGiResources::free_all() {
 	RD *rd = RD::get_singleton();
 	fold_dump_ran = false;
+	free_fold_lineage();
+	fold_lineage_failed = false;
 	if (!rd) {
 		allocated = false;
 		return;
@@ -406,8 +477,12 @@ void RestirGiCore::free() {
 
 void RestirGiCore::_free_fold_debug() {
 	for (int v = 0; v < VARIANT_MAX; v++) {
-		RestirFoldDumpObjects *objects = dump_objects[v];
-		if (objects) {
+		RestirFoldDumpObjects **slots[2] = { &dump_objects[v], &lineage_objects[v] };
+		for (RestirFoldDumpObjects **slot : slots) {
+			RestirFoldDumpObjects *objects = *slot;
+			if (!objects) {
+				continue;
+			}
 			for (int i = 0; i < RESTIR_FOLD_DUMP_MODES; i++) {
 				objects->pipelines[i].free();
 			}
@@ -415,9 +490,10 @@ void RestirGiCore::_free_fold_debug() {
 				objects->shader.version_free(objects->version);
 			}
 			memdelete(objects);
-			dump_objects[v] = nullptr;
+			*slot = nullptr;
 		}
 		dump_tried[v] = false;
+		lineage_tried[v] = false;
 	}
 	if (fold_test) {
 		if (fold_test->pipeline.is_valid() && RD::get_singleton()) {
@@ -432,11 +508,13 @@ void RestirGiCore::_free_fold_debug() {
 	fold_test_tried = false;
 }
 
-bool RestirGiCore::_ensure_dump(Variant p_variant) {
-	if (dump_tried[p_variant]) {
-		return dump_objects[p_variant] != nullptr;
+bool RestirGiCore::_ensure_dump(Variant p_variant, bool p_lineage) {
+	RestirFoldDumpObjects *&slot = p_lineage ? lineage_objects[p_variant] : dump_objects[p_variant];
+	bool &tried = p_lineage ? lineage_tried[p_variant] : dump_tried[p_variant];
+	if (tried) {
+		return slot != nullptr;
 	}
-	dump_tried[p_variant] = true;
+	tried = true;
 	if (!_ensure(p_variant)) {
 		return false;
 	}
@@ -447,7 +525,7 @@ bool RestirGiCore::_ensure_dump(Variant p_variant) {
 	}
 	RestirFoldDumpObjects *objects = memnew(RestirFoldDumpObjects);
 	objects->modes = modes.size();
-	objects->shader.initialize(modes, _defines(p_variant) + "\n#define RS_FOLD_DUMP\n");
+	objects->shader.initialize(modes, _defines(p_variant) + (p_lineage ? "\n#define RS_FOLD_DUMP\n#define RS_FOLD_LINEAGE\n" : "\n#define RS_FOLD_DUMP\n"));
 	objects->version = objects->shader.version_create();
 	bool ok = p_variant != VARIANT_HW || objects->shader.version_is_valid(objects->version);
 	for (int i = 0; ok && i < objects->modes; i++) {
@@ -471,7 +549,7 @@ bool RestirGiCore::_ensure_dump(Variant p_variant) {
 		memdelete(objects);
 		return false;
 	}
-	dump_objects[p_variant] = objects;
+	slot = objects;
 	return true;
 }
 
@@ -665,11 +743,11 @@ void RestirGiCore::_dispatch(Variant p_variant, PassMode p_mode, RID p_ubo, cons
 	rd->compute_list_end();
 }
 
-bool RestirGiCore::_dispatch_dump(Variant p_variant, bool p_sky, RID p_ubo, const LocalVector<RD::Uniform> &p_set0, const RestirGiInputs &p_inputs, const Size2i &p_size) {
-	if (!_ensure_dump(p_variant)) {
+bool RestirGiCore::_dispatch_dump(Variant p_variant, bool p_sky, bool p_lineage, RID p_ubo, const LocalVector<RD::Uniform> &p_set0, const RestirGiInputs &p_inputs, const Size2i &p_size) {
+	if (!_ensure_dump(p_variant, p_lineage)) {
 		return false;
 	}
-	RestirFoldDumpObjects *objects = dump_objects[p_variant];
+	RestirFoldDumpObjects *objects = p_lineage ? lineage_objects[p_variant] : dump_objects[p_variant];
 	const int index = p_sky ? 1 : 0;
 	if (index >= objects->modes) {
 		return false;
@@ -697,7 +775,11 @@ bool RestirGiCore::_dispatch_dump(Variant p_variant, bool p_sky, RID p_ubo, cons
 		return false;
 	}
 	RD *rd = RD::get_singleton();
-	RENDER_TIMESTAMP(p_sky ? "ReSTIR Temporal Sky Fold Dump" : "ReSTIR Temporal Fold Dump");
+	if (p_lineage) {
+		RENDER_TIMESTAMP(p_sky ? "ReSTIR Temporal Sky Fold Lineage" : "ReSTIR Temporal Fold Lineage");
+	} else {
+		RENDER_TIMESTAMP(p_sky ? "ReSTIR Temporal Sky Fold Dump" : "ReSTIR Temporal Fold Dump");
+	}
 	RD::ComputeListID list = rd->compute_list_begin();
 	rd->compute_list_bind_compute_pipeline(list, pipeline);
 	rd->compute_list_bind_uniform_set(list, set0_rid, 0);
@@ -753,6 +835,7 @@ void RestirGiCore::clear_history(RestirGiResources &r_resources, const RestirGiI
 	}
 	r_resources.history_index = 0;
 	r_resources.final_index = 0;
+	r_resources.fold_lineage_written = -1;
 }
 
 bool RestirGiCore::run_capture(const RestirGiInputs &p_inputs, const Size2i &p_size, RID r_out[6]) {
@@ -799,6 +882,7 @@ void RestirGiCore::run_source(RestirGiResources &r_resources, const RestirFrameP
 
 void RestirGiCore::run_frame(RestirGiResources &r_resources, const RestirFrameParams &p_params, const RestirGiInputs &p_inputs) {
 	r_resources.fold_dump_ran = false;
+	r_resources.fold_lineage_ran = false;
 	Variant variant = _variant_for(p_inputs);
 	if (!r_resources.allocated || !_ensure(variant)) {
 		return;
@@ -896,16 +980,35 @@ void RestirGiCore::run_frame(RestirGiResources &r_resources, const RestirFramePa
 			set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 29, r_resources.sky_epoch));
 		}
 		bool dumped = false;
+		bool lineage = false;
 		if (r_resources.fold_dump.is_valid()) {
 			LocalVector<RD::Uniform> dump_set0(set0);
 			dump_set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, int(RESTIR_FOLD_DUMP_BINDING), r_resources.fold_dump));
 			RD::get_singleton()->buffer_clear(r_resources.fold_dump, 0, RESTIR_FOLD_DUMP_BYTES);
-			dumped = _dispatch_dump(variant, sky_reread, r_resources.ubo[0], dump_set0, p_inputs, r_resources.size);
+			if (r_resources.fold_refused_id.is_valid() && hist < 2u) {
+				if (r_resources.fold_lineage_written != int32_t(hist)) {
+					RD::get_singleton()->texture_clear(r_resources.fold_lineage[hist], Color(0, 0, 0, 0), 0, 1, 0, 1);
+				}
+				LocalVector<RD::Uniform> lineage_set0(dump_set0);
+				lineage_set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, int(RESTIR_FOLD_LINEAGE_IN_BINDING), r_resources.fold_lineage[hist]));
+				lineage_set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, int(RESTIR_FOLD_LINEAGE_OUT_BINDING), r_resources.fold_lineage[hist ^ 1u]));
+				lineage_set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, int(RESTIR_FOLD_REFUSED_ID_BINDING), r_resources.fold_refused_id));
+				lineage = _dispatch_dump(variant, sky_reread, true, r_resources.ubo[0], lineage_set0, p_inputs, r_resources.size);
+				dumped = lineage;
+				if (!lineage) {
+					r_resources.fold_lineage_refusal = RESTIR_FOLD_LINEAGE_REFUSAL_UNAVAILABLE;
+				}
+			}
+			if (!dumped) {
+				dumped = _dispatch_dump(variant, sky_reread, false, r_resources.ubo[0], dump_set0, p_inputs, r_resources.size);
+			}
 		}
 		if (!dumped) {
 			_dispatch(variant, sky_reread ? PASS_TEMPORAL_SKY : PASS_TEMPORAL, r_resources.ubo[0], set0, p_inputs, r_resources.size);
 		}
 		r_resources.fold_dump_ran = dumped;
+		r_resources.fold_lineage_ran = lineage;
+		r_resources.fold_lineage_written = lineage ? int32_t(hist ^ 1u) : -1;
 	}
 
 	const uint32_t passes = params.spatial_count > 0 ? CLAMP(params.spatial_passes, 1u, 2u) : 0u;
@@ -1074,6 +1177,22 @@ bool RestirGiCore::read_fold_dump(const RestirGiResources &p_resources, RestirFo
 	r_dump.texels = words[2];
 	r_dump.starts.resize(RESTIR_FOLD_START_COUNT);
 	memcpy(r_dump.starts.ptrw(), words + RESTIR_FOLD_DUMP_HEADER_WORDS, RESTIR_FOLD_START_COUNT * sizeof(uint32_t));
+	return true;
+}
+
+bool RestirGiCore::read_fold_refused_ids(const RestirGiResources &p_resources, Vector<uint8_t> &r_raw, int64_t &r_texels) {
+	r_raw.clear();
+	r_texels = 0;
+	if (!p_resources.allocated || p_resources.fold_refused_id.is_null()) {
+		return false;
+	}
+	const int64_t texels = int64_t(p_resources.size.x) * int64_t(p_resources.size.y);
+	r_raw = RD::get_singleton()->texture_get_data(p_resources.fold_refused_id, 0);
+	if (r_raw.size() < texels * int64_t(sizeof(uint32_t))) {
+		r_raw.clear();
+		return false;
+	}
+	r_texels = texels;
 	return true;
 }
 

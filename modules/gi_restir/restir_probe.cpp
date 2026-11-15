@@ -74,6 +74,9 @@ void RestirProbe::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("fold_test_ready"), &RestirProbe::fold_test_ready);
 	ClassDB::bind_method(D_METHOD("get_fold_test_result"), &RestirProbe::get_fold_test_result);
 	ClassDB::bind_method(D_METHOD("mirror_fold_test", "args"), &RestirProbe::mirror_fold_test);
+	ClassDB::bind_method(D_METHOD("get_fold_families", "tag"), &RestirProbe::get_fold_families);
+	ClassDB::bind_method(D_METHOD("get_fold_family_totals", "tag"), &RestirProbe::get_fold_family_totals);
+	ClassDB::bind_method(D_METHOD("reset_fold_families"), &RestirProbe::reset_fold_families);
 }
 
 static_assert(sizeof(RestirShimCheckShaderRD) > 0, "the shim check header must be part of every build");
@@ -169,8 +172,38 @@ void RestirProbe::configure(const Dictionary &p_options) {
 		options.fold_dump = p_options["fold_dump"];
 		if (options.fold_dump) {
 			options.readback = true;
+		} else {
+			options.fold_lineage = false;
 		}
 	}
+	if (p_options.has("fold_lineage")) {
+		const bool wanted = p_options["fold_lineage"];
+		if (wanted && !options.fold_dump) {
+			options.fold_lineage = false;
+			options.fold_lineage_refusal = RESTIR_FOLD_LINEAGE_REFUSAL_NO_DUMP;
+		} else {
+			options.fold_lineage = wanted;
+			options.fold_lineage_refusal = RESTIR_FOLD_LINEAGE_REFUSAL_NONE;
+		}
+	}
+}
+
+PackedInt64Array RestirProbe::get_fold_families(int p_tag) const {
+	return restir_fold_family_pairs(p_tag);
+}
+
+Dictionary RestirProbe::get_fold_family_totals(int p_tag) const {
+	const RestirFoldFamilyTotals totals = restir_fold_family_totals(p_tag);
+	Dictionary d;
+	d["frames"] = int64_t(totals.frames);
+	d["refusals"] = totals.refusals;
+	d["unknown"] = totals.unknown;
+	d["families"] = totals.families;
+	return d;
+}
+
+void RestirProbe::reset_fold_families() {
+	restir_fold_families_reset();
 }
 
 static PackedInt64Array _fold_test_words(const Vector<uint32_t> &p_words) {

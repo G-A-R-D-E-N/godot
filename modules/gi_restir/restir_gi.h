@@ -117,6 +117,8 @@ struct RestirGiSummary {
 	uint64_t serial = 0;
 	int fold_tag = 0;
 	bool fold_dump_active = false;
+	bool fold_lineage_active = false;
+	int32_t fold_lineage_refusal = RESTIR_FOLD_LINEAGE_REFUSAL_NONE;
 };
 
 class RestirGiBackend : public RendererRD::RtgiResampleBackend {
@@ -140,6 +142,7 @@ class RestirGiBackend : public RendererRD::RtgiResampleBackend {
 	uint64_t release_calls_total = 0;
 	uint64_t release_tests_total = 0;
 	uint64_t fold_dump_frames_total = 0;
+	uint64_t fold_lineage_frames_total = 0;
 	String refusal_reason;
 
 	void _free_state(RestirGiState &r_state);

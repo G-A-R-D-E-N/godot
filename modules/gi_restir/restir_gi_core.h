@@ -213,10 +213,18 @@ struct RestirGiResources {
 	bool allocated = false;
 	RID fold_dump;
 	bool fold_dump_ran = false;
+	RID fold_lineage[2];
+	RID fold_refused_id;
+	bool fold_lineage_ran = false;
+	int32_t fold_lineage_written = -1;
+	int32_t fold_lineage_refusal = RESTIR_FOLD_LINEAGE_REFUSAL_NONE;
+	bool fold_lineage_failed = false;
 
 	bool allocate(const Size2i &p_size, bool p_debug = true);
 	void ensure_debug(bool p_needed);
 	void ensure_fold_dump(bool p_needed);
+	void ensure_fold_lineage(bool p_needed);
+	void free_fold_lineage();
 	void free_all();
 };
 
@@ -326,11 +334,13 @@ private:
 	bool octmap_array = false;
 	RestirFoldDumpObjects *dump_objects[VARIANT_MAX] = {};
 	bool dump_tried[VARIANT_MAX] = {};
+	RestirFoldDumpObjects *lineage_objects[VARIANT_MAX] = {};
+	bool lineage_tried[VARIANT_MAX] = {};
 	RestirFoldTestObjects *fold_test = nullptr;
 	bool fold_test_tried = false;
 
-	bool _ensure_dump(Variant p_variant);
-	bool _dispatch_dump(Variant p_variant, bool p_sky, RID p_ubo, const LocalVector<RD::Uniform> &p_set0, const RestirGiInputs &p_inputs, const Size2i &p_size);
+	bool _ensure_dump(Variant p_variant, bool p_lineage);
+	bool _dispatch_dump(Variant p_variant, bool p_sky, bool p_lineage, RID p_ubo, const LocalVector<RD::Uniform> &p_set0, const RestirGiInputs &p_inputs, const Size2i &p_size);
 	RID _shade_set(RID p_shader, const RestirGiInputs &p_inputs);
 	bool _ensure_fold_test();
 	void _free_fold_debug();
@@ -363,6 +373,7 @@ public:
 
 	static RestirFrameStats read_stats(const RestirGiResources &p_resources);
 	static bool read_fold_dump(const RestirGiResources &p_resources, RestirFoldDump &r_dump);
+	static bool read_fold_refused_ids(const RestirGiResources &p_resources, Vector<uint8_t> &r_raw, int64_t &r_texels);
 	static Vector<uint8_t> read_selection(const RestirGiResources &p_resources);
 	static bool read_sky_epoch(const RestirGiResources &p_resources, RestirSkyEpoch &r_epoch);
 };

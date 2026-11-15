@@ -34,6 +34,7 @@
 
 #include "core/math/color.h"
 #include "core/os/mutex.h"
+#include "core/templates/hash_map.h"
 #include "core/templates/local_vector.h"
 #include "core/variant/dictionary.h"
 
@@ -65,6 +66,20 @@ struct RestirTestOptions {
 	int fold_tag = 0;
 	bool release_once = false;
 	bool fold_dump = false;
+	bool fold_lineage = false;
+	int32_t fold_lineage_refusal = RESTIR_FOLD_LINEAGE_REFUSAL_NONE;
+};
+
+struct RestirFoldFamilyTotals {
+	uint64_t frames = 0;
+	int64_t refusals = 0;
+	int64_t unknown = 0;
+	int64_t families = 0;
+};
+
+struct RestirFoldFamilyTag {
+	HashMap<int, int64_t> sizes;
+	RestirFoldFamilyTotals totals;
 };
 
 enum RestirDetail : uint32_t {
@@ -109,6 +124,9 @@ struct RestirFoldRecord {
 	int64_t s_max = -1;
 	int64_t n_over = -1;
 	int64_t hist_texels = -1;
+	int64_t lineage_refusals = -1;
+	int64_t lineage_unknown = -1;
+	int64_t lineage_families = -1;
 };
 
 struct RestirFrameRecord {
@@ -117,7 +135,7 @@ struct RestirFrameRecord {
 	RestirFoldRecord fold;
 };
 
-static constexpr int RESTIR_FOLD_ROW_FIELDS = 29;
+static constexpr int RESTIR_FOLD_ROW_FIELDS = 32;
 
 const char *const *restir_fold_row_names();
 int64_t restir_fold_n_valid(const uint32_t *p_temporal_reject);
@@ -131,6 +149,11 @@ LocalVector<uint64_t> &restir_fold_starts();
 Mutex &restir_fold_starts_mutex();
 uint64_t &restir_fold_starts_frames();
 void restir_fold_starts_add(const Vector<uint32_t> &p_starts);
+HashMap<int, RestirFoldFamilyTag> &restir_fold_family_tags();
+RestirFoldFamilyCount restir_fold_families_add(int p_tag, const uint32_t *p_ids, int64_t p_count);
+Vector<int64_t> restir_fold_family_pairs(int p_tag);
+RestirFoldFamilyTotals restir_fold_family_totals(int p_tag);
+void restir_fold_families_reset();
 Dictionary &restir_captured_case();
 Dictionary &restir_final_capture();
 RestirPixelSums &restir_pixel_sums();

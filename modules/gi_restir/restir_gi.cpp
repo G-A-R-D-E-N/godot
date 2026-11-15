@@ -93,6 +93,64 @@ void restir_fold_starts_add(const Vector<uint32_t> &p_starts) {
 	restir_fold_starts_frames()++;
 }
 
+HashMap<int, RestirFoldFamilyTag> &restir_fold_family_tags() {
+	static HashMap<int, RestirFoldFamilyTag> tags;
+	return tags;
+}
+
+RestirFoldFamilyCount restir_fold_families_add(int p_tag, const uint32_t *p_ids, int64_t p_count) {
+	HashMap<int, int64_t> sizes;
+	const RestirFoldFamilyCount count = restir_fold_families(p_ids, p_count, sizes);
+	MutexLock lock(restir_frame_records_mutex());
+	RestirFoldFamilyTag &tag = restir_fold_family_tags()[p_tag];
+	for (const KeyValue<int, int64_t> &entry : sizes) {
+		int64_t *seen = tag.sizes.getptr(entry.key);
+		if (seen) {
+			*seen += entry.value;
+		} else {
+			tag.sizes.insert(entry.key, entry.value);
+		}
+	}
+	tag.totals.frames++;
+	tag.totals.refusals += count.refusals;
+	tag.totals.unknown += count.unknown;
+	tag.totals.families += count.families;
+	return count;
+}
+
+Vector<int64_t> restir_fold_family_pairs(int p_tag) {
+	MutexLock lock(restir_frame_records_mutex());
+	Vector<int64_t> pairs;
+	const RestirFoldFamilyTag *tag = restir_fold_family_tags().getptr(p_tag);
+	if (!tag) {
+		return pairs;
+	}
+	LocalVector<int> keys;
+	for (const KeyValue<int, int64_t> &entry : tag->sizes) {
+		keys.push_back(entry.key);
+	}
+	keys.sort();
+	pairs.resize(int64_t(keys.size()) * 2);
+	int64_t *w = pairs.ptrw();
+	for (uint32_t i = 0; i < keys.size(); i++) {
+		w[i * 2] = int64_t(keys[i]);
+		const int64_t *count = tag->sizes.getptr(keys[i]);
+		w[i * 2 + 1] = count ? *count : 0;
+	}
+	return pairs;
+}
+
+RestirFoldFamilyTotals restir_fold_family_totals(int p_tag) {
+	MutexLock lock(restir_frame_records_mutex());
+	const RestirFoldFamilyTag *tag = restir_fold_family_tags().getptr(p_tag);
+	return tag ? tag->totals : RestirFoldFamilyTotals();
+}
+
+void restir_fold_families_reset() {
+	MutexLock lock(restir_frame_records_mutex());
+	restir_fold_family_tags().clear();
+}
+
 Dictionary &restir_captured_case() {
 	static Dictionary captured;
 	return captured;
@@ -364,6 +422,7 @@ bool RestirGiBackend::begin_frame(const RtgiFrameInputs &p_inputs) {
 void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutput &r_output) {
 	r_output.valid = false;
 	summary.fold_dump_active = false;
+	summary.fold_lineage_active = false;
 	RestirGiState *found = states.getptr(p_inputs.buffers);
 	if (!found) {
 		return;
@@ -439,6 +498,7 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	const bool dump_wanted = !String(GLOBAL_GET(String(RESTIR_GI) + "dump_path")).is_empty();
 	state.resources.ensure_debug(state.resources.debug.is_valid() || p_inputs.debug_view >= 0 || options.readback || options.capture || options.capture_final || dump_wanted);
 	state.resources.ensure_fold_dump(options.fold_dump && options.readback);
+	state.resources.ensure_fold_lineage(options.fold_lineage && options.fold_dump && options.readback);
 
 	RestirFrameParams params;
 	params.trace_size = p_inputs.trace_size;
@@ -666,6 +726,11 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	if (state.resources.fold_dump_ran) {
 		fold_dump_frames_total++;
 	}
+	summary.fold_lineage_active = state.resources.fold_lineage_ran;
+	summary.fold_lineage_refusal = state.resources.fold_lineage_refusal;
+	if (state.resources.fold_lineage_ran) {
+		fold_lineage_frames_total++;
+	}
 	if (options.capture_final) {
 		RestirFrameParams final_params = params;
 		final_params.trace_size = p_inputs.trace_size;
@@ -798,6 +863,16 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 				record.fold.n_over = int64_t(dump.n_over);
 				record.fold.hist_texels = int64_t(dump.texels);
 				restir_fold_starts_add(dump.starts);
+			}
+		}
+		if (state.resources.fold_lineage_ran) {
+			Vector<uint8_t> refused_raw;
+			int64_t refused_texels = 0;
+			if (RestirGiCore::read_fold_refused_ids(state.resources, refused_raw, refused_texels)) {
+				const RestirFoldFamilyCount families = restir_fold_families_add(int(record.fold.tag), reinterpret_cast<const uint32_t *>(refused_raw.ptr()), refused_texels);
+				record.fold.lineage_refusals = families.refusals;
+				record.fold.lineage_unknown = families.unknown;
+				record.fold.lineage_families = families.families;
 			}
 		}
 		int record_index = 0;
@@ -947,6 +1022,11 @@ void RestirGiBackend::get_status(Dictionary &r_status) const {
 	r_status["release_tests_total"] = int64_t(release_tests_total);
 	r_status["fold_dump_active"] = summary.fold_dump_active;
 	r_status["fold_dump_frames_total"] = int64_t(fold_dump_frames_total);
+	r_status["fold_lineage_active"] = summary.fold_lineage_active;
+	r_status["fold_lineage_frames_total"] = int64_t(fold_lineage_frames_total);
+	const int32_t lineage_refusal = restir_test_options().fold_lineage_refusal != RESTIR_FOLD_LINEAGE_REFUSAL_NONE ? restir_test_options().fold_lineage_refusal : summary.fold_lineage_refusal;
+	r_status["fold_lineage_refusal"] = String(restir_fold_lineage_refusal_text(lineage_refusal));
+	r_status["fold_lineage_refusal_code"] = int64_t(lineage_refusal);
 	r_status["jitter_shift"] = PackedFloat64Array({ summary.jitter.ax, summary.jitter.ay, summary.jitter.bx, summary.jitter.by });
 	r_status["jitter_ndc"] = PackedFloat64Array({ summary.jitter.jitter_x, summary.jitter.jitter_y });
 	r_status["jitter_unmatched"] = summary.jitter.unmatched || summary.previous_jitter.unmatched;

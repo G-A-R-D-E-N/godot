@@ -256,3 +256,64 @@ int64_t restir_fold_test_compare(const Vector<uint32_t> &p_a, const Vector<uint3
 	}
 	return mismatches;
 }
+
+uint32_t restir_fold_lineage_pixel(uint32_t p_x, uint32_t p_y, uint32_t p_width) {
+	return p_y * p_width + p_x + 1u;
+}
+
+uint32_t restir_fold_lineage_id(uint32_t p_pixel_word, uint32_t p_clock_word) {
+	if (p_pixel_word == 0u || p_pixel_word > RESTIR_FOLD_LINEAGE_PIXEL_MASK) {
+		return RESTIR_FOLD_LINEAGE_UNKNOWN;
+	}
+	return ((p_clock_word & RESTIR_FOLD_LINEAGE_CLOCK_MASK) << RESTIR_FOLD_LINEAGE_CLOCK_SHIFT) | p_pixel_word;
+}
+
+RestirFoldFamilyCount restir_fold_families(const uint32_t *p_ids, int64_t p_count, HashMap<int, int64_t> &r_sizes) {
+	RestirFoldFamilyCount count;
+	if (!p_ids || p_count <= 0) {
+		return count;
+	}
+	HashMap<uint32_t, int> members;
+	for (int64_t i = 0; i < p_count; i++) {
+		const uint32_t id = p_ids[i];
+		if (id == 0u) {
+			continue;
+		}
+		count.refusals++;
+		if ((id & RESTIR_FOLD_LINEAGE_PIXEL_MASK) == 0u) {
+			count.unknown++;
+			continue;
+		}
+		int *seen = members.getptr(id);
+		if (seen) {
+			(*seen)++;
+		} else {
+			members.insert(id, 1);
+		}
+	}
+	for (const KeyValue<uint32_t, int> &entry : members) {
+		int64_t *sized = r_sizes.getptr(entry.value);
+		if (sized) {
+			(*sized)++;
+		} else {
+			r_sizes.insert(entry.value, 1);
+		}
+		count.families++;
+	}
+	return count;
+}
+
+const char *restir_fold_lineage_refusal_text(int32_t p_code) {
+	switch (p_code) {
+		case RESTIR_FOLD_LINEAGE_REFUSAL_NONE:
+			return "";
+		case RESTIR_FOLD_LINEAGE_REFUSAL_NO_DUMP:
+			return "fold_lineage needs fold_dump on";
+		case RESTIR_FOLD_LINEAGE_REFUSAL_GRID:
+			return "fold_lineage needs a trace grid of at most 16777215 texels";
+		case RESTIR_FOLD_LINEAGE_REFUSAL_UNAVAILABLE:
+			return "fold_lineage images or shaders are not available";
+		default:
+			return "fold_lineage refused for an unknown reason";
+	}
+}

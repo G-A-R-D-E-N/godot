@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/templates/hash_map.h"
 #include "core/templates/vector.h"
 #include "core/typedefs.h"
 
@@ -58,6 +59,28 @@ static constexpr uint32_t RESTIR_FOLD_DUMP_BYTES = (RESTIR_FOLD_DUMP_HEADER_WORD
 static constexpr uint32_t RESTIR_FOLD_REJ_FRAME_CODE = 1u;
 static constexpr uint32_t RESTIR_FOLD_REJ_CUT_CODE = 9u;
 static constexpr uint32_t RESTIR_FOLD_INFO_VALID = 1u << 14u;
+
+static constexpr uint32_t RESTIR_FOLD_LINEAGE_IN_BINDING = 33u;
+static constexpr uint32_t RESTIR_FOLD_LINEAGE_OUT_BINDING = 34u;
+static constexpr uint32_t RESTIR_FOLD_REFUSED_ID_BINDING = 35u;
+static constexpr uint32_t RESTIR_FOLD_LINEAGE_PIXEL_MASK = 0x00FFFFFFu;
+static constexpr uint32_t RESTIR_FOLD_LINEAGE_CLOCK_SHIFT = 24u;
+static constexpr uint32_t RESTIR_FOLD_LINEAGE_CLOCK_MASK = 0xFFu;
+static constexpr uint32_t RESTIR_FOLD_LINEAGE_UNKNOWN = 0xFF000000u;
+static constexpr uint64_t RESTIR_FOLD_LINEAGE_MAX_TEXELS = RESTIR_FOLD_LINEAGE_PIXEL_MASK;
+
+enum RestirFoldLineageRefusal : int32_t {
+	RESTIR_FOLD_LINEAGE_REFUSAL_NONE = 0,
+	RESTIR_FOLD_LINEAGE_REFUSAL_NO_DUMP = 1,
+	RESTIR_FOLD_LINEAGE_REFUSAL_GRID = 2,
+	RESTIR_FOLD_LINEAGE_REFUSAL_UNAVAILABLE = 3,
+};
+
+struct RestirFoldFamilyCount {
+	int64_t refusals = 0;
+	int64_t unknown = 0;
+	int64_t families = 0;
+};
 
 enum RestirFoldTestSub : uint32_t {
 	RESTIR_FOLD_TEST_DRAW = 0,
@@ -102,3 +125,8 @@ uint64_t restir_fold_test_words(const RestirFoldTestArgs &p_args);
 void restir_fold_test_initial(const RestirFoldTestArgs &p_args, Vector<uint32_t> &r_words);
 void restir_fold_test_mirror(const RestirFoldTestArgs &p_args, Vector<uint32_t> &r_words);
 int64_t restir_fold_test_compare(const Vector<uint32_t> &p_a, const Vector<uint32_t> &p_b, int64_t &r_first);
+
+uint32_t restir_fold_lineage_pixel(uint32_t p_x, uint32_t p_y, uint32_t p_width);
+uint32_t restir_fold_lineage_id(uint32_t p_pixel_word, uint32_t p_clock_word);
+RestirFoldFamilyCount restir_fold_families(const uint32_t *p_ids, int64_t p_count, HashMap<int, int64_t> &r_sizes);
+const char *restir_fold_lineage_refusal_text(int32_t p_code);

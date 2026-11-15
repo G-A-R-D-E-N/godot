@@ -479,12 +479,45 @@ void rs_fold_dump_relock(ivec2 p_pixel, ivec2 p_hp) {
 	}
 }
 
+#ifdef RS_FOLD_LINEAGE
+uint rs_fold_lineage_id(uvec2 p_word) {
+	if (p_word.x == 0u || p_word.x > RS_FOLD_LINEAGE_PIXEL_MASK) {
+		return RS_FOLD_LINEAGE_UNKNOWN;
+	}
+	return ((p_word.y & RS_FOLD_LINEAGE_CLOCK_MASK) << RS_FOLD_LINEAGE_CLOCK_SHIFT) | p_word.x;
+}
+
+void rs_fold_lineage_store(ivec2 p_pixel, ivec2 p_hp, bool p_valid, bool p_had, bool p_cleared) {
+	uvec2 word = uvec2(0u);
+	uint id = 0u;
+	if (p_valid && RS_FOLD_K != 0u) {
+		uvec2 born = uvec2(uint(p_pixel.y) * uint(rf.trace_size.x) + uint(p_pixel.x) + 1u, RS_FOLD_CLOCK);
+		if (p_had) {
+			uvec2 history = imageLoad(rs_fold_lineage_in, p_hp).xy;
+			if (p_cleared) {
+				id = rs_fold_lineage_id(history);
+				word = born;
+			} else {
+				word = history;
+			}
+		} else {
+			word = born;
+		}
+	}
+	imageStore(rs_fold_lineage_out, p_pixel, uvec4(word, 0u, 0u));
+	imageStore(rs_fold_refused_id, p_pixel, uvec4(id, 0u, 0u, 0u));
+}
+#endif
+
 #endif
 void rs_temporal_pixel(ivec2 px) {
 	Receiver r = rs_receiver_cur(px);
 	if (!r.valid) {
 		rs_store(px, rs_empty());
 		imageStore(info_image, px, uvec4(0u));
+#ifdef RS_FOLD_LINEAGE
+		rs_fold_lineage_store(px, px, false, false, false);
+#endif
 		return;
 	}
 	Reservoir fresh = rs_from_candidate(px, r);
@@ -599,6 +632,9 @@ void rs_temporal_pixel(ivec2 px) {
 	info |= reason & INFO_TEMPORAL_REJECT_MASK;
 	rs_store(px, result);
 	imageStore(info_image, px, uvec4(info));
+#ifdef RS_FOLD_LINEAGE
+	rs_fold_lineage_store(px, hp, true, had, cleared);
+#endif
 }
 
 void main() {
@@ -613,6 +649,9 @@ void main() {
 		} else {
 			rs_store(px, rs_empty());
 			imageStore(info_image, px, uvec4(0u));
+#ifdef RS_FOLD_LINEAGE
+			rs_fold_lineage_store(px, px, false, false, false);
+#endif
 		}
 	}
 	rs_stats_store(rf.pass_index);
