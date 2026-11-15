@@ -115,7 +115,7 @@ jobs:
         run: |
           ./bin/godot.linuxbsd.editor.double.x86_64.mono --headless --test --force-colors -s &
           pid=$!
-          (sleep 1500; echo "::error::Unit tests still running after 25 minutes; dumping thread stacks"; nproc
+          (trap 'kill "$s" 2>/dev/null; exit' TERM; sleep 1500 & s=$!; wait "$s"; echo "::error::Unit tests still running after 25 minutes; dumping thread stacks"; nproc
             for g in "gdb" "sudo -n gdb"; do
               out=$($g -p "$pid" -batch -ex "thread apply all bt" 2>&1 || true)
               case "$out" in *"Thread "*) echo "$out" | tail -n 600; break ;; *) echo "$g: $out" | tail -n 5 ;; esac
@@ -123,8 +123,8 @@ jobs:
             kill -9 "$pid") &
           watchdog=$!
           rc=0; wait "$pid" || rc=$?
-          pkill -P "$watchdog" 2>/dev/null || true
           kill "$watchdog" 2>/dev/null || true
+          wait "$watchdog" 2>/dev/null || true
           exit "$rc"
 
       - name: Package editor
