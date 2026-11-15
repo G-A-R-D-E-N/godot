@@ -64,14 +64,29 @@ constexpr float median_log(const float *p_weight, const float *p_sum, int p_coun
 	if (!(total > 1e-5f)) {
 		return p_none;
 	}
+	const float half_weight = 0.5f * total;
 	float running = 0.0f;
+	float previous_middle = 0.0f;
+	float previous_mean = 0.0f;
+	bool has_previous = false;
 	for (int i = 0; i < p_count; i++) {
-		running += p_weight[i];
-		if (running >= 0.5f * total) {
-			return p_sum[i] / p_weight[i];
+		if (!(p_weight[i] > 0.0f)) {
+			continue;
 		}
+		const float mean = p_sum[i] / p_weight[i];
+		const float middle = running + 0.5f * p_weight[i];
+		running += p_weight[i];
+		if (middle >= half_weight) {
+			if (!has_previous) {
+				return mean;
+			}
+			return previous_mean + (half_weight - previous_middle) / (middle - previous_middle) * (mean - previous_mean);
+		}
+		previous_middle = middle;
+		previous_mean = mean;
+		has_previous = true;
 	}
-	return p_none;
+	return has_previous ? previous_mean : p_none;
 }
 
 } // namespace LocalExposureLimits

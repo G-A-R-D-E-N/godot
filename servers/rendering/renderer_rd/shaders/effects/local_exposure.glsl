@@ -185,13 +185,26 @@ void main() {
 		}
 		float median = MEDIAN_NONE;
 		if (all > 1e-5) {
+			float half_weight = 0.5 * all;
 			float running = 0.0;
+			float previous_middle = 0.0;
+			float previous_mean = 0.0;
+			bool has_previous = false;
 			for (int i = 0; i < GRID_DEPTH; i++) {
+				if (!(bin_weight[i] > 0.0)) {
+					continue;
+				}
+				float mean = bin_sum[i] / bin_weight[i];
+				float middle = running + 0.5 * bin_weight[i];
 				running += bin_weight[i];
-				if (running >= 0.5 * all) {
-					median = bin_sum[i] / bin_weight[i];
+				if (middle >= half_weight) {
+					median = !has_previous ? mean : previous_mean + (half_weight - previous_middle) / (middle - previous_middle) * (mean - previous_mean);
 					break;
 				}
+				previous_middle = middle;
+				previous_mean = mean;
+				has_previous = true;
+				median = mean;
 			}
 		}
 		imageStore(dest_median, ivec2(0), vec4(median));
