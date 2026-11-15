@@ -48,8 +48,7 @@ struct Guide {
 	vec3 position;
 };
 
-Guide read_guide(ivec2 p_pixel) {
-	uvec2 raw = imageLoad(guide_image, p_pixel).xy;
+Guide guide_from(uvec2 raw, ivec2 p_pixel) {
 	Guide guide;
 	guide.depth = uintBitsToFloat(raw.x);
 	guide.normal = direct_oct_decode(unpackSnorm2x16(raw.y));
@@ -57,6 +56,10 @@ Guide read_guide(ivec2 p_pixel) {
 	vec2 at_unit = vec2(params.inv_projection[0][0], params.inv_projection[1][1]) * uv;
 	guide.position = params.inv_projection[2][3] == 0.0 ? vec3(at_unit + params.inv_projection[3].xy, -guide.depth) : vec3(at_unit * guide.depth, -guide.depth);
 	return guide;
+}
+
+Guide read_guide(ivec2 p_pixel) {
+	return guide_from(imageLoad(guide_image, p_pixel).xy, p_pixel);
 }
 
 float geometry_weight(Guide p_center, Guide p_other) {
@@ -145,6 +148,42 @@ void main() {
 }
 #else
 
+#ifdef MODE_FIRST
+#define HALO 1
+#else
+#define HALO 2
+#endif
+#define TILE (8 + 2 * HALO)
+#define TILE_SLOT_WORDS (MAX_ENTRIES / 2)
+
+shared uvec2 tile_guide[TILE * TILE];
+shared uint tile_slots[TILE * TILE * TILE_SLOT_WORDS];
+
+uint tile_slot(uint p_texel, uint p_layer) {
+	return (tile_slots[p_texel * TILE_SLOT_WORDS + (p_layer >> 1u)] >> ((p_layer & 1u) * 16u)) & 0xFFFFu;
+}
+
+void load_tile(ivec2 p_origin, uint p_layers) {
+	for (uint k = gl_LocalInvocationIndex; k < uint(TILE * TILE); k += 64u) {
+		ivec2 at = p_origin + ivec2(int(k % uint(TILE)), int(k / uint(TILE)));
+		if (any(lessThan(at, ivec2(0))) || any(greaterThanEqual(at, params.size))) {
+			continue;
+		}
+		uvec2 raw = imageLoad(guide_image, at).xy;
+		tile_guide[k] = raw;
+		if (uintBitsToFloat(raw.x) <= 0.0) {
+			continue;
+		}
+		for (uint j = 0u; j < p_layers; j += 2u) {
+			uint low = read_slot(at, j);
+			uint high = j + 1u < p_layers ? read_slot(at, j + 1u) : 0u;
+			tile_slots[k * TILE_SLOT_WORDS + (j >> 1u)] = low | (high << 16u);
+		}
+	}
+	memoryBarrierShared();
+	barrier();
+}
+
 float sampling_noise(vec2 p_accum) {
 	float count = max(min(p_accum.y, params.history_cap), 1e-3);
 	float mean = p_accum.y > 0.0 ? p_accum.x / p_accum.y : 0.5;
@@ -158,12 +197,16 @@ float range_weight(float p_own, float p_other, float p_noise) {
 
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	uint own_limit = params.entries - 1u;
+	uint layers = own_limit + 3u;
+	ivec2 tile_origin = ivec2(gl_WorkGroupID.xy) * 8 - HALO;
+	load_tile(tile_origin, own_limit + 1u);
 	if (any(greaterThanEqual(pixel, params.size))) {
 		return;
 	}
-	uint own_limit = params.entries - 1u;
-	uint layers = own_limit + 3u;
-	Guide center = read_guide(pixel);
+	ivec2 center_at = pixel - tile_origin;
+	uint center_texel = uint(center_at.y * TILE + center_at.x);
+	Guide center = guide_from(tile_guide[center_texel], pixel);
 	if (center.depth <= 0.0) {
 		for (uint i = 0u; i < layers; i++) {
 			imageStore(out_image, ivec3(pixel, int(i)), vec4(1.0));
@@ -177,7 +220,7 @@ void main() {
 	float sum[MAX_ENTRIES + 2];
 	float total[MAX_ENTRIES + 2];
 	for (uint i = 0u; i < own_limit; i++) {
-		slots[i] = read_slot(pixel, i);
+		slots[i] = tile_slot(center_texel, i);
 		float sigma = params.kernel_floor;
 		if (slots[i] != 0u) {
 			float reach = params.inv_projection[2][3] == 0.0 ? 1.0 : center.depth;
@@ -198,7 +241,7 @@ void main() {
 		sum[i] = 0.0;
 		total[i] = 0.0;
 	}
-	uint rest_key = read_slot(pixel, own_limit);
+	uint rest_key = tile_slot(center_texel, own_limit);
 #ifdef MODE_FIRST
 	const int step_size = 1;
 #else
@@ -221,16 +264,18 @@ void main() {
 			if (any(lessThan(at, ivec2(0))) || any(greaterThanEqual(at, params.size))) {
 				continue;
 			}
+			ivec2 tile_at = at - tile_origin;
+			uint texel = uint(tile_at.y * TILE + tile_at.x);
 			float base = kernel[dx + 1] * kernel[dy + 1];
 			if (dx != 0 || dy != 0) {
-				base *= geometry_weight(center, read_guide(at));
+				base *= geometry_weight(center, guide_from(tile_guide[texel], at));
 				if (base <= 0.0) {
 					continue;
 				}
 			}
 			uint ring = uint(dx * dx + dy * dy);
 			for (uint j = 0u; j < own_limit; j++) {
-				uint slot = read_slot(at, j);
+				uint slot = tile_slot(texel, j);
 				if (slot == 0u) {
 					continue;
 				}
@@ -259,7 +304,7 @@ void main() {
 					break;
 				}
 			}
-			if (rest_key != 0u && read_slot(at, own_limit) == rest_key) {
+			if (rest_key != 0u && tile_slot(texel, own_limit) == rest_key) {
 #ifdef MODE_FIRST
 				vec4 rest = imageLoad(rest_image, at);
 				if (rest.a > 0.0) {
