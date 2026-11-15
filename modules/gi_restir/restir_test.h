@@ -64,6 +64,7 @@ struct RestirTestOptions {
 	int compat_early_stop = -1;
 	int fold_tag = 0;
 	bool release_once = false;
+	bool fold_dump = false;
 };
 
 enum RestirDetail : uint32_t {
@@ -126,6 +127,10 @@ void restir_fold_pack_row(const RestirFrameRecord &p_record, int64_t p_index, in
 RestirTestOptions &restir_test_options();
 LocalVector<RestirFrameRecord> &restir_frame_records();
 Mutex &restir_frame_records_mutex();
+LocalVector<uint64_t> &restir_fold_starts();
+Mutex &restir_fold_starts_mutex();
+uint64_t &restir_fold_starts_frames();
+void restir_fold_starts_add(const Vector<uint32_t> &p_starts);
 Dictionary &restir_captured_case();
 Dictionary &restir_final_capture();
 RestirPixelSums &restir_pixel_sums();

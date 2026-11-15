@@ -389,34 +389,7 @@ float rs_event_cap_history(Receiver p_r, Receiver p_q, Reservoir p_h, float p_m)
 
 #define RS_FOLD_CLOCK rf.shade_pad1
 #define RS_FOLD_K rf.shade_pad2
-#define RS_FOLD_C1 0x68E31DA4u
-#define RS_FOLD_C2 0x2C1B3C6Du
-#define RS_FOLD_DIM_RENEW 0u
-#define RS_FOLD_DIM_START 1u
-
-uint rs_fold_isqrt(uint p_x) {
-	uint s = uint(sqrt(float(p_x)));
-	if ((s + 1u) * (s + 1u) <= p_x) {
-		s++;
-	}
-	if (s * s > p_x) {
-		s--;
-	}
-	return s;
-}
-
-uint rs_fold_draw(uint p_psi, uint p_k) {
-	uint quarter = (p_k * p_k) >> 2u;
-	uint x = p_psi % (3u * quarter);
-	if (x < quarter) {
-		return rs_fold_isqrt(x);
-	}
-	return (p_k >> 1u) + (x - quarter) / p_k;
-}
-
-uint rs_fold_phi(uvec2 p_pixel) {
-	return rtgi_pcg(p_pixel.x + rtgi_pcg(p_pixel.y + RS_FOLD_C1));
-}
+#include "restir_fold_inc.glsl"
 
 bool rs_fold_refuses(uint p_h_s) {
 	uint bound = (rf.flags & F_PRE_FRAME) != 0u ? RS_FOLD_K - 1u : RS_FOLD_K;
@@ -437,12 +410,12 @@ uint rs_fold_bits(ivec2 p_pixel, ivec2 p_hp, bool p_had, bool p_cleared, uint p_
 		g_stats[PS_FOLD_CARRIED] += 1.0;
 	} else {
 		if (p_cleared) {
-			uint u = (!p_h_mv && still) ? (v + rs_fold_phi(pixel)) % k : rtgi_rng_state(pixel, v, RS_FOLD_DIM_RENEW, RS_FOLD_C2) % k;
+			uint u = (!p_h_mv && still) ? (v + rs_fold_phi(pixel)) % k : RS_FOLD_PSI_R(pixel, v) % k;
 			s = u <= half_k ? u : u - half_k;
 			mv = false;
 			g_stats[PS_FOLD_RENEWED] += 1.0;
 		} else {
-			s = rs_fold_draw(rtgi_rng_state(pixel, v, RS_FOLD_DIM_START, RS_FOLD_C2), k);
+			s = rs_fold_draw(RS_FOLD_PSI_S(pixel, v), k);
 			mv = true;
 			g_stats[PS_FOLD_STARTED] += 1.0;
 		}
@@ -453,6 +426,60 @@ uint rs_fold_bits(ivec2 p_pixel, ivec2 p_hp, bool p_had, bool p_cleared, uint p_
 	return ((s & RF_S_MASK) << RF_S_SHIFT) | (mv ? RF_MV : 0u);
 }
 
+#ifdef RS_FOLD_DUMP
+shared uint rs_fold_scan_max;
+shared uint rs_fold_scan_over;
+shared uint rs_fold_scan_texels;
+
+void rs_fold_dump_scan(ivec2 p_pixel) {
+	if (RS_FOLD_K == 0u) {
+		return;
+	}
+	if (gl_LocalInvocationIndex == 0u) {
+		rs_fold_scan_max = 0u;
+		rs_fold_scan_over = 0u;
+		rs_fold_scan_texels = 0u;
+	}
+	barrier();
+	if (all(lessThan(p_pixel, rf.trace_size))) {
+		uint hs = (rs_load(p_pixel).flags >> RF_S_SHIFT) & RF_S_MASK;
+		atomicMax(rs_fold_scan_max, hs);
+		if (hs > RS_FOLD_K - 1u) {
+			atomicAdd(rs_fold_scan_over, 1u);
+		}
+		atomicAdd(rs_fold_scan_texels, 1u);
+	}
+	barrier();
+	if (gl_LocalInvocationIndex == 0u) {
+		atomicMax(rs_fold_dump.s_max, rs_fold_scan_max);
+		atomicAdd(rs_fold_dump.n_over, rs_fold_scan_over);
+		atomicAdd(rs_fold_dump.texels, rs_fold_scan_texels);
+	}
+}
+
+uint rs_fold_start_class(uint p_reason) {
+	uint base = p_reason == REJ_CUT ? RS_FOLD_START_CUT : (p_reason == REJ_FRAME ? RS_FOLD_START_FRAME : RS_FOLD_START_OTHER);
+	return base + ((rf.flags & F_PRE_FRAME) != 0u ? RS_FOLD_START_PRE : 0u);
+}
+
+void rs_fold_dump_start(ivec2 p_pixel, uint p_reason, uint p_flags) {
+	uint s = (p_flags >> RF_S_SHIFT) & RF_S_MASK;
+	uint u = (RS_FOLD_CLOCK + rs_fold_phi(uvec2(p_pixel))) % RS_FOLD_K;
+	uint c = rs_fold_start_class(p_reason);
+	atomicAdd(rs_fold_dump.starts[(c * RS_FOLD_START_S + s) * RS_FOLD_START_U + u], 1u);
+}
+
+void rs_fold_dump_relock(ivec2 p_pixel, ivec2 p_hp) {
+	if (RS_FOLD_K == 0u || !all(equal(p_hp, p_pixel))) {
+		return;
+	}
+	g_stats[PS_FOLD_HP_EQ_PX] += 1.0;
+	if ((RS_FOLD_CLOCK + rs_fold_phi(uvec2(p_pixel))) % RS_FOLD_K == 0u) {
+		g_stats[PS_FOLD_PHASE0] += 1.0;
+	}
+}
+
+#endif
 void rs_temporal_pixel(ivec2 px) {
 	Receiver r = rs_receiver_cur(px);
 	if (!r.valid) {
@@ -549,6 +576,9 @@ void rs_temporal_pixel(ivec2 px) {
 			}
 		}
 	}
+#ifdef RS_FOLD_DUMP
+	rs_fold_dump_relock(px, hp);
+#endif
 	bool had = c[1].present || cleared;
 
 	int sel;
@@ -557,6 +587,11 @@ void rs_temporal_pixel(ivec2 px) {
 	result = rs_finish(result, sel, total_m, r, RF_TEMPORAL, 1u);
 	if (RS_FOLD_K != 0u) {
 		result.flags = (result.flags & ~RF_FOLD_BITS) | rs_fold_bits(px, hp, had, cleared, h_s, h_mv);
+#ifdef RS_FOLD_DUMP
+		if (!had) {
+			rs_fold_dump_start(px, reason, result.flags);
+		}
+#endif
 	}
 	if (sel == 1) {
 		info |= INFO_SEL_TEMPORAL;
@@ -569,6 +604,9 @@ void rs_temporal_pixel(ivec2 px) {
 void main() {
 	rs_stats_clear();
 	ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+#ifdef RS_FOLD_DUMP
+	rs_fold_dump_scan(px);
+#endif
 	if (all(lessThan(px, rf.trace_size))) {
 		if (rs_tile_traced(px)) {
 			rs_temporal_pixel(px);

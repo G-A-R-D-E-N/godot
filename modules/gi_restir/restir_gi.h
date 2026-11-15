@@ -116,6 +116,7 @@ struct RestirGiSummary {
 	RestirJitterShift previous_jitter;
 	uint64_t serial = 0;
 	int fold_tag = 0;
+	bool fold_dump_active = false;
 };
 
 class RestirGiBackend : public RendererRD::RtgiResampleBackend {
@@ -138,6 +139,7 @@ class RestirGiBackend : public RendererRD::RtgiResampleBackend {
 	uint64_t state_rebuilds_total = 0;
 	uint64_t release_calls_total = 0;
 	uint64_t release_tests_total = 0;
+	uint64_t fold_dump_frames_total = 0;
 	String refusal_reason;
 
 	void _free_state(RestirGiState &r_state);

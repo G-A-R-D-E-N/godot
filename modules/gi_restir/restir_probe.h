@@ -63,13 +63,24 @@ public:
 	PackedInt64Array get_fold_rows() const;
 	PackedStringArray get_fold_row_fields() const;
 	Dictionary get_fold_seeds() const;
+	PackedInt64Array get_fold_starts() const;
+	void reset_fold_starts();
+	int64_t get_fold_starts_frames() const;
+	PackedInt64Array mirror_fold_starts(const PackedByteArray &p_info, int p_width, int p_k, int p_clock, bool p_pre_frame) const;
+	void run_fold_test(const Dictionary &p_args);
+	bool fold_test_ready() const;
+	Dictionary get_fold_test_result() const;
+	Dictionary mirror_fold_test(const Dictionary &p_args) const;
 	~RestirProbe();
 
 private:
 	void _run_case_render(const Dictionary &p_case);
+	void _run_fold_test_render(const Dictionary &p_args);
 
 	RestirGiCore *harness_core = nullptr;
 	mutable Mutex result_mutex;
 	Dictionary case_result;
 	bool case_done = false;
+	Dictionary fold_test_result;
+	bool fold_test_done = false;
 };

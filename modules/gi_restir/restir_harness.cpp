@@ -342,6 +342,10 @@ Dictionary run_case(RestirGiCore &p_core, const Dictionary &p_case) {
 	if (params.compat) {
 		params.flags |= RESTIR_F_PROBE_STATS;
 	}
+	const bool fold_dump = overrides.fold_dump;
+	if (fold_dump) {
+		params.flags |= RESTIR_F_PROBE_STATS;
+	}
 
 	RestirGiInputs inputs;
 	inputs.geo_position = _upload(p_case, "geo_pos", size);
@@ -364,6 +368,9 @@ Dictionary run_case(RestirGiCore &p_core, const Dictionary &p_case) {
 	}
 	rd->texture_update(res.vis_state, 0, _from_packed(p_case["vis_l0"]));
 	res.history_index = 0;
+	if (fold_dump) {
+		res.ensure_fold_dump(true);
+	}
 
 	p_core.run_frame(res, params, inputs);
 
@@ -411,6 +418,35 @@ Dictionary run_case(RestirGiCore &p_core, const Dictionary &p_case) {
 	result["stats"] = s;
 	if (params.compat) {
 		result["selection"] = _to_packed(RestirGiCore::read_selection(res));
+	}
+	if (fold_dump) {
+		Dictionary d;
+		d["active"] = res.fold_dump_ran;
+		d["k_eff"] = int64_t(params.fold_k_eff);
+		d["clock"] = int64_t(params.fold_clock);
+		d["n_valid"] = restir_fold_n_valid(stats.temporal_reject);
+		d["cut_rej"] = restir_fold_cut_rej(stats.temporal_reject);
+		d["had_history"] = int64_t(stats.had_history);
+		d["hp_eq_px"] = int64_t(stats.fold_hp_eq_px);
+		d["expected_phase0"] = int64_t(stats.fold_phase0);
+		RestirFoldDump dump;
+		if (res.fold_dump_ran && RestirGiCore::read_fold_dump(res, dump)) {
+			d["s_max"] = int64_t(dump.s_max);
+			d["n_over"] = int64_t(dump.n_over);
+			d["texels"] = int64_t(dump.texels);
+			PackedInt64Array starts;
+			starts.resize(int64_t(RESTIR_FOLD_START_COUNT));
+			for (uint32_t i = 0; i < RESTIR_FOLD_START_COUNT; i++) {
+				starts.set(int64_t(i), int64_t(dump.starts[i]));
+			}
+			d["starts"] = starts;
+		} else {
+			d["s_max"] = int64_t(-1);
+			d["n_over"] = int64_t(-1);
+			d["texels"] = int64_t(-1);
+			d["starts"] = PackedInt64Array();
+		}
+		result["fold_dump"] = d;
 	}
 	result["size"] = Vector2i(size);
 

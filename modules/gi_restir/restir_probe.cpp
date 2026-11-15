@@ -66,6 +66,14 @@ void RestirProbe::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_fold_rows"), &RestirProbe::get_fold_rows);
 	ClassDB::bind_method(D_METHOD("get_fold_row_fields"), &RestirProbe::get_fold_row_fields);
 	ClassDB::bind_method(D_METHOD("get_fold_seeds"), &RestirProbe::get_fold_seeds);
+	ClassDB::bind_method(D_METHOD("get_fold_starts"), &RestirProbe::get_fold_starts);
+	ClassDB::bind_method(D_METHOD("reset_fold_starts"), &RestirProbe::reset_fold_starts);
+	ClassDB::bind_method(D_METHOD("get_fold_starts_frames"), &RestirProbe::get_fold_starts_frames);
+	ClassDB::bind_method(D_METHOD("mirror_fold_starts", "info", "width", "k", "clock", "pre_frame"), &RestirProbe::mirror_fold_starts);
+	ClassDB::bind_method(D_METHOD("run_fold_test", "args"), &RestirProbe::run_fold_test);
+	ClassDB::bind_method(D_METHOD("fold_test_ready"), &RestirProbe::fold_test_ready);
+	ClassDB::bind_method(D_METHOD("get_fold_test_result"), &RestirProbe::get_fold_test_result);
+	ClassDB::bind_method(D_METHOD("mirror_fold_test", "args"), &RestirProbe::mirror_fold_test);
 }
 
 static_assert(sizeof(RestirShimCheckShaderRD) > 0, "the shim check header must be part of every build");
@@ -157,6 +165,166 @@ void RestirProbe::configure(const Dictionary &p_options) {
 	if (p_options.has("release_once")) {
 		options.release_once = p_options["release_once"];
 	}
+	if (p_options.has("fold_dump")) {
+		options.fold_dump = p_options["fold_dump"];
+		if (options.fold_dump) {
+			options.readback = true;
+		}
+	}
+}
+
+static PackedInt64Array _fold_test_words(const Vector<uint32_t> &p_words) {
+	PackedInt64Array words;
+	words.resize(p_words.size());
+	int64_t *w = words.ptrw();
+	for (int64_t i = 0; i < p_words.size(); i++) {
+		w[i] = int64_t(p_words[i]);
+	}
+	return words;
+}
+
+PackedInt64Array RestirProbe::get_fold_starts() const {
+	PackedInt64Array counts;
+	counts.resize(int64_t(RESTIR_FOLD_START_COUNT));
+	int64_t *w = counts.ptrw();
+	MutexLock lock(restir_fold_starts_mutex());
+	const LocalVector<uint64_t> &starts = restir_fold_starts();
+	for (uint32_t i = 0; i < RESTIR_FOLD_START_COUNT; i++) {
+		w[i] = starts.size() == RESTIR_FOLD_START_COUNT ? int64_t(starts[i]) : 0;
+	}
+	return counts;
+}
+
+void RestirProbe::reset_fold_starts() {
+	MutexLock lock(restir_fold_starts_mutex());
+	restir_fold_starts().clear();
+	restir_fold_starts_frames() = 0;
+}
+
+int64_t RestirProbe::get_fold_starts_frames() const {
+	MutexLock lock(restir_fold_starts_mutex());
+	return int64_t(restir_fold_starts_frames());
+}
+
+PackedInt64Array RestirProbe::mirror_fold_starts(const PackedByteArray &p_info, int p_width, int p_k, int p_clock, bool p_pre_frame) const {
+	PackedInt64Array counts;
+	const int64_t texels = p_info.size() / 4;
+	if (p_info.size() % 4 != 0 || p_width <= 0 || texels == 0 || texels % p_width != 0 || p_k < 4 || p_k > 64 || (p_k & (p_k - 1)) != 0 || p_clock < 0) {
+		return counts;
+	}
+	Vector<uint32_t> words;
+	words.resize(texels);
+	memcpy(words.ptrw(), p_info.ptr(), size_t(texels) * sizeof(uint32_t));
+	Vector<uint32_t> starts;
+	restir_fold_start_mirror(words.ptr(), texels, p_width, uint32_t(p_k), uint32_t(p_clock), p_pre_frame, starts);
+	return _fold_test_words(starts);
+}
+
+static bool _fold_test_arg(const Dictionary &p_args, const char *p_key, uint32_t &r_value) {
+	if (!p_args.has(p_key)) {
+		return true;
+	}
+	const int64_t value = p_args[p_key];
+	if (value < 0 || value > int64_t(UINT32_MAX)) {
+		return false;
+	}
+	r_value = uint32_t(value);
+	return true;
+}
+
+static bool _fold_test_args(const Dictionary &p_args, RestirFoldTestArgs &r_args) {
+	bool ok = _fold_test_arg(p_args, "sub", r_args.sub);
+	ok = _fold_test_arg(p_args, "k", r_args.k) && ok;
+	ok = _fold_test_arg(p_args, "count", r_args.count) && ok;
+	ok = _fold_test_arg(p_args, "v0", r_args.v0) && ok;
+	ok = _fold_test_arg(p_args, "grid_w", r_args.grid_w) && ok;
+	ok = _fold_test_arg(p_args, "grid_h", r_args.grid_h) && ok;
+	ok = _fold_test_arg(p_args, "stride", r_args.stride) && ok;
+	ok = _fold_test_arg(p_args, "frames", r_args.frames) && ok;
+	return ok;
+}
+
+static Dictionary _fold_test_result(const RestirFoldTestArgs &p_args, const String &p_source) {
+	Dictionary result;
+	result["source"] = p_source;
+	result["ok"] = false;
+	result["error"] = String();
+	result["sub"] = int64_t(p_args.sub);
+	result["k"] = int64_t(p_args.k);
+	result["count"] = int64_t(p_args.count);
+	result["v0"] = int64_t(p_args.v0);
+	result["grid_w"] = int64_t(p_args.grid_w);
+	result["grid_h"] = int64_t(p_args.grid_h);
+	result["stride"] = int64_t(p_args.stride);
+	result["frames"] = int64_t(p_args.frames);
+	result["word_count"] = int64_t(0);
+	result["words"] = PackedInt64Array();
+	result["mirror_mismatches"] = int64_t(-1);
+	result["first_mismatch"] = int64_t(-1);
+	return result;
+}
+
+void RestirProbe::run_fold_test(const Dictionary &p_args) {
+	{
+		MutexLock lock(result_mutex);
+		fold_test_done = false;
+		fold_test_result = Dictionary();
+	}
+	RenderingServer::get_singleton()->call_on_render_thread(callable_mp(this, &RestirProbe::_run_fold_test_render).bind(p_args));
+}
+
+void RestirProbe::_run_fold_test_render(const Dictionary &p_args) {
+	if (!harness_core) {
+		harness_core = memnew(RestirGiCore);
+	}
+	RestirFoldTestArgs args;
+	const bool in_range = _fold_test_args(p_args, args);
+	Dictionary result = _fold_test_result(args, "gpu");
+	Vector<uint32_t> gpu;
+	String error = "argument out of range";
+	if (in_range && harness_core->run_fold_test(args, gpu, error)) {
+		Vector<uint32_t> cpu;
+		restir_fold_test_mirror(args, cpu);
+		int64_t first = -1;
+		result["mirror_mismatches"] = restir_fold_test_compare(gpu, cpu, first);
+		result["first_mismatch"] = first;
+		result["word_count"] = int64_t(gpu.size());
+		result["words"] = _fold_test_words(gpu);
+		result["ok"] = true;
+	} else {
+		result["error"] = error;
+	}
+	MutexLock lock(result_mutex);
+	fold_test_result = result;
+	fold_test_done = true;
+}
+
+bool RestirProbe::fold_test_ready() const {
+	MutexLock lock(result_mutex);
+	return fold_test_done;
+}
+
+Dictionary RestirProbe::get_fold_test_result() const {
+	MutexLock lock(result_mutex);
+	return fold_test_result;
+}
+
+Dictionary RestirProbe::mirror_fold_test(const Dictionary &p_args) const {
+	RestirFoldTestArgs args;
+	const bool in_range = _fold_test_args(p_args, args);
+	Dictionary result = _fold_test_result(args, "mirror");
+	const char *invalid = in_range ? restir_fold_test_invalid(args) : "argument out of range";
+	if (invalid) {
+		result["error"] = String(invalid);
+		return result;
+	}
+	Vector<uint32_t> cpu;
+	restir_fold_test_mirror(args, cpu);
+	result["mirror_mismatches"] = int64_t(0);
+	result["word_count"] = int64_t(cpu.size());
+	result["words"] = _fold_test_words(cpu);
+	result["ok"] = true;
+	return result;
 }
 
 void RestirProbe::reset_records() {

@@ -59,6 +59,40 @@ Mutex &restir_frame_records_mutex() {
 	return mutex;
 }
 
+LocalVector<uint64_t> &restir_fold_starts() {
+	static LocalVector<uint64_t> starts;
+	return starts;
+}
+
+Mutex &restir_fold_starts_mutex() {
+	static Mutex mutex;
+	return mutex;
+}
+
+uint64_t &restir_fold_starts_frames() {
+	static uint64_t frames = 0;
+	return frames;
+}
+
+void restir_fold_starts_add(const Vector<uint32_t> &p_starts) {
+	if (p_starts.size() != int64_t(RESTIR_FOLD_START_COUNT)) {
+		return;
+	}
+	MutexLock lock(restir_fold_starts_mutex());
+	LocalVector<uint64_t> &starts = restir_fold_starts();
+	if (starts.size() != RESTIR_FOLD_START_COUNT) {
+		starts.resize(RESTIR_FOLD_START_COUNT);
+		for (uint32_t i = 0; i < RESTIR_FOLD_START_COUNT; i++) {
+			starts[i] = 0;
+		}
+	}
+	const uint32_t *counts = p_starts.ptr();
+	for (uint32_t i = 0; i < RESTIR_FOLD_START_COUNT; i++) {
+		starts[i] += counts[i];
+	}
+	restir_fold_starts_frames()++;
+}
+
 Dictionary &restir_captured_case() {
 	static Dictionary captured;
 	return captured;
@@ -329,6 +363,7 @@ bool RestirGiBackend::begin_frame(const RtgiFrameInputs &p_inputs) {
 
 void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutput &r_output) {
 	r_output.valid = false;
+	summary.fold_dump_active = false;
 	RestirGiState *found = states.getptr(p_inputs.buffers);
 	if (!found) {
 		return;
@@ -403,6 +438,7 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	const bool use_history = !cut && options.history;
 	const bool dump_wanted = !String(GLOBAL_GET(String(RESTIR_GI) + "dump_path")).is_empty();
 	state.resources.ensure_debug(state.resources.debug.is_valid() || p_inputs.debug_view >= 0 || options.readback || options.capture || options.capture_final || dump_wanted);
+	state.resources.ensure_fold_dump(options.fold_dump && options.readback);
 
 	RestirFrameParams params;
 	params.trace_size = p_inputs.trace_size;
@@ -626,6 +662,10 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 		}
 	}
 	get_core()->run_frame(state.resources, params, inputs);
+	summary.fold_dump_active = state.resources.fold_dump_ran;
+	if (state.resources.fold_dump_ran) {
+		fold_dump_frames_total++;
+	}
 	if (options.capture_final) {
 		RestirFrameParams final_params = params;
 		final_params.trace_size = p_inputs.trace_size;
@@ -749,6 +789,17 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 		record.fold.history_used = use_history ? 1 : 0;
 		record.fold.trace_w = int64_t(p_inputs.trace_size.x);
 		record.fold.trace_h = int64_t(p_inputs.trace_size.y);
+		if (state.resources.fold_dump_ran) {
+			RestirFoldDump dump;
+			if (RestirGiCore::read_fold_dump(state.resources, dump)) {
+				record.fold.hp_eq_px = int64_t(summary.stats.fold_hp_eq_px);
+				record.fold.expected_phase0 = int64_t(summary.stats.fold_phase0);
+				record.fold.s_max = int64_t(dump.s_max);
+				record.fold.n_over = int64_t(dump.n_over);
+				record.fold.hist_texels = int64_t(dump.texels);
+				restir_fold_starts_add(dump.starts);
+			}
+		}
 		int record_index = 0;
 		{
 			MutexLock lock(restir_frame_records_mutex());
@@ -894,6 +945,8 @@ void RestirGiBackend::get_status(Dictionary &r_status) const {
 	r_status["state_rebuilds_total"] = int64_t(state_rebuilds_total);
 	r_status["release_calls_total"] = int64_t(release_calls_total);
 	r_status["release_tests_total"] = int64_t(release_tests_total);
+	r_status["fold_dump_active"] = summary.fold_dump_active;
+	r_status["fold_dump_frames_total"] = int64_t(fold_dump_frames_total);
 	r_status["jitter_shift"] = PackedFloat64Array({ summary.jitter.ax, summary.jitter.ay, summary.jitter.bx, summary.jitter.by });
 	r_status["jitter_ndc"] = PackedFloat64Array({ summary.jitter.jitter_x, summary.jitter.jitter_y });
 	r_status["jitter_unmatched"] = summary.jitter.unmatched || summary.previous_jitter.unmatched;

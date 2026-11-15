@@ -41,11 +41,15 @@
 #include "servers/rendering/rendering_device.h"
 
 #include "restir_events.h"
+#include "restir_fold_mirror.h"
 #include "shaders/restir_gi.glsl.gen.h"
 
 namespace RendererRD {
 class RayScene;
 }
+
+struct RestirFoldDumpObjects;
+struct RestirFoldTestObjects;
 
 enum RestirFlags : uint32_t {
 	RESTIR_F_UNBIASED = 1,
@@ -207,10 +211,20 @@ struct RestirGiResources {
 	uint32_t history_index = 0;
 	uint32_t final_index = 0;
 	bool allocated = false;
+	RID fold_dump;
+	bool fold_dump_ran = false;
 
 	bool allocate(const Size2i &p_size, bool p_debug = true);
 	void ensure_debug(bool p_needed);
+	void ensure_fold_dump(bool p_needed);
 	void free_all();
+};
+
+struct RestirFoldDump {
+	uint32_t s_max = 0;
+	uint32_t n_over = 0;
+	uint32_t texels = 0;
+	Vector<uint32_t> starts;
 };
 
 struct RestirFrameStats {
@@ -256,6 +270,8 @@ struct RestirFrameStats {
 	double fold_renewed = 0.0;
 	double fold_started = 0.0;
 	double fold_refused_empty = 0.0;
+	double fold_hp_eq_px = 0.0;
+	double fold_phase0 = 0.0;
 	uint32_t temporal_reject[16] = {};
 	uint32_t spatial_reject[16] = {};
 	uint32_t had_history = 0;
@@ -308,6 +324,16 @@ private:
 	RID dummy_float;
 	RID dummy_tiles;
 	bool octmap_array = false;
+	RestirFoldDumpObjects *dump_objects[VARIANT_MAX] = {};
+	bool dump_tried[VARIANT_MAX] = {};
+	RestirFoldTestObjects *fold_test = nullptr;
+	bool fold_test_tried = false;
+
+	bool _ensure_dump(Variant p_variant);
+	bool _dispatch_dump(Variant p_variant, bool p_sky, RID p_ubo, const LocalVector<RD::Uniform> &p_set0, const RestirGiInputs &p_inputs, const Size2i &p_size);
+	RID _shade_set(RID p_shader, const RestirGiInputs &p_inputs);
+	bool _ensure_fold_test();
+	void _free_fold_debug();
 
 	bool _ensure(Variant p_variant);
 	bool _compile(RestirGiShaderRD &r_shader, RID &r_version, const Vector<String> &p_modes, Variant p_variant, int p_first_pass);
@@ -332,9 +358,11 @@ public:
 	void run_source(RestirGiResources &r_resources, const RestirFrameParams &p_params, const RestirGiInputs &p_inputs);
 	void run_frame(RestirGiResources &r_resources, const RestirFrameParams &p_params, const RestirGiInputs &p_inputs);
 	void run_pack(RestirGiResources &r_resources, const RestirGiInputs &p_inputs);
+	bool run_fold_test(const RestirFoldTestArgs &p_args, Vector<uint32_t> &r_words, String &r_error);
 	void free();
 
 	static RestirFrameStats read_stats(const RestirGiResources &p_resources);
+	static bool read_fold_dump(const RestirGiResources &p_resources, RestirFoldDump &r_dump);
 	static Vector<uint8_t> read_selection(const RestirGiResources &p_resources);
 	static bool read_sky_epoch(const RestirGiResources &p_resources, RestirSkyEpoch &r_epoch);
 };

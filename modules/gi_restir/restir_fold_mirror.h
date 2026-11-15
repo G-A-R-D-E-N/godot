@@ -42,6 +42,47 @@ static constexpr uint32_t RESTIR_FOLD_RAND2_SUMS = 8u;
 static constexpr uint32_t RESTIR_FOLD_RAND_DIM_FIRST = 64u;
 static constexpr uint32_t RESTIR_FOLD_RAND_DIMS = 512u;
 
+static constexpr uint32_t RESTIR_FOLD_DUMP_BINDING = 32u;
+static constexpr uint32_t RESTIR_FOLD_SLOT_HP_EQ_PX = 27u;
+static constexpr uint32_t RESTIR_FOLD_SLOT_PHASE0 = 28u;
+static constexpr uint32_t RESTIR_FOLD_START_CUT = 0u;
+static constexpr uint32_t RESTIR_FOLD_START_FRAME = 1u;
+static constexpr uint32_t RESTIR_FOLD_START_OTHER = 2u;
+static constexpr uint32_t RESTIR_FOLD_START_PRE = 3u;
+static constexpr uint32_t RESTIR_FOLD_START_CLASSES = 6u;
+static constexpr uint32_t RESTIR_FOLD_START_S = 64u;
+static constexpr uint32_t RESTIR_FOLD_START_U = 64u;
+static constexpr uint32_t RESTIR_FOLD_START_COUNT = RESTIR_FOLD_START_CLASSES * RESTIR_FOLD_START_S * RESTIR_FOLD_START_U;
+static constexpr uint32_t RESTIR_FOLD_DUMP_HEADER_WORDS = 4u;
+static constexpr uint32_t RESTIR_FOLD_DUMP_BYTES = (RESTIR_FOLD_DUMP_HEADER_WORDS + RESTIR_FOLD_START_COUNT) * 4u;
+static constexpr uint32_t RESTIR_FOLD_REJ_FRAME_CODE = 1u;
+static constexpr uint32_t RESTIR_FOLD_REJ_CUT_CODE = 9u;
+static constexpr uint32_t RESTIR_FOLD_INFO_VALID = 1u << 14u;
+
+enum RestirFoldTestSub : uint32_t {
+	RESTIR_FOLD_TEST_DRAW = 0,
+	RESTIR_FOLD_TEST_PHI = 1,
+	RESTIR_FOLD_TEST_PSI = 2,
+	RESTIR_FOLD_TEST_ISQRT = 3,
+	RESTIR_FOLD_TEST_MAX = 4,
+};
+
+static constexpr uint32_t RESTIR_FOLD_TEST_GROUP = 64u;
+static constexpr uint32_t RESTIR_FOLD_TEST_GROUPS_X = 1024u;
+static constexpr uint64_t RESTIR_FOLD_TEST_MAX_THREADS = uint64_t(1) << 24u;
+static constexpr uint64_t RESTIR_FOLD_TEST_MAX_WORDS = uint64_t(1) << 22u;
+
+struct RestirFoldTestArgs {
+	uint32_t sub = RESTIR_FOLD_TEST_DRAW;
+	uint32_t k = 8u;
+	uint32_t count = 0u;
+	uint32_t v0 = 0u;
+	uint32_t grid_w = 0u;
+	uint32_t grid_h = 0u;
+	uint32_t stride = 1u;
+	uint32_t frames = 1u;
+};
+
 uint32_t restir_fold_pcg(uint32_t p_value);
 uint32_t restir_fold_rng_state(uint32_t p_x, uint32_t p_y, uint32_t p_frame, uint32_t p_dimension, uint32_t p_seed);
 uint32_t restir_fold_phi(uint32_t p_x, uint32_t p_y);
@@ -50,3 +91,14 @@ uint32_t restir_fold_isqrt(uint32_t p_x);
 uint32_t restir_fold_draw(uint32_t p_psi, uint32_t p_k);
 uint32_t restir_fold_rand_seed(uint32_t p_seed);
 Vector<uint32_t> restir_fold_other_seeds(uint32_t p_rtgi_seed, uint32_t p_seed_offset);
+
+uint32_t restir_fold_start_class(uint32_t p_reason, bool p_pre_frame);
+uint32_t restir_fold_start_index(uint32_t p_class, uint32_t p_s, uint32_t p_u);
+void restir_fold_start_mirror(const uint32_t *p_info, int64_t p_count, int64_t p_width, uint32_t p_k, uint32_t p_clock, bool p_pre_frame, Vector<uint32_t> &r_starts);
+
+const char *restir_fold_test_invalid(const RestirFoldTestArgs &p_args);
+uint64_t restir_fold_test_threads(const RestirFoldTestArgs &p_args);
+uint64_t restir_fold_test_words(const RestirFoldTestArgs &p_args);
+void restir_fold_test_initial(const RestirFoldTestArgs &p_args, Vector<uint32_t> &r_words);
+void restir_fold_test_mirror(const RestirFoldTestArgs &p_args, Vector<uint32_t> &r_words);
+int64_t restir_fold_test_compare(const Vector<uint32_t> &p_a, const Vector<uint32_t> &p_b, int64_t &r_first);

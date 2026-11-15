@@ -27,11 +27,16 @@ if "RD_GLSL" in env["BUILDERS"]:
         Exit(255)
     print("gi_restir: core include mode " + mode)
 
-    glsl_files = ["shaders/restir_shim_check.glsl", "shaders/restir_gi.glsl"]
+    glsl_files = ["shaders/restir_shim_check.glsl", "shaders/restir_gi.glsl", "shaders/restir_fold_test.glsl"]
     per_file_shims = [File(os.path.join(shader_dir, shim.PER_FILE_PREFIX + name)) for name in shim.CORE_INCLUDES + shim.EXTRA_INCLUDES]
     env_gi_restir.Depends(
         [f + ".gen.h" for f in glsl_files],
-        [File(os.path.join(shader_dir, shim.SHIM_NAME)), "#glsl_builders.py", File(os.path.join(shader_dir, "restir_gi_inc.glsl"))]
+        [
+            File(os.path.join(shader_dir, shim.SHIM_NAME)),
+            "#glsl_builders.py",
+            File(os.path.join(shader_dir, "restir_gi_inc.glsl")),
+            File(os.path.join(shader_dir, "restir_fold_inc.glsl")),
+        ]
         + per_file_shims
         + [File(path) for path in shim_deps],
     )

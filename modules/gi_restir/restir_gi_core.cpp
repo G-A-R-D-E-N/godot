@@ -31,6 +31,7 @@
 #include "restir_gi_core.h"
 
 #include "restir_fold.h"
+#include "shaders/restir_fold_test.glsl.gen.h"
 
 #include "core/config/project_settings.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
@@ -107,6 +108,24 @@ static_assert(RESTIR_FOLD_F_PRE_FRAME == RESTIR_F_PRE_FRAME, "Fold's pre-frame b
 
 static constexpr uint32_t PASS_STATS_ROWS = 4;
 static constexpr uint32_t PASS_STATS_STRIDE = 32;
+
+static_assert(RESTIR_FOLD_SLOT_PHASE0 < PASS_STATS_STRIDE, "The Fold dump slots must fit the pass-stats stride");
+static_assert(RESTIR_FOLD_DUMP_BYTES == 98320u, "The Fold dump buffer is a 16-byte header and 6 x 64 x 64 start counts");
+
+static constexpr int RESTIR_FOLD_DUMP_MODES = 2;
+
+struct RestirFoldDumpObjects {
+	RestirGiShaderRD shader;
+	RID version;
+	PipelineDeferredRD pipelines[RESTIR_FOLD_DUMP_MODES];
+	int modes = 0;
+};
+
+struct RestirFoldTestObjects {
+	RestirFoldTestShaderRD shader;
+	RID version;
+	RID pipeline;
+};
 
 static RID _create_texture(RD::DataFormat p_format, const Size2i &p_size, RD::TextureType p_type, uint32_t p_layers, uint32_t p_extra_usage = 0) {
 	RD::TextureFormat format;
@@ -201,8 +220,30 @@ void RestirGiResources::ensure_debug(bool p_needed) {
 	}
 }
 
+void RestirGiResources::ensure_fold_dump(bool p_needed) {
+	if (!allocated) {
+		return;
+	}
+	RD *rd = RD::get_singleton();
+	if (p_needed && fold_dump.is_null()) {
+		const uint64_t before = rd->get_memory_usage(RD::MEMORY_BUFFERS);
+		fold_dump = rd->storage_buffer_create(RESTIR_FOLD_DUMP_BYTES);
+		alloc_log.push_back({ "fold_dump", RESTIR_FOLD_DUMP_BYTES, rd->get_memory_usage(RD::MEMORY_BUFFERS) - before, true });
+	} else if (!p_needed && fold_dump.is_valid()) {
+		rd->free_rid(fold_dump);
+		fold_dump = RID();
+		for (uint32_t i = 0; i < alloc_log.size(); i++) {
+			if (String(alloc_log[i].name) == "fold_dump") {
+				alloc_log.remove_at(i);
+				break;
+			}
+		}
+	}
+}
+
 void RestirGiResources::free_all() {
 	RD *rd = RD::get_singleton();
+	fold_dump_ran = false;
 	if (!rd) {
 		allocated = false;
 		return;
@@ -229,6 +270,10 @@ void RestirGiResources::free_all() {
 	if (dirty_ubo.is_valid()) {
 		rd->free_rid(dirty_ubo);
 		dirty_ubo = RID();
+	}
+	if (fold_dump.is_valid()) {
+		rd->free_rid(fold_dump);
+		fold_dump = RID();
 	}
 	allocated = false;
 	group_count = 0;
@@ -356,6 +401,103 @@ void RestirGiCore::free() {
 		valid[v] = false;
 		sky_valid[v] = false;
 	}
+	_free_fold_debug();
+}
+
+void RestirGiCore::_free_fold_debug() {
+	for (int v = 0; v < VARIANT_MAX; v++) {
+		RestirFoldDumpObjects *objects = dump_objects[v];
+		if (objects) {
+			for (int i = 0; i < RESTIR_FOLD_DUMP_MODES; i++) {
+				objects->pipelines[i].free();
+			}
+			if (objects->version.is_valid()) {
+				objects->shader.version_free(objects->version);
+			}
+			memdelete(objects);
+			dump_objects[v] = nullptr;
+		}
+		dump_tried[v] = false;
+	}
+	if (fold_test) {
+		if (fold_test->pipeline.is_valid() && RD::get_singleton()) {
+			RD::get_singleton()->free_rid(fold_test->pipeline);
+		}
+		if (fold_test->version.is_valid()) {
+			fold_test->shader.version_free(fold_test->version);
+		}
+		memdelete(fold_test);
+		fold_test = nullptr;
+	}
+	fold_test_tried = false;
+}
+
+bool RestirGiCore::_ensure_dump(Variant p_variant) {
+	if (dump_tried[p_variant]) {
+		return dump_objects[p_variant] != nullptr;
+	}
+	dump_tried[p_variant] = true;
+	if (!_ensure(p_variant)) {
+		return false;
+	}
+	Vector<String> modes;
+	modes.push_back("\n#define MODE_TEMPORAL\n");
+	if (p_variant != VARIANT_NONE) {
+		modes.push_back("\n#define MODE_TEMPORAL\n#define SKY_REREAD\n");
+	}
+	RestirFoldDumpObjects *objects = memnew(RestirFoldDumpObjects);
+	objects->modes = modes.size();
+	objects->shader.initialize(modes, _defines(p_variant) + "\n#define RS_FOLD_DUMP\n");
+	objects->version = objects->shader.version_create();
+	bool ok = p_variant != VARIANT_HW || objects->shader.version_is_valid(objects->version);
+	for (int i = 0; ok && i < objects->modes; i++) {
+		RID shader_rid = objects->shader.version_get_shader(objects->version, i);
+		if (shader_rid.is_null()) {
+			ok = false;
+			continue;
+		}
+		objects->pipelines[i].create_compute_pipeline(shader_rid);
+		if (!objects->pipelines[i].get_rid().is_valid()) {
+			ok = false;
+		}
+	}
+	if (!ok) {
+		for (int i = 0; i < RESTIR_FOLD_DUMP_MODES; i++) {
+			objects->pipelines[i].free();
+		}
+		if (objects->version.is_valid()) {
+			objects->shader.version_free(objects->version);
+		}
+		memdelete(objects);
+		return false;
+	}
+	dump_objects[p_variant] = objects;
+	return true;
+}
+
+bool RestirGiCore::_ensure_fold_test() {
+	if (fold_test_tried) {
+		return fold_test != nullptr;
+	}
+	fold_test_tried = true;
+	RestirFoldTestObjects *objects = memnew(RestirFoldTestObjects);
+	Vector<String> modes;
+	modes.push_back("\n");
+	objects->shader.initialize(modes);
+	objects->version = objects->shader.version_create();
+	const RID shader_rid = objects->shader.version_get_shader(objects->version, 0);
+	if (shader_rid.is_valid()) {
+		objects->pipeline = RD::get_singleton()->compute_pipeline_create(shader_rid);
+	}
+	if (objects->pipeline.is_null()) {
+		if (objects->version.is_valid()) {
+			objects->shader.version_free(objects->version);
+		}
+		memdelete(objects);
+		return false;
+	}
+	fold_test = objects;
+	return true;
 }
 
 void RestirGiCore::_upload(RID p_ubo, const RestirFrameParams &p, uint32_t p_pass_index) {
@@ -469,6 +611,10 @@ RID RestirGiCore::_tile_texture(const RestirGiInputs &p_inputs) {
 }
 
 void RestirGiCore::_bind_shade(RID p_shader, RD::ComputeListID p_list, const RestirGiInputs &p_inputs) {
+	RD::get_singleton()->compute_list_bind_uniform_set(p_list, _shade_set(p_shader, p_inputs), 2);
+}
+
+RID RestirGiCore::_shade_set(RID p_shader, const RestirGiInputs &p_inputs) {
 	RD *rd = RD::get_singleton();
 	if (dummy_ubo.is_null()) {
 		Vector<uint8_t> zeros;
@@ -489,7 +635,7 @@ void RestirGiCore::_bind_shade(RID p_shader, RD::ComputeListID p_list, const Res
 	set2.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER, 6, material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED)));
 	set2.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 7, sky));
 	set2.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER, 8, material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED)));
-	rd->compute_list_bind_uniform_set(p_list, UniformSetCacheRD::get_singleton()->get_cache_vec(p_shader, 2, set2), 2);
+	return UniformSetCacheRD::get_singleton()->get_cache_vec(p_shader, 2, set2);
 }
 
 void RestirGiCore::_dispatch(Variant p_variant, PassMode p_mode, RID p_ubo, const LocalVector<RD::Uniform> &p_set0, const RestirGiInputs &p_inputs, const Size2i &p_size) {
@@ -517,6 +663,53 @@ void RestirGiCore::_dispatch(Variant p_variant, PassMode p_mode, RID p_ubo, cons
 	}
 	rd->compute_list_dispatch(list, uint32_t(Math::division_round_up(p_size.x, 8)), uint32_t(Math::division_round_up(p_size.y, 8)), 1);
 	rd->compute_list_end();
+}
+
+bool RestirGiCore::_dispatch_dump(Variant p_variant, bool p_sky, RID p_ubo, const LocalVector<RD::Uniform> &p_set0, const RestirGiInputs &p_inputs, const Size2i &p_size) {
+	if (!_ensure_dump(p_variant)) {
+		return false;
+	}
+	RestirFoldDumpObjects *objects = dump_objects[p_variant];
+	const int index = p_sky ? 1 : 0;
+	if (index >= objects->modes) {
+		return false;
+	}
+	const RID shader_rid = objects->shader.version_get_shader(objects->version, index);
+	const RID pipeline = objects->pipelines[index].get_rid();
+	if (shader_rid.is_null() || pipeline.is_null()) {
+		return false;
+	}
+	UniformSetCacheRD *cache = UniformSetCacheRD::get_singleton();
+	LocalVector<RD::Uniform> set0;
+	set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, p_ubo));
+	for (const RD::Uniform &uniform : p_set0) {
+		set0.push_back(uniform);
+	}
+	const RID set0_rid = cache->get_cache_vec(shader_rid, 0, set0);
+	RID set1_rid;
+	if (p_variant != VARIANT_NONE) {
+		LocalVector<RD::Uniform> set1;
+		p_inputs.ray_scene->append_uniforms(set1);
+		set1_rid = cache->get_cache_vec(shader_rid, 1, set1);
+	}
+	const RID set2_rid = p_sky ? _shade_set(shader_rid, p_inputs) : RID();
+	if (set0_rid.is_null() || (p_variant != VARIANT_NONE && set1_rid.is_null()) || (p_sky && set2_rid.is_null())) {
+		return false;
+	}
+	RD *rd = RD::get_singleton();
+	RENDER_TIMESTAMP(p_sky ? "ReSTIR Temporal Sky Fold Dump" : "ReSTIR Temporal Fold Dump");
+	RD::ComputeListID list = rd->compute_list_begin();
+	rd->compute_list_bind_compute_pipeline(list, pipeline);
+	rd->compute_list_bind_uniform_set(list, set0_rid, 0);
+	if (set1_rid.is_valid()) {
+		rd->compute_list_bind_uniform_set(list, set1_rid, 1);
+	}
+	if (set2_rid.is_valid()) {
+		rd->compute_list_bind_uniform_set(list, set2_rid, 2);
+	}
+	rd->compute_list_dispatch(list, uint32_t(Math::division_round_up(p_size.x, 8)), uint32_t(Math::division_round_up(p_size.y, 8)), 1);
+	rd->compute_list_end();
+	return true;
 }
 
 static RestirGiCore::PassMode _sky_twin(RestirGiCore::PassMode p_mode) {
@@ -605,6 +798,7 @@ void RestirGiCore::run_source(RestirGiResources &r_resources, const RestirFrameP
 }
 
 void RestirGiCore::run_frame(RestirGiResources &r_resources, const RestirFrameParams &p_params, const RestirGiInputs &p_inputs) {
+	r_resources.fold_dump_ran = false;
 	Variant variant = _variant_for(p_inputs);
 	if (!r_resources.allocated || !_ensure(variant)) {
 		return;
@@ -701,7 +895,17 @@ void RestirGiCore::run_frame(RestirGiResources &r_resources, const RestirFramePa
 		if (sky_reread) {
 			set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 29, r_resources.sky_epoch));
 		}
-		_dispatch(variant, sky_reread ? PASS_TEMPORAL_SKY : PASS_TEMPORAL, r_resources.ubo[0], set0, p_inputs, r_resources.size);
+		bool dumped = false;
+		if (r_resources.fold_dump.is_valid()) {
+			LocalVector<RD::Uniform> dump_set0(set0);
+			dump_set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, int(RESTIR_FOLD_DUMP_BINDING), r_resources.fold_dump));
+			RD::get_singleton()->buffer_clear(r_resources.fold_dump, 0, RESTIR_FOLD_DUMP_BYTES);
+			dumped = _dispatch_dump(variant, sky_reread, r_resources.ubo[0], dump_set0, p_inputs, r_resources.size);
+		}
+		if (!dumped) {
+			_dispatch(variant, sky_reread ? PASS_TEMPORAL_SKY : PASS_TEMPORAL, r_resources.ubo[0], set0, p_inputs, r_resources.size);
+		}
+		r_resources.fold_dump_ran = dumped;
 	}
 
 	const uint32_t passes = params.spatial_count > 0 ? CLAMP(params.spatial_passes, 1u, 2u) : 0u;
@@ -826,6 +1030,8 @@ RestirFrameStats RestirGiCore::read_stats(const RestirGiResources &p_resources) 
 				stats.fold_renewed += v[24];
 				stats.fold_started += v[25];
 				stats.fold_refused_empty += v[26];
+				stats.fold_hp_eq_px += v[RESTIR_FOLD_SLOT_HP_EQ_PX];
+				stats.fold_phase0 += v[RESTIR_FOLD_SLOT_PHASE0];
 			}
 		}
 		for (uint32_t i = p_resources.group_count * 3; i < p_resources.group_count * PASS_STATS_ROWS; i++) {
@@ -852,6 +1058,76 @@ RestirFrameStats RestirGiCore::read_stats(const RestirGiResources &p_resources) 
 		}
 	}
 	return stats;
+}
+
+bool RestirGiCore::read_fold_dump(const RestirGiResources &p_resources, RestirFoldDump &r_dump) {
+	if (!p_resources.allocated || p_resources.fold_dump.is_null()) {
+		return false;
+	}
+	const Vector<uint8_t> raw = RD::get_singleton()->buffer_get_data(p_resources.fold_dump, 0, RESTIR_FOLD_DUMP_BYTES);
+	if (uint32_t(raw.size()) < RESTIR_FOLD_DUMP_BYTES) {
+		return false;
+	}
+	const uint32_t *words = reinterpret_cast<const uint32_t *>(raw.ptr());
+	r_dump.s_max = words[0];
+	r_dump.n_over = words[1];
+	r_dump.texels = words[2];
+	r_dump.starts.resize(RESTIR_FOLD_START_COUNT);
+	memcpy(r_dump.starts.ptrw(), words + RESTIR_FOLD_DUMP_HEADER_WORDS, RESTIR_FOLD_START_COUNT * sizeof(uint32_t));
+	return true;
+}
+
+bool RestirGiCore::run_fold_test(const RestirFoldTestArgs &p_args, Vector<uint32_t> &r_words, String &r_error) {
+	r_words.clear();
+	if (!RD::get_singleton()) {
+		r_error = "no rendering device";
+		return false;
+	}
+	const char *invalid = restir_fold_test_invalid(p_args);
+	if (invalid) {
+		r_error = String(invalid);
+		return false;
+	}
+	if (!_ensure_fold_test()) {
+		r_error = "the Fold self-test shader or its pipeline could not be made";
+		return false;
+	}
+	RD *rd = RD::get_singleton();
+	Vector<uint32_t> initial;
+	restir_fold_test_initial(p_args, initial);
+	const uint32_t bytes = uint32_t(initial.size()) * uint32_t(sizeof(uint32_t));
+	Vector<uint8_t> data;
+	data.resize(bytes);
+	memcpy(data.ptrw(), initial.ptr(), bytes);
+	const RID buffer = rd->storage_buffer_create(bytes, data);
+	LocalVector<RD::Uniform> uniforms;
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 0, buffer));
+	const RID set = rd->uniform_set_create(uniforms, fold_test->shader.version_get_shader(fold_test->version, 0), 0);
+	if (set.is_null()) {
+		rd->free_rid(buffer);
+		r_error = "the Fold self-test uniform set could not be made";
+		return false;
+	}
+	const uint32_t push[8] = { p_args.sub, p_args.k, p_args.count, p_args.v0, p_args.grid_w, p_args.grid_h, p_args.stride, p_args.frames };
+	const uint64_t groups = (restir_fold_test_threads(p_args) + RESTIR_FOLD_TEST_GROUP - 1u) / RESTIR_FOLD_TEST_GROUP;
+	const uint32_t groups_x = uint32_t(MIN(groups, uint64_t(RESTIR_FOLD_TEST_GROUPS_X)));
+	const uint32_t groups_y = uint32_t((groups + groups_x - 1u) / groups_x);
+	RD::ComputeListID list = rd->compute_list_begin();
+	rd->compute_list_bind_compute_pipeline(list, fold_test->pipeline);
+	rd->compute_list_bind_uniform_set(list, set, 0);
+	rd->compute_list_set_push_constant(list, push, sizeof(push));
+	rd->compute_list_dispatch(list, groups_x, groups_y, 1);
+	rd->compute_list_end();
+	const Vector<uint8_t> raw = rd->buffer_get_data(buffer, 0, bytes);
+	rd->free_rid(set);
+	rd->free_rid(buffer);
+	if (uint32_t(raw.size()) < bytes) {
+		r_error = "the Fold self-test read-back was short";
+		return false;
+	}
+	r_words.resize(initial.size());
+	memcpy(r_words.ptrw(), raw.ptr(), bytes);
+	return true;
 }
 
 bool RestirGiCore::read_sky_epoch(const RestirGiResources &p_resources, RestirSkyEpoch &r_epoch) {

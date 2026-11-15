@@ -105,6 +105,16 @@
 #define PS_FOLD_RENEWED 24
 #define PS_FOLD_STARTED 25
 #define PS_FOLD_REFUSED_EMPTY 26
+#ifdef RS_FOLD_DUMP
+#define PS_FOLD_HP_EQ_PX 27
+#define PS_FOLD_PHASE0 28
+#define RS_FOLD_START_CUT 0u
+#define RS_FOLD_START_FRAME 1u
+#define RS_FOLD_START_OTHER 2u
+#define RS_FOLD_START_PRE 3u
+#define RS_FOLD_START_S 64u
+#define RS_FOLD_START_U 64u
+#endif
 #define PS_ROW_VALIDATE 3u
 #define RS_EVENT_VALIDATE_EVENT 1u
 #define RS_EVENT_VALIDATE_ALL 2u
@@ -335,6 +345,17 @@ layout(set = 0, binding = 29, std430) restrict readonly buffer RestirSkyEpoch {
 	uint spare2;
 }
 sky_epoch;
+#endif
+
+#if defined(MODE_TEMPORAL) && defined(RS_FOLD_DUMP)
+layout(set = 0, binding = 32, std430) restrict buffer RestirFoldDump {
+	uint s_max;
+	uint n_over;
+	uint texels;
+	uint pad;
+	uint starts[];
+}
+rs_fold_dump;
 #endif
 
 #ifdef MODE_SKY_EPOCH

@@ -97,3 +97,162 @@ Vector<uint32_t> restir_fold_other_seeds(uint32_t p_rtgi_seed, uint32_t p_seed_o
 	}
 	return seeds;
 }
+
+uint32_t restir_fold_start_class(uint32_t p_reason, bool p_pre_frame) {
+	const uint32_t base = p_reason == RESTIR_FOLD_REJ_CUT_CODE ? RESTIR_FOLD_START_CUT : (p_reason == RESTIR_FOLD_REJ_FRAME_CODE ? RESTIR_FOLD_START_FRAME : RESTIR_FOLD_START_OTHER);
+	return base + (p_pre_frame ? RESTIR_FOLD_START_PRE : 0u);
+}
+
+uint32_t restir_fold_start_index(uint32_t p_class, uint32_t p_s, uint32_t p_u) {
+	return (p_class * RESTIR_FOLD_START_S + p_s) * RESTIR_FOLD_START_U + p_u;
+}
+
+void restir_fold_start_mirror(const uint32_t *p_info, int64_t p_count, int64_t p_width, uint32_t p_k, uint32_t p_clock, bool p_pre_frame, Vector<uint32_t> &r_starts) {
+	r_starts.clear();
+	r_starts.resize(int64_t(RESTIR_FOLD_START_COUNT));
+	r_starts.fill(0u);
+	if (!p_info || p_width <= 0 || p_k < 4u || p_k > 64u || (p_k & (p_k - 1u)) != 0u) {
+		return;
+	}
+	uint32_t *w = r_starts.ptrw();
+	const uint32_t start_class = restir_fold_start_class(RESTIR_FOLD_REJ_CUT_CODE, p_pre_frame);
+	for (int64_t i = 0; i < p_count; i++) {
+		if ((p_info[i] & RESTIR_FOLD_INFO_VALID) == 0u) {
+			continue;
+		}
+		const uint32_t x = uint32_t(i % p_width);
+		const uint32_t y = uint32_t(i / p_width);
+		uint32_t s = restir_fold_draw(restir_fold_rng_state(x, y, p_clock, RESTIR_FOLD_DIM_START, RESTIR_FOLD_C2), p_k);
+		if (p_pre_frame) {
+			s = MIN(s, p_k - 2u);
+		}
+		const uint32_t u = (p_clock + restir_fold_phi(x, y)) % p_k;
+		w[restir_fold_start_index(start_class, s, u)]++;
+	}
+}
+
+const char *restir_fold_test_invalid(const RestirFoldTestArgs &p_args) {
+	if (p_args.sub >= RESTIR_FOLD_TEST_MAX) {
+		return "sub must be 0 to 3";
+	}
+	if (p_args.k < 4u || p_args.k > 64u || (p_args.k & (p_args.k - 1u)) != 0u) {
+		return "k must be a power of two from 4 to 64";
+	}
+	const uint64_t grid = uint64_t(p_args.grid_w) * uint64_t(p_args.grid_h);
+	if (p_args.sub != RESTIR_FOLD_TEST_PHI && p_args.count == 0u) {
+		return "count must be above 0";
+	}
+	if ((p_args.sub == RESTIR_FOLD_TEST_PHI || p_args.sub == RESTIR_FOLD_TEST_PSI) && grid == 0u) {
+		return "grid_w and grid_h must be above 0";
+	}
+	if (p_args.sub == RESTIR_FOLD_TEST_PSI) {
+		if (p_args.frames == 0u || p_args.stride == 0u) {
+			return "frames and stride must be above 0";
+		}
+		if (uint64_t(p_args.count - 1u) * uint64_t(p_args.stride) >= grid) {
+			return "the last sampled pixel lies outside the grid";
+		}
+	}
+	if (restir_fold_test_threads(p_args) > RESTIR_FOLD_TEST_MAX_THREADS) {
+		return "too many threads";
+	}
+	if (restir_fold_test_words(p_args) > RESTIR_FOLD_TEST_MAX_WORDS) {
+		return "too many output words";
+	}
+	return nullptr;
+}
+
+uint64_t restir_fold_test_threads(const RestirFoldTestArgs &p_args) {
+	switch (p_args.sub) {
+		case RESTIR_FOLD_TEST_PHI:
+			return uint64_t(p_args.grid_w) * uint64_t(p_args.grid_h);
+		case RESTIR_FOLD_TEST_PSI:
+			return uint64_t(p_args.count) * uint64_t(p_args.frames);
+		default:
+			return uint64_t(p_args.count);
+	}
+}
+
+uint64_t restir_fold_test_words(const RestirFoldTestArgs &p_args) {
+	switch (p_args.sub) {
+		case RESTIR_FOLD_TEST_PHI:
+			return uint64_t(p_args.k);
+		case RESTIR_FOLD_TEST_PSI:
+			return uint64_t(p_args.count) * uint64_t(p_args.frames);
+		case RESTIR_FOLD_TEST_ISQRT:
+			return 2u;
+		default:
+			return uint64_t(p_args.count);
+	}
+}
+
+void restir_fold_test_initial(const RestirFoldTestArgs &p_args, Vector<uint32_t> &r_words) {
+	r_words.clear();
+	if (restir_fold_test_invalid(p_args)) {
+		return;
+	}
+	r_words.resize(int64_t(restir_fold_test_words(p_args)));
+	r_words.fill(0u);
+	if (p_args.sub == RESTIR_FOLD_TEST_ISQRT) {
+		r_words.set(1, 0xFFFFFFFFu);
+	}
+}
+
+void restir_fold_test_mirror(const RestirFoldTestArgs &p_args, Vector<uint32_t> &r_words) {
+	restir_fold_test_initial(p_args, r_words);
+	if (r_words.is_empty()) {
+		return;
+	}
+	uint32_t *w = r_words.ptrw();
+	const uint32_t k = p_args.k;
+	const uint32_t threads = uint32_t(restir_fold_test_threads(p_args));
+	for (uint32_t t = 0u; t < threads; t++) {
+		switch (p_args.sub) {
+			case RESTIR_FOLD_TEST_DRAW: {
+				w[t] = restir_fold_draw(t, k);
+			} break;
+			case RESTIR_FOLD_TEST_PHI: {
+				w[restir_fold_phi(t % p_args.grid_w, t / p_args.grid_w) % k]++;
+			} break;
+			case RESTIR_FOLD_TEST_PSI: {
+				const uint32_t v = p_args.v0 + t % p_args.frames;
+				const uint32_t linear = (t / p_args.frames) * p_args.stride;
+				const uint32_t x = linear % p_args.grid_w;
+				const uint32_t y = linear / p_args.grid_w;
+				const uint32_t phi = restir_fold_phi(x, y) % k;
+				const uint32_t psi_r = restir_fold_rng_state(x, y, v, RESTIR_FOLD_DIM_RENEW, RESTIR_FOLD_C2) % k;
+				const uint32_t s = restir_fold_draw(restir_fold_rng_state(x, y, v, RESTIR_FOLD_DIM_START, RESTIR_FOLD_C2), k);
+				w[t] = phi | (psi_r << 8u) | (s << 16u);
+			} break;
+			case RESTIR_FOLD_TEST_ISQRT: {
+				const uint32_t s = restir_fold_isqrt(t);
+				if (!(s * s <= t && t < (s + 1u) * (s + 1u))) {
+					w[0]++;
+					w[1] = MIN(w[1], t);
+				}
+			} break;
+			default:
+				break;
+		}
+	}
+}
+
+int64_t restir_fold_test_compare(const Vector<uint32_t> &p_a, const Vector<uint32_t> &p_b, int64_t &r_first) {
+	r_first = -1;
+	const int64_t common = MIN(p_a.size(), p_b.size());
+	int64_t mismatches = MAX(p_a.size(), p_b.size()) - common;
+	const uint32_t *a = p_a.ptr();
+	const uint32_t *b = p_b.ptr();
+	for (int64_t i = 0; i < common; i++) {
+		if (a[i] != b[i]) {
+			if (r_first < 0) {
+				r_first = i;
+			}
+			mismatches++;
+		}
+	}
+	if (r_first < 0 && mismatches > 0) {
+		r_first = common;
+	}
+	return mismatches;
+}
