@@ -531,23 +531,37 @@ half light_contact_shadow(uint p_sscs_index, vec2 p_screen_uv) {
 #endif
 
 #ifndef USING_MOBILE_RENDERER
+int direct_own = -1;
+uint direct_own_slots[7];
+bool direct_has_rest = false;
+bool direct_ratio_loaded = false;
+vec3 direct_ratio = vec3(1.0);
+
 bool direct_shadow_factor(uint p_flags, vec3 p_color, bool p_use_rest, inout half r_shadow) {
 	ivec2 pixel = ivec2(gl_FragCoord.xy);
-	int own = textureSize(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), 0).z - 1;
-	float slot = float((p_flags >> 1) & 0xFFFFu);
+	if (direct_own < 0) {
+		direct_own = min(textureSize(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), 0).z - 1, 7);
+		for (int i = 0; i < direct_own; i++) {
+			direct_own_slots[i] = uint(round(texelFetch(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), ivec3(pixel, i), 0).r * 65535.0));
+		}
+		direct_has_rest = texelFetch(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), ivec3(pixel, direct_own), 0).r > 0.0;
+	}
+	uint slot = (p_flags >> 1) & 0xFFFFu;
 	half strength = half(float((p_flags >> 17) & 0xFFu) / 255.0);
-	for (int i = 0; i < own; i++) {
-		if (round(texelFetch(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), ivec3(pixel, i), 0).r * 65535.0) == slot) {
+	for (int i = 0; i < direct_own; i++) {
+		if (direct_own_slots[i] == slot) {
 			r_shadow = mix(half(1.0), half(texelFetch(sampler2DArray(direct_shadow_factors, SAMPLER_NEAREST_CLAMP), ivec3(pixel, i), 0).r), strength);
 			return true;
 		}
 	}
-	if (p_use_rest && texelFetch(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), ivec3(pixel, own), 0).r > 0.0) {
-		vec3 ratio;
-		for (int c = 0; c < 3; c++) {
-			ratio[c] = texelFetch(sampler2DArray(direct_shadow_factors, SAMPLER_NEAREST_CLAMP), ivec3(pixel, own + c), 0).r;
+	if (p_use_rest && direct_has_rest) {
+		if (!direct_ratio_loaded) {
+			for (int c = 0; c < 3; c++) {
+				direct_ratio[c] = texelFetch(sampler2DArray(direct_shadow_factors, SAMPLER_NEAREST_CLAMP), ivec3(pixel, direct_own + c), 0).r;
+			}
+			direct_ratio_loaded = true;
 		}
-		r_shadow = mix(half(1.0), half(dot(ratio, p_color) / max(p_color.r + p_color.g + p_color.b, 1e-6)), strength);
+		r_shadow = mix(half(1.0), half(dot(direct_ratio, p_color) / max(p_color.r + p_color.g + p_color.b, 1e-6)), strength);
 		return true;
 	}
 	return false;
