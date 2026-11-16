@@ -621,6 +621,219 @@ TEST_CASE("[RayScene] Alpha store ages out entries no material uses") {
 	CHECK(store.get_entry_count() == before);
 }
 
+TEST_CASE("[RayScene] Alpha change serial stays still when nothing a ray reads changes") {
+	live_ids.clear();
+	RayAlphaStore store;
+	const Vector2 one(1.0f, 1.0f);
+	const Vector2 zero(0.0f, 0.0f);
+	const RID grate = make_live(0x100000001ull);
+	store.begin_update(1);
+	CHECK(store.acquire(grate, 128, one, zero) == 0);
+	store.sync_entries();
+	store.release();
+	CHECK(store.get_change_serial() == 0);
+
+	store.configure(16, 256, 1u << 20);
+	store.set_liveness(&test_texture_live);
+	store.begin_update(1);
+	CHECK(store.get_change_serial() == 0);
+	const uint32_t index = store.acquire(grate, 128, one, zero);
+	REQUIRE(index != 0);
+	const uint32_t layer = store.get_entry(index).layer;
+	store.commit_fill(layer, 42);
+	store.sync_entries();
+	store.begin_update(2);
+	CHECK(store.acquire(grate, 128, one, zero) == index);
+	store.sync_entries();
+	const uint64_t settled = store.get_change_serial();
+	CHECK(settled != 0);
+
+	for (uint64_t f = 3; f <= 10; f++) {
+		INFO("frame ", f);
+		store.begin_update(f);
+		CHECK(store.acquire(grate, 128, one, zero) == index);
+		store.commit_fill(layer, 42);
+		store.sync_entries();
+		CHECK(store.get_change_serial() == settled);
+	}
+	store.configure(16, 256, 1u << 10);
+	CHECK(store.get_change_serial() == settled);
+	CHECK(store.get_stats().entries_retired_total == 0);
+	CHECK(store.get_layer_state(layer) == RayAlphaStore::LAYER_READY);
+}
+
+TEST_CASE("[RayScene] Alpha change serial moves when a layer becomes ready and once more on the next frame") {
+	live_ids.clear();
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	store.set_liveness(&test_texture_live);
+	const Vector2 one(1.0f, 1.0f);
+	const Vector2 zero(0.0f, 0.0f);
+	const RID grate = make_live(0x100000001ull);
+	store.begin_update(1);
+	const uint32_t index = store.acquire(grate, 128, one, zero);
+	REQUIRE(index != 0);
+	const uint32_t layer = store.get_entry(index).layer;
+	store.sync_entries();
+	store.begin_update(2);
+	CHECK(store.acquire(grate, 128, one, zero) == index);
+	store.sync_entries();
+	const uint64_t waiting = store.get_change_serial();
+
+	store.commit_fill(layer, 42);
+	store.sync_entries();
+	CHECK(store.get_entry(index).state == RayAlphaStore::LAYER_READY);
+	const uint64_t ready = store.get_change_serial();
+	CHECK(ready != waiting);
+
+	store.begin_update(3);
+	const uint64_t next_frame = store.get_change_serial();
+	CHECK(next_frame != ready);
+	CHECK(store.acquire(grate, 128, one, zero) == index);
+	store.sync_entries();
+	CHECK(store.get_change_serial() == next_frame);
+
+	store.begin_update(4);
+	CHECK(store.acquire(grate, 128, one, zero) == index);
+	store.sync_entries();
+	CHECK(store.get_change_serial() == next_frame);
+}
+
+TEST_CASE("[RayScene] Alpha change serial takes the next-frame move only in a later frame") {
+	live_ids.clear();
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	store.set_liveness(&test_texture_live);
+	const Vector2 one(1.0f, 1.0f);
+	const Vector2 zero(0.0f, 0.0f);
+	const RID grate = make_live(0x100000001ull);
+	store.begin_update(5);
+	const uint32_t index = store.acquire(grate, 128, one, zero);
+	REQUIRE(index != 0);
+	const uint32_t layer = store.get_entry(index).layer;
+	store.commit_fill(layer, 42);
+	store.sync_entries();
+	CHECK(store.get_entry(index).state == RayAlphaStore::LAYER_READY);
+	const uint64_t filled = store.get_change_serial();
+
+	store.begin_update(5);
+	CHECK(store.acquire(grate, 128, one, zero) == index);
+	store.sync_entries();
+	CHECK(store.get_change_serial() == filled);
+
+	store.begin_update(6);
+	const uint64_t next_frame = store.get_change_serial();
+	CHECK(next_frame != filled);
+	CHECK(store.acquire(grate, 128, one, zero) == index);
+	store.sync_entries();
+	store.begin_update(6);
+	CHECK(store.get_change_serial() == next_frame);
+	store.begin_update(7);
+	CHECK(store.acquire(grate, 128, one, zero) == index);
+	store.sync_entries();
+	CHECK(store.get_change_serial() == next_frame);
+}
+
+TEST_CASE("[RayScene] Alpha change serial moves when a ready layer is refilled") {
+	live_ids.clear();
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	store.set_liveness(&test_texture_live);
+	const Vector2 one(1.0f, 1.0f);
+	const Vector2 zero(0.0f, 0.0f);
+	const RID grate = make_live(0x100000001ull);
+	store.begin_update(1);
+	const uint32_t index = store.acquire(grate, 128, one, zero);
+	REQUIRE(index != 0);
+	const uint32_t layer = store.get_entry(index).layer;
+	store.commit_fill(layer, 42);
+	store.sync_entries();
+	store.begin_update(2);
+	CHECK(store.acquire(grate, 128, one, zero) == index);
+	store.sync_entries();
+	const uint64_t settled = store.get_change_serial();
+
+	store.commit_fill(layer, 43);
+	store.sync_entries();
+	CHECK(store.get_layer_state(layer) == RayAlphaStore::LAYER_READY);
+	CHECK(store.get_entry(index).state == RayAlphaStore::LAYER_READY);
+	const uint64_t refilled = store.get_change_serial();
+	CHECK(refilled != settled);
+
+	store.begin_update(3);
+	CHECK(store.acquire(grate, 128, one, zero) == index);
+	store.sync_entries();
+	const uint64_t after = store.get_change_serial();
+	store.begin_update(4);
+	CHECK(store.acquire(grate, 128, one, zero) == index);
+	store.commit_fill(layer, 43);
+	store.sync_entries();
+	CHECK(store.get_change_serial() == after);
+}
+
+TEST_CASE("[RayScene] Alpha change serial moves when a layer is evicted, released or dropped") {
+	live_ids.clear();
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	store.set_liveness(&test_texture_live);
+	const Vector2 one(1.0f, 1.0f);
+	const Vector2 zero(0.0f, 0.0f);
+	RID textures[16];
+	store.begin_update(1);
+	for (uint32_t i = 0; i < 16; i++) {
+		textures[i] = make_live(0x100000000ull | (100 + i));
+		REQUIRE(store.acquire(textures[i], 128, one, zero) != 0);
+		store.commit_fill(i, 7);
+	}
+	store.sync_entries();
+	for (uint64_t f = 2; f <= 3; f++) {
+		store.begin_update(f);
+		for (uint32_t i = 0; i < 16; i++) {
+			if (f == 3 && i == 15) {
+				continue;
+			}
+			REQUIRE(store.acquire(textures[i], 128, one, zero) != 0);
+		}
+		store.sync_entries();
+	}
+	uint64_t serial = store.get_change_serial();
+
+	store.begin_update(4);
+	CHECK(store.get_stats().entries_retired_total == 1);
+	CHECK(store.get_change_serial() != serial);
+	for (uint32_t i = 0; i < 15; i++) {
+		REQUIRE(store.acquire(textures[i], 128, one, zero) != 0);
+	}
+	serial = store.get_change_serial();
+	const RID extra = make_live(0x100000000ull | 500);
+	const uint32_t got = store.acquire(extra, 128, one, zero);
+	REQUIRE(got != 0);
+	CHECK(store.get_stats().layers_evicted_total == 1);
+	CHECK(store.get_entry(got).layer == 15);
+	CHECK(store.get_change_serial() != serial);
+	store.sync_entries();
+
+	serial = store.get_change_serial();
+	kill_texture(textures[0].get_id());
+	store.begin_update(5);
+	CHECK(store.get_stats().layers_released_total == 1);
+	CHECK(store.get_layer_source(0).is_null());
+	CHECK(store.get_change_serial() != serial);
+
+	serial = store.get_change_serial();
+	store.configure(16, 512, 1u << 20);
+	CHECK(store.get_entry_count() == 1);
+	CHECK(store.get_change_serial() != serial);
+
+	serial = store.get_change_serial();
+	store.release();
+	CHECK(store.get_change_serial() != serial);
+	serial = store.get_change_serial();
+	store.release();
+	store.begin_update(6);
+	CHECK(store.get_change_serial() == serial);
+}
+
 struct StreamMaterial {
 	uint32_t texture = 0;
 	uint32_t cutoff = 0;
