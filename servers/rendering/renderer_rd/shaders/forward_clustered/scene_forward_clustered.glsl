@@ -1317,7 +1317,6 @@ float direct_tail_pass(uint p_flags, vec3 p_live_color, int p_pass) {
 		}
 		seen++;
 	}
-	direct_tail_layer = -1;
 	return 0.0;
 }
 #endif
@@ -3377,8 +3376,6 @@ void fragment_shader(in SceneData scene_data) {
 						direct_specular_light = lamp_specular;
 					}
 				}
-				direct_head_layer = -1;
-				direct_tail_layer = -1;
 #else
 						diffuse_light, direct_specular_light);
 #endif
@@ -3462,8 +3459,6 @@ void fragment_shader(in SceneData scene_data) {
 						direct_specular_light = lamp_specular;
 					}
 				}
-				direct_head_layer = -1;
-				direct_tail_layer = -1;
 #else
 						diffuse_light, direct_specular_light);
 #endif

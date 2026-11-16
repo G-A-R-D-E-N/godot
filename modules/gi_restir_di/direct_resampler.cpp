@@ -193,8 +193,7 @@ bool DirectResamplerRD::_ensure_device() {
 	lab_buffer = RD::get_singleton()->storage_buffer_create(LAB_BYTES);
 	lab_mask_buffer = RD::get_singleton()->storage_buffer_create(LAB_MASK_BYTES);
 #endif
-	history_slots_dummy = _dummy(RD::DATA_FORMAT_R16_UNORM, RD::TEXTURE_TYPE_2D_ARRAY, "Direct Resampled History Slots Dummy");
-	history_factors_dummy = _dummy(RD::DATA_FORMAT_R16_UNORM, RD::TEXTURE_TYPE_2D_ARRAY, "Direct Resampled History Factors Dummy");
+	history_array_dummy = _dummy(RD::DATA_FORMAT_R16_UNORM, RD::TEXTURE_TYPE_2D_ARRAY, "Direct Resampled History Array Dummy");
 	history_guide_dummy = _dummy(RD::DATA_FORMAT_R32G32_UINT, RD::TEXTURE_TYPE_2D, "Direct Resampled History Guide Dummy");
 	return true;
 }
@@ -462,8 +461,8 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 4, params_buffer));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, Vector<RID>{ sampler, p_input.depth }));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, Vector<RID>{ sampler, p_input.normal_roughness }));
-	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 7, history ? p_input.history_slots : history_slots_dummy));
-	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 8, history ? p_input.history_factors : history_factors_dummy));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 7, history ? p_input.history_slots : history_array_dummy));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 8, history ? p_input.history_factors : history_array_dummy));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 9, history ? p_input.history_guide : history_guide_dummy));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, entries));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 11, record));
@@ -586,33 +585,22 @@ void DirectResamplerRD::free_device_resources() {
 	_write_lab_mask();
 	_flush_lab_line();
 #endif
-	const RID owned[] = {
-		params_buffer,
-		debug_buffer,
+	for (RID *rid : {
+				 &params_buffer,
+				 &debug_buffer,
 #ifdef DI_RESAMPLER_LAB
-		lab_buffer,
-		lab_mask_buffer,
+				 &lab_buffer,
+				 &lab_mask_buffer,
 #endif
-		history_slots_dummy,
-		history_factors_dummy,
-		history_guide_dummy,
-		header_dummy,
-	};
-	for (const RID &rid : owned) {
-		if (rid.is_valid()) {
-			rd->free_rid(rid);
+				 &history_array_dummy,
+				 &history_guide_dummy,
+				 &header_dummy,
+		 }) {
+		if (rid->is_valid()) {
+			rd->free_rid(*rid);
 		}
+		*rid = RID();
 	}
-#ifdef DI_RESAMPLER_LAB
-	lab_buffer = RID();
-	lab_mask_buffer = RID();
-#endif
-	params_buffer = RID();
-	debug_buffer = RID();
-	history_slots_dummy = RID();
-	history_factors_dummy = RID();
-	history_guide_dummy = RID();
-	header_dummy = RID();
 	device_ready = false;
 }
 

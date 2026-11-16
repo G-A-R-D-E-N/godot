@@ -34,6 +34,7 @@
 #include "core/math/transform_3d.h"
 #include "core/templates/local_vector.h"
 #include "servers/rendering/renderer_rd/environment/direct_lights.h"
+#include "servers/rendering/renderer_rd/environment/direct_resampler_hooks.h"
 #include "servers/rendering/renderer_rd/pipeline_deferred_rd.h"
 #include "servers/rendering/renderer_rd/shaders/environment/direct_shadows.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/environment/direct_shadows_filter.glsl.gen.h"
@@ -59,20 +60,7 @@ namespace RendererRD {
 
 class DirectShadows {
 public:
-	struct FrameInput {
-		Ref<RenderSceneBuffersRD> render_buffers;
-		RID depth;
-		RID normal_roughness;
-		RID cluster_buffer;
-		RID omni_buffer;
-		RID spot_buffer;
-		Projection projection;
-		Transform3D camera;
-		Vector3 region_half;
-		uint32_t cluster_size = 32;
-		uint32_t cluster_max_elements = 512;
-		float z_far = 1.0f;
-		uint64_t frame = 0;
+	struct FrameInput : DirectFrameView {
 		uint64_t table_generation = 0;
 		RID entries;
 		uint32_t head_entries = 0;
@@ -226,9 +214,7 @@ public:
 	bool prepare_lamps(const FrameInput &p_input, DirectLightTable &p_table);
 	bool process(const FrameInput &p_input, DirectLightTable &p_table);
 	RID get_lamp_buffer() const { return lamp_buffer; }
-	RID get_history_slots(const Ref<RenderSceneBuffersRD> &p_render_buffers) const;
-	RID get_history_factors(const Ref<RenderSceneBuffersRD> &p_render_buffers) const;
-	bool get_history_view(const Ref<RenderSceneBuffersRD> &p_render_buffers, uint64_t p_table_generation, Transform3D &r_camera, Projection &r_projection, RID &r_guide) const;
+	bool get_history(const Ref<RenderSceneBuffersRD> &p_render_buffers, uint64_t p_table_generation, RID &r_slots, RID &r_factors, Transform3D &r_camera, Projection &r_projection, RID &r_guide) const;
 	RID get_resampled_dummy() const { return resampled_dummy; }
 	RID get_slots(const Ref<RenderSceneBuffersRD> &p_render_buffers) const;
 	RID get_factors(const Ref<RenderSceneBuffersRD> &p_render_buffers) const;

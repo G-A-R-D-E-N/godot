@@ -507,29 +507,19 @@ RID DirectShadows::get_factors(const Ref<RenderSceneBuffersRD> &p_render_buffers
 	return p_render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_FACTORS);
 }
 
-RID DirectShadows::get_history_slots(const Ref<RenderSceneBuffersRD> &p_render_buffers) const {
+bool DirectShadows::get_history(const Ref<RenderSceneBuffersRD> &p_render_buffers, uint64_t p_table_generation, RID &r_slots, RID &r_factors, Transform3D &r_camera, Projection &r_projection, RID &r_guide) const {
 	if (!p_render_buffers->has_custom_data(RB_SCOPE_DIRECT_SHADOWS) || !p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_FACTORS)) {
-		return RID();
-	}
-	Ref<ViewportData> viewport = p_render_buffers->get_custom_data(RB_SCOPE_DIRECT_SHADOWS);
-	if (viewport->last_frame == 0) {
-		return RID();
-	}
-	return get_slots(p_render_buffers);
-}
-
-RID DirectShadows::get_history_factors(const Ref<RenderSceneBuffersRD> &p_render_buffers) const {
-	return get_history_slots(p_render_buffers).is_valid() ? get_factors(p_render_buffers) : RID();
-}
-
-bool DirectShadows::get_history_view(const Ref<RenderSceneBuffersRD> &p_render_buffers, uint64_t p_table_generation, Transform3D &r_camera, Projection &r_projection, RID &r_guide) const {
-	if (get_history_slots(p_render_buffers).is_null()) {
 		return false;
 	}
 	Ref<ViewportData> viewport = p_render_buffers->get_custom_data(RB_SCOPE_DIRECT_SHADOWS);
-	if (viewport->table_generation != p_table_generation) {
+	if (viewport->last_frame == 0 || viewport->table_generation != p_table_generation) {
 		return false;
 	}
+	r_slots = get_slots(p_render_buffers);
+	if (r_slots.is_null()) {
+		return false;
+	}
+	r_factors = get_factors(p_render_buffers);
 	r_camera = viewport->last_camera;
 	r_projection = viewport->last_projection;
 	r_guide = p_render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, viewport->flip ? RB_DIRECT_GUIDE_OTHER : RB_DIRECT_GUIDE);

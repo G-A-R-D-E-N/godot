@@ -86,15 +86,6 @@ bool store(const String &p_path, const uint8_t *p_data, uint64_t p_size) {
 	return p_size == 0 || file->store_buffer(p_data, p_size);
 }
 
-template <typename T>
-bool store_vector(const String &p_path, const LocalVector<T> &p_data) {
-	return store(p_path, reinterpret_cast<const uint8_t *>(p_data.ptr()), uint64_t(p_data.size()) * sizeof(T));
-}
-
-bool store_bytes(const String &p_path, const Vector<uint8_t> &p_data) {
-	return store(p_path, p_data.ptr(), uint64_t(p_data.size()));
-}
-
 Array to_array(const LocalVector<uint32_t> &p_values) {
 	Array values;
 	for (const uint32_t value : p_values) {
@@ -417,43 +408,24 @@ Dictionary DirectSamplerLab::_run(const String &p_request, Mutant p_mutant) {
 
 	bool stored = true;
 	Dictionary files;
-	const bool screen_differs = !bool(shapes["pass"]);
-	struct Named {
-		const char *key;
-		const char *suffix;
+	auto put = [&](const char *p_key, const char *p_suffix, const auto *p_data, uint64_t p_count) {
+		files[p_key] = (p_request + p_suffix).get_file();
+		stored = store(p_request + p_suffix, reinterpret_cast<const uint8_t *>(p_data), p_count * sizeof(*p_data)) && stored;
 	};
-	const Named names[] = {
-		{ "sets", ".sets.bin" },
-		{ "hit_lights", ".hit_lights.bin" },
-		{ "seeds", ".seeds.bin" },
-		{ "tables", ".tables.bin" },
-		{ "weights", ".weights.bin" },
-		{ "edges", ".edges.bin" },
-		{ "rows", ".hit.rows.bin" },
-		{ "lamps", ".hit.lamps.bin" },
-		{ "counts", ".counts.bin" },
-		{ "table_rows", ".table_rows.bin" },
-		{ "edge_out", ".edge_out.bin" },
-	};
-	for (const Named &name : names) {
-		files[name.key] = (p_request + name.suffix).get_file();
-	}
-	stored = store_vector(p_request + ".sets.bin", inputs.sets) && stored;
-	stored = store_vector(p_request + ".hit_lights.bin", inputs.hit) && stored;
-	stored = store_vector(p_request + ".seeds.bin", inputs.seeds) && stored;
-	stored = store_vector(p_request + ".tables.bin", inputs.tables) && stored;
-	stored = store_vector(p_request + ".weights.bin", inputs.weights) && stored;
-	stored = store_vector(p_request + ".edges.bin", inputs.edges) && stored;
-	stored = store(p_request + ".hit.rows.bin", hit.rows.ptr(), uint64_t(inputs.rows) * sizeof(Row)) && stored;
-	stored = store(p_request + ".hit.lamps.bin", hit.lamps.ptr(), uint64_t(inputs.hit.size()) * sizeof(LampOut)) && stored;
-	stored = store(p_request + ".counts.bin", hit.counts.ptr(), uint64_t(inputs.counts) * sizeof(uint32_t)) && stored;
-	stored = store(p_request + ".table_rows.bin", hit.table_rows.ptr(), uint64_t(inputs.table_rows) * sizeof(TableRow)) && stored;
-	stored = store(p_request + ".edge_out.bin", hit.edge_out.ptr(), uint64_t(inputs.edges.size()) * sizeof(EdgeOut)) && stored;
-	if (screen_differs) {
-		files["screen_rows"] = (p_request + ".screen.rows.bin").get_file();
-		files["screen_lamps"] = (p_request + ".screen.lamps.bin").get_file();
-		stored = store_bytes(p_request + ".screen.rows.bin", screen.rows) && stored;
-		stored = store_bytes(p_request + ".screen.lamps.bin", screen.lamps) && stored;
+	put("sets", ".sets.bin", inputs.sets.ptr(), inputs.sets.size());
+	put("hit_lights", ".hit_lights.bin", inputs.hit.ptr(), inputs.hit.size());
+	put("seeds", ".seeds.bin", inputs.seeds.ptr(), inputs.seeds.size());
+	put("tables", ".tables.bin", inputs.tables.ptr(), inputs.tables.size());
+	put("weights", ".weights.bin", inputs.weights.ptr(), inputs.weights.size());
+	put("edges", ".edges.bin", inputs.edges.ptr(), inputs.edges.size());
+	put("rows", ".hit.rows.bin", hit.rows.ptr(), uint64_t(inputs.rows) * sizeof(Row));
+	put("lamps", ".hit.lamps.bin", hit.lamps.ptr(), uint64_t(inputs.hit.size()) * sizeof(LampOut));
+	put("counts", ".counts.bin", hit.counts.ptr(), uint64_t(inputs.counts) * sizeof(uint32_t));
+	put("table_rows", ".table_rows.bin", hit.table_rows.ptr(), uint64_t(inputs.table_rows) * sizeof(TableRow));
+	put("edge_out", ".edge_out.bin", hit.edge_out.ptr(), uint64_t(inputs.edges.size()) * sizeof(EdgeOut));
+	if (!bool(shapes["pass"])) {
+		put("screen_rows", ".screen.rows.bin", screen.rows.ptr(), screen.rows.size());
+		put("screen_lamps", ".screen.lamps.bin", screen.lamps.ptr(), screen.lamps.size());
 	}
 	report["files"] = files;
 	report["layouts"] = layouts();

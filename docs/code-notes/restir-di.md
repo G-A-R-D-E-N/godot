@@ -4,7 +4,7 @@
 `resampled/enabled`) picks each pixel's head lamps and tail samples before DI-1's trace. DI-1 then runs in
 external-entries mode and the opaque pass shades heads, tail samples or nothing.
 
-- `environment/direct_resampler_hooks.h:DirectResamplerHooks` is the one registration point. Core never includes the
+- `environment/direct_resampler_hooks.h:DirectResampler::set_singleton` is the one registration point. Core never includes the
   module. `render_forward_clustered.cpp` calls `DirectShadows::prepare_lamps`, then the resampler's `run`, then
   `DirectShadows::process` with the entry texture; with no resampler, or the setting off, `process` runs as before.
   `free_device_resources` is called from the renderer's destructor, because the module's servers-level uninit runs after
@@ -100,8 +100,9 @@ external-entries mode and the opaque pass shades heads, tail samples or nothing.
   local index into `RaySceneLight.pad`, the same low 32 bits DI-1's K4 keys lamps by, and 0 is a real id. Core doesn't
   use the hit mode yet. KA8 has an id-0 case and fails any accessor that returns repeated ids.
 - The entry pass's shader object is made on its first frame, not at module start: `ShaderRD`'s constructor reads the
-  rendering device, which doesn't exist yet at the servers init level. `DirectShadows::get_history_view` hands over last
-  frame's guide (the buffer written before this frame's flip) and refuses history after a slot-table generation change.
+  rendering device, which doesn't exist yet at the servers init level. `DirectShadows::get_history` hands over last
+  frame's slots, factors and guide (the buffer written before this frame's flip) and refuses history after a slot-table
+  generation change.
 - Known edges, left: under the live energy arm a lamp whose mean colour is 0 has target 0, so it is never a tail sample
   although it is lit live. This is the default arm. A head lamp that DI-1 sees at weight 0 (live colour 0, or facing
   away with the full normal while the packed one faces it) is in no layer, so the opaque pass skips it; its light there
@@ -133,10 +134,9 @@ wrote before.
 
 - `modules/gi_restir_di/di_sampler_reference.h` mirrors di_sampler_inc.glsl operation for operation: `hash` is
   `di_hash`, `candidate` is `di_candidate`, `weight` is `di_weight`, `Inversion` and its functions are the
-  `di_inversion_*` functions, `precise_divide` is `di_precise_divide`, `race_exponential` is `di_race_exponential`,
-  and `race_k` is the key `di_race_exponential` computes first. `tail_u` is the `float(h >> 8u) / 16777216.0` map
-  di_resample.glsl uses for the tail inversion's goal: written out in the tail draw without reservoirs, and through
-  `stream_uniform` with reservoirs. A change to any of these GLSL functions changes its mirror in the same commit; the
+  `di_inversion_*` functions, `race_exponential` is `di_race_exponential`, and `race_k` is the key
+  `di_race_exponential` computes first. di_resample.glsl draws the tail inversion's goal with `stream_uniform`, with
+  reservoirs or without. A change to any of these GLSL functions changes its mirror in the same commit; the
   `[DirectSampler]` tests run the mirror.
   hash_inverse undoes hash; KA8 uses it to build seed hashes with k = 0 and k = 2^23 - 1. stratum_weight,
   contribution_weight and source_pdf_weight are the design's stratum and source-pdf formulas, templated so the L0 tests

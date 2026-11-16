@@ -37,28 +37,33 @@
 
 namespace RendererRD {
 
+struct DirectFrameView {
+	Ref<RenderSceneBuffersRD> render_buffers;
+	RID depth;
+	RID normal_roughness;
+	RID cluster_buffer;
+	RID omni_buffer;
+	RID spot_buffer;
+	Projection projection;
+	Transform3D camera;
+	Vector3 region_half;
+	uint32_t cluster_size = 32;
+	uint32_t cluster_max_elements = 512;
+	float z_far = 1.0f;
+	uint64_t frame = 0;
+};
+
 class DirectResampler {
+	static inline DirectResampler *singleton = nullptr;
+
 public:
-	struct Input {
-		Ref<RenderSceneBuffersRD> render_buffers;
-		RID depth;
-		RID normal_roughness;
-		RID cluster_buffer;
-		RID omni_buffer;
-		RID spot_buffer;
+	struct Input : DirectFrameView {
 		RID lamp_buffer;
 		RID history_slots;
 		RID history_factors;
 		RID history_guide;
 		Transform3D history_camera;
 		Projection history_projection;
-		Projection projection;
-		Transform3D camera;
-		Vector3 region_half;
-		uint32_t cluster_size = 32;
-		uint32_t cluster_max_elements = 512;
-		float z_far = 1.0f;
-		uint64_t frame = 0;
 	};
 
 	struct Output {
@@ -74,14 +79,9 @@ public:
 	virtual void release(const Ref<RenderSceneBuffersRD> &p_render_buffers) = 0;
 	virtual void free_device_resources() = 0;
 	virtual ~DirectResampler() {}
-};
 
-class DirectResamplerHooks {
-	static inline DirectResampler *resampler = nullptr;
-
-public:
-	static void set_resampler(DirectResampler *p_resampler) { resampler = p_resampler; }
-	static DirectResampler *get_resampler() { return resampler; }
+	static void set_singleton(DirectResampler *p_singleton) { singleton = p_singleton; }
+	static DirectResampler *get_singleton() { return singleton; }
 };
 
 } // namespace RendererRD

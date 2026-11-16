@@ -2115,7 +2115,7 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 	direct_shadow_slots = RID();
 	direct_shadow_factors = RID();
 	direct_resampled = RID();
-	RendererRD::DirectResampler *resampler = RendererRD::DirectResamplerHooks::get_resampler();
+	RendererRD::DirectResampler *resampler = RendererRD::DirectResampler::get_singleton();
 	if (rb_data.is_valid() && !(p_use_direct_lights && p_render_data->scene_data->view_count == 1 && p_render_data->cluster_buffer.is_valid())) {
 		direct_shadows->release(rb);
 		if (resampler) {
@@ -2142,26 +2142,9 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 		RID record;
 		if (resampler && resampler->is_enabled() && direct_shadows->prepare_lamps(input, light_storage->get_direct_lights())) {
 			RendererRD::DirectResampler::Input resample_input;
-			resample_input.render_buffers = rb;
-			resample_input.depth = input.depth;
-			resample_input.normal_roughness = input.normal_roughness;
-			resample_input.cluster_buffer = input.cluster_buffer;
-			resample_input.omni_buffer = input.omni_buffer;
-			resample_input.spot_buffer = input.spot_buffer;
+			static_cast<RendererRD::DirectFrameView &>(resample_input) = input;
 			resample_input.lamp_buffer = direct_shadows->get_lamp_buffer();
-			resample_input.history_slots = direct_shadows->get_history_slots(rb);
-			resample_input.history_factors = direct_shadows->get_history_factors(rb);
-			if (!direct_shadows->get_history_view(rb, input.table_generation, resample_input.history_camera, resample_input.history_projection, resample_input.history_guide)) {
-				resample_input.history_slots = RID();
-				resample_input.history_factors = RID();
-			}
-			resample_input.projection = input.projection;
-			resample_input.camera = input.camera;
-			resample_input.region_half = input.region_half;
-			resample_input.cluster_size = input.cluster_size;
-			resample_input.cluster_max_elements = input.cluster_max_elements;
-			resample_input.z_far = input.z_far;
-			resample_input.frame = input.frame;
+			direct_shadows->get_history(rb, input.table_generation, resample_input.history_slots, resample_input.history_factors, resample_input.history_camera, resample_input.history_projection, resample_input.history_guide);
 			RendererRD::DirectResampler::Output resample_output;
 			if (resampler->run(resample_input, resample_output)) {
 				input.entries = resample_output.entries;
@@ -6117,8 +6100,8 @@ RenderForwardClustered::RenderForwardClustered() {
 
 RenderForwardClustered::~RenderForwardClustered() {
 	RD::get_singleton()->free_rid(default_sky_sh_buffer);
-	if (RendererRD::DirectResamplerHooks::get_resampler()) {
-		RendererRD::DirectResamplerHooks::get_resampler()->free_device_resources();
+	if (RendererRD::DirectResampler::get_singleton()) {
+		RendererRD::DirectResampler::get_singleton()->free_device_resources();
 	}
 
 	if (ss_effects != nullptr) {

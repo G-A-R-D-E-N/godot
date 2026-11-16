@@ -49,7 +49,7 @@ void initialize_gi_restir_di_module(ModuleInitializationLevel p_level) {
 	}
 	DirectResamplerRD::register_settings();
 	direct_resampler = memnew(DirectResamplerRD);
-	RendererRD::DirectResamplerHooks::set_resampler(direct_resampler);
+	RendererRD::DirectResampler::set_singleton(direct_resampler);
 }
 
 void uninitialize_gi_restir_di_module(ModuleInitializationLevel p_level) {
@@ -60,7 +60,7 @@ void uninitialize_gi_restir_di_module(ModuleInitializationLevel p_level) {
 		RenderingServer::get_singleton()->call_on_render_thread(callable_mp_static(&_free_direct_resampler_device));
 		RenderingServer::get_singleton()->sync();
 	}
-	RendererRD::DirectResamplerHooks::set_resampler(nullptr);
+	RendererRD::DirectResampler::set_singleton(nullptr);
 	if (direct_resampler) {
 		memdelete(direct_resampler);
 		direct_resampler = nullptr;

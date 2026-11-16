@@ -143,7 +143,6 @@ lab_mask;
 #define DEBUG_NO_STAMP 4u
 #define RECORD_EXACT_CHECK 0x80000000u
 #define RESERVOIRS_OFF 0u
-#define RESERVOIRS_B1 1u
 #define RESERVOIRS_U1 2u
 #define STREAM_STRATA 1u
 #define STREAM_SELECT 2u
@@ -213,14 +212,6 @@ float other_stored[MAX_NEIGHBORS];
 float other_here[MAX_NEIGHBORS];
 float other_there[MAX_NEIGHBORS];
 vec3 other_target[MAX_NEIGHBORS];
-
-vec3 to_world(vec3 p_view) {
-	return vec3(dot(params.camera_basis[0].xyz, p_view), dot(params.camera_basis[1].xyz, p_view), dot(params.camera_basis[2].xyz, p_view));
-}
-
-vec3 to_view(vec3 p_world) {
-	return params.camera_basis[0].xyz * p_world.x + params.camera_basis[1].xyz * p_world.y + params.camera_basis[2].xyz * p_world.z;
-}
 
 float prior(uint p_slot, vec3 p_mean) {
 	if ((params.debug_flags & DEBUG_STALE_PRIOR) != 0u && (p_slot & 1u) == 0u) {
@@ -359,7 +350,7 @@ void visit(LightData p_light, bool p_spot, uint p_pass) {
 	DiSlot data = di_slots.data[slot];
 	vec3 mean = vec3(data.mean_r, data.mean_g, data.mean_b);
 	if (p_pass == 0u) {
-		vec3 anchor = p_light.position + to_view(vec3(data.anchor_offset_x, data.anchor_offset_y, data.anchor_offset_z));
+		vec3 anchor = p_light.position + (params.camera_basis[0].xyz * data.anchor_offset_x + params.camera_basis[1].xyz * data.anchor_offset_y + params.camera_basis[2].xyz * data.anchor_offset_z);
 		DiGeometry anchored = di_geometry(anchor, p_light.inv_radius, p_light.attenuation, p_spot, p_light.direction, p_light.cone_angle, p_light.cone_attenuation, vertex);
 		float rank = di_luminance(di_screen_target(mean, anchored, normal, view, roughness, p_light.specular_amount));
 		if (params.head_rank == 0u) {
@@ -709,33 +700,38 @@ void write_empty(ivec2 p_pixel) {
 	}
 }
 
+uint surface_packed_normal = 0u;
+float surface_depth = 0.0;
+
+bool surface_at(ivec2 p_pixel, out vec3 r_vertex, out vec3 r_normal, out float r_roughness, out uint r_packed_normal, out float r_depth) {
+	r_depth = texelFetch(depth_buffer, p_pixel, 0).r;
+	if (r_depth <= 0.0) {
+		return false;
+	}
+	vec2 uv = (vec2(p_pixel) + 0.5) * params.pixel_size;
+	vec4 view_h = params.inv_projection * vec4(uv * 2.0 - 1.0, r_depth, 1.0);
+	r_vertex = view_h.xyz / view_h.w;
+	vec4 normal_roughness = texelFetch(normal_roughness_buffer, p_pixel, 0);
+	r_packed_normal = packSnorm2x16(di_oct_encode(normalize(normal_roughness.xyz * 2.0 - 1.0)));
+	r_normal = di_oct_decode(unpackSnorm2x16(r_packed_normal));
+	r_roughness = normal_roughness.w;
+	if (r_roughness > 0.5) {
+		r_roughness = 1.0 - r_roughness;
+	}
+	r_roughness /= 127.0 / 255.0;
+	return true;
+}
+
 #ifndef MODE_SPATIAL
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 	if (any(greaterThanEqual(pixel, params.size))) {
 		return;
 	}
-	float depth = texelFetch(depth_buffer, pixel, 0).r;
-	if (depth <= 0.0) {
+	if (!surface_at(pixel, vertex, normal, roughness, surface_packed_normal, surface_depth) || any(greaterThan(abs(vec3(dot(params.camera_basis[0].xyz, vertex), dot(params.camera_basis[1].xyz, vertex), dot(params.camera_basis[2].xyz, vertex))), params.region_half))) {
 		write_empty(pixel);
 		return;
 	}
-	vec2 uv = (vec2(pixel) + 0.5) * params.pixel_size;
-	vec4 view_h = params.inv_projection * vec4(uv * 2.0 - 1.0, depth, 1.0);
-	vertex = view_h.xyz / view_h.w;
-	if (any(greaterThan(abs(to_world(vertex)), params.region_half))) {
-		write_empty(pixel);
-		return;
-	}
-
-	vec4 normal_roughness = texelFetch(normal_roughness_buffer, pixel, 0);
-	uint packed_normal = packSnorm2x16(di_oct_encode(normalize(normal_roughness.xyz * 2.0 - 1.0)));
-	normal = di_oct_decode(unpackSnorm2x16(packed_normal));
-	roughness = normal_roughness.w;
-	if (roughness > 0.5) {
-		roughness = 1.0 - roughness;
-	}
-	roughness /= 127.0 / 255.0;
 	view = -normalize(vertex);
 
 	load_history();
@@ -806,17 +802,15 @@ void main() {
 		}
 	}
 	if (!exact && !reservoir) {
-		uint seed = di_hash(uint(pixel.y) * 65537u + uint(pixel.x)) ^ di_hash(params.frame ^ 0x68e31da4u);
 		for (uint k = 0u; k < tails; k++) {
-			uint h = di_hash(seed ^ di_hash(k + 0xb5297a4du));
-			inversions[k] = di_inversion_begin(sum_weight, float(h >> 8u) / 16777216.0);
+			inversions[k] = di_inversion_begin(sum_weight, stream_uniform(0u, k));
 			pick_target[k] = vec3(0.0);
 		}
 		walk(cluster_offset, cluster_z, false, 2u);
 		walk(cluster_offset + params.cluster_type_size, cluster_z, true, 2u);
 	}
 
-	imageStore(record_image, ivec3(pixel, 0), uvec4(packed_normal, floatBitsToUint(depth) | record_flag, 0u, 0u));
+	imageStore(record_image, ivec3(pixel, 0), uvec4(surface_packed_normal, floatBitsToUint(surface_depth) | record_flag, 0u, 0u));
 	for (uint i = 0u; i < params.head_entries; i++) {
 		imageStore(entry_image, ivec3(pixel, int(i)), uvec4(i < head_count ? head_slot[i] : 0u, 0u, 0u, 0u));
 	}
@@ -862,24 +856,6 @@ void main() {
 	}
 }
 #else
-bool surface_at(ivec2 p_pixel, out vec3 r_vertex, out vec3 r_normal, out float r_roughness) {
-	float depth = texelFetch(depth_buffer, p_pixel, 0).r;
-	if (depth <= 0.0) {
-		return false;
-	}
-	vec2 uv = (vec2(p_pixel) + 0.5) * params.pixel_size;
-	vec4 view_h = params.inv_projection * vec4(uv * 2.0 - 1.0, depth, 1.0);
-	r_vertex = view_h.xyz / view_h.w;
-	vec4 normal_roughness = texelFetch(normal_roughness_buffer, p_pixel, 0);
-	r_normal = di_oct_decode(unpackSnorm2x16(packSnorm2x16(di_oct_encode(normalize(normal_roughness.xyz * 2.0 - 1.0)))));
-	r_roughness = normal_roughness.w;
-	if (r_roughness > 0.5) {
-		r_roughness = 1.0 - r_roughness;
-	}
-	r_roughness /= 127.0 / 255.0;
-	return true;
-}
-
 float neighbour_target(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal, float p_roughness) {
 	for (uint i = 0u; i < params.head_entries; i++) {
 		if ((imageLoad(entry_image, ivec3(p_pixel, int(i))).r & 0xFFFFu) == own_slot) {
@@ -901,7 +877,7 @@ void main() {
 	if ((header >> 25u) != (params.counter & 127u) || ((header >> 24u) & 1u) != reservoir_arm()) {
 		return;
 	}
-	if (!surface_at(pixel, vertex, normal, roughness)) {
+	if (!surface_at(pixel, vertex, normal, roughness, surface_packed_normal, surface_depth)) {
 		return;
 	}
 	view = -normalize(vertex);
@@ -948,7 +924,7 @@ void main() {
 		if (!reservoir_reads(other, params.counter)) {
 			continue;
 		}
-		if (!surface_at(at, other_vertex[i], other_normal[i], other_roughness[i])) {
+		if (!surface_at(at, other_vertex[i], other_normal[i], other_roughness[i], surface_packed_normal, surface_depth)) {
 			continue;
 		}
 		if (abs(-other_vertex[i].z - expected) > tolerance || dot(normal, other_normal[i]) < 0.9) {

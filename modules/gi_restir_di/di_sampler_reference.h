@@ -75,10 +75,6 @@ inline float weight(float p_total, float p_pick_target) {
 	return p_pick_target > 0.0f ? p_total / p_pick_target : 0.0f;
 }
 
-inline float tail_u(uint32_t p_hash) {
-	return float(p_hash >> 8u) / 16777216.0f;
-}
-
 struct Inversion {
 	float goal = 0.0f;
 	float running = 0.0f;
@@ -91,11 +87,6 @@ struct Inversion {
 inline Inversion inversion_begin(float p_total, float p_u) {
 	Inversion inversion;
 	inversion.goal = p_u * p_total;
-	inversion.running = 0.0f;
-	inversion.pick = NO_PICK;
-	inversion.pick_target = 0.0f;
-	inversion.last = NO_PICK;
-	inversion.last_target = 0.0f;
 	return inversion;
 }
 
@@ -122,13 +113,6 @@ inline uint32_t inversion_end(Inversion &r_inversion) {
 
 constexpr uint32_t race_k(uint32_t p_seed_hash, uint32_t p_id) {
 	return hash(p_seed_hash ^ hash(p_id)) >> 9u;
-}
-
-inline float precise_divide(float p_a, float p_b) {
-	float quotient = p_a / p_b;
-	float residual = std::fma(-quotient, p_b, p_a);
-	float corrected = std::fma(residual, 1.0f / p_b, quotient);
-	return corrected;
 }
 
 inline float race_exponential(uint32_t p_seed_hash, uint32_t p_id) {

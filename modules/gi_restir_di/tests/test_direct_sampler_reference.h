@@ -379,19 +379,6 @@ TEST_CASE("[DirectSampler] Stratum weights at 2 C_full + 3, the separable identi
 		}
 	}
 	CHECK(derived == 134);
-	Rational over_strata;
-	Rational over_lamps;
-	for (uint32_t j = 0; j < strata; j++) {
-		Rational stratum_sum;
-		for (uint32_t lamp = begins[j]; lamp < begins[j] + sizes[j]; lamp++) {
-			stratum_sum += Rational(stratum_f(lamp));
-		}
-		over_strata += Rational(int64_t(sizes[j])) * (stratum_sum / Rational(int64_t(sizes[j])));
-	}
-	for (uint32_t lamp = 0; lamp < count; lamp++) {
-		over_lamps += Rational(stratum_f(lamp));
-	}
-	CHECK(over_strata == over_lamps);
 }
 
 static void check_source_pdf(const int64_t *p_targets, const int64_t *p_sources, uint32_t p_count, uint32_t p_draws) {

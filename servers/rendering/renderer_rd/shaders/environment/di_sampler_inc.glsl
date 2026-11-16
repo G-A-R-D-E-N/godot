@@ -67,13 +67,10 @@ vec3 di_oct_decode(vec2 p_oct) {
 	return normalize(normal);
 }
 
-float di_surface_response(vec3 p_to_light, vec3 p_normal, vec3 p_view, float p_roughness, float p_specular, bool p_lambert) {
+float di_surface_response(vec3 p_to_light, vec3 p_normal, vec3 p_view, float p_roughness, float p_specular) {
 	float n_dot_l = dot(p_normal, p_to_light);
 	if (n_dot_l <= 0.0) {
 		return 0.0;
-	}
-	if (p_lambert) {
-		return n_dot_l / DI_SAMPLER_PI;
 	}
 	vec3 h = normalize(p_to_light + p_view);
 	float n_dot_h = max(dot(p_normal, h), 0.0);
@@ -93,7 +90,7 @@ vec3 di_screen_target(vec3 p_color, DiGeometry p_geometry, vec3 p_normal, vec3 p
 	if (p_geometry.term <= 0.0) {
 		return vec3(0.0);
 	}
-	return p_color * (p_geometry.term * di_surface_response(p_geometry.to_light, p_normal, p_view, p_roughness, p_specular, false));
+	return p_color * (p_geometry.term * di_surface_response(p_geometry.to_light, p_normal, p_view, p_roughness, p_specular));
 }
 
 float di_resample_weight(vec3 p_target, float p_prior, float p_floor) {

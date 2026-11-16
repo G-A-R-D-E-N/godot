@@ -195,8 +195,7 @@ private:
 	PipelineDeferredRD spatial_pipeline;
 	RID params_buffer;
 	RID header_dummy;
-	RID history_slots_dummy;
-	RID history_factors_dummy;
+	RID history_array_dummy;
 	RID history_guide_dummy;
 	RID debug_buffer;
 	bool device_ready = false;

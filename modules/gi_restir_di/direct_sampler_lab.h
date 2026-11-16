@@ -57,7 +57,6 @@ public:
 	};
 
 	static constexpr uint32_t GROUP_SIZE = 128;
-	static constexpr uint32_t STRATA = 32;
 	static constexpr uint32_t BASE_SEEDS = 1u << 16;
 	static constexpr uint32_t PERMUTATIONS = 64;
 	static constexpr uint32_t PERMUTATION_SEEDS = 256;
