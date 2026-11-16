@@ -32,8 +32,12 @@
 
 TEST_FORCE_LINK(test_direct_quarter)
 
+#include "core/io/file_access.h"
+#include "core/io/json.h"
+#include "core/os/os.h"
 #include "core/templates/local_vector.h"
 #include "servers/rendering/renderer_rd/environment/direct_quarter.h"
+
 
 
 namespace TestDirectQuarter {
@@ -700,6 +704,325 @@ TEST_CASE("[DirectQuarter] 1921x1081 gives a 961x541 grid whose last block holds
 	}
 	CHECK_EQ(inside, 1);
 	CHECK_EQ(representative(last, pixels), 0);
+}
+
+struct Dump {
+	int width = 0;
+	int height = 0;
+	int block_width = 0;
+	int block_height = 0;
+	uint32_t entries = 0;
+	Rebuild rebuild;
+	LocalVector<uint16_t> slots;
+	LocalVector<uint16_t> factors;
+	LocalVector<uint8_t> tier;
+	LocalVector<uint16_t> slots_block;
+	LocalVector<uint16_t> factors_block;
+	LocalVector<uint32_t> guide_block;
+	LocalVector<float> depth_full;
+	LocalVector<uint32_t> normal_full;
+	LocalVector<Block> blocks;
+
+	const Block *operator()(const Vector2i &p_block) const {
+		if (p_block.x < 0 || p_block.y < 0 || p_block.x >= block_width || p_block.y >= block_height) {
+			return nullptr;
+		}
+		return &blocks[p_block.y * block_width + p_block.x];
+	}
+};
+
+Vector3 oct_decode(uint32_t p_word) {
+	const float x = CLAMP(float(int16_t(p_word & 0xffffu)) / 32767.0f, -1.0f, 1.0f);
+	const float y = CLAMP(float(int16_t(p_word >> 16u)) / 32767.0f, -1.0f, 1.0f);
+	Vector3 n(x, y, 1.0f - Math::abs(x) - Math::abs(y));
+	const float fold = MAX(float(-n.z), 0.0f);
+	n.x += n.x >= 0.0f ? -fold : fold;
+	n.y += n.y >= 0.0f ? -fold : fold;
+	return n.normalized();
+}
+
+uint32_t oct_encode(const Vector3 &p_normal) {
+	const float sum = Math::abs(p_normal.x) + Math::abs(p_normal.y) + Math::abs(p_normal.z);
+	Vector2 folded(p_normal.x / sum, p_normal.y / sum);
+	if (p_normal.z < 0.0f) {
+		folded = Vector2((1.0f - Math::abs(folded.y)) * (folded.x >= 0.0f ? 1.0f : -1.0f), (1.0f - Math::abs(folded.x)) * (folded.y >= 0.0f ? 1.0f : -1.0f));
+	}
+	const uint32_t lo = uint32_t(uint16_t(int16_t(Math::round(CLAMP(float(folded.x), -1.0f, 1.0f) * 32767.0f))));
+	const uint32_t hi = uint32_t(uint16_t(int16_t(Math::round(CLAMP(float(folded.y), -1.0f, 1.0f) * 32767.0f))));
+	return lo | (hi << 16u);
+}
+
+uint32_t float_bits(float p_value) {
+	uint32_t bits;
+	memcpy(&bits, &p_value, sizeof(bits));
+	return bits;
+}
+
+float bits_float(uint32_t p_bits) {
+	float value;
+	memcpy(&value, &p_bits, sizeof(value));
+	return value;
+}
+
+void build_blocks(Dump &r_dump) {
+	const int count = r_dump.block_width * r_dump.block_height;
+	r_dump.blocks.resize(count);
+	for (int i = 0; i < count; i++) {
+		Block block;
+		const uint32_t word = r_dump.guide_block[i * 2];
+		if ((word & ~3u) != 0u) {
+			block.phase = word & 3u;
+			block.guide.depth = bits_float(word & ~3u);
+			block.guide.normal = oct_decode(r_dump.guide_block[i * 2 + 1]);
+			for (uint32_t e = 0; e < r_dump.entries; e++) {
+				block.slots[e] = r_dump.slots_block[e * count + i];
+			}
+			for (uint32_t e = 0; e < r_dump.entries + 2; e++) {
+				block.factors[e] = float(r_dump.factors_block[e * count + i]) / 65535.0f;
+			}
+		}
+		r_dump.blocks[i] = block;
+	}
+}
+
+Surface own_surface(const Dump &p_dump, int p_index) {
+	Surface s;
+	const float depth = p_dump.depth_full[p_index];
+	if (depth <= 0.0f) {
+		return s;
+	}
+	const uint32_t packed = p_dump.normal_full[p_index];
+	const Vector3 unit(float(packed & 255u) / 255.0f, float((packed >> 8u) & 255u) / 255.0f, float((packed >> 16u) & 255u) / 255.0f);
+	s.depth = depth;
+	s.normal = (unit * 2.0f - Vector3(1.0f, 1.0f, 1.0f)).normalized();
+	return s;
+}
+
+struct DumpTally {
+	int64_t compared = 0;
+	int64_t past_region = 0;
+	int64_t threshold = 0;
+	int64_t outside = 0;
+	int64_t factor_off = 0;
+	float worst_factor = 0.0f;
+};
+
+bool near_threshold(const Dump &p_dump, const Vector2i &p_pixel, const Surface &p_own) {
+	Surface own = p_own;
+	own.position = p_dump.rebuild.position(p_pixel, own.depth);
+	const Vector2i near_block = bracket(p_pixel);
+	for (int dy = -1; dy <= 2; dy++) {
+		for (int dx = -1; dx <= 2; dx++) {
+			const Block *block = p_dump(near_block + Vector2i(dx, dy));
+			if (block == nullptr || block->is_empty()) {
+				continue;
+			}
+			Surface other = block->guide;
+			other.position = p_dump.rebuild.position(block_pixel(near_block + Vector2i(dx, dy), block->phase), other.depth);
+			if (Math::abs(surface_weight(own, other) - SURFACE_MIN) < 1e-4f) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+DumpTally compare_dump(const Dump &p_dump, int p_print) {
+	DumpTally tally;
+	const int64_t pixels = int64_t(p_dump.width) * p_dump.height;
+	for (int y = 0; y < p_dump.height; y++) {
+		for (int x = 0; x < p_dump.width; x++) {
+			const int index = y * p_dump.width + x;
+			const uint32_t gpu_tier = p_dump.tier[index];
+			if (gpu_tier == TIER_NONE && p_dump.depth_full[index] > 0.0f) {
+				tally.past_region++;
+				continue;
+			}
+			tally.compared++;
+			const Surface own = own_surface(p_dump, index);
+			float margin = 1e30f;
+			const Resolved out = resolve(Vector2i(x, y), own, p_dump.entries, p_dump.rebuild, p_dump, &margin);
+			bool same = out.tier == gpu_tier;
+			for (uint32_t e = 0; e < p_dump.entries; e++) {
+				same = same && out.slots[e] == p_dump.slots[e * pixels + index];
+			}
+			float worst = 0.0f;
+			for (uint32_t e = 0; e < p_dump.entries + 2; e++) {
+				worst = MAX(worst, Math::abs(out.factors[e] - float(p_dump.factors[e * pixels + index]) / 65535.0f));
+			}
+			const bool factors_ok = worst <= 1e-3f;
+			if (same && factors_ok) {
+				tally.worst_factor = MAX(tally.worst_factor, worst);
+				continue;
+			}
+			const bool in_class = margin < 1e-4f || near_threshold(p_dump, Vector2i(x, y), own);
+			if (in_class) {
+				tally.threshold++;
+			} else if (!same) {
+				tally.outside++;
+			} else {
+				tally.factor_off++;
+				tally.worst_factor = MAX(tally.worst_factor, worst);
+			}
+			if (p_print > 0 && !in_class) {
+				p_print--;
+				MESSAGE(vformat("pixel (%d, %d): GPU tier %d slot0 %d factor0 %f; mirror tier %d slot0 %d factor0 %f; cut margin %f", x, y, gpu_tier, p_dump.slots[index], float(p_dump.factors[index]) / 65535.0f, out.tier, out.slots[0], out.factors[0], margin).utf8().get_data());
+			}
+		}
+	}
+	return tally;
+}
+
+template <typename T>
+bool read_layers(const String &p_path, LocalVector<T> &r_out, int64_t p_values) {
+	const Vector<uint8_t> bytes = FileAccess::get_file_as_bytes(p_path);
+	if (int64_t(bytes.size()) != p_values * int64_t(sizeof(T))) {
+		MESSAGE(vformat("%s holds %d bytes, not %d", p_path, bytes.size(), p_values * int64_t(sizeof(T))).utf8().get_data());
+		return false;
+	}
+	r_out.resize(p_values);
+	memcpy(r_out.ptr(), bytes.ptr(), bytes.size());
+	return true;
+}
+
+TEST_CASE("[DirectQuarter][Dump] The mirror resolves a GPU dump as the GPU did") {
+	const String path = OS::get_singleton()->get_environment("DI1Q_DUMP");
+	if (path.is_empty()) {
+		MESSAGE("DI1Q_DUMP is not set; skipped.");
+		return;
+	}
+	const Dictionary report = JSON::parse_string(FileAccess::get_file_as_string(path));
+	REQUIRE(bool(report.get("ok", false)));
+	REQUIRE(String(report.get("mode", "")) == "quarter");
+	Dump dump;
+	dump.width = report["width"];
+	dump.height = report["height"];
+	dump.block_width = report["block_width"];
+	dump.block_height = report["block_height"];
+	dump.entries = uint32_t(int(report["entries"]));
+	const Array inverse = report["inv_projection"];
+	REQUIRE(inverse.size() == 16);
+	dump.rebuild.inv00 = float(inverse[0]);
+	dump.rebuild.inv11 = float(inverse[5]);
+	dump.rebuild.inv23 = float(inverse[11]);
+	dump.rebuild.inv30 = float(inverse[12]);
+	dump.rebuild.inv31 = float(inverse[13]);
+	dump.rebuild.pixel_size = Vector2(1.0f / float(dump.width), 1.0f / float(dump.height));
+	REQUIRE(dump.entries >= 2);
+	REQUIRE(dump.entries <= uint32_t(MAX_ENTRIES));
+	const Dictionary files = report["files"];
+	REQUIRE(files.has("tier"));
+	REQUIRE(files.has("depth_full"));
+	REQUIRE(files.has("normal_full"));
+	const String dir = path.get_base_dir();
+	const int64_t pixels = int64_t(dump.width) * dump.height;
+	const int64_t blocks = int64_t(dump.block_width) * dump.block_height;
+	REQUIRE(read_layers(dir.path_join(files["slots"]), dump.slots, pixels * dump.entries));
+	REQUIRE(read_layers(dir.path_join(files["factors"]), dump.factors, pixels * (dump.entries + 2)));
+	REQUIRE(read_layers(dir.path_join(files["tier"]), dump.tier, pixels));
+	REQUIRE(read_layers(dir.path_join(files["slots_block"]), dump.slots_block, blocks * dump.entries));
+	REQUIRE(read_layers(dir.path_join(files["factors_block"]), dump.factors_block, blocks * (dump.entries + 2)));
+	REQUIRE(read_layers(dir.path_join(files["guide_block"]), dump.guide_block, blocks * 2));
+	REQUIRE(read_layers(dir.path_join(files["depth_full"]), dump.depth_full, pixels));
+	REQUIRE(read_layers(dir.path_join(files["normal_full"]), dump.normal_full, pixels));
+	build_blocks(dump);
+	const DumpTally tally = compare_dump(dump, 20);
+	MESSAGE(vformat("DI1Q_DUMP %s: compared %d, past the region %d, threshold class %d (limit %d), different outside the class %d, factors off by more than 1e-3 %d, worst factor difference %f", path, tally.compared, tally.past_region, tally.threshold, tally.compared / 10000, tally.outside, tally.factor_off, tally.worst_factor).utf8().get_data());
+
+	CHECK_EQ(tally.outside, 0);
+	CHECK_EQ(tally.factor_off, 0);
+	CHECK(tally.threshold * 10000 <= tally.compared);
+}
+
+Dump synthetic_dump() {
+	Dump dump;
+	dump.width = 33;
+	dump.height = 17;
+	dump.block_width = 17;
+	dump.block_height = 9;
+	dump.entries = 4;
+	dump.rebuild = flat_rebuild();
+	dump.rebuild.pixel_size = Vector2(1.0f / 33.0f, 1.0f / 17.0f);
+	const int64_t pixels = int64_t(dump.width) * dump.height;
+	const int64_t blocks = int64_t(dump.block_width) * dump.block_height;
+	dump.guide_block.resize(blocks * 2);
+	dump.slots_block.resize(blocks * dump.entries);
+	dump.factors_block.resize(blocks * (dump.entries + 2));
+	for (int64_t i = 0; i < blocks; i++) {
+		const int bx = int(i % dump.block_width);
+		const int by = int(i / dump.block_width);
+		const bool lamp_free = (bx * 7 + by * 3) % 11 == 0;
+		const float depth = bx < 9 ? 5.0f : 6.0f;
+		const uint32_t phase = uint32_t(bx + by) & 3u;
+		dump.guide_block[i * 2] = lamp_free ? 0u : ((float_bits(depth) & ~3u) | phase);
+		dump.guide_block[i * 2 + 1] = oct_encode(Vector3(0.0f, 0.0f, 1.0f));
+		for (uint32_t e = 0; e < dump.entries; e++) {
+			dump.slots_block[e * blocks + i] = lamp_free ? 0 : uint16_t(e < 3 ? 10 + (bx + e) % 5 : 500 + by % 2);
+		}
+		for (uint32_t e = 0; e < dump.entries + 2; e++) {
+			dump.factors_block[e * blocks + i] = uint16_t(((bx * 13 + by * 7 + e * 5) % 17) * 65535 / 16);
+		}
+	}
+	dump.depth_full.resize(pixels);
+	dump.normal_full.resize(pixels);
+	for (int64_t i = 0; i < pixels; i++) {
+		const int x = int(i % dump.width);
+		dump.depth_full[i] = x < 18 ? 5.0f : 6.0f;
+		dump.normal_full[i] = 128u | (128u << 8u) | (255u << 16u);
+	}
+	build_blocks(dump);
+	dump.slots.resize(pixels * dump.entries);
+	dump.factors.resize(pixels * (dump.entries + 2));
+	dump.tier.resize(pixels);
+	for (int64_t i = 0; i < pixels; i++) {
+		const Resolved out = resolve(Vector2i(int(i % dump.width), int(i / dump.width)), own_surface(dump, int(i)), dump.entries, dump.rebuild, dump);
+		dump.tier[i] = uint8_t(out.tier);
+		for (uint32_t e = 0; e < dump.entries; e++) {
+			dump.slots[e * pixels + i] = uint16_t(out.slots[e]);
+		}
+		for (uint32_t e = 0; e < dump.entries + 2; e++) {
+			dump.factors[e * pixels + i] = uint16_t(Math::round(CLAMP(out.factors[e], 0.0f, 1.0f) * 65535.0f));
+		}
+	}
+	return dump;
+}
+
+int clear_pixel(const Dump &p_dump) {
+	for (int i = 0; i < p_dump.width * p_dump.height; i++) {
+		const Vector2i pixel(i % p_dump.width, i / p_dump.width);
+		const Surface own = own_surface(p_dump, i);
+		float margin = 0.0f;
+		const Resolved out = resolve(pixel, own, p_dump.entries, p_dump.rebuild, p_dump, &margin);
+		if (out.tier == TIER_NEAR && out.slots[0] != 0 && margin > 1e-2f && !near_threshold(p_dump, pixel, own)) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+TEST_CASE("[DirectQuarter] The dump comparison reads a mirror-made dump as equal and finds one changed pixel") {
+	const Dump dump = synthetic_dump();
+	const DumpTally same = compare_dump(dump, 0);
+	CHECK_EQ(same.compared, int64_t(dump.width) * dump.height);
+	CHECK_EQ(same.outside, 0);
+	CHECK_EQ(same.factor_off, 0);
+	CHECK_EQ(same.threshold, 0);
+	int tier_two = 0;
+	for (uint8_t t : dump.tier) {
+		tier_two += t == TIER_WIDE ? 1 : 0;
+	}
+	CHECK(tier_two > 0);
+	const int pick = clear_pixel(dump);
+	REQUIRE(pick >= 0);
+	Dump tier_changed = synthetic_dump();
+	tier_changed.tier[pick] = tier_changed.tier[pick] == TIER_NEAR ? TIER_WIDE : TIER_NEAR;
+	CHECK_EQ(compare_dump(tier_changed, 0).outside, 1);
+	Dump slot_changed = synthetic_dump();
+	slot_changed.slots[pick] = uint16_t(slot_changed.slots[pick] + 1);
+	CHECK_EQ(compare_dump(slot_changed, 0).outside, 1);
+	Dump factor_changed = synthetic_dump();
+	factor_changed.factors[pick] = uint16_t(factor_changed.factors[pick] > 30000 ? factor_changed.factors[pick] - 1000 : factor_changed.factors[pick] + 1000);
+	CHECK_EQ(compare_dump(factor_changed, 0).factor_off, 1);
 }
 
 } // namespace TestDirectQuarter

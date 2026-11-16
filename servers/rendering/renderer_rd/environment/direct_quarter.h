@@ -151,9 +151,13 @@ inline Vector2i bracket(const Vector2i &p_pixel) {
 }
 
 template <typename BlockAt>
-Resolved resolve(const Vector2i &p_pixel, const Surface &p_own, uint32_t p_entries, const Rebuild &p_rebuild, const BlockAt &p_block_at) {
+Resolved resolve(const Vector2i &p_pixel, const Surface &p_own, uint32_t p_entries, const Rebuild &p_rebuild, const BlockAt &p_block_at, float *r_cut_margin = nullptr) {
 	Resolved out;
 	const uint32_t own_limit = p_entries - 1;
+	float margin = 1e30f;
+	if (r_cut_margin != nullptr) {
+		*r_cut_margin = margin;
+	}
 	for (uint32_t i = 0; i < own_limit + 3; i++) {
 		out.factors[i] = 1.0f;
 	}
@@ -250,6 +254,12 @@ Resolved resolve(const Vector2i &p_pixel, const Surface &p_own, uint32_t p_entri
 		SWAP(merged_slot[i], merged_slot[best]);
 		SWAP(merged_score[i], merged_score[best]);
 	}
+	for (uint32_t i = 0; i + 1 < kept; i++) {
+		margin = MIN(margin, (merged_score[i] - merged_score[i + 1]) / MAX(merged_score[i], 1e-20f));
+	}
+	for (uint32_t m = kept; m < merged_count && kept > 0; m++) {
+		margin = MIN(margin, (merged_score[kept - 1] - merged_score[m]) / MAX(merged_score[kept - 1], 1e-20f));
+	}
 	for (uint32_t i = 0; i < own_limit; i++) {
 		const uint32_t slot = i < kept ? merged_slot[i] : 0;
 		out.slots[i] = slot;
@@ -272,7 +282,9 @@ Resolved resolve(const Vector2i &p_pixel, const Surface &p_own, uint32_t p_entri
 
 	uint32_t rest_key = 0;
 	float rest_weight = 0.0f;
+	float key_sums[MAX_USED];
 	for (int u = 0; u < used_count; u++) {
+		key_sums[u] = 0.0f;
 		const uint32_t key = used[u]->slots[own_limit];
 		if (key == 0) {
 			continue;
@@ -283,11 +295,21 @@ Resolved resolve(const Vector2i &p_pixel, const Surface &p_own, uint32_t p_entri
 				summed += used_weight[v];
 			}
 		}
+		key_sums[u] = summed;
 		if (summed > rest_weight || (summed == rest_weight && key < rest_key)) {
 			rest_key = key;
 			rest_weight = summed;
 		}
 	}
+	for (int u = 0; u < used_count; u++) {
+		if (used[u]->slots[own_limit] != 0 && used[u]->slots[own_limit] != rest_key) {
+			margin = MIN(margin, (rest_weight - key_sums[u]) / MAX(rest_weight, 1e-20f));
+		}
+	}
+	if (r_cut_margin != nullptr) {
+		*r_cut_margin = margin;
+	}
+
 	out.slots[own_limit] = rest_key;
 	if (rest_key != 0) {
 		float rest_sum[3] = { 0.0f, 0.0f, 0.0f };
