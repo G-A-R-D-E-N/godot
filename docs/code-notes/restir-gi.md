@@ -1,20 +1,26 @@
-# gi_restir module notes (skeleton, ADR-PHASE6 lane S3)
+# ReSTIR GI (modules/gi_restir)
 
-Status: skeleton only. No ReSTIR algorithm code is in this module yet (lane S4 adds it).
-Default: off at build time (config.py is_enabled returns False) and off at run time (every restir setting false or neutral).
+### `modules/gi_restir/config.py`
 
-## What the module does now
+Reservoir resampling of the ray-traced diffuse pass (R2, see rtgi-r2.md): temporal and spatial reuse of each pixel's
+traced sample, in front of R2's denoiser. `modules/gi_restir/config.py` builds the module with the engine (any build
+with a RenderingDevice). It is off at run time until rendering/global_illumination/restir/gi/enabled is set; every
+other restir setting defaults to false or neutral. The sections below follow the features in the order they were
+added, each under the setting that switches it.
+
+### `modules/gi_restir/register_types.cpp`
 
 - SERVERS level: registers the RtgiResampleBackend (RestirGiBackend) with RendererRD::GIModuleHooks, and creates the
   probe singleton GiRestirProbe. The backend is always registered (run-time switching stays possible) and answers
-  is_active() from rendering/global_illumination/restir/gi/enabled. The path tracer backend is not part of this line. Core treats a registered backend
-  with is_active() false as no backend, so with the settings at their defaults the frame is the one rendered with
-  no module. With a setting on, the backend is active but still refuses every frame (no-op): core then forces the
-  RTGI trace for it, runs the plain reconstruction and counts a refusal, which is not identical to the module-off frame.
-- SCENE level: registers the ADR-PHASE6 8.1 settings under rendering/global_illumination/restir/.
+  is_active() from rendering/global_illumination/restir/gi/enabled. The path tracer backend is not part of this line.
+  Core treats a registered backend with is_active() false as no backend and releases what it held, so with the
+  settings at their defaults the frame is the one rendered with no module. An active backend may still refuse a
+  frame (`modules/gi_restir/restir_gi.cpp` lists the reasons in its status): core then runs the plain reconstruction
+  and counts the refusal.
+- SCENE level: registers the settings under rendering/global_illumination/restir/ (`modules/gi_restir/restir_settings.cpp`).
 - Uninitialise (SERVERS): release_all, unregister_all, remove the probe singleton, free the two objects.
 
-## Settings (ADR 8.1)
+## Settings (`modules/gi_restir/restir_settings.cpp`)
 
 | Name (under rendering/global_illumination/restir/) | Type | Default |
 |---|---|---|
@@ -63,7 +69,7 @@ setting is off. Every description starts with "Experimental.". Godot shows proje
 doc/classes/ProjectSettings.xml (core), which must not name the module, so the descriptions are kept in
 restir_settings.cpp and reach the probe status only. The editor settings page does not show them.
 
-## Core include shim (ADR 7.3)
+## Core include shim (`modules/gi_restir/restir_shim.py`)
 
 - SCsub asks restir_shim.write_shim for the core include shim before it adds sources.
 - Primary path: shaders/restir_core_inc.glsl (generated, git-ignored) holds one #include per core file, each path
@@ -113,12 +119,12 @@ restir_settings.cpp and reach the probe status only. The editor settings page do
 - restir_core_inc.glsl now includes the shade file with none of the above defined. Only the placeholder shader includes it,
   and the placeholder is never compiled, so the build still only proves that the paths resolve.
 
-## Build cases (ADR 7.4)
+## Build cases
 
-- a: module absent. int4m-1 snapshot (same engine commit, no module files).
-- b: in tree, module_gi_restir_enabled default (no).
-- c: in tree, module_gi_restir_enabled=yes.
-- d: custom_modules= folder on E: with a copy of this module (identical sources; the copy is outside the tree).
+- a: module absent (same engine commit, no module files).
+- b: in tree, module_gi_restir_enabled=no.
+- c: in tree, module_gi_restir_enabled at its default (yes).
+- d: a custom_modules= folder outside the tree with a copy of this module (identical sources).
 - e: D3D12. The module has no hardware variant and no D3D12-specific source.
 
 ## Probe
@@ -128,7 +134,7 @@ restir_settings.cpp and reach the probe status only. The editor settings page do
   declared order).
 - Game probe: opencw/tools/gi/GiRestirProbe.cs and gi_restir_probe.tscn (headless).
 
-## Contracts for lane S4
+## Backend contracts
 
 - release(nullptr) is called at shutdown only by this module's uninitialise (release_all, then unregister_all); the
   renderer never calls release_all. Backends must make release(nullptr) idempotent and must not touch the device after
@@ -136,19 +142,14 @@ restir_settings.cpp and reach the probe status only. The editor settings page do
 - is_active() runs on the render thread every frame: no allocation, no GPU work, no locks.
 - gi/deterministic and gi/dump_path are internal settings: they do not appear in the editor.
 
-## Review notes not changed
-
-- The review items N10, N13 and N15 of the S3 ruling were "note only"; their text was not available to lane S3F, so
-  they are listed here without a description and no change was made for them.
-
 ## Provenance
 
-- No paper, SDK or third-party code was read or used in this lane. Sources consulted: the core hook headers
+- No paper, SDK or third-party code was read or used for the module skeleton. Sources consulted: the core hook headers
   (servers/rendering/renderer_rd/environment/gi_module_hooks.h and .cpp), SConstruct module discovery,
   glsl_builders.py include resolution, project_settings.h, and the module precedents modules/gi_hook_probe and
   modules/lightmapper_rd.
 
-## Lane S4: ReSTIR GI core (gi backend "restir_gi")
+## ReSTIR GI core (gi backend "restir_gi")
 
 Files: restir_gi_core.h/.cpp (resources, pipelines, pass dispatch), restir_gi.h/.cpp (backend: refusals, history cuts,
 epoch handling, status), restir_test.h (probe options and per-frame records), shaders/restir_gi_inc.glsl and
@@ -249,7 +250,7 @@ request_final_capture asks the next frame to keep the final reservoir layers, th
 pass (get_final_capture returns them; the blocker scene's view 62 oracle uses it). Spatial reuse is switched off with spatial_neighbors = 0
 (spatial_passes is clamped to 1..2); spatial_combines is 0 then.
 
-## Lane S5: invalidation and R2 integration (ADR 5.9, D7)
+## Invalidation and R2 integration (`modules/gi_restir/restir_epochs.cpp`)
 
 Planner: restir_epochs.h/.cpp, restir_plan_epochs() decides per frame from the history flags, the previous and current GIEpochs::Snapshot and the dirty feed
 (RtgiFrameInputs.dirty_source, the GIEpochs singleton core sets; no core accessor was added). Order: no history (FIRST), core history_cut (REQUEST; camera cut,
@@ -676,7 +677,7 @@ Design 2.10 (N7 and "PACK writes M"), 3.2, 3.3, 8.1 rows 12-14; change plan comm
   output must not change. CLEAR, SOURCE, CAPTURE, VALIDATE and SKY_EPOCH see only new #defines, so their SPIR-V should stay
   byte-identical to 45bee90de. No core shader changed.
 
-## R2 side: module output, route coverage, tile memory (change plan commit 10)
+## R2 side: module output, route coverage, tile memory
 
 Design 2.8 (R2's two restart branches), 2.10, 3.2, 3.3, 8.2 rows 5-8; change plan commit 10. The core part (rtgi.h,
 rtgi.cpp, rtgi.glsl, rtgi_inc.glsl, gi_module_hooks.h, the rtgi/ddgi_wrong_* settings in rendering_server.cpp) never names
@@ -790,7 +791,7 @@ the module; the module part is restir_route_output and its use in restir_gi.cpp.
   shader see only new #defines in rtgi_inc.glsl, so their SPIR-V should stay byte-identical. R2 allocates the two tile-memory
   textures (2 x tiles x 2 B) whatever the settings, because CLASSIFY declares them.
 
-## Fold, the stored-age bound (gi/fold_k, default 0) (change plan commit 11)
+## Fold, the stored-age bound (gi/fold_k, default 0)
 
 FOLD-ENGINE-NOTE sections 1 to 3 (the rule, storage, clock, K and the pre-frame), STAGGER-NOTE section 3 (carry, renewal by
 fold, start from π), B1-NOTE's refusal and proof; change plan row 11 and section 5 items 1 to 9, 11 and 12. Item 10
@@ -925,7 +926,7 @@ reads a light.
   - The doctests named "Mirror:" test a C++ copy of the shader's rule; only the GPU readback at commit 12 tests the shader.
     The hash known answers were recomputed independently from the GLSL text and agree.
 
-## TAA jitter in the receivers (fix after change plan commit 11)
+## TAA jitter in the receivers (`modules/gi_restir/restir_jitter.cpp`)
 
 - What was wrong. R2 writes the geometry position texture (geo_position, view space, one anchor per trace pixel) from the
   jittered depth buffer with the unjittered inverse projection (rtgi.cpp _fill_frame_ubo: inverse(C * cam_projection), C the
@@ -1015,7 +1016,7 @@ reads a light.
     temporal plane test and its DDGI lookup. With denoise r2 after the module, some TAA-on difference from the TAA-off
     level may remain for that reason; it is R2's to fix.
 
-## Commit 12a: run counters
+## Run counters
 
 Change plan commit 12, sub-commit 12a (C12-DESIGN section 2.1): CPU only. No shader file, no UBO, no pass and no setting
 changes; nothing here alters what a frame computes. Everything below is read by the lab through the probe (frame records,
@@ -1174,7 +1175,7 @@ fold rows, seeds) or through status.
   - Whether a lab set_setting of rtgi/resolution_scale reaches R2 in the same frame (R2 reads it through a cached
     setting) was not read; state_rebuilds_total is the proof for that path, and the lab VOIDs it when it does not move.
 
-## Commit 12b: Fold dump and self-test
+## Fold dump and self-test
 
 Change plan commit 12, sub-commit 12b (C12-DESIGN section 2.2): debug-only shader text, a lazily built dump shader, a
 self-test shader and the probe methods that read them. With the dump off nothing a frame computes or binds changes.
@@ -1320,7 +1321,7 @@ self-test shader and the probe methods that read them. With the dump off nothing
   - run_fold_test uses the probe's own core (the one run_case uses), never the backend's.
   - A dump that fails to build is tried once per variant and core; fold_dump_active stays false after that.
 
-## Commit 12c: Fold lineage
+## Fold lineage
 
 Change plan commit 12, sub-commit 12c (C12-DESIGN section 2.3): a debug-only lineage per pixel and a refused-id image, so
 the lab can count how many receivers clear one lineage on one frame (fanin.csv, check 12, and the 4d bar). With
