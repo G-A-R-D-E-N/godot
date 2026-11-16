@@ -50,7 +50,8 @@ external-entries mode and the opaque pass shades heads, tail samples or nothing.
   opaque pass reads it from the record, so both see the same lamp set.
 - `di_sampler_inc.glsl:di_candidate` drops a target below `DI_MIN_TARGET`, 2^-64 (5.421011e-20 rounds to it exactly),
   like a zero target: it is never added to a total and never picked, by the inversion, the race or the exact tail.
-  Without it, the race key E / w misbehaves at tiny w:
+  The exact tail still records such a lamp, with no share and so no ray of its own; the opaque pass lights it at
+  factor 1 under the pooled visibility of the rest. Without the drop, the race key E / w misbehaves at tiny w:
   - at w of about 1e-38 to 5e-38 the quotient overflows, and `di_precise_divide`'s correction turns it into NaN, a key
     that never wins;
   - at denormal w below about 2.9e-39, 1 / w is infinite, so the correction gives +inf or -inf, and a -inf key always
@@ -128,7 +129,7 @@ wrote before.
 - Lab build only: `debug/lab_log` writes counters and a settings line, with a per-pixel mask of the reservoir path
   beside it (also written at shutdown); `debug/no_stamp` reads the stored reservoir without the frame-stamp test.
 
-## L0 mirror and KA8 lab (lab only)
+## L0 mirror (every build) and KA8 lab (lab option)
 
 - `modules/gi_restir_di/di_sampler_reference.h` mirrors di_sampler_inc.glsl: `di_hash`, `di_candidate`, `di_weight`, the
   inversion, `di_precise_divide` and the race with its exponential; the tail u is di_resample.glsl's `stream_uniform`.
@@ -141,7 +142,7 @@ wrote before.
   records through a cell list and a slot table; variant 1 hit shape: RaySceneLight records), both through di_hit_pick,
   over the hit records and without rays.
 
-## Cold frames (lab only)
+## Cold frames (test switch)
 
 - `rendering/global_illumination/direct/debug_cold_frames` N: in the traced pass, a lamp whose age (frame minus its
   reset frame) is under N loads no history for its own entries and a ray drawn for one is not traced, so the entry
