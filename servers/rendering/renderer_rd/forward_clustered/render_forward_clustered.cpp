@@ -2132,6 +2132,7 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 		input.omni_buffer = light_storage->get_omni_light_buffer();
 		input.spot_buffer = light_storage->get_spot_light_buffer();
 		input.projection = p_render_data->scene_data->get_cam_projection();
+		input.jitter = p_render_data->scene_data->taa_jitter;
 		input.camera = p_render_data->scene_data->cam_transform;
 		input.region_half = ray_scene_get_region(p_render_data->scene_data->cam_transform.origin).size * 0.5;
 		input.cluster_size = p_render_data->cluster_size;

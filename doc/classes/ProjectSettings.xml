@@ -3256,6 +3256,9 @@
 		<member name="rendering/global_illumination/direct/filter_range_sigmas" type="float" setter="" getter="" default="1.5">
 			How far a neighbour's shadow factor may sit from the pixel's own before the spatial filter stops using it, in standard errors of the two pixels' sample counts. Keeps hard shadow edges from bleeding. [code]0[/code] turns the test off.
 		</member>
+		<member name="rendering/global_illumination/direct/filter_second_pass" type="bool" setter="" getter="" default="true">
+			If [code]false[/code], the spatial filter runs only its first pass, which then writes the final shadow factors. Only used when [member rendering/global_illumination/direct/trace_resolution] is Quarter.
+		</member>
 		<member name="rendering/global_illumination/direct/force_factor_one" type="bool" setter="" getter="" default="false">
 			Debug: writes every shadow factor as [code]1[/code], so owned lamps with a matching entry shade as unshadowed.
 		</member>
@@ -3333,6 +3336,9 @@
 		</member>
 		<member name="rendering/global_illumination/direct/resampled/temporal_reuse" type="bool" setter="" getter="" default="true">
 			Applies while [member rendering/global_illumination/direct/resampled/reservoirs] is [code]B1[/code] or [code]U1[/code] and [member rendering/global_illumination/direct/resampled/tail_samples] is [code]1[/code]. If [code]true[/code], a pixel combines its fresh pick with the pick stored for the same surface in the previous frame, found by reprojection where the previous frame's depth and normal match. If [code]false[/code], every frame's pick starts fresh and only the spatial pass reuses picks.
+		</member>
+		<member name="rendering/global_illumination/direct/trace_resolution" type="int" setter="" getter="" default="0">
+			Full traces and filters the shadow entries at every pixel. Quarter traces and filters one pixel of each 2×2 block, chosen from the block's depths and normals, and a resolve pass then writes every pixel's entries from the nearby blocks on the same surface. Quarter costs less and is softer on hard shadow edges. A change starts the shadow history over. Quarter is not used while [member rendering/global_illumination/direct/reference] is on or [member rendering/global_illumination/direct/history_cap] is [code]0[/code], or while [member rendering/global_illumination/direct/resampled/enabled] supplies the entries, since the Quarter trace has no variant that reads resampled entries.
 		</member>
 		<member name="rendering/global_illumination/gi/use_half_resolution" type="bool" setter="" getter="" default="false" keywords="size">
 			If [code]true[/code], renders [VoxelGI] and SDFGI ([member Environment.sdfgi_enabled]) buffers at halved resolution (e.g. 960×540 when the viewport size is 1920×1080). This improves performance significantly when VoxelGI or SDFGI is enabled, at the cost of artifacts that may be visible on polygon edges. The loss in quality becomes less noticeable as the viewport resolution increases. [LightmapGI] rendering is not affected by this setting.
