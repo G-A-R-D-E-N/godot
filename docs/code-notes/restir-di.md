@@ -131,8 +131,13 @@ wrote before.
 
 ## L0 mirror (every build) and KA8 lab (lab option)
 
-- `modules/gi_restir_di/di_sampler_reference.h` mirrors di_sampler_inc.glsl: `di_hash`, `di_candidate`, `di_weight`, the
-  inversion, `di_precise_divide` and the race with its exponential; the tail u is di_resample.glsl's `stream_uniform`.
+- `modules/gi_restir_di/di_sampler_reference.h` mirrors di_sampler_inc.glsl operation for operation: `hash` is
+  `di_hash`, `candidate` is `di_candidate`, `weight` is `di_weight`, `Inversion` and its functions are the
+  `di_inversion_*` functions, `precise_divide` is `di_precise_divide`, `race_exponential` is `di_race_exponential`,
+  and `race_k` is the key `di_race_exponential` computes first. `tail_u` is the `float(h >> 8u) / 16777216.0` map
+  di_resample.glsl uses for the tail inversion's goal: written out in the tail draw without reservoirs, and through
+  `stream_uniform` with reservoirs. A change to any of these GLSL functions changes its mirror in the same commit; the
+  `[DirectSampler]` tests run the mirror.
   hash_inverse undoes hash; KA8 uses it to build seed hashes with k = 0 and k = 2^23 - 1. stratum_weight,
   contribution_weight and source_pdf_weight are the design's stratum and source-pdf formulas, templated so the L0 tests
   run them in exact rationals.

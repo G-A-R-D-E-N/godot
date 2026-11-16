@@ -41,7 +41,6 @@ inline constexpr uint32_t NO_PICK = 0xFFFFFFFFu;
 inline constexpr float MIN_TARGET = 5.421011e-20f;
 inline constexpr uint32_t RACE_K_TOP = 8388607u;
 
-// Must match di_sampler_inc.glsl:7-14 operation for operation.
 constexpr uint32_t hash(uint32_t p_value) {
 	p_value ^= p_value >> 16u;
 	p_value *= 0x7feb352du;
@@ -68,22 +67,18 @@ constexpr uint32_t hash_inverse(uint32_t p_value) {
 	return p_value;
 }
 
-// Must match di_sampler_inc.glsl:103-105 operation for operation.
 constexpr bool candidate(float p_target) {
 	return p_target >= MIN_TARGET && !Math::is_inf(p_target);
 }
 
-// Must match di_sampler_inc.glsl:107-109 operation for operation.
 inline float weight(float p_total, float p_pick_target) {
 	return p_pick_target > 0.0f ? p_total / p_pick_target : 0.0f;
 }
 
-// Must match di_resample.glsl:355 operation for operation.
 inline float tail_u(uint32_t p_hash) {
 	return float(p_hash >> 8u) / 16777216.0f;
 }
 
-// Must match di_sampler_inc.glsl:111-150 operation for operation.
 struct Inversion {
 	float goal = 0.0f;
 	float running = 0.0f;
@@ -125,12 +120,10 @@ inline uint32_t inversion_end(Inversion &r_inversion) {
 	return r_inversion.pick;
 }
 
-// Must match di_sampler_inc.glsl:160 operation for operation.
 constexpr uint32_t race_k(uint32_t p_seed_hash, uint32_t p_id) {
 	return hash(p_seed_hash ^ hash(p_id)) >> 9u;
 }
 
-// Must match di_sampler_inc.glsl:152-157 operation for operation.
 inline float precise_divide(float p_a, float p_b) {
 	float quotient = p_a / p_b;
 	float residual = std::fma(-quotient, p_b, p_a);
@@ -138,7 +131,6 @@ inline float precise_divide(float p_a, float p_b) {
 	return corrected;
 }
 
-// Must match di_sampler_inc.glsl:159-175 operation for operation.
 inline float race_exponential(uint32_t p_seed_hash, uint32_t p_id) {
 	uint32_t k = hash(p_seed_hash ^ hash(p_id)) >> 9u;
 	if (k < 4194304u) {
