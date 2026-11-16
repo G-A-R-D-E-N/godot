@@ -40,17 +40,17 @@ using Data = RendererSceneCull::InstanceData;
 
 constexpr uint32_t MESH = uint32_t(RSE::INSTANCE_MESH);
 
-TEST_CASE("[SceneCull] Both flags with casting on: ray scene only, no raster shadow") {
+TEST_CASE("[SceneCull] Flag rules: both flags with casting on give ray scene only and no raster shadow") {
 	const uint32_t flags = MESH | Data::FLAG_CAST_SHADOWS | Data::FLAG_RAY_SCENE_ONLY | Data::FLAG_NO_RASTER_SHADOW;
 	CHECK(Data::enters_ray_scene(flags));
 	CHECK_FALSE(Data::draws_in_camera(flags));
-	INFO("directional cascade caster cull");
+	INFO("the rule the directional cascade caster cull calls");
 	CHECK_FALSE(Data::casts_raster_shadow(flags));
-	INFO("omni, spot and area caster culls, and the lamp dirty marking on re-box, pairing and changes");
+	INFO("the rule the omni, spot and area caster culls and the lamp dirty marking call");
 	CHECK_FALSE(Data::casts_raster_shadow(true, true));
 }
 
-TEST_CASE("[SceneCull] Ray scene only alone still casts raster shadows") {
+TEST_CASE("[SceneCull] Flag rules: ray scene only alone still casts raster shadows") {
 	const uint32_t flags = MESH | Data::FLAG_CAST_SHADOWS | Data::FLAG_RAY_SCENE_ONLY;
 	CHECK(Data::enters_ray_scene(flags));
 	CHECK_FALSE(Data::draws_in_camera(flags));
@@ -58,14 +58,14 @@ TEST_CASE("[SceneCull] Ray scene only alone still casts raster shadows") {
 	CHECK(Data::casts_raster_shadow(true, false));
 }
 
-TEST_CASE("[SceneCull] No raster shadow alone keeps camera drawing") {
+TEST_CASE("[SceneCull] Flag rules: no raster shadow alone keeps camera drawing") {
 	const uint32_t flags = MESH | Data::FLAG_CAST_SHADOWS | Data::FLAG_NO_RASTER_SHADOW;
 	CHECK(Data::enters_ray_scene(flags));
 	CHECK(Data::draws_in_camera(flags));
 	CHECK_FALSE(Data::casts_raster_shadow(flags));
 }
 
-TEST_CASE("[SceneCull] Both caster rules agree and read only their two flags") {
+TEST_CASE("[SceneCull] Flag rules: both caster rules agree and read only their two flags") {
 	for (bool casts : { false, true }) {
 		for (bool no_raster : { false, true }) {
 			const uint32_t flags = (casts ? uint32_t(Data::FLAG_CAST_SHADOWS) : 0u) | (no_raster ? uint32_t(Data::FLAG_NO_RASTER_SHADOW) : 0u);
@@ -83,7 +83,7 @@ TEST_CASE("[SceneCull] Both caster rules agree and read only their two flags") {
 	}
 }
 
-TEST_CASE("[SceneCull] Only the ray scene only flag leaves the camera cull and neither flag leaves the ray scene") {
+TEST_CASE("[SceneCull] Flag rules: only the ray scene only flag leaves the camera cull and neither flag leaves the ray scene") {
 	for (uint32_t bit = 0; bit < 32; bit++) {
 		const uint32_t other = 1u << bit;
 		if (other & Data::FLAG_BASE_TYPE_MASK) {
