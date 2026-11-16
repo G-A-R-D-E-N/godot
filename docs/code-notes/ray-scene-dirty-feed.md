@@ -44,6 +44,10 @@ box list of an overflow result holds the first 64 merged boxes and is not a comp
 - Changes of albedo or emission do not produce boxes. A change of the layer mask, of a surface's material flags (shadow
   casting included) or of its coverage does, through the record's state word (`feed_surface_state`). The instance class
   (opaque or candidate) is not part of the record.
+- With `ray_scene/alpha_test` on, the material flags also carry the alpha table index (`MATERIAL_ALPHA_MASK`, bits 8
+  to 31) while the surface's layer is READY, so a cut-out that starts or stops (its layer turns READY, is evicted or
+  is acquired again) publishes a box. A READY layer refilled in place and a table entry change on the same index
+  publish none (`docs/code-notes/ray-scene-alpha.md`, "Change serial").
 - The record keeps the mesh's `build_serial`, which `_build_blas` steps from one counter for all meshes, so it changes
   whenever a mesh is rebuilt, also when the mesh entry was erased and captured again. The scene hash reads the same word.
 - The hardware-usable bit is read from `hw_usable` right after `_hw_instance` (always true with the software backend).
@@ -64,10 +68,12 @@ both at the end of every `update`.
 16 frames, at most `DIRTY_RING_BOXES` (32) boxes per frame, tagged with the serial, the scene epoch at the end of the update
 and the structure generation. A read older than 16 frames, a slot that does not carry the expected serial (the feed was off in
 between) or a feed that is not held gives `DIRTY_OVERFLOW`. The ring is cleared when the last consumer releases the feed.
-Nothing on this branch bumps `GIEpochs::SOURCE_SCENE` and `RayScene` has no scene epoch, so the ring frames carry the word
-as it is (0 until something bumps it). While the word has never moved, `get_dirty_boxes(since_scene_epoch)` returns
-`DIRTY_OVERFLOW`, never `DIRTY_NONE`; it answers from the ring once something bumps the word. The serial query does not use
-the word.
+`GIEpochs::SOURCE_SCENE` is bumped by `RayScene::update` through `GISceneTracker` (`scene_tracker.update`, when the hash of
+the instances' meshes, transforms, layer masks, build serials and material records changes) and by `_feed_end` when the feed
+saw changes or overflowed its raw limit and the word has not moved yet in that update (`feed_frame_needs_epoch`). The ring
+frames carry the word as it is at the end of the update. While the word has never moved, `get_dirty_boxes(since_scene_epoch)`
+returns `DIRTY_OVERFLOW`, never `DIRTY_NONE`; it answers from the ring once something bumps the word. The serial query does
+not use the word.
 
 The baseline frame, the first update after the feed is acquired (also after a release and a re-acquire), is published with
 overflow set (`RayScene::feed_frame_overflow`). The feed saw nothing while it was off, so a reader still holding a serial
@@ -86,4 +92,5 @@ written while the path is empty).
   instances enter and leave at its edge, and those show as adds and removes.
 - Several cameras that call `RayScene::update` with different instance sets in one frame make the same instances appear and
   disappear (the TLAS signature flaps the same way).
-- `layer_mask`, `cast_shadows` and material edits change the TLAS signature but publish no boxes.
+- Material edits that change only albedo or emission publish no boxes. `layer_mask`, `cast_shadows` and material flag
+  or coverage edits do (see "How the diff works").
