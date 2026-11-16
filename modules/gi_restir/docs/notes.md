@@ -265,7 +265,7 @@ feed says. Boxes are world space; the planner subtracts RayScene::get_anchor() t
 when a frame has changes or a raw overflow and the scene tracker did not step it in that update (RayScene::feed_frame_needs_epoch: a hardware
 usability flip is the one change the feed sees and the tracker's hash does not), because get_dirty_boxes returns only frames newer than the reader's epoch. State counters: cut_counts per reason,
 dirty_frames; status keys cut_reason, dirty_boxes, dirty_feed, scene_changed, light_changed, sky_changed, origin_changed, world_changed, light_cap, light_frames_left.
-What makes a box: the feed compares, per instance, the world transform, the mesh and its generation, hardware usability, and a state word built from the layer mask
+What makes a box: the feed compares, per instance, the world transform, the mesh and its build serial, hardware usability, and a state word built from the layer mask
 and each surface's material flags (shadow casting included) and coverage (RayScene::feed_surface_state). So a change of who a mesh shadows or how much it lets through
 dirties its bounds like a move does. A change of albedo or emission alone (the game animating an emission scale) moves the scene epoch with no box: history is kept,
 as it was before the scene epoch moved at all, and the re-validation rays are what follow it. When restir/gi/enabled is off, RTGI releases the backend's state for the
