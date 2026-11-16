@@ -1,4 +1,4 @@
-# Lane DBX: dirty-box feed in the ray scene
+# Ray scene: the dirty-box feed
 
 ## What the feed is
 

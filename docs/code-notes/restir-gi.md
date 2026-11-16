@@ -283,7 +283,7 @@ for exactly that many frames (defaults 2 and 4). It is a soft cap, not a cut.
 Sky epoch: nothing is cleared. The sky radiance is core-owned (ddgi_trace.glsl sky_radiance_in, set 2 and push constants); the ray scene carries no sky, so a module
 cannot re-read the sky by direction. A MISS_SKY sample therefore keeps its stored Lo until it is replaced; this is measured lag, not a re-read.
 
-## Port onto RT GI's R2 line
+## Port onto the R2 line
 
 - Rays: ray_scene_trace with DI-1's seed argument. Each call site hashes the pixel, the frame and its own odd salt.
 - Backface: a hit is shaded when it faces the ray, or when its material is two-sided or a blend material, as in ddgi_trace.glsl shade_hit.
@@ -329,7 +329,7 @@ cannot re-read the sky by direction. A MISS_SKY sample therefore keeps its store
   the module decides inside the frame.
 - The mirror floor: MODE_RTGI floors the mirrored term at 1e-4/π (about 3.2e-5, ddgi_trace.glsl:520). Where the true p0(m(w)) is 0
   (m(w) below the shading hemisphere) the floor adds density that is not there. That happens only at near-grazing w, where the pdf
-  word can read up to about 2x p0(w); elsewhere it is negligible (RT GI's review of 998e583da).
+  word can read up to about 2x p0(w); elsewhere it is negligible (from the R2 side's review of this change).
 - direct_shadows.glsl does not define RAY_SCENE_REPLAY, so DI-1's picks stay index-keyed. ReSTIR DI must define it (and set the
   global) if it ever wants to replay a DI-1 pick.
 
@@ -355,7 +355,7 @@ Design 2.8, 8.1 rows 5-8, 8.3 row 4; change plan commit 5.
   events between two reads of this view, written by any view's update, makes events_lost positive here, and the frame is a
   jump frame (every receiver capped) even with no change near this view. Conservative, not wrong; fires are rate-limited to
   one per light per 8 frames. If a second live view (SubViewport, probe capture) ever runs RTGI, a region test on lost events
-  would avoid the extra jump frames (RT GI's review of 9ec4439b4).
+  would avoid the extra jump frames (from the R2 side's review of this change).
 - epochs.light lags the events by one frame: the epoch snapshot is taken (render_forward_clustered.cpp) before
   _read_light_changes bumps SOURCE_LIGHT, so on frame N the module sees N's events and jump, and the light epoch changes on
   N+1. With events on, m_light_frames is 0 and nothing depends on it; with events off, the epoch path caps from N+1 as
@@ -419,7 +419,7 @@ Design 2.8, 8.1 rows 5-8, 8.3 row 4; change plan commit 5.
   dispatch runs, so TEMPORAL, SPATIAL and VALIDATE do today's arithmetic in today's order (SPIR-V of those three changes; every other
   module pass, every DDGI trace variant and both direct-shadow variants are byte-identical, spirv_c5.py).
 - The harness carries the packed UBO in a captured case as "events" when F_EVENTS is set.
-- Later item (MC #131, 14 Nov): R2's tracker fires two events per lamp change, the old and the new state
+- Later item (14 Nov): R2's tracker fires two events per lamp change, the old and the new state
   (`ddgi_light_tracker.cpp` `fire` twice), and R2's select merges them into one sphere for a light that doesn't move. The module
   takes both as capping spheres, so a stationary flicker reads events_read 2 and event_capping_spheres 2 per changed frame
   (flicker lab, 2f01e4725: 32 frames, 64 events). The M cap is a min, so the output is the same, but the count dispatch and the
@@ -841,7 +841,7 @@ reads a light.
   d with seed rtgi_pcg(seed * 0x9E3779B1 + 0x7F4A7C15), seed rtgi/seed + seed_offset or 0x1234567 under F_DETERMINISTIC
   (0xF5F17964 and 0x56F88133 at the defaults). C2 is about 7.2e8 or more from every one of those sums, and C1 is far from
   C2. The doctest "[RestirFold] C2 sits at least 5 ..." checks the defaults; a non-default rtgi/seed is the run's to list
-  in run.json. φ's classes are not balanced (FOLD-ENGINE-NOTE section 3); RT GI measures them on the trace grid first.
+  in run.json. φ's classes are not balanced (FOLD-ENGINE-NOTE section 3); the R2 side measures them on the trace grid first.
 - The clock v is RestirGiState::frames, read before resample's frames++ (params.fold_clock), in shade_pad1; K_eff is in
   shade_pad2. The GLSL names stay shade_pad1 and shade_pad2 (RS_FOLD_CLOCK and RS_FOLD_K alias them inside MODE_TEMPORAL)
   so no other mode's block changes; the C++ struct calls them fold_clock and fold_k_eff. The freeze return comes before
@@ -910,7 +910,7 @@ reads a light.
   SPIR-V of TEMPORAL and TEMPORAL_SKY changes (every ray variant) and their output must not; every other module mode sees
   only new #defines and should stay byte-identical to 22c0ee2ac. No core shader changed. Status gains keys and cut_counts
   one entry; settings snapshot gains gi/fold_k.
-- Known limits, for RT GI's checks: φ is a hash, not a balanced tile; only K 8 and 32 were judged; a stored s needs a
+- Known limits, for the R2 side's checks: φ is a hash, not a balanced tile; only K 8 and 32 were judged; a stored s needs a
   debug readout of the history set (check 3), not FINAL's set; starts by situation (check 10) and families (check 12) need
   commit 12's debug tags; a view that skips the pre-frame can refuse up to the K − 1 starts on its revalidation frame
   (quality, not soundness); a Fold change while the freeze test option holds takes effect when the freeze ends.
@@ -1453,7 +1453,7 @@ lineage off nothing a frame computes or binds changes, and the 12b dump objects 
 
 ## Fold check 6 (b): gated phase-0 counts and start reasons
 
-Registration D:\claude\rtgi\plan\restir-gi\FOLD-B-REG.md (14 Nov 2026), on 0f7705509. Dump path only: every change is
+Registered 14 Nov 2026 before any code (the Fold check 6 (b) registration). Dump path only: every change is
 under #ifdef RS_FOLD_DUMP or in code that runs only when the dump ran, so the plain TEMPORAL variants keep their
 preprocessed token stream (the shader cache misses once, as the source text changed).
 
