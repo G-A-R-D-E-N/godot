@@ -539,6 +539,13 @@ vec3 direct_ratio = vec3(1.0);
 
 bool direct_shadow_factor(uint p_flags, vec3 p_color, bool p_use_rest, inout half r_shadow) {
 	ivec2 pixel = ivec2(gl_FragCoord.xy);
+	uint slot = (p_flags >> 1) & 0xFFFFu;
+	half strength = half(float((p_flags >> 17) & 0xFFu) / 255.0);
+	int matched = direct_head_layer >= 0 ? direct_head_layer : direct_tail_layer;
+	if (matched >= 0) {
+		r_shadow = mix(half(1.0), half(texelFetch(sampler2DArray(direct_shadow_factors, SAMPLER_NEAREST_CLAMP), ivec3(pixel, matched), 0).r), strength);
+		return true;
+	}
 	if (direct_own < 0) {
 		direct_own = min(textureSize(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), 0).z - 1, 7);
 		for (int i = 0; i < 7; i++) {
@@ -548,13 +555,6 @@ bool direct_shadow_factor(uint p_flags, vec3 p_color, bool p_use_rest, inout hal
 			}
 		}
 		direct_has_rest = direct_own > 0 && texelFetch(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), ivec3(pixel, direct_own), 0).r > 0.0;
-	}
-	uint slot = (p_flags >> 1) & 0xFFFFu;
-	half strength = half(float((p_flags >> 17) & 0xFFu) / 255.0);
-	int matched = direct_head_layer >= 0 ? direct_head_layer : direct_tail_layer;
-	if (matched >= 0) {
-		r_shadow = mix(half(1.0), half(texelFetch(sampler2DArray(direct_shadow_factors, SAMPLER_NEAREST_CLAMP), ivec3(pixel, matched), 0).r), strength);
-		return true;
 	}
 	for (int i = 0; i < 7; i++) {
 		if (i < direct_own && direct_own_slots[i] == slot) {

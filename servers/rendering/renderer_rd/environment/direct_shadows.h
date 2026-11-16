@@ -159,6 +159,7 @@ private:
 		uint32_t cold_frames;
 		uint32_t pad[2];
 	};
+	static_assert(sizeof(Params) == 384);
 
 	static constexpr uint32_t COUNTER_BYTES = 32;
 
