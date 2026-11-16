@@ -95,6 +95,9 @@ void RayAlphaStore::configure(uint32_t p_max_layers, uint32_t p_layer_size, uint
 }
 
 void RayAlphaStore::release() {
+	if (max_layers > 0) {
+		change_serial++;
+	}
 	if (layer_texture.is_valid()) {
 		RD::get_singleton()->free_rid(layer_texture);
 		layer_texture = RID();
@@ -203,7 +206,7 @@ void RayAlphaStore::_release_layer(uint32_t p_layer) {
 	layer = Layer();
 	layer.generation = generation;
 	free_layers.push_back(p_layer);
-	table_dirty = true;
+	_mark_changed();
 }
 
 void RayAlphaStore::_retire_entry(uint32_t p_entry) {
@@ -222,7 +225,18 @@ void RayAlphaStore::_retire_entry(uint32_t p_entry) {
 	entry.offset[1] = 0.0f;
 	free_entries.push_back(p_entry);
 	stats.entries_retired_total++;
+	_mark_changed();
+}
+
+void RayAlphaStore::_mark_changed() {
 	table_dirty = true;
+	change_serial++;
+}
+
+void RayAlphaStore::_mark_state_changed() {
+	_mark_changed();
+	state_changed = true;
+	state_change_frame = frame;
 }
 
 void RayAlphaStore::begin_update(uint64_t p_frame) {
@@ -231,6 +245,10 @@ void RayAlphaStore::begin_update(uint64_t p_frame) {
 	stats.dead_sources_refused = 0;
 	if (max_layers == 0) {
 		return;
+	}
+	if (state_changed && p_frame > state_change_frame) {
+		state_changed = false;
+		change_serial++;
 	}
 	if (liveness != nullptr) {
 		for (uint32_t i = 0; i < layers.size(); i++) {
@@ -329,7 +347,7 @@ uint32_t RayAlphaStore::acquire(RID p_source, uint32_t p_cutoff, const Vector2 &
 	if (mapped == nullptr) {
 		entry_map.insert(entry_key, index);
 	}
-	table_dirty = true;
+	_mark_changed();
 	return index;
 }
 
@@ -355,7 +373,7 @@ void RayAlphaStore::update() {
 		if (rd.is_null()) {
 			if (layer.state != LAYER_PENDING) {
 				layer.state = LAYER_PENDING;
-				table_dirty = true;
+				_mark_state_changed();
 			}
 			stats.source_missing_frames++;
 			continue;
@@ -368,7 +386,7 @@ void RayAlphaStore::update() {
 		if (layer.signature != layer.filled_signature || layer.state != LAYER_READY) {
 			if (layer.state != LAYER_PENDING) {
 				layer.state = LAYER_PENDING;
-				table_dirty = true;
+				_mark_state_changed();
 			}
 			pending.push_back(i);
 		}
@@ -419,10 +437,13 @@ void RayAlphaStore::commit_fill(uint32_t p_layer, uint64_t p_signature) {
 	if (layer.source.is_null()) {
 		return;
 	}
+	const bool changed = layer.state != LAYER_READY || layer.filled_signature != p_signature;
 	layer.signature = p_signature;
 	layer.filled_signature = p_signature;
 	layer.state = LAYER_READY;
-	table_dirty = true;
+	if (changed) {
+		_mark_state_changed();
+	}
 }
 
 void RayAlphaStore::sync_entries() {
@@ -444,7 +465,7 @@ void RayAlphaStore::sync_entries() {
 		TableEntry &entry = entries[i];
 		if (entry.layer < layers.size() && entry.state != layers[entry.layer].state) {
 			entry.state = layers[entry.layer].state;
-			table_dirty = true;
+			_mark_state_changed();
 		}
 	}
 }

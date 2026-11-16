@@ -103,6 +103,7 @@ public:
 	uint32_t get_layer_state(uint32_t p_layer) const { return layers[p_layer].state; }
 	uint32_t get_layer_generation(uint32_t p_layer) const { return layers[p_layer].generation; }
 	uint32_t get_max_layers() const { return max_layers; }
+	uint64_t get_change_serial() const { return change_serial; }
 	const Stats &get_stats() const { return stats; }
 
 private:
@@ -141,6 +142,8 @@ private:
 	uint32_t _find_victim() const;
 	void _release_layer(uint32_t p_layer);
 	void _retire_entry(uint32_t p_entry);
+	void _mark_changed();
+	void _mark_state_changed();
 	bool _ensure_pipeline();
 	bool _ensure_texture();
 	void _ensure_table_capacity(uint32_t p_count);
@@ -162,6 +165,9 @@ private:
 	uint64_t frame = 0;
 	LivenessFunc liveness = nullptr;
 	bool table_dirty = true;
+	uint64_t change_serial = 0;
+	bool state_changed = false;
+	uint64_t state_change_frame = 0;
 	RaySceneAlphaFillShaderRD *fill_shader = nullptr;
 	RID fill_version;
 	RID fill_pipeline;

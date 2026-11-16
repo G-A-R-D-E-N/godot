@@ -458,6 +458,7 @@ public:
 	bool is_alpha_enabled() const { return alpha_enabled; }
 	static String alpha_shader_defines();
 	RID get_alpha_table_buffer() const { return alpha_store.get_table_buffer(); }
+	uint64_t get_alpha_change_serial() const { return alpha_store.get_change_serial(); }
 	RID get_alpha_layer_texture() const { return alpha_store.get_layer_texture(); }
 	const RayAlphaStore &get_alpha_store() const { return alpha_store; }
 
