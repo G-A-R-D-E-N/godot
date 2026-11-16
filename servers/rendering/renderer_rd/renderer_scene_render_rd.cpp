@@ -1672,15 +1672,12 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 			scene_data.directional_shadow_pixel_size.y = 1.0 / directional_shadow_size;
 		}
 
+		const RID sky_rid = p_environment.is_valid() ? environment_get_sky(p_environment) : RID();
+		if (p_reflection_probe.is_null() && rb->update_gi_sky(sky_rid)) {
+			RendererRD::GIEpochs::get_singleton()->bump(RendererRD::GIEpochs::SOURCE_SKY);
+		}
+
 		if (p_environment.is_valid()) {
-			RID sky_rid = environment_get_sky(p_environment);
-			RID *seen_sky = gi_environment_skies.getptr(p_environment);
-			if (!seen_sky) {
-				gi_environment_skies.insert(p_environment, sky_rid);
-			} else if (*seen_sky != sky_rid) {
-				*seen_sky = sky_rid;
-				RendererRD::GIEpochs::get_singleton()->bump(RendererRD::GIEpochs::SOURCE_SKY);
-			}
 			if (sky_rid.is_valid()) {
 				int radiance_size = sky.sky_get_radiance_size(sky_rid);
 				scene_data.radiance_pixel_size = 1.0f / radiance_size;
@@ -1794,7 +1791,6 @@ void RendererSceneRenderRD::render_particle_collider_heightfield(RID p_collider,
 
 bool RendererSceneRenderRD::free(RID p_rid) {
 	if (is_environment(p_rid)) {
-		gi_environment_skies.erase(p_rid);
 		environment_free(p_rid);
 	} else if (is_compositor(p_rid)) {
 		compositor_free(p_rid);

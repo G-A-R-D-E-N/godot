@@ -30,7 +30,6 @@
 
 #pragma once
 
-#include "core/templates/hash_map.h"
 #include "servers/rendering/renderer_compositor.h"
 #include "servers/rendering/renderer_rd/effects/bokeh_dof.h"
 #include "servers/rendering/renderer_rd/effects/copy_effects.h"
@@ -83,8 +82,6 @@ protected:
 	bool glow_bicubic_upscale = false;
 
 	bool use_physical_light_units = false;
-
-	HashMap<RID, RID> gi_environment_skies;
 
 	////////////////////////////////
 

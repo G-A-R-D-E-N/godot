@@ -379,6 +379,7 @@ void RayScene::_build_blas(MeshEntry &p_mesh) {
 		triangle.surface = p_mesh.triangle_surface[t];
 	}
 	p_mesh.built = true;
+	p_mesh.build_serial = ++next_build_serial;
 }
 
 void RayScene::_ensure_buffer(RID &r_buffer, uint32_t &r_capacity, uint32_t p_count, uint32_t p_stride, const char *p_name) {
@@ -934,8 +935,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		uint32_t scene_hash = hash_murmur3_one_64(mesh_rid.get_id());
 		scene_hash = hash_murmur3_buffer(&geometry->transform, sizeof(Transform3D), scene_hash);
 		scene_hash = hash_murmur3_one_32(geometry->layer_mask, scene_hash);
-		scene_hash = hash_murmur3_one_32(mesh->triangle_surface.size(), scene_hash);
-		scene_hash = hash_murmur3_buffer(&mesh->aabb, sizeof(AABB), scene_hash);
+		scene_hash = hash_murmur3_one_32(mesh->build_serial, scene_hash);
 		scene_hash = hash_murmur3_buffer(materials.ptr() + instance.material_offset, sizeof(Material) * mesh->surface_count, scene_hash);
 		scene_signature = GISceneTracker::add_instance(scene_signature, scene_hash);
 		scene_members.push_back(GISceneTracker::member_key(p_instances[i], mesh_rid.get_id()));

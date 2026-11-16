@@ -83,6 +83,8 @@ private:
 	bool history_discard = false;
 	bool history_cut = false;
 	uint64_t history_frame = UINT64_MAX;
+	RID gi_sky;
+	bool gi_sky_known = false;
 	RSE::ViewportVRSMode vrs_mode = RSE::VIEWPORT_VRS_DISABLED;
 
 	// Our render target represents our final destination that we display on screen.
@@ -277,6 +279,12 @@ public:
 	bool get_history_reset() const { return history_reset; }
 	bool get_history_discard() const { return history_discard; }
 	bool get_history_cut() const { return history_cut; }
+	bool update_gi_sky(RID p_sky) {
+		const bool changed = gi_sky_known && gi_sky != p_sky;
+		gi_sky = p_sky;
+		gi_sky_known = true;
+		return changed;
+	}
 
 	// For our internal textures we provide some easy access methods.
 
