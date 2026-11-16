@@ -25,13 +25,15 @@ no status file is written.
 While the ambient buffer doesn't exist, `GICompositor::ensure_slot_textures` returns `Size2i()` and that frame is skipped
 without a refusal. It's the one-frame case on a new viewport or a size change.
 
-Epoch change sets `FRAME_FLAG_SOFT_CUT`, and the temporal pass clamps the history count to `soft_cut_count`, 0 by default.
-So an epoch bump restarts history from one sample. See `gi_epochs.h`.
+A change of the world or sky epoch sets `FRAME_FLAG_SOFT_CUT`, and the temporal pass clamps the history count to
+`soft_cut_count`, 0 by default. So such a bump restarts history from one sample. The scene epoch does not cut: it moves
+on every change of the ray scene, and local changes are the restart spheres' business. See `gi_epochs.h` below.
 
 ### `servers/rendering/renderer_rd/environment/rtgi.h`
 
-`FrameInputs.hardware` stays false on this branch. Ray-query tracing arrives with the hardware rays work, and until then
-no text may claim it.
+`FrameInputs.hardware` is the ray scene's backend for the frame, so a switch between software and hardware rays is a
+`CUT_BACKEND` history cut. `DDGI::trace_rtgi` takes the hardware trace shader when the ray scene uses hardware rays,
+and refuses hardware for the ray scene if that pipeline cannot be made.
 
 ### `servers/rendering/renderer_rd/shaders/environment/rtgi.glsl`
 
@@ -48,14 +50,46 @@ run keeps it off.
 
 ### `servers/rendering/renderer_rd/environment/gi_epochs.h`
 
-A word of 0 means unknown. `next` wraps past 0 to 1. `fill_record` sets a flag only for a nonzero word, so a source with no
-producer stays unknown in the record and fires no soft cut. Nothing in this commit produces an epoch.
+A word of 0 means unknown. `next` wraps past 0 to 1, so a word that has moved never reads 0 again. `fill_record` sets a
+flag only for a nonzero word.
 
-The plain ray-scene hash can't drive a cut: `ray_scene_get_region` follows the camera unsnapped and `material_offset` is
-a running count, so one instance crossing the region's edge changes the hash. In a populated exterior that restarts
-history on most moving frames.
+The producers:
 
-With no producer, scene, light and sky stay unknown, so R2's history lags a real scene or lamp change.
+| Source | Bumped by | When |
+|---|---|---|
+| `SOURCE_SCENE` | `RayScene::update` | once per update whose ray-scene content changed: an instance added, removed or moved, or its layer mask or material entries changed; never on an update with no change |
+| `SOURCE_WORLD` | `RayScene::update` | when no instance of the last non-empty scene is left: the world was replaced or cleared |
+| `SOURCE_SKY` | `SkyRD::sky_set_material`, `RendererSceneRenderRD::render_scene` | a sky's material replaced, or an environment drawn with a different sky than the last frame it was drawn |
+| `SOURCE_ORIGIN` | `RayScene::update` | the ray scene's anchor snapped to a new cell |
+| `SOURCE_LIGHT` | `RtgiPass` | a lamp change or a directional jump read from the light tracker |
+
+`GISceneTracker` decides the scene and world bumps, and holds no GPU state, so the doctests cover it. Its signature is a
+sum over the instances of one 32-bit hash each, with 2^32 added per instance, so it does not depend on the order the
+cull hands the instances in, and adding an instance changes it. A changed instance goes unseen with odds of about 2^-32.
+The hash covers the mesh RID, the mesh's triangle count and bounds (so a mesh re-captured under the same RID is a
+change), the world transform (not the anchor-relative one, so an anchor snap is not a scene change), the layer mask and
+the instance's material entries.
+
+A member is the geometry instance's address mixed with its mesh RID. Geometry instances come from a paged allocator that
+hands freed slots out again, so the address alone would read a new world's instances as kept. The set is rebuilt only
+when the members' own order-free sum changes, also on an update whose scene did not change, so a moved instance costs no
+rebuild and a later change compares with the current set. The world rule reads only membership, so a moved instance is a
+scene change and not a world change. An instance that stays across a world swap, a held item for one, keeps the world
+epoch from moving.
+
+`RayScene::update` bumps the scene epoch right after its instance loop, before anything later in the update, so a
+consumer that stamps a frame later in the same update stamps it with the new value.
+
+The plain ray-scene hash (`instance_signature`) can't drive a cut: it is anchor-relative and `material_offset` is a
+running count, so it changes on an anchor snap and with the cull order. It only decides the rebuild.
+
+A sky changing gradually through its shader parameters is not a replacement and bumps nothing; the temporal pass
+follows it. A material swap on a sky that several environments share bumps once. `RendererSceneRenderRD::free` drops an
+environment's entry from `gi_environment_skies`. A viewport that moves from one seen environment to another bumps nothing
+for the sky.
+
+The scene epoch moves on every update while anything in the ray-scene region moves, or while a game animates an emission
+scale that goes into the material entries. R2 does not read it.
 
 ### `servers/rendering/renderer_rd/environment/gi_compositor.cpp`
 
@@ -92,5 +126,8 @@ No public status API and no debug-draw enum exist, so nothing draws these views 
 
 ### `tests/servers/rendering/test_gi_epochs.cpp`
 
-Covers the epoch rules. A publish after the early-out erased the state can't be tested without a device, because
-`RenderSceneBuffersRD`'s destructor frees samplers through `MaterialStorage`.
+Covers the epoch rules: the record flags, the wrap past 0, the world word in the snapshot, the order-free scene
+signature, no bump on an unchanged update, one step per change, the world rule (replaced, cleared, refilled from empty,
+an instance moved), the member set refreshed on an unchanged scene, and a reused address with another mesh. That the
+bump comes before later readers in the same update follows from its place in `RayScene::update` and has no test. A publish after the early-out erased the state can't be
+tested without a device, because `RenderSceneBuffersRD`'s destructor frees samplers through `MaterialStorage`.

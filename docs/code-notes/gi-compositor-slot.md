@@ -45,8 +45,9 @@ cleared after every composition, so a provider that stops turns the slot off on 
 
 ### `servers/rendering/renderer_rd/environment/gi_provider.h`
 
-`gi_provider_make_record` leaves the record's epoch words at 0 with their flags clear. Nothing on dev produces them yet,
-so claiming them would be false.
+`gi_provider_make_record` leaves the record's epoch words at 0 with their flags clear. `GIEpochs::fill_record` fills
+them for a provider that publishes, and sets a flag only for a word that has moved (see `rtgi-r2.md`). The record has
+no world word; a reader that needs it takes `GIEpochs::snapshot`.
 
 ### `servers/rendering/renderer_rd/shaders/environment/gi_compositor_inc.glsl`
 
@@ -75,12 +76,10 @@ above DDGI, surfels, voxel and SDFGI, and it doesn't reach the reflection buffer
 | `compositor/debug_radiance` | 0.0 | grey radiance |
 | `compositor/debug_dump_path` | "" | see `GICompositor::_dump_ambient` |
 
-### Left for the first real provider
+### The first real provider
 
-`gi_epochs.*`, `gi_module_hooks.*`, `gi_provider_inc.glsl`, a provider registry, `gi_compositor_coverage` and
-`gi_provider_confidence_from_samples` aren't here, because nothing here consumes them. `GICompositor::_run_synthetic` is
-the only writer of `ViewportState`, and `_process` makes the textures after the GI dispatch. A real provider needs the
-textures made before it runs and a public call to publish its record.
+R2 (`rtgi-r2.md`) is the first provider. `GICompositor::ensure_slot_textures` makes the textures before it runs, and
+`GICompositor::publish` takes its record. `GICompositor::_run_synthetic` is the other writer of `ViewportState`.
 
 ### Limits
 
