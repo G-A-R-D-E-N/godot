@@ -385,7 +385,7 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 	} else if ((inputs.camera_transform.origin - p_buffers->previous_transform.origin).length() > CAMERA_CUT_DISTANCE) {
 		cut = CUT_CAMERA;
 	}
-	const bool epoch_changed = p_buffers->have_epochs && (p_buffers->previous_epochs.scene != inputs.epochs.scene || p_buffers->previous_epochs.sky != inputs.epochs.sky);
+	const bool epoch_changed = p_buffers->have_epochs && (p_buffers->previous_epochs.world != inputs.epochs.world || p_buffers->previous_epochs.sky != inputs.epochs.sky);
 	RtgiRestarts::Selection selection;
 	RtgiRestarts::DirectionalRead directional;
 	_read_light_changes(p_buffers, settings, inputs, selection, directional);

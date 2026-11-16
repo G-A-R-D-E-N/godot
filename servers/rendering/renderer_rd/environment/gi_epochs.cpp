@@ -30,6 +30,8 @@
 
 #include "gi_epochs.h"
 
+#include "core/templates/hashfuncs.h"
+
 namespace RendererRD {
 
 GIEpochs *GIEpochs::get_singleton() {
@@ -42,9 +44,65 @@ uint32_t GIEpochs::next(uint32_t p_value) {
 	return value == 0 ? 1 : value;
 }
 
+uint64_t GISceneTracker::add_instance(uint64_t p_signature, uint32_t p_instance_hash) {
+	return p_signature + (uint64_t(p_instance_hash) | (uint64_t(1) << 32));
+}
+
+uint64_t GISceneTracker::member_key(const void *p_instance, uint64_t p_mesh_id) {
+	return (uint64_t(uintptr_t(p_instance)) * 0x9E3779B97F4A7C15ull) ^ p_mesh_id;
+}
+
+uint64_t GISceneTracker::member_signature_of(const LocalVector<uint64_t> &p_members) {
+	uint64_t result = 0;
+	for (uint64_t member : p_members) {
+		result = add_instance(result, hash_murmur3_one_64(member));
+	}
+	return result;
+}
+
+GISceneTracker::Change GISceneTracker::update(uint64_t p_signature, const LocalVector<uint64_t> &p_members) {
+	Change change;
+	const uint64_t new_member_signature = member_signature_of(p_members);
+	const bool same_members = have && new_member_signature == member_signature;
+	if (have && p_signature != signature) {
+		change.scene = true;
+		if (!members.is_empty() && !same_members) {
+			bool kept = false;
+			for (uint64_t member : p_members) {
+				if (members.has(member)) {
+					kept = true;
+					break;
+				}
+			}
+			change.world = !kept;
+		}
+	} else if (!have) {
+		change.scene = true;
+	}
+	if (!same_members) {
+		members.clear();
+		for (uint64_t member : p_members) {
+			members.insert(member);
+		}
+		member_signature = new_member_signature;
+	}
+	signature = p_signature;
+	have = true;
+	return change;
+}
+
 void GIEpochs::bump(Source p_source) {
 	if (p_source < SOURCE_COUNT) {
 		epochs[p_source] = next(epochs[p_source]);
+	}
+}
+
+void GIEpochs::apply(const GISceneTracker::Change &p_change) {
+	if (p_change.scene) {
+		bump(SOURCE_SCENE);
+	}
+	if (p_change.world) {
+		bump(SOURCE_WORLD);
 	}
 }
 
@@ -58,6 +116,7 @@ GIEpochs::Snapshot GIEpochs::snapshot() const {
 	result.light = epochs[SOURCE_LIGHT];
 	result.sky = epochs[SOURCE_SKY];
 	result.origin = epochs[SOURCE_ORIGIN];
+	result.world = epochs[SOURCE_WORLD];
 	return result;
 }
 

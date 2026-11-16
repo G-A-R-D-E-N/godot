@@ -848,6 +848,8 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	}
 	LocalVector<BuildPrimitive> primitives;
 	uint32_t signature = HASH_MURMUR3_SEED;
+	uint64_t scene_signature = 0;
+	scene_members.clear();
 	for (uint32_t i = 0; i < p_instances.size(); i++) {
 		RenderGeometryInstanceBase *geometry = static_cast<RenderGeometryInstanceBase *>(p_instances[i]);
 		if (!geometry->data || geometry->data->base_type != RSE::INSTANCE_MESH || geometry->data->skeleton.is_valid()) {
@@ -928,7 +930,17 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		primitives.push_back(primitive);
 		instances.push_back(instance);
 		signature = hash_murmur3_buffer(&instance, sizeof(Instance), signature);
+
+		uint32_t scene_hash = hash_murmur3_one_64(mesh_rid.get_id());
+		scene_hash = hash_murmur3_buffer(&geometry->transform, sizeof(Transform3D), scene_hash);
+		scene_hash = hash_murmur3_one_32(geometry->layer_mask, scene_hash);
+		scene_hash = hash_murmur3_one_32(mesh->triangle_surface.size(), scene_hash);
+		scene_hash = hash_murmur3_buffer(&mesh->aabb, sizeof(AABB), scene_hash);
+		scene_hash = hash_murmur3_buffer(materials.ptr() + instance.material_offset, sizeof(Material) * mesh->surface_count, scene_hash);
+		scene_signature = GISceneTracker::add_instance(scene_signature, scene_hash);
+		scene_members.push_back(GISceneTracker::member_key(p_instances[i], mesh_rid.get_id()));
 	}
+	GIEpochs::get_singleton()->apply(scene_tracker.update(scene_signature, scene_members));
 
 	const bool rebuilt = signature != instance_signature || anchor_moved || need_assembly || tlas_node_buffer.is_null();
 	if (rebuilt) {

@@ -32,9 +32,30 @@
 
 #include "gi_provider.h"
 
+#include "core/templates/hash_set.h"
+#include "core/templates/local_vector.h"
+
 #include <stdint.h>
 
 namespace RendererRD {
+
+class GISceneTracker {
+	uint64_t signature = 0;
+	uint64_t member_signature = 0;
+	bool have = false;
+	HashSet<uint64_t> members;
+
+public:
+	struct Change {
+		bool scene = false;
+		bool world = false;
+	};
+
+	static uint64_t add_instance(uint64_t p_signature, uint32_t p_instance_hash);
+	static uint64_t member_key(const void *p_instance, uint64_t p_mesh_id);
+	static uint64_t member_signature_of(const LocalVector<uint64_t> &p_members);
+	Change update(uint64_t p_signature, const LocalVector<uint64_t> &p_members);
+};
 
 class GIEpochs {
 public:
@@ -43,7 +64,8 @@ public:
 		SOURCE_LIGHT = 1,
 		SOURCE_SKY = 2,
 		SOURCE_ORIGIN = 3,
-		SOURCE_COUNT = 4,
+		SOURCE_WORLD = 4,
+		SOURCE_COUNT = 5,
 	};
 
 	struct Snapshot {
@@ -51,6 +73,7 @@ public:
 		uint32_t light;
 		uint32_t sky;
 		uint32_t origin;
+		uint32_t world;
 	};
 
 private:
@@ -61,6 +84,7 @@ public:
 	static uint32_t next(uint32_t p_value);
 
 	void bump(Source p_source);
+	void apply(const GISceneTracker::Change &p_change);
 
 	uint32_t get(Source p_source) const;
 	Snapshot snapshot() const;
