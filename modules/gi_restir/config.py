@@ -6,10 +6,6 @@ def configure(env):
     pass
 
 
-def is_enabled():
-    return False
-
-
 def get_doc_classes():
     return []
 
