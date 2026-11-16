@@ -3,10 +3,10 @@
 ### `servers/rendering/renderer_rd/environment/gi_compositor.cpp`
 
 `GICompositor::process` is called at the end of `GI::process_gi`, after the GI dispatch and inside its label. With
-`compositor/extra_provider` and `compositor/debug_provider` both false it returns at once, and frees what an earlier
-frame left in this viewport. A viewport that stops reaching `GI::process_gi` keeps those textures until its buffers are
-configured again. No shader or pipeline exists until the first frame with one of the settings on, so a run with the slot
-off compiles and binds nothing new.
+`compositor/extra_provider` and `compositor/debug_provider` both false and R2 (`rtgi/enabled`) off it returns at once,
+and frees what an earlier frame left in this viewport. A viewport that stops reaching `GI::process_gi` keeps those
+textures until its buffers are configured again. No shader or pipeline exists until the first frame with one of the two
+settings or R2 on, so a run with all three off compiles and binds nothing new.
 
 The slot is a separate compute pass instead of a `USE_GI_EXTRA` variant of `gi.glsl`:
 
@@ -19,15 +19,26 @@ What it costs: the pass reads the ambient texel after the GI dispatch stored it,
 through float16 once more than inside `gi.glsl`, and can differ from that form by one float16 step. It adds one compute
 dispatch per view with the slot on.
 
-`GICompositor::_dump_ambient`: with `compositor/debug_dump_path` set and one of the two settings on, each frame writes
-`<path>.pre` (ambient before composition), `<path>` (after) and `<path>.txt` (width, height, slot state as a number). Two
-dumps of the same frame let a checker compare against the real lower stack. With both settings off nothing is written.
+`GICompositor::_dump_ambient`: with `compositor/debug_dump_path` set and one of the two settings or R2 on, each frame
+writes `<path>.pre` (ambient before composition), `<path>` (after) and `<path>.txt` (width, height, slot state as a
+number). Two dumps of the same frame let a checker compare against the real lower stack. With all three off nothing is
+written.
 The path must be set before the viewport's first GI frame, because `GI::process_gi` adds the copy-from usage bit when it
 creates the ambient texture. `GICompositor::_ambient_can_copy` skips the dump with one warning otherwise.
 
 The dump reads back in the middle of the frame. That flush bumps `RenderingDevice::frames_drawn`, which `MultiUmaBuffer`
 uses to detect a new frame, so with two 3D viewports or a reflection probe in one frame a buffer's ring can advance twice
 and the next frame can write a slot the GPU still reads. Use the dump with one 3D viewport and no reflection probe.
+
+R2 (`rtgi-r2.md`) is the first provider. `GICompositor::ensure_slot_textures` makes the textures before it runs, and
+`GICompositor::publish` takes its record. `GICompositor::_run_synthetic` is the other writer of `ViewportState`.
+
+Limits:
+
+- `GICompositor::process`: the slot needs `GI::process_gi` to run, so with no GI method on it does nothing.
+- `GICompositor::_process`: with `extra_provider` on and no provider, the two textures stay allocated, 10 bytes per texel
+  per view. The first frame with a setting on compiles the shaders and pipelines and can stall.
+- `GICompositor::_dump_ambient`: reads layer 0 only. Multiview loops over views like the GI dispatch and isn't tested.
 
 ### `servers/rendering/renderer_rd/environment/gi_compositor.h`
 
@@ -66,6 +77,9 @@ above DDGI, surfels, voxel and SDFGI, and it doesn't reach the reflection buffer
 
 `main` skips the store when `!(coverage > 0.0)`, so a NaN or negative coverage leaves the texel's bytes alone.
 
+Limits: with VRS on, the GI dispatch writes coarse texels and the compose pass works per texel. A provider's NaN or
+infinite radiance would reach the ambient buffer; the provider owns that guard.
+
 ### `servers/rendering/rendering_server.cpp`
 
 | Internal setting | Default | Meaning |
@@ -76,22 +90,12 @@ above DDGI, surfels, voxel and SDFGI, and it doesn't reach the reflection buffer
 | `compositor/debug_radiance` | 0.0 | grey radiance |
 | `compositor/debug_dump_path` | "" | see `GICompositor::_dump_ambient` |
 
-### The first real provider
+### `servers/rendering/renderer_rd/shaders/forward_clustered/scene_forward_clustered.glsl`
 
-R2 (`rtgi-r2.md`) is the first provider. `GICompositor::ensure_slot_textures` makes the textures before it runs, and
-`GICompositor::publish` takes its record. `GICompositor::_run_synthetic` is the other writer of `ViewportState`.
+The slot's light is in `buffer_ambient`, so it enters `bounce_gi_light` and with it the screen-space bounce source of
+the next frame. It also takes full SSAO and multi-bounce AO, because the relief at `ambient_ao` follows surfel coverage
+only.
 
-### Limits
+### `tests/servers/rendering/test_gi_compositor.cpp`
 
-- `GICompositor::process`: the slot needs `GI::process_gi` to run, so with no GI method on it does nothing.
-- `GICompositor::_process`: with `extra_provider` on and no provider, the two textures stay allocated, 10 bytes per texel
-  per view. The first frame with a setting on compiles the shaders and pipelines and can stall.
-- `GICompositor::_dump_ambient`: reads layer 0 only. Multiview loops over views like the GI dispatch and isn't tested.
-- `gi_extra_compose.glsl`: with VRS on, the GI dispatch writes coarse texels and the compose pass works per texel.
-- `gi_extra_compose.glsl`: a provider's NaN or infinite radiance would reach the ambient buffer. The provider owns that
-  guard.
-- `scene_forward_clustered.glsl`: the slot's light is in `buffer_ambient`, so it enters `bounce_gi_light` and with it the
-  screen-space bounce source of the next frame. It also takes full SSAO and multi-bounce AO, because the relief at
-  `ambient_ao` follows surfel coverage only.
-- `tests/servers/rendering/test_gi_compositor.cpp` covers the pure helpers. The default-off path needs a rendering device
-  and has no unit test.
+Covers the pure helpers. The default-off path needs a rendering device and has no unit test.
