@@ -30,10 +30,10 @@
 
 #include "direct_sampler_lab.h"
 
-#include "modules/gi_restir_di/di_sampler_reference.h"
-
 #include "core/io/file_access.h"
 #include "core/variant/array.h"
+
+#include "modules/gi_restir_di/di_sampler_reference.h"
 
 namespace {
 

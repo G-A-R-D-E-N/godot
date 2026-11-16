@@ -6,8 +6,8 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-#include "../../../servers/rendering/renderer_rd/shaders/light_data_inc.glsl"
 #include "../../../servers/rendering/renderer_rd/shaders/environment/di_sampler_inc.glsl"
+#include "../../../servers/rendering/renderer_rd/shaders/light_data_inc.glsl"
 
 #define MAX_ENTRIES 8
 #define MAX_NEIGHBORS 4

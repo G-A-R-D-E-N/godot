@@ -35,11 +35,12 @@
 #include "core/templates/local_vector.h"
 #include "core/templates/rid.h"
 #include "core/templates/vector.h"
-#include "modules/gi_restir_di/di_resampler_config.gen.h"
-#include "modules/gi_restir_di/shaders/di_resample.glsl.gen.h"
 #include "servers/rendering/renderer_rd/environment/direct_resampler_hooks.h"
 #include "servers/rendering/renderer_rd/pipeline_deferred_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_buffer_custom_data_rd.h"
+
+#include "modules/gi_restir_di/di_resampler_config.gen.h"
+#include "modules/gi_restir_di/shaders/di_resample.glsl.gen.h"
 
 #ifdef DI_RESAMPLER_LAB
 #include "modules/gi_restir_di/direct_sampler_lab.h"

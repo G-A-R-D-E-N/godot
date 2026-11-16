@@ -3348,27 +3348,27 @@ void fragment_shader(in SceneData scene_data) {
 					hvec3 lamp_diffuse = direct_passes > 0 ? hvec3(0.0) : diffuse_light;
 					hvec3 lamp_specular = direct_passes > 0 ? hvec3(0.0) : direct_specular_light;
 #endif
-				light_process_omni(light_index, vertex, view, normal, vertex_ddx, vertex_ddy, f0, roughness, metallic, scene_data.taa_frame_count, albedo, alpha, screen_uv, energy_compensation,
+					light_process_omni(light_index, vertex, view, normal, vertex_ddx, vertex_ddy, f0, roughness, metallic, scene_data.taa_frame_count, albedo, alpha, screen_uv, energy_compensation,
 #ifdef LIGHT_BACKLIGHT_USED
-						backlight,
+							backlight,
 #endif
 #ifdef LIGHT_TRANSMITTANCE_USED
-						transmittance_color,
-						transmittance_depth,
-						transmittance_boost,
+							transmittance_color,
+							transmittance_depth,
+							transmittance_boost,
 #endif
 #ifdef LIGHT_RIM_USED
-						rim,
-						rim_tint,
+							rim,
+							rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-						clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
+							clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_CLEARCOAT_USED
 #ifdef LIGHT_ANISOTROPY_USED
-						binormal, tangent, anisotropy,
+							binormal, tangent, anisotropy,
 #endif
 #ifdef DIRECT_RESAMPLED_ROUTE
-						lamp_diffuse, lamp_specular);
+							lamp_diffuse, lamp_specular);
 					if (direct_passes > 0) {
 						diffuse_light += hvec3(vec3(lamp_diffuse) * direct_scale);
 						direct_specular_light += hvec3(vec3(lamp_specular) * direct_scale);
@@ -3433,27 +3433,27 @@ void fragment_shader(in SceneData scene_data) {
 					hvec3 lamp_diffuse = direct_passes > 0 ? hvec3(0.0) : diffuse_light;
 					hvec3 lamp_specular = direct_passes > 0 ? hvec3(0.0) : direct_specular_light;
 #endif
-				light_process_spot(light_index, vertex, view, normal, vertex_ddx, vertex_ddy, f0, roughness, metallic, scene_data.taa_frame_count, albedo, alpha, screen_uv, energy_compensation,
+					light_process_spot(light_index, vertex, view, normal, vertex_ddx, vertex_ddy, f0, roughness, metallic, scene_data.taa_frame_count, albedo, alpha, screen_uv, energy_compensation,
 #ifdef LIGHT_BACKLIGHT_USED
-						backlight,
+							backlight,
 #endif
 #ifdef LIGHT_TRANSMITTANCE_USED
-						transmittance_color,
-						transmittance_depth,
-						transmittance_boost,
+							transmittance_color,
+							transmittance_depth,
+							transmittance_boost,
 #endif
 #ifdef LIGHT_RIM_USED
-						rim,
-						rim_tint,
+							rim,
+							rim_tint,
 #endif
 #ifdef LIGHT_CLEARCOAT_USED
-						clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
+							clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
 #endif // LIGHT_CLEARCOAT_USED
 #ifdef LIGHT_ANISOTROPY_USED
-						binormal, tangent, anisotropy,
+							binormal, tangent, anisotropy,
 #endif
 #ifdef DIRECT_RESAMPLED_ROUTE
-						lamp_diffuse, lamp_specular);
+							lamp_diffuse, lamp_specular);
 					if (direct_passes > 0) {
 						diffuse_light += hvec3(vec3(lamp_diffuse) * direct_scale);
 						direct_specular_light += hvec3(vec3(lamp_specular) * direct_scale);

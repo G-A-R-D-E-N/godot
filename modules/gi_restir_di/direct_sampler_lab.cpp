@@ -30,14 +30,14 @@
 
 #include "direct_sampler_lab.h"
 
-#include "modules/gi_restir_di/di_sampler_reference.h"
-#include "modules/gi_restir_di/shaders/di_sampler_test.glsl.gen.h"
-
 #include "core/config/project_settings.h"
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
 #include "core/io/json.h"
 #include "servers/rendering/rendering_device.h"
+
+#include "modules/gi_restir_di/di_sampler_reference.h"
+#include "modules/gi_restir_di/shaders/di_sampler_test.glsl.gen.h"
 
 #define DI_SAMPLER_LAB_SETTING(m_name) ("rendering/global_illumination/direct/resampled/debug/" m_name)
 

@@ -30,10 +30,10 @@
 
 #pragma once
 
-#include "modules/gi_restir_di/di_sampler_reference.h"
-
 #include "core/templates/local_vector.h"
 #include "tests/test_macros.h"
+
+#include "modules/gi_restir_di/di_sampler_reference.h"
 
 #include <limits>
 

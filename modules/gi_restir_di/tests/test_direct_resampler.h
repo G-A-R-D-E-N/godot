@@ -30,9 +30,9 @@
 
 #pragma once
 
-#include "modules/gi_restir_di/direct_resampler.h"
-
 #include "tests/test_macros.h"
+
+#include "modules/gi_restir_di/direct_resampler.h"
 
 #include <cstddef>
 
