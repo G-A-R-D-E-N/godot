@@ -254,16 +254,16 @@ pass (get_final_capture returns them; the blocker scene's view 62 oracle uses it
 Planner: restir_epochs.h/.cpp, restir_plan_epochs() decides per frame from the history flags, the previous and current GIEpochs::Snapshot and the dirty feed
 (RtgiFrameInputs.dirty_source, the GIEpochs singleton core sets; no core accessor was added). Order: no history (FIRST), core history_cut (REQUEST; camera cut,
 resize and backend switch reach the module only through it), hardware change (BACKEND), a Fold change (FOLD), origin epoch change (ORIGIN), world epoch change (WORLD),
-then a scene epoch change. The scene epoch moves on every ray scene update in which the scene tracker's signature changed (an instance added, removed or moved, its mesh, layer mask or
-material entries changed), so a scene
+then a scene epoch change. The scene epoch moves on every ray scene update in which the scene tracker's signature changed (an instance added, removed or moved, its mesh
+rebuilt, its layer mask or material entries changed; a mesh rewritten every frame moves it on every update), so a scene
 change is not a cut by itself. The backend holds the ray scene's dirty feed (RayScene::FEED_MODULE, taken in resample, given back when its last state is released) and,
 when the scene epoch differs from the one stored with the history, asks GIEpochs::get_dirty_boxes(stored scene epoch) through RtgiFrameInputs.dirty_source. The planner
 then reads: no live feed, SCENE_NO_FEED and a full cut; DIRTY_NONE (a change with no geometry behind it, a material entry for one), no cut; DIRTY_OVERFLOW or more than
 RESTIR_DIRTY_MAX boxes, SCENE_OVERFLOW and a full cut; DIRTY_BOXES with no box or a box that is not finite or has a negative size, SCENE_UNLOCALISED and a full cut;
 otherwise the boxes go to the dirty test below and nothing else is cut. A world epoch change (no instance of the last ray scene is left) is a full cut whatever the
 feed says. Boxes are world space; the planner subtracts RayScene::get_anchor() to get the anchor-relative space of the geometry. The feed steps the scene epoch itself
-when a frame has changes or a raw overflow and the scene tracker did not step it in that update (RayScene::feed_frame_needs_epoch: a rebuilt mesh with the same triangle
-count and bounds, a hardware usability flip), because get_dirty_boxes returns only frames newer than the reader's epoch. State counters: cut_counts per reason,
+when a frame has changes or a raw overflow and the scene tracker did not step it in that update (RayScene::feed_frame_needs_epoch: a hardware
+usability flip is the one change the feed sees and the tracker's hash does not), because get_dirty_boxes returns only frames newer than the reader's epoch. State counters: cut_counts per reason,
 dirty_frames; status keys cut_reason, dirty_boxes, dirty_feed, scene_changed, light_changed, sky_changed, origin_changed, world_changed, light_cap, light_frames_left.
 What makes a box: the feed compares, per instance, the world transform, the mesh and its generation, hardware usability, and a state word built from the layer mask
 and each surface's material flags (shadow casting included) and coverage (RayScene::feed_surface_state). So a change of who a mesh shadows or how much it lets through
