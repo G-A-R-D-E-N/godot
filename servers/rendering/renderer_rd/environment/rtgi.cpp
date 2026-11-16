@@ -377,6 +377,7 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 
 	RtgiResampleBackend *backend = GIModuleHooks::get_singleton()->get_rtgi_backend();
 	if (backend && !backend->is_active()) {
+		backend->release(p_render_buffers.ptr());
 		backend = nullptr;
 	}
 	if (backend && backend->wants_all_tiles()) {
@@ -641,7 +642,7 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 		backend_inputs.frame_index = inputs.frame_index;
 		backend_inputs.trace_scale = scale;
 		backend_inputs.epochs = inputs.epochs;
-		backend_inputs.dirty_source = nullptr;
+		backend_inputs.dirty_source = GIEpochs::get_singleton();
 		backend_inputs.history_cut = !backend_ran_before || (flags & (FRAME_FLAG_HISTORY_CUT | FRAME_FLAG_CAMERA_CUT)) != 0u;
 		backend_inputs.hardware = ray_scene->uses_hardware();
 		backend_inputs.deterministic = false;

@@ -357,6 +357,73 @@ TEST_CASE("[GIEpochs] The scene epoch query reads overflow until the scene word 
 	CHECK(result[0].position.is_equal_approx(Vector3(0, 0, 0)));
 }
 
+TEST_CASE("[GIEpochs] The scene epoch query returns the boxes of every frame newer than the reader's epoch") {
+	GIEpochs epochs;
+	LocalVector<AABB> first;
+	first.push_back(AABB(Vector3(0, 0, 0), Vector3(1, 1, 1)));
+	LocalVector<AABB> second;
+	second.push_back(AABB(Vector3(10, 0, 0), Vector3(1, 1, 1)));
+	LocalVector<AABB> result;
+
+	epochs.bump(GIEpochs::SOURCE_SCENE);
+	_publish(epochs, 1, LocalVector<AABB>());
+	const uint32_t held = epochs.get(GIEpochs::SOURCE_SCENE);
+	epochs.bump(GIEpochs::SOURCE_SCENE);
+	_publish(epochs, 2, first);
+	_publish(epochs, 3, LocalVector<AABB>());
+	const uint32_t middle = epochs.get(GIEpochs::SOURCE_SCENE);
+	epochs.bump(GIEpochs::SOURCE_SCENE);
+	_publish(epochs, 4, second);
+
+	CHECK(epochs.get_dirty_boxes(held, result) == GIEpochs::DIRTY_BOXES);
+	REQUIRE(result.size() == 2);
+	CHECK(result[0].position.is_equal_approx(Vector3(0, 0, 0)));
+	CHECK(result[1].position.is_equal_approx(Vector3(10, 0, 0)));
+	CHECK(epochs.get_dirty_boxes(middle, result) == GIEpochs::DIRTY_BOXES);
+	REQUIRE(result.size() == 1);
+	CHECK(result[0].position.is_equal_approx(Vector3(10, 0, 0)));
+	CHECK(epochs.get_dirty_boxes(epochs.get(GIEpochs::SOURCE_SCENE), result) == GIEpochs::DIRTY_NONE);
+	CHECK(result.is_empty());
+}
+
+TEST_CASE("[GIEpochs] A feed frame with changes steps the scene epoch itself when the scene tracker did not") {
+	using RendererRD::RayScene;
+	CHECK(RayScene::feed_frame_needs_epoch(1, false, false));
+	CHECK(RayScene::feed_frame_needs_epoch(0, true, false));
+	CHECK_FALSE(RayScene::feed_frame_needs_epoch(0, false, false));
+	CHECK_FALSE(RayScene::feed_frame_needs_epoch(1, false, true));
+	CHECK_FALSE(RayScene::feed_frame_needs_epoch(0, true, true));
+
+	GIEpochs epochs;
+	LocalVector<AABB> boxes;
+	boxes.push_back(AABB(Vector3(0, 0, 0), Vector3(1, 1, 1)));
+	LocalVector<AABB> result;
+	epochs.bump(GIEpochs::SOURCE_SCENE);
+	_publish(epochs, 1, LocalVector<AABB>());
+	const uint32_t held = epochs.get(GIEpochs::SOURCE_SCENE);
+
+	_publish(epochs, 2, boxes);
+	CHECK(epochs.get_dirty_boxes(held, result) == GIEpochs::DIRTY_NONE);
+
+	if (RayScene::feed_frame_needs_epoch(1, false, epochs.get(GIEpochs::SOURCE_SCENE) != held)) {
+		epochs.bump(GIEpochs::SOURCE_SCENE);
+	}
+	_publish(epochs, 3, boxes);
+	CHECK(epochs.get(GIEpochs::SOURCE_SCENE) != held);
+	CHECK(epochs.get_dirty_boxes(held, result) == GIEpochs::DIRTY_BOXES);
+	CHECK(result.size() == 1);
+}
+
+TEST_CASE("[GIEpochs] The feed's state word moves with a surface's flags, its coverage, the layer mask and the surface order") {
+	const uint32_t layers = hash_murmur3_one_32(1u);
+	const uint32_t base = RayScene::feed_surface_state(RayScene::feed_surface_state(layers, 3u, 1.0f), 5u, 0.5f);
+	CHECK(base == RayScene::feed_surface_state(RayScene::feed_surface_state(layers, 3u, 1.0f), 5u, 0.5f));
+	CHECK(base != RayScene::feed_surface_state(RayScene::feed_surface_state(layers, 3u | 16u, 1.0f), 5u, 0.5f));
+	CHECK(base != RayScene::feed_surface_state(RayScene::feed_surface_state(layers, 3u, 1.0f), 5u, 0.25f));
+	CHECK(base != RayScene::feed_surface_state(RayScene::feed_surface_state(hash_murmur3_one_32(2u), 3u, 1.0f), 5u, 0.5f));
+	CHECK(base != RayScene::feed_surface_state(RayScene::feed_surface_state(layers, 5u, 0.5f), 3u, 1.0f));
+}
+
 } // namespace TestGIEpochs
 
 #endif

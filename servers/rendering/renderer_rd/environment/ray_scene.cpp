@@ -906,6 +906,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		const uint32_t cast_flags = shadow_cast_flags(geometry->data->cast_shadows);
 		uint64_t material_candidates = 0;
 		uint64_t candidates = 0;
+		uint32_t feed_state = hash_murmur3_one_32(geometry->layer_mask);
 
 		for (uint32_t s = 0; s < mesh->surface_count; s++) {
 			RID material = geometry->data->material_override;
@@ -924,6 +925,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			}
 			materials.push_back(cached->entry);
 			materials[materials.size() - 1].flags |= cast_flags;
+			feed_state = feed_surface_state(feed_state, materials[materials.size() - 1].flags, materials[materials.size() - 1].coverage);
 			if (accel) {
 				material_candidates |= surface_candidates(s, cached->entry.flags);
 				candidates |= surface_candidates(s, materials[materials.size() - 1].flags);
@@ -951,7 +953,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		}
 		primitive.index = instances.size();
 		if (feed_on) {
-			_feed_observe(geometry, geometry->transform, mesh_rid, *mesh, hw_instance_usable);
+			_feed_observe(geometry, geometry->transform, mesh_rid, *mesh, hw_instance_usable, feed_state);
 		}
 		primitives.push_back(primitive);
 		instances.push_back(instance);

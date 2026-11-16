@@ -203,6 +203,8 @@ public:
 	static void pack_area(const Basis &p_basis, const Vector2 &p_area_size, Light &r_light);
 	static void pack_shape(RSE::LightType p_type, const Basis &p_basis, const Vector2 &p_area_size, float p_direct_size, Light &r_light);
 	static bool feed_frame_overflow(bool p_raw_overflow, bool p_baseline) { return p_raw_overflow || p_baseline; }
+	static bool feed_frame_needs_epoch(uint32_t p_changes, bool p_raw_overflow, bool p_epoch_moved) { return (p_changes > 0 || p_raw_overflow) && !p_epoch_moved; }
+	static uint32_t feed_surface_state(uint32_t p_state, uint32_t p_flags, float p_coverage) { return hash_murmur3_one_float(p_coverage, hash_murmur3_one_32(p_flags, p_state)); }
 	static uint32_t shadow_cast_flags(RSE::ShadowCastingSetting p_setting);
 	static uint64_t surface_candidates(uint32_t p_surface, uint32_t p_flags);
 	static uint32_t instance_class(uint64_t p_candidates, uint64_t p_split);
@@ -245,6 +247,7 @@ private:
 		uint64_t generation = 0;
 		AABB bounds;
 		uint32_t stamp = 0;
+		uint32_t state = 0;
 		uint8_t history = 0;
 		uint8_t usable = 1;
 		bool listed = false;
@@ -262,6 +265,7 @@ private:
 	uint32_t feed_survivors = 0;
 	uint32_t feed_tracked_before = 0;
 	uint32_t feed_generation_before = 0;
+	uint32_t feed_epoch_before = 0;
 	uint32_t structure_generation = 0;
 	Ref<FileAccess> feed_log;
 	int feed_log_mode = 0;
@@ -346,7 +350,7 @@ private:
 	uint32_t hw_group_count = 0;
 
 	void _feed_begin();
-	void _feed_observe(const void *p_key, const Transform3D &p_world, RID p_mesh_rid, const MeshEntry &p_mesh, bool p_usable);
+	void _feed_observe(const void *p_key, const Transform3D &p_world, RID p_mesh_rid, const MeshEntry &p_mesh, bool p_usable, uint32_t p_state);
 	void _feed_end();
 	void _feed_stop();
 	void _feed_log_line();

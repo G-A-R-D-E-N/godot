@@ -92,6 +92,7 @@ void RayScene::_feed_begin() {
 		feed_active.clear();
 		feed_generation_before = structure_generation;
 	}
+	feed_epoch_before = GIEpochs::get_singleton()->get(GIEpochs::SOURCE_SCENE);
 	feed_stamp++;
 	feed_raw.clear();
 	feed_raw_overflow = false;
@@ -107,13 +108,13 @@ void RayScene::_feed_begin() {
 	}
 }
 
-void RayScene::_feed_observe(const void *p_key, const Transform3D &p_world, RID p_mesh_rid, const MeshEntry &p_mesh, bool p_usable) {
+void RayScene::_feed_observe(const void *p_key, const Transform3D &p_world, RID p_mesh_rid, const MeshEntry &p_mesh, bool p_usable, uint32_t p_state) {
 	feed_seen++;
 	FeedRecord *record = feed_records.getptr(p_key);
 	if (record) {
 		feed_survivors++;
 		record->stamp = feed_stamp;
-		if (record->mesh == p_mesh_rid && record->generation == p_mesh.generation && record->usable == uint8_t(p_usable) && memcmp(&record->world, &p_world, sizeof(Transform3D)) == 0) {
+		if (record->mesh == p_mesh_rid && record->generation == p_mesh.generation && record->usable == uint8_t(p_usable) && record->state == p_state && memcmp(&record->world, &p_world, sizeof(Transform3D)) == 0) {
 			return;
 		}
 		feed.changes++;
@@ -126,6 +127,7 @@ void RayScene::_feed_observe(const void *p_key, const Transform3D &p_world, RID 
 		record->mesh = p_mesh_rid;
 		record->generation = p_mesh.generation;
 		record->usable = uint8_t(p_usable);
+		record->state = p_state;
 		record->bounds = p_world.xform(p_mesh.aabb);
 		if (feed_raw.size() < FEED_RAW_LIMIT) {
 			feed_raw.push_back(record->bounds);
@@ -144,6 +146,7 @@ void RayScene::_feed_observe(const void *p_key, const Transform3D &p_world, RID 
 	entry.mesh = p_mesh_rid;
 	entry.generation = p_mesh.generation;
 	entry.usable = uint8_t(p_usable);
+	entry.state = p_state;
 	entry.stamp = feed_stamp;
 	entry.bounds = p_world.xform(p_mesh.aabb);
 	if (!feed_baseline) {
@@ -242,6 +245,9 @@ void RayScene::_feed_end() {
 		feed.mover_boxes.push_back(box);
 	}
 	feed_generation_before = structure_generation;
+	if (feed_frame_needs_epoch(feed.changes, feed_raw_overflow, GIEpochs::get_singleton()->get(GIEpochs::SOURCE_SCENE) != feed_epoch_before)) {
+		GIEpochs::get_singleton()->bump(GIEpochs::SOURCE_SCENE);
+	}
 	feed_epoch_history[feed_serial % FEED_EPOCH_HISTORY] = GIEpochs::get_singleton()->get(GIEpochs::SOURCE_SCENE);
 }
 
