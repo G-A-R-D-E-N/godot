@@ -351,6 +351,7 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 	}
 
 	FrameInputs inputs = p_inputs;
+	inputs.hardware = ray_scene->uses_hardware();
 	inputs.screen_size = p_render_buffers->get_internal_size();
 	const int32_t scale = MAX(1, int32_t(Math::round(1.0f / settings.resolution_scale)));
 	inputs.trace_size = Size2i(MAX(1, Math::division_round_up(inputs.screen_size.x, scale)), MAX(1, Math::division_round_up(inputs.screen_size.y, scale)));
