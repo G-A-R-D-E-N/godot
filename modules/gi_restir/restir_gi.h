@@ -146,10 +146,13 @@ class RestirGiBackend : public RendererRD::RtgiResampleBackend {
 	uint64_t fold_dump_frames_total = 0;
 	uint64_t fold_lineage_frames_total = 0;
 	String refusal_reason;
+	String invalid_choice;
+	uint32_t choices_version = 0xFFFFFFFFu;
 	bool feed_held = false;
 
 	void _free_state(RestirGiState &r_state);
 	void _release_feed();
+	void _check_choices();
 
 public:
 	virtual bool is_active() const override;

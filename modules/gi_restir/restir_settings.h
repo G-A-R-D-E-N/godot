@@ -32,6 +32,26 @@
 
 #include "core/variant/dictionary.h"
 
+struct RestirFrameParams;
+
+struct RestirReuseValues {
+	double plane_tolerance = 0.0;
+	double normal_angle = 0.0;
+	double roughness_tolerance = 0.0;
+	double jacobian_max = 0.0;
+	double min_distance = 0.0;
+	double min_cosine = 0.0;
+	double weight_clamp = 0.0;
+	double sky_distance = 0.0;
+	double dirty_margin = 0.0;
+};
+
 void restir_register_settings();
 bool restir_gi_enabled();
 Dictionary restir_settings_snapshot();
+RestirReuseValues restir_reuse_defaults();
+RestirReuseValues restir_reuse_read();
+void restir_reuse_apply(const RestirReuseValues &p_values, RestirFrameParams &r_params);
+bool restir_setting_range(const String &p_name, double &r_min, double &r_max);
+String restir_setting_invalid_choice(const String &p_name, const String &p_value);
+String restir_settings_invalid_choice();

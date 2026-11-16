@@ -30,7 +30,10 @@
 
 #include "restir_settings.h"
 
+#include "restir_gi_core.h"
+
 #include "core/config/project_settings.h"
+#include "core/math/math_funcs.h"
 
 static const char *const RESTIR_PREFIX = "rendering/global_illumination/restir/";
 
@@ -67,7 +70,7 @@ static const RestirSetting restir_table[] = {
 	{ Variant::INT, "gi/m_temporal_cap", PROPERTY_HINT_RANGE, "1,256,1", 20, "", false,
 			"Experimental. ReSTIR GI cap on the history count before temporal combine." },
 	{ Variant::BOOL, "gi/m_cap_follows_rate", PROPERTY_HINT_NONE, "", 1, "", false,
-			"Experimental. ReSTIR GI scales the history cap and the total cap by the share of pixels that receive a candidate each frame (RTGI ray fraction), so the history window stays the same number of frames when candidates are thinned. Off keeps the caps as set." },
+			"Experimental. ReSTIR GI scales the history cap by the share of pixels that receive a candidate each frame (RTGI ray fraction), rounded up and at least 1, and limits the total cap to that history cap plus 1, so the history window stays the same number of frames when candidates are thinned. Off keeps the caps as set." },
 	{ Variant::INT, "gi/m_max", PROPERTY_HINT_RANGE, "1,512,1", 32, "", false,
 			"Experimental. ReSTIR GI cap on the total sample count after spatial reuse." },
 	{ Variant::INT, "gi/m_light", PROPERTY_HINT_RANGE, "1,32,1", 2, "", false,
@@ -134,30 +137,135 @@ static const RestirSetting restir_table[] = {
 			"Experimental. ReSTIR GI output route: r2 (default) packs the module radiance into the RTGI candidate stream so the RTGI temporal, variance and a-trous passes denoise it, off leaves the module output unused and RTGI runs on its own candidates. Has no effect while gi/enabled is off." },
 	{ Variant::INT, "gi/denoise_history_cap", PROPERTY_HINT_RANGE, "1,255,1", 4, "", false,
 			"Experimental. History cap of the RTGI temporal pass while gi/denoise is r2. Has no effect while gi/denoise is off." },
+	{ Variant::FLOAT, "gi/plane_tolerance", PROPERTY_HINT_RANGE, "0.001,0.5,0.001", 0, "0.02", false,
+			"Experimental. ReSTIR GI reuse limit: a neighbour or history sample is refused when its receiver lies off this receiver's plane by this share of the receiver depth or more. Lower keeps reuse on the same surface, higher reuses across steps and gives less noise." },
+	{ Variant::FLOAT, "gi/normal_angle", PROPERTY_HINT_RANGE, "1,90,0.1", 0, "25", false,
+			"Experimental. ReSTIR GI reuse limit: a neighbour or history sample is refused when the two receiver normals differ by this many degrees or more." },
+	{ Variant::FLOAT, "gi/roughness_tolerance", PROPERTY_HINT_RANGE, "0,1,0.01", 0, "0.35", false,
+			"Experimental. ReSTIR GI reuse limit: a neighbour or history sample is refused when the two receivers' roughness differs by more than this." },
+	{ Variant::FLOAT, "gi/jacobian_max", PROPERTY_HINT_RANGE, "1,64,0.1", 0, "8", false,
+			"Experimental. ReSTIR GI reuse limit: a reused sample is refused when moving it to this receiver changes its solid angle by more than this factor, either way." },
+	{ Variant::FLOAT, "gi/min_distance", PROPERTY_HINT_RANGE, "0,1,0.001", 0, "0.03", false,
+			"Experimental. ReSTIR GI reuse limit: a reused sample nearer than this distance to the receiver it came from or the receiver that takes it is refused." },
+	{ Variant::FLOAT, "gi/min_cosine", PROPERTY_HINT_RANGE, "0,1,0.001", 0, "0.05", false,
+			"Experimental. ReSTIR GI reuse limit: a reused sample is refused when the cosine at the sample point towards either receiver is below this (grazing reuse)." },
+	{ Variant::FLOAT, "gi/weight_clamp", PROPERTY_HINT_RANGE, "1,1000,0.1", 0, "20", false,
+			"Experimental. ReSTIR GI firefly limit: in the final pass of the biased modes a reservoir weight is held to this many times the median of the positive weights in its 3 by 3 block, where at least 3 pixels of the block hold one. Lower removes more bright specks and loses more energy. U1 does not use it." },
+	{ Variant::FLOAT, "gi/sky_distance", PROPERTY_HINT_RANGE, "10,100000,1", 0, "1000", false,
+			"Experimental. ReSTIR GI distance given to a sky sample, in world units: the length of a visibility ray towards the sky, of the segment a stored sky sample is tested with against changed-scene boxes, of the own sampler's trace, and the shading distance of a hit without DDGI." },
+	{ Variant::FLOAT, "gi/dirty_margin", PROPERTY_HINT_RANGE, "0,1,0.001", 0, "0.01", false,
+			"Experimental. ReSTIR GI padding added to each changed-scene box when stored samples that cross it are thrown away." },
 };
 
 static const int RESTIR_SETTING_COUNT = sizeof(restir_table) / sizeof(restir_table[0]);
 
+static Variant _default_value(const RestirSetting &p_setting) {
+	switch (p_setting.type) {
+		case Variant::BOOL:
+			return p_setting.int_default != 0;
+		case Variant::INT:
+			return p_setting.int_default;
+		case Variant::FLOAT:
+			return String::utf8(p_setting.text_default).to_float();
+		default:
+			return String::utf8(p_setting.text_default);
+	}
+}
+
+static const RestirSetting *_find_setting(const String &p_name) {
+	for (int i = 0; i < RESTIR_SETTING_COUNT; i++) {
+		if (p_name == restir_table[i].name) {
+			return &restir_table[i];
+		}
+	}
+	return nullptr;
+}
+
 void restir_register_settings() {
 	for (int i = 0; i < RESTIR_SETTING_COUNT; i++) {
 		const RestirSetting &setting = restir_table[i];
-		Variant default_value;
-		switch (setting.type) {
-			case Variant::BOOL:
-				default_value = setting.int_default != 0;
-				break;
-			case Variant::INT:
-				default_value = setting.int_default;
-				break;
-			case Variant::FLOAT:
-				default_value = String::utf8(setting.text_default).to_float();
-				break;
-			default:
-				default_value = String::utf8(setting.text_default);
-				break;
-		}
-		_GLOBAL_DEF(PropertyInfo(setting.type, String(RESTIR_PREFIX) + setting.name, setting.hint, setting.hint_string), default_value, false, false, false, setting.internal);
+		_GLOBAL_DEF(PropertyInfo(setting.type, String(RESTIR_PREFIX) + setting.name, setting.hint, setting.hint_string), _default_value(setting), false, false, false, setting.internal);
 	}
+}
+
+template <typename T>
+static RestirReuseValues _reuse_values(T p_get) {
+	RestirReuseValues values;
+	values.plane_tolerance = p_get("gi/plane_tolerance");
+	values.normal_angle = p_get("gi/normal_angle");
+	values.roughness_tolerance = p_get("gi/roughness_tolerance");
+	values.jacobian_max = p_get("gi/jacobian_max");
+	values.min_distance = p_get("gi/min_distance");
+	values.min_cosine = p_get("gi/min_cosine");
+	values.weight_clamp = p_get("gi/weight_clamp");
+	values.sky_distance = p_get("gi/sky_distance");
+	values.dirty_margin = p_get("gi/dirty_margin");
+	return values;
+}
+
+RestirReuseValues restir_reuse_defaults() {
+	return _reuse_values([](const char *p_name) -> Variant {
+		const RestirSetting *setting = _find_setting(p_name);
+		ERR_FAIL_NULL_V(setting, Variant());
+		return _default_value(*setting);
+	});
+}
+
+RestirReuseValues restir_reuse_read() {
+	return _reuse_values([](const char *p_name) -> Variant {
+		return GLOBAL_GET(String(RESTIR_PREFIX) + p_name);
+	});
+}
+
+void restir_reuse_apply(const RestirReuseValues &p_values, RestirFrameParams &r_params) {
+	r_params.tol_plane = float(CLAMP(p_values.plane_tolerance, 0.001, 0.5));
+	r_params.cos_normal = float(Math::cos(Math::deg_to_rad(CLAMP(p_values.normal_angle, 1.0, 90.0))));
+	r_params.class_tol = float(CLAMP(p_values.roughness_tolerance, 0.0, 1.0));
+	r_params.jac_max = float(CLAMP(p_values.jacobian_max, 1.0, 64.0));
+	r_params.d_min = float(CLAMP(p_values.min_distance, 0.0, 1.0));
+	r_params.cos_min = float(CLAMP(p_values.min_cosine, 0.0, 1.0));
+	r_params.w_clamp = float(CLAMP(p_values.weight_clamp, 1.0, 1000.0));
+	r_params.sky_distance = float(CLAMP(p_values.sky_distance, 10.0, 100000.0));
+	r_params.dirty_margin = float(CLAMP(p_values.dirty_margin, 0.0, 1.0));
+}
+
+bool restir_setting_range(const String &p_name, double &r_min, double &r_max) {
+	const RestirSetting *setting = _find_setting(p_name);
+	if (!setting || setting->hint != PROPERTY_HINT_RANGE) {
+		return false;
+	}
+	const Vector<String> parts = String::utf8(setting->hint_string).split(",");
+	if (parts.size() < 2) {
+		return false;
+	}
+	r_min = parts[0].to_float();
+	r_max = parts[1].to_float();
+	return true;
+}
+
+String restir_setting_invalid_choice(const String &p_name, const String &p_value) {
+	const RestirSetting *setting = _find_setting(p_name);
+	if (!setting || setting->hint != PROPERTY_HINT_ENUM) {
+		return String();
+	}
+	if (String::utf8(setting->hint_string).split(",").has(p_value)) {
+		return String();
+	}
+	return String(RESTIR_PREFIX) + setting->name + "=" + p_value + " (not one of " + setting->hint_string + ")";
+}
+
+String restir_settings_invalid_choice() {
+	for (int i = 0; i < RESTIR_SETTING_COUNT; i++) {
+		const RestirSetting &setting = restir_table[i];
+		if (setting.hint != PROPERTY_HINT_ENUM) {
+			continue;
+		}
+		const String bad = restir_setting_invalid_choice(setting.name, GLOBAL_GET(String(RESTIR_PREFIX) + setting.name));
+		if (!bad.is_empty()) {
+			return bad;
+		}
+	}
+	return String();
 }
 
 bool restir_gi_enabled() {

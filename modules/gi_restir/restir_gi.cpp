@@ -345,8 +345,22 @@ void RestirGiBackend::_release_feed() {
 	}
 }
 
+void RestirGiBackend::_check_choices() {
+	const uint32_t version = ProjectSettings::get_singleton()->get_version();
+	if (version == choices_version) {
+		return;
+	}
+	choices_version = version;
+	const String bad = restir_settings_invalid_choice();
+	if (bad != invalid_choice && !bad.is_empty()) {
+		ERR_PRINT("ReSTIR GI: " + bad + ".");
+	}
+	invalid_choice = bad;
+}
+
 bool RestirGiBackend::begin_frame(const RtgiFrameInputs &p_inputs) {
 	refusal_reason = String();
+	_check_choices();
 	if (!p_inputs.buffers) {
 		refusal_reason = "no buffers";
 		refusals++;
@@ -445,9 +459,10 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 		r_output.coverage = state.resources.coverage;
 		r_output.debug = p_inputs.debug_view >= 0 ? state.resources.debug : RID();
 		r_output.record.flags = GI_PROVIDER_FLAG_SAMPLE_COUNT | GI_PROVIDER_FLAG_CONFIDENCE | GI_PROVIDER_FLAG_HISTORY | GI_PROVIDER_FLAG_SCENE_EPOCH | GI_PROVIDER_FLAG_LIGHT_EPOCH | GI_PROVIDER_FLAG_SKY_EPOCH | GI_PROVIDER_FLAG_ORIGIN_EPOCH;
-		r_output.record.sample_count = uint32_t(MIN(state.frames_since_cut, uint32_t(_gi_int("n_target"))));
+		const uint32_t n_target = uint32_t(CLAMP(_gi_int("n_target"), 1, 64));
+		r_output.record.sample_count = MIN(state.frames_since_cut, n_target);
 		r_output.record.validity = 1.0f;
-		r_output.record.confidence = gi_provider_confidence_from_samples(r_output.record.sample_count, uint32_t(_gi_int("n_target")));
+		r_output.record.confidence = gi_provider_confidence_from_samples(r_output.record.sample_count, n_target);
 		r_output.valid = true;
 		if (_gi_text("denoise") == "r2") {
 			RestirGiInputs frozen;
@@ -695,6 +710,7 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	params.origin_scale = MAX(float(GLOBAL_GET("rendering/global_illumination/rtgi/origin_scale")), 0.0f);
 	params.origin_floor = MAX(float(GLOBAL_GET("rendering/global_illumination/rtgi/origin_floor")), 0.0f);
 	params.debug_view = p_inputs.debug_view >= 0 ? uint32_t(57 + p_inputs.debug_view) : 0u;
+	restir_reuse_apply(restir_reuse_read(), params);
 	if (options.d_min >= 0.0f) {
 		params.d_min = options.d_min;
 	}
@@ -975,6 +991,7 @@ void RestirGiBackend::get_status(Dictionary &r_status) const {
 	r_status["ready"] = summary.ran;
 	r_status["refusals"] = int64_t(refusals);
 	r_status["refusal_reason"] = refusal_reason;
+	r_status["invalid_choice"] = invalid_choice;
 	r_status["states"] = int64_t(states.size());
 	r_status["hw_variant_compiled"] = (core && core->hw_variant_compiled());
 	r_status["lo_clamp"] = 60000.0;
