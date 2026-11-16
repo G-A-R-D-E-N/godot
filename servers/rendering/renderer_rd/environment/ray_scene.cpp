@@ -378,7 +378,6 @@ void RayScene::_build_blas(MeshEntry &p_mesh) {
 		triangle.e2[3] = 0.0f;
 		triangle.surface = p_mesh.triangle_surface[t];
 	}
-	p_mesh.generation = ++mesh_generation_counter;
 	p_mesh.built = true;
 	p_mesh.build_serial = ++next_build_serial;
 }

@@ -41,9 +41,11 @@ box list of an overflow result holds the first 64 merged boxes and is not a comp
   last 8 updates sit in a small active list.
 - Skinned instances never reach `_feed_observe` (the loop skips them), instances whose mesh is not built yet are absent
   until it is.
-- Material changes do not produce boxes. The instance class (opaque or candidate) is not part of the record either.
-- `MeshEntry::generation` is taken from `mesh_generation_counter` in `_build_blas`, so it changes whenever a mesh is rebuilt,
-  also when the mesh entry was erased and captured again.
+- Changes of albedo or emission do not produce boxes. A change of the layer mask, of a surface's material flags (shadow
+  casting included) or of its coverage does, through the record's state word (`feed_surface_state`). The instance class
+  (opaque or candidate) is not part of the record.
+- The record keeps the mesh's `build_serial`, which `_build_blas` steps from one counter for all meshes, so it changes
+  whenever a mesh is rebuilt, also when the mesh entry was erased and captured again. The scene hash reads the same word.
 - The hardware-usable bit is read from `hw_usable` right after `_hw_instance` (always true with the software backend).
 - `update` starts by reading `debug_dirty_feed` (a cached setting) and holds or releases `FEED_DEBUG`; after that it only
   tests `feed_consumers` once.

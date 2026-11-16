@@ -227,7 +227,6 @@ private:
 		uint32_t node_offset = 0;
 		uint32_t triangle_offset = 0;
 		AABB aabb;
-		uint64_t generation = 0;
 		uint64_t hw_generation = 0;
 		uint64_t hw_split = 0;
 		uint32_t hw_opaque = 0;
@@ -239,12 +238,11 @@ private:
 	HashMap<RID, MeshEntry> meshes;
 	HashSet<RID> assembled_meshes;
 	bool assembly_dirty = false;
-	uint64_t mesh_generation_counter = 0;
 	SafeNumeric<uint32_t> feed_consumers;
 	struct FeedRecord {
 		Transform3D world;
 		RID mesh;
-		uint64_t generation = 0;
+		uint32_t build_serial = 0;
 		AABB bounds;
 		uint32_t stamp = 0;
 		uint32_t state = 0;

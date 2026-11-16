@@ -114,7 +114,7 @@ void RayScene::_feed_observe(const void *p_key, const Transform3D &p_world, RID 
 	if (record) {
 		feed_survivors++;
 		record->stamp = feed_stamp;
-		if (record->mesh == p_mesh_rid && record->generation == p_mesh.generation && record->usable == uint8_t(p_usable) && record->state == p_state && memcmp(&record->world, &p_world, sizeof(Transform3D)) == 0) {
+		if (record->mesh == p_mesh_rid && record->build_serial == p_mesh.build_serial &&record->usable == uint8_t(p_usable) && record->state == p_state && memcmp(&record->world, &p_world, sizeof(Transform3D)) == 0) {
 			return;
 		}
 		feed.changes++;
@@ -125,7 +125,7 @@ void RayScene::_feed_observe(const void *p_key, const Transform3D &p_world, RID 
 		}
 		record->world = p_world;
 		record->mesh = p_mesh_rid;
-		record->generation = p_mesh.generation;
+		record->build_serial = p_mesh.build_serial;
 		record->usable = uint8_t(p_usable);
 		record->state = p_state;
 		record->bounds = p_world.xform(p_mesh.aabb);
@@ -144,7 +144,7 @@ void RayScene::_feed_observe(const void *p_key, const Transform3D &p_world, RID 
 	FeedRecord entry;
 	entry.world = p_world;
 	entry.mesh = p_mesh_rid;
-	entry.generation = p_mesh.generation;
+	entry.build_serial = p_mesh.build_serial;
 	entry.usable = uint8_t(p_usable);
 	entry.state = p_state;
 	entry.stamp = feed_stamp;
