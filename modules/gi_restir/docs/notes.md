@@ -253,11 +253,24 @@ pass (get_final_capture returns them; the blocker scene's view 62 oracle uses it
 
 Planner: restir_epochs.h/.cpp, restir_plan_epochs() decides per frame from the history flags, the previous and current GIEpochs::Snapshot and the dirty feed
 (RtgiFrameInputs.dirty_source, the GIEpochs singleton core sets; no core accessor was added). Order: no history (FIRST), core history_cut (REQUEST; camera cut,
-resize and backend switch reach the module only through it), hardware change (BACKEND), origin epoch change (ORIGIN), then a scene epoch change. On RT GI's R2 line there is no
-dirty feed yet (RtgiFrameInputs.dirty_source is null and GIEpochs has no feed API), so every scene epoch change is a SCENE_NO_FEED cut and clears everything.
-SCENE_OVERFLOW and SCENE_UNLOCALISED stay defined for the feed that GI adds later. Boxes are world space; the module subtracts
-RayScene::get_anchor() to get the anchor-relative space of the geometry. State counters: cut_counts per reason, dirty_frames; status keys cut_reason, dirty_boxes,
-scene_changed, light_changed, sky_changed, origin_changed, light_cap, light_frames_left.
+resize and backend switch reach the module only through it), hardware change (BACKEND), a Fold change (FOLD), origin epoch change (ORIGIN), world epoch change (WORLD),
+then a scene epoch change. The scene epoch moves on every ray scene update in which the scene tracker's signature changed (an instance added, removed or moved, its mesh, layer mask or
+material entries changed), so a scene
+change is not a cut by itself. The backend holds the ray scene's dirty feed (RayScene::FEED_MODULE, taken in resample, given back when its last state is released) and,
+when the scene epoch differs from the one stored with the history, asks GIEpochs::get_dirty_boxes(stored scene epoch) through RtgiFrameInputs.dirty_source. The planner
+then reads: no live feed, SCENE_NO_FEED and a full cut; DIRTY_NONE (a change with no geometry behind it, a material entry for one), no cut; DIRTY_OVERFLOW or more than
+RESTIR_DIRTY_MAX boxes, SCENE_OVERFLOW and a full cut; DIRTY_BOXES with no box or a box that is not finite or has a negative size, SCENE_UNLOCALISED and a full cut;
+otherwise the boxes go to the dirty test below and nothing else is cut. A world epoch change (no instance of the last ray scene is left) is a full cut whatever the
+feed says. Boxes are world space; the planner subtracts RayScene::get_anchor() to get the anchor-relative space of the geometry. The feed steps the scene epoch itself
+when a frame has changes or a raw overflow and the scene tracker did not step it in that update (RayScene::feed_frame_needs_epoch: a rebuilt mesh with the same triangle
+count and bounds, a hardware usability flip), because get_dirty_boxes returns only frames newer than the reader's epoch. State counters: cut_counts per reason,
+dirty_frames; status keys cut_reason, dirty_boxes, dirty_feed, scene_changed, light_changed, sky_changed, origin_changed, world_changed, light_cap, light_frames_left.
+What makes a box: the feed compares, per instance, the world transform, the mesh and its generation, hardware usability, and a state word built from the layer mask
+and each surface's material flags (shadow casting included) and coverage (RayScene::feed_surface_state). So a change of who a mesh shadows or how much it lets through
+dirties its bounds like a move does. A change of albedo or emission alone (the game animating an emission scale) moves the scene epoch with no box: history is kept,
+as it was before the scene epoch moved at all, and the re-validation rays are what follow it. When restir/gi/enabled is off, RTGI releases the backend's state for the
+buffers it is rendering (RtgiPass::_process), which frees the history textures and, with the last state, gives the feed back; switching the module on again starts
+from a first-frame cut.
 
 Dirty test (restir_gi.glsl rs_dirty_hit): per reprojected history pixel with a stored sample, the slab test of the segment from the previous receiver surface point
 q.pos to the stored sample point x_s (to q.pos + dir * sky_distance for a sky sample) against every box grown by dirty_margin 0.01 m. A hit gives reject code 6 (REJ_DIRTY)
@@ -357,8 +370,8 @@ Design 2.8, 8.1 rows 5-8, 8.3 row 4; change plan commit 5.
   off): counts = (sphere count, event count, event_m_cap, jump_m_cap); params = (event_reach_scale, event_solid_angle, 0, 0);
   gates = (quiet frames, budget B, jump frame 0 or 1, VALIDATE selection 0 none, 1 event, 2 all); sphere[64] = (centre, reach) in
   metres, anchor-relative, reach = the tracker's half; since_last[16] holds sphere i at [i >> 2][i & 3]. The first event-count
-  spheres are events; slots after them are for dirty-box spheres (centre, half diagonal, since_last UINT32_MAX), none on this line
-  because the module's planner gets no dirty boxes (scene changes still cut). RestirFrame stays 400 bytes. The CPU side packs it in
+  spheres are events; slots after them are for dirty-box spheres (centre, half diagonal, since_last UINT32_MAX), none on this line:
+  the planner's dirty boxes go to the shader's own dirty test (rs_dirty_hit), not to the event UBO. RestirFrame stays 400 bytes. The CPU side packs it in
   restir_events.cpp (restir_plan_events), with no RD dependency, so the doctests (tests/test_restir_events.h) read the same rules.
 - F_EVENTS is rf.flags bit 24. Bits 19 and 22 stay free for Fold and B2k. The jump frame lives in the UBO, not in a flag.
 - Sample test (VALIDATE): the stored x_s lies in any event sphere, old or new, first fire or repeat: |x_s - c|² <= R², raw reach.
@@ -1038,8 +1051,9 @@ fold rows, seeds) or through status.
     history_used 0. With the probe option history off, cut is 0 and history_used is 0: the lab writes its cut column from
     cut and VOIDs any row with cut 0 and history_used 0.
   - mode is the RestirMode value: 0 B1, 1 B2, 2 U1, 3 B2k. cut_reason is the RestirCutReason value: 0 none, 1 first frame
-    of a state, 2 request, 3 origin, 4 backend, 5 scene without feed, 6 scene overflow, 7 scene unlocalised, 8 Fold. The
-    plan never produces 6 or 7. R2's own cuts (a camera jump over 25 m, a resize, an R2 refusal on the frame before) reach
+    of a state, 2 request, 3 origin, 4 backend, 5 scene without feed, 6 scene overflow, 7 scene unlocalised, 8 Fold, 9 world. The
+    plan produces 6 when the dirty feed overflows or hands over more than 64 boxes, 7 when it says boxes and gives none or a
+    box that is not finite or has a negative size, and 9 when the world epoch moves. R2's own cuts (a camera jump over 25 m, a resize, an R2 refusal on the frame before) reach
     the module as history_cut and read 2, the same as a forced LightingUnits.BumpHistoryResetSerial; the rows can't tell
     them apart.
   - record is the index in the current record list. It restarts at 0 after reset_records, and every get_fold_rows call

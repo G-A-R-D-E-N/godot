@@ -87,6 +87,8 @@ struct RestirGiSummary {
 	bool light_changed = false;
 	bool sky_changed = false;
 	bool origin_changed = false;
+	bool world_changed = false;
+	bool have_feed = false;
 	Size2i size;
 	RestirFrameStats stats;
 	bool stats_valid = false;
@@ -144,8 +146,10 @@ class RestirGiBackend : public RendererRD::RtgiResampleBackend {
 	uint64_t fold_dump_frames_total = 0;
 	uint64_t fold_lineage_frames_total = 0;
 	String refusal_reason;
+	bool feed_held = false;
 
 	void _free_state(RestirGiState &r_state);
+	void _release_feed();
 
 public:
 	virtual bool is_active() const override;

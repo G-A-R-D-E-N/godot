@@ -43,6 +43,7 @@ void restir_plan_epochs(const RestirEpochInputs &p_inputs, RestirEpochPlan &r_pl
 		r_plan.light_changed = p_inputs.previous.light != p_inputs.current.light;
 		r_plan.sky_changed = p_inputs.previous.sky != p_inputs.current.sky;
 		r_plan.origin_changed = p_inputs.previous.origin != p_inputs.current.origin;
+		r_plan.world_changed = p_inputs.previous.world != p_inputs.current.world;
 	}
 	if (r_plan.light_changed) {
 		r_plan.light_soft_frames = p_inputs.m_light_frames;
@@ -67,8 +68,41 @@ void restir_plan_epochs(const RestirEpochInputs &p_inputs, RestirEpochPlan &r_pl
 		r_plan.reason = RESTIR_CUT_ORIGIN;
 		return;
 	}
-	if (r_plan.scene_changed) {
+	if (r_plan.world_changed) {
+		r_plan.cut = true;
+		r_plan.reason = RESTIR_CUT_WORLD;
+		return;
+	}
+	if (!r_plan.scene_changed) {
+		return;
+	}
+	if (!p_inputs.have_feed) {
 		r_plan.cut = true;
 		r_plan.reason = RESTIR_CUT_SCENE_NO_FEED;
+		return;
+	}
+	if (p_inputs.dirty_result == RendererRD::GIEpochs::DIRTY_NONE) {
+		return;
+	}
+	if (p_inputs.dirty_result != RendererRD::GIEpochs::DIRTY_BOXES || p_inputs.dirty_box_count > RESTIR_DIRTY_MAX) {
+		r_plan.cut = true;
+		r_plan.reason = RESTIR_CUT_SCENE_OVERFLOW;
+		return;
+	}
+	bool localised = p_inputs.dirty_boxes != nullptr && p_inputs.dirty_box_count > 0;
+	for (uint32_t i = 0; localised && i < p_inputs.dirty_box_count; i++) {
+		const AABB &box = p_inputs.dirty_boxes[i];
+		localised = box.position.is_finite() && box.size.is_finite() && box.size.x >= 0 && box.size.y >= 0 && box.size.z >= 0;
+	}
+	if (!localised) {
+		r_plan.cut = true;
+		r_plan.reason = RESTIR_CUT_SCENE_UNLOCALISED;
+		return;
+	}
+	r_plan.dirty_count = p_inputs.dirty_box_count;
+	for (uint32_t i = 0; i < p_inputs.dirty_box_count; i++) {
+		const AABB &box = p_inputs.dirty_boxes[i];
+		r_plan.dirty_min[i] = box.position - p_inputs.anchor;
+		r_plan.dirty_max[i] = box.position + box.size - p_inputs.anchor;
 	}
 }

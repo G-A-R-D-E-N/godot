@@ -334,6 +334,17 @@ void RestirGiBackend::_free_state(RestirGiState &r_state) {
 	r_state.resources.free_all();
 }
 
+void RestirGiBackend::_release_feed() {
+	if (!feed_held) {
+		return;
+	}
+	feed_held = false;
+	RayScene *ray_scene = RayScene::get_singleton();
+	if (ray_scene) {
+		ray_scene->release_dirty_feed(RayScene::FEED_MODULE);
+	}
+}
+
 bool RestirGiBackend::begin_frame(const RtgiFrameInputs &p_inputs) {
 	refusal_reason = String();
 	if (!p_inputs.buffers) {
@@ -480,6 +491,17 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	epoch_inputs.anchor = ray_scene ? ray_scene->get_anchor() : Vector3();
 	epoch_inputs.light_soft_frames = state.light_soft_frames;
 	epoch_inputs.m_light_frames = events_on ? 0u : uint32_t(CLAMP(_gi_int("m_light_frames"), 0, 64));
+	LocalVector<AABB> dirty_boxes;
+	if (ray_scene) {
+		ray_scene->acquire_dirty_feed(RayScene::FEED_MODULE);
+		feed_held = true;
+	}
+	epoch_inputs.have_feed = p_inputs.dirty_source && p_inputs.dirty_source->is_feed_live();
+	if (epoch_inputs.have_feed && state.have_epochs && state.epochs.scene != p_inputs.epochs.scene) {
+		epoch_inputs.dirty_result = p_inputs.dirty_source->get_dirty_boxes(state.epochs.scene, dirty_boxes);
+		epoch_inputs.dirty_boxes = dirty_boxes.ptr();
+		epoch_inputs.dirty_box_count = dirty_boxes.size();
+	}
 	RestirEpochPlan plan;
 	restir_plan_epochs(epoch_inputs, plan);
 	state.light_soft_frames = plan.light_soft_frames;
@@ -780,6 +802,8 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	summary.light_changed = plan.light_changed;
 	summary.sky_changed = plan.sky_changed;
 	summary.origin_changed = plan.origin_changed;
+	summary.world_changed = plan.world_changed;
+	summary.have_feed = epoch_inputs.have_feed;
 	summary.size = p_inputs.trace_size;
 	summary.reval_active = params.reval_pass;
 	summary.reval_frames = state.reval_frames;
@@ -931,12 +955,16 @@ void RestirGiBackend::release(RenderSceneBuffersRD *p_buffers) {
 			states.erase(p_buffers);
 			release_calls_total++;
 		}
+		if (states.is_empty()) {
+			_release_feed();
+		}
 		return;
 	}
 	for (KeyValue<RenderSceneBuffersRD *, RestirGiState> &entry : states) {
 		_free_state(entry.value);
 	}
 	states.clear();
+	_release_feed();
 	if (core) {
 		core->free();
 	}
@@ -973,6 +1001,8 @@ void RestirGiBackend::get_status(Dictionary &r_status) const {
 	r_status["light_changed"] = summary.light_changed;
 	r_status["sky_changed"] = summary.sky_changed;
 	r_status["origin_changed"] = summary.origin_changed;
+	r_status["world_changed"] = summary.world_changed;
+	r_status["dirty_feed"] = summary.have_feed;
 	r_status["event_reshade"] = summary.events_on;
 	r_status["events_read"] = int64_t(summary.events_read);
 	r_status["events_lost"] = int64_t(summary.events_lost);

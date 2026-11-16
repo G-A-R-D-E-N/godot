@@ -472,6 +472,7 @@ static RendererRD::GIEpochs::Snapshot _snapshot_from(const Dictionary &p_dict) {
 	s.light = uint32_t(int64_t(p_dict.get("light", 1)));
 	s.sky = uint32_t(int64_t(p_dict.get("sky", 1)));
 	s.origin = uint32_t(int64_t(p_dict.get("origin", 1)));
+	s.world = uint32_t(int64_t(p_dict.get("world", 1)));
 	return s;
 }
 
@@ -488,6 +489,18 @@ Dictionary RestirProbe::plan_epochs(const Dictionary &p_case) const {
 	inputs.anchor = p_case.get("anchor", Vector3());
 	inputs.light_soft_frames = uint32_t(int64_t(p_case.get("light_soft_frames", 0)));
 	inputs.m_light_frames = uint32_t(int64_t(p_case.get("m_light_frames", 4)));
+	LocalVector<AABB> feed_boxes;
+	inputs.have_feed = bool(p_case.get("have_feed", false));
+	if (inputs.have_feed) {
+		const PackedFloat64Array feed = p_case.get("feed_boxes", PackedFloat64Array());
+		for (int i = 0; i + 5 < feed.size(); i += 6) {
+			feed_boxes.push_back(AABB(Vector3(feed[i], feed[i + 1], feed[i + 2]), Vector3(feed[i + 3], feed[i + 4], feed[i + 5])));
+		}
+		const int64_t feed_result = int64_t(p_case.get("feed_result", int64_t(RendererRD::GIEpochs::DIRTY_OVERFLOW)));
+		inputs.dirty_result = feed_result == int64_t(RendererRD::GIEpochs::DIRTY_NONE) ? RendererRD::GIEpochs::DIRTY_NONE : (feed_result == int64_t(RendererRD::GIEpochs::DIRTY_BOXES) ? RendererRD::GIEpochs::DIRTY_BOXES : RendererRD::GIEpochs::DIRTY_OVERFLOW);
+		inputs.dirty_boxes = feed_boxes.ptr();
+		inputs.dirty_box_count = feed_boxes.size();
+	}
 	RestirEpochPlan plan;
 	restir_plan_epochs(inputs, plan);
 	PackedFloat64Array boxes;
@@ -508,6 +521,7 @@ Dictionary RestirProbe::plan_epochs(const Dictionary &p_case) const {
 	result["light_changed"] = plan.light_changed;
 	result["sky_changed"] = plan.sky_changed;
 	result["origin_changed"] = plan.origin_changed;
+	result["world_changed"] = plan.world_changed;
 	result["light_soft_frames"] = int64_t(plan.light_soft_frames);
 	return result;
 }

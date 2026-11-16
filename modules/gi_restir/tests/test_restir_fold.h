@@ -321,6 +321,142 @@ TEST_CASE("[RestirFold] The epoch planner files a Fold change as its own cut, af
 	CHECK(plan.reason == RESTIR_CUT_SCENE_NO_FEED);
 }
 
+TEST_CASE("[RestirFold] The epoch planner cuts only inside the dirty boxes when the feed localises a scene change") {
+	using RendererRD::GIEpochs;
+	RestirEpochInputs inputs;
+	inputs.have_history = true;
+	inputs.have_epochs = true;
+	inputs.previous.scene = 4u;
+	inputs.current.scene = 5u;
+	inputs.anchor = Vector3(100, 0, -50);
+	RestirEpochPlan plan;
+
+	restir_plan_epochs(inputs, plan);
+	CHECK(plan.cut);
+	CHECK(plan.reason == RESTIR_CUT_SCENE_NO_FEED);
+	CHECK(plan.dirty_count == 0u);
+
+	const AABB two[2] = { AABB(Vector3(101, 2, -49), Vector3(1, 2, 3)), AABB(Vector3(90, 0, -60), Vector3(4, 4, 4)) };
+	inputs.have_feed = true;
+	inputs.dirty_result = GIEpochs::DIRTY_BOXES;
+	inputs.dirty_boxes = two;
+	inputs.dirty_box_count = 2u;
+	restir_plan_epochs(inputs, plan);
+	CHECK_FALSE(plan.cut);
+	CHECK(plan.reason == RESTIR_CUT_NONE);
+	CHECK(plan.scene_changed);
+	REQUIRE(plan.dirty_count == 2u);
+	CHECK(plan.dirty_min[0].is_equal_approx(Vector3(1, 2, 1)));
+	CHECK(plan.dirty_max[0].is_equal_approx(Vector3(2, 4, 4)));
+	CHECK(plan.dirty_min[1].is_equal_approx(Vector3(-10, 0, -10)));
+	CHECK(plan.dirty_max[1].is_equal_approx(Vector3(-6, 4, -6)));
+
+	inputs.dirty_result = GIEpochs::DIRTY_NONE;
+	inputs.dirty_boxes = nullptr;
+	inputs.dirty_box_count = 0u;
+	restir_plan_epochs(inputs, plan);
+	CHECK_FALSE(plan.cut);
+	CHECK(plan.scene_changed);
+	CHECK(plan.dirty_count == 0u);
+
+	inputs.dirty_result = GIEpochs::DIRTY_OVERFLOW;
+	restir_plan_epochs(inputs, plan);
+	CHECK(plan.cut);
+	CHECK(plan.reason == RESTIR_CUT_SCENE_OVERFLOW);
+	CHECK(plan.dirty_count == 0u);
+
+	LocalVector<AABB> many;
+	for (uint32_t i = 0; i < RESTIR_DIRTY_MAX + 1u; i++) {
+		many.push_back(AABB(Vector3(real_t(i) * 10, 0, 0), Vector3(1, 1, 1)));
+	}
+	inputs.dirty_result = GIEpochs::DIRTY_BOXES;
+	inputs.dirty_boxes = many.ptr();
+	inputs.dirty_box_count = RESTIR_DIRTY_MAX;
+	restir_plan_epochs(inputs, plan);
+	CHECK_FALSE(plan.cut);
+	CHECK(plan.dirty_count == RESTIR_DIRTY_MAX);
+	CHECK(plan.dirty_min[RESTIR_DIRTY_MAX - 1u].is_equal_approx(Vector3(real_t(RESTIR_DIRTY_MAX - 1u) * 10 - 100, 0, 50)));
+	inputs.dirty_box_count = RESTIR_DIRTY_MAX + 1u;
+	restir_plan_epochs(inputs, plan);
+	CHECK(plan.cut);
+	CHECK(plan.reason == RESTIR_CUT_SCENE_OVERFLOW);
+	CHECK(plan.dirty_count == 0u);
+
+	inputs.dirty_box_count = 0u;
+	restir_plan_epochs(inputs, plan);
+	CHECK(plan.cut);
+	CHECK(plan.reason == RESTIR_CUT_SCENE_UNLOCALISED);
+
+	const AABB not_a_number[1] = { AABB(Vector3(real_t(Math::NaN), 0, 0), Vector3(1, 1, 1)) };
+	inputs.dirty_boxes = not_a_number;
+	inputs.dirty_box_count = 1u;
+	restir_plan_epochs(inputs, plan);
+	CHECK(plan.cut);
+	CHECK(plan.reason == RESTIR_CUT_SCENE_UNLOCALISED);
+	CHECK(plan.dirty_count == 0u);
+
+	const AABB inside_out[1] = { AABB(Vector3(0, 0, 0), Vector3(1, -1, 1)) };
+	inputs.dirty_boxes = inside_out;
+	restir_plan_epochs(inputs, plan);
+	CHECK(plan.cut);
+	CHECK(plan.reason == RESTIR_CUT_SCENE_UNLOCALISED);
+
+	inputs.current.scene = inputs.previous.scene;
+	inputs.dirty_boxes = two;
+	inputs.dirty_box_count = 2u;
+	restir_plan_epochs(inputs, plan);
+	CHECK_FALSE(plan.cut);
+	CHECK_FALSE(plan.scene_changed);
+	CHECK(plan.dirty_count == 0u);
+}
+
+TEST_CASE("[RestirFold] The epoch planner cuts everything on a world change, after the origin cut and before the scene check") {
+	using RendererRD::GIEpochs;
+	const AABB one[1] = { AABB(Vector3(0, 0, 0), Vector3(1, 1, 1)) };
+	RestirEpochInputs inputs;
+	inputs.have_history = true;
+	inputs.have_epochs = true;
+	inputs.previous.scene = 4u;
+	inputs.current.scene = 5u;
+	inputs.previous.world = 1u;
+	inputs.current.world = 2u;
+	inputs.have_feed = true;
+	inputs.dirty_result = GIEpochs::DIRTY_BOXES;
+	inputs.dirty_boxes = one;
+	inputs.dirty_box_count = 1u;
+	RestirEpochPlan plan;
+	restir_plan_epochs(inputs, plan);
+	CHECK(plan.cut);
+	CHECK(plan.world_changed);
+	CHECK(plan.reason == RESTIR_CUT_WORLD);
+	CHECK(plan.dirty_count == 0u);
+
+	inputs.current.origin = 1u;
+	restir_plan_epochs(inputs, plan);
+	CHECK(plan.reason == RESTIR_CUT_ORIGIN);
+	inputs.current.origin = 0u;
+
+	inputs.current.scene = inputs.previous.scene;
+	restir_plan_epochs(inputs, plan);
+	CHECK(plan.cut);
+	CHECK(plan.reason == RESTIR_CUT_WORLD);
+
+	inputs.current.world = inputs.previous.world;
+	inputs.current.scene = 5u;
+	restir_plan_epochs(inputs, plan);
+	CHECK_FALSE(plan.cut);
+	CHECK_FALSE(plan.world_changed);
+	CHECK(plan.dirty_count == 1u);
+
+	inputs.current.world = 2u;
+	inputs.have_epochs = false;
+	restir_plan_epochs(inputs, plan);
+	CHECK_FALSE(plan.cut);
+	CHECK_FALSE(plan.world_changed);
+	CHECK_FALSE(plan.scene_changed);
+	CHECK(plan.dirty_count == 0u);
+}
+
 TEST_CASE("[RestirFold] Mirror: the integer square root is exact from a float seed off by one either way") {
 	bool exact_all = true;
 	for (uint32_t x = 0u; x < 3u * 64u * 64u / 4u; x++) {
