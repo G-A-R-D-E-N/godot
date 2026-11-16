@@ -75,7 +75,13 @@ public:
 		TRACE_MODE_PROBES,
 		TRACE_MODE_DEBUG,
 		TRACE_MODE_SURFELS,
+		TRACE_MODE_RTGI,
 		TRACE_MODE_MAX
+	};
+
+	enum TraceGroup {
+		TRACE_GROUP_BASE,
+		TRACE_GROUP_RTGI,
 	};
 
 	enum SkyFlags {
@@ -219,7 +225,7 @@ private:
 	bool trace_hw_valid = false;
 	bool use_octmap_array = false;
 
-	static Vector<String> _trace_modes();
+	static Vector<ShaderRD::VariantDefine> _trace_modes();
 	bool _ensure_trace_hw();
 	bool _trace_usable(RayScene *p_ray_scene);
 
@@ -237,6 +243,7 @@ public:
 
 	void update(const Ref<RenderSceneBuffersRD> &p_render_buffers, const Vector3 &p_camera_position);
 	void trace_surfels(const Ref<Volume> &p_volume, const LocalVector<RD::Uniform> &p_surfel_uniforms, RID p_indirect_buffer, uint32_t p_indirect_offset);
+	bool trace_rtgi(const Ref<Volume> &p_volume, RID p_output, const LocalVector<RD::Uniform> &p_uniforms, uint32_t p_x_groups, uint32_t p_y_groups);
 	void process(const Ref<Volume> &p_volume, RID p_environment, SkyRD::Sky *p_sky, RID p_camera_attributes, const Projection &p_projection, const Transform3D &p_camera_transform, const Size2i &p_screen_size);
 };
 

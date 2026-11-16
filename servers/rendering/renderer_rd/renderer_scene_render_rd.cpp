@@ -35,6 +35,7 @@
 #include "core/io/image.h"
 #include "core/object/callable_mp.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
+#include "servers/rendering/renderer_rd/environment/gi_epochs.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/framebuffer_cache_rd.h"
 #include "servers/rendering/renderer_rd/shaders/decal_data_inc.glsl.gen.h"
@@ -1671,8 +1672,12 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 			scene_data.directional_shadow_pixel_size.y = 1.0 / directional_shadow_size;
 		}
 
+		const RID sky_rid = p_environment.is_valid() ? environment_get_sky(p_environment) : RID();
+		if (p_reflection_probe.is_null() && rb->update_gi_sky(sky_rid)) {
+			RendererRD::GIEpochs::get_singleton()->bump(RendererRD::GIEpochs::SOURCE_SKY);
+		}
+
 		if (p_environment.is_valid()) {
-			RID sky_rid = environment_get_sky(p_environment);
 			if (sky_rid.is_valid()) {
 				int radiance_size = sky.sky_get_radiance_size(sky_rid);
 				scene_data.radiance_pixel_size = 1.0f / radiance_size;

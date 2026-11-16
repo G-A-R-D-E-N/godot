@@ -39,6 +39,7 @@
 #include "core/templates/local_vector.h"
 #include "core/templates/paged_array.h"
 #include "core/templates/safe_refcount.h"
+#include "servers/rendering/renderer_rd/environment/gi_epochs.h"
 #include "servers/rendering/rendering_device.h"
 #include "servers/rendering/rendering_server_enums.h"
 #include "servers/rendering/rendering_server_types.h"
@@ -191,6 +192,7 @@ private:
 		LocalVector<Node> nodes;
 		LocalVector<Triangle> bvh_triangles;
 		bool built = false;
+		uint32_t build_serial = 0;
 		uint32_t node_offset = 0;
 		uint32_t triangle_offset = 0;
 		AABB aabb;
@@ -245,6 +247,9 @@ private:
 	LightCensus printed_census;
 	LocalVector<Node> tlas_nodes;
 	uint64_t instance_signature = 0;
+	GISceneTracker scene_tracker;
+	uint32_t next_build_serial = 0;
+	LocalVector<uint64_t> scene_members;
 	Vector3 anchor;
 
 	RID blas_node_buffer;

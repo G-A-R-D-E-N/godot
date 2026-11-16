@@ -33,6 +33,7 @@
 #include "core/config/project_settings.h"
 #include "core/math/math_defs.h"
 #include "servers/rendering/renderer_rd/effects/copy_effects.h"
+#include "servers/rendering/renderer_rd/environment/gi_epochs.h"
 #include "servers/rendering/renderer_rd/framebuffer_cache_rd.h"
 #include "servers/rendering/renderer_rd/renderer_compositor_rd.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
@@ -2139,6 +2140,7 @@ void SkyRD::sky_set_material(RID p_sky, RID p_material) {
 
 	if (sky->set_material(p_material)) {
 		invalidate_sky(sky, MATERIAL);
+		GIEpochs::get_singleton()->bump(GIEpochs::SOURCE_SKY);
 	}
 }
 
