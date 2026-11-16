@@ -3008,7 +3008,7 @@
 			Number of depth samples per slice side used by GTAO. Only used when [member rendering/environment/ssao/backend] is [code]GTAO[/code].
 		</member>
 		<member name="rendering/environment/gtao/thin_occluder_compensation" type="float" setter="" getter="" default="0.0">
-			How much GTAO discounts occluders that stand in front of a surface along the view direction, so thin objects such as grass blades don't read as solid walls. Higher values lighten the AO those objects cast. Clamped to [code]0.7[/code]. Only used when [member rendering/environment/ssao/backend] is [code]GTAO[/code].
+			How much GTAO discounts samples whose view depth differs from the shaded pixel's, in front or behind, so thin objects such as grass blades darken the surface behind them less. Higher values lighten the occlusion those objects cast, and also the occlusion thick objects cast on surfaces some way behind them. Clamped to the range [code]0.0[/code] to [code]0.7[/code]. Only used when [member rendering/environment/ssao/backend] is [code]GTAO[/code].
 		</member>
 		<member name="rendering/environment/local_exposure/edge_range" type="float" setter="" getter="" default="1.0">
 			For the [code]Edge-Checked Blur[/code] method of [member rendering/environment/local_exposure/method]: the distance, in stops, between a pixel's own luminance and the blurred base at which the pixel starts to follow its own luminance instead of the base. At twice this distance the base is ignored. Lower values protect edges more and adapt less across them.
