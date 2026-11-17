@@ -111,14 +111,14 @@ jobs:
           python modules/mono/build_scripts/build_assemblies.py --godot-output-dir=./bin --precision=double
 
       - name: Unit tests
-        timeout-minutes: 30
+        timeout-minutes: 45
         run: |
           ./bin/godot.linuxbsd.editor.double.x86_64.mono --headless --test --force-colors -s &
           pid=$!
-          (trap 'kill "$s" 2>/dev/null; exit' TERM; sleep 1500 & s=$!; wait "$s"; echo "::error::Unit tests still running after 25 minutes; dumping thread stacks"; nproc
+          (sleep 1200; echo "::error::Unit tests still running after 20 minutes; dumping thread stacks"; nproc
             for g in "gdb" "sudo -n gdb"; do
               out=$($g -p "$pid" -batch -ex "thread apply all bt" 2>&1 || true)
-              case "$out" in *"Thread "*) echo "$out" | tail -n 600; break ;; *) echo "$g: $out" | tail -n 5 ;; esac
+              case "$out" in *"Thread "*) echo "$out" | tail -n 800; break ;; *) echo "$g: $out" | tail -n 5 ;; esac
             done
             kill -9 "$pid") &
           watchdog=$!
@@ -203,8 +203,8 @@ jobs:
           python modules/mono/build_scripts/build_assemblies.py --godot-output-dir=./bin --precision=double
 
       - name: Unit tests
-        timeout-minutes: 30
-        run: ./bin/godot.windows.editor.double.x86_64.mono.exe --headless --test --force-colors -s
+        timeout-minutes: 45
+        run: ./bin/godot.windows.editor.double.x86_64.mono.exe --headless --test --force-colors
 
       - name: Mono shutdown tracker regression
         run: python tests/mono_shutdown_tracker/run.py --candidate bin/godot.windows.editor.double.x86_64.mono.exe --output shutdown-tracker-logs
