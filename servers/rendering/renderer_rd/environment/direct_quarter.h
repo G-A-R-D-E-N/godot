@@ -159,15 +159,23 @@ enum CutKind : uint32_t {
 };
 
 template <typename BlockAt>
-Resolved resolve(const Vector2i &p_pixel, const Surface &p_own, uint32_t p_entries, const Rebuild &p_rebuild, const BlockAt &p_block_at, float *r_cut_margin = nullptr, uint32_t *r_cut_kind = nullptr) {
+Resolved resolve(const Vector2i &p_pixel, const Surface &p_own, uint32_t p_entries, const Rebuild &p_rebuild, const BlockAt &p_block_at, float *r_cut_margin = nullptr, uint32_t *r_cut_kind = nullptr, float *r_kind_margins = nullptr) {
 	Resolved out;
 	const uint32_t own_limit = p_entries - 1;
 	float margin = 1e30f;
 	uint32_t kind = CUT_NONE;
+	if (r_kind_margins != nullptr) {
+		for (uint32_t k = 0; k < CUT_KIND_COUNT; k++) {
+			r_kind_margins[k] = 1e30f;
+		}
+	}
 	const auto take = [&](float p_value, uint32_t p_kind) {
 		if (p_value < margin) {
 			margin = p_value;
 			kind = p_kind;
+		}
+		if (r_kind_margins != nullptr && p_value < r_kind_margins[p_kind]) {
+			r_kind_margins[p_kind] = p_value;
 		}
 	};
 	if (r_cut_margin != nullptr) {

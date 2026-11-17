@@ -818,6 +818,25 @@ struct DumpTally {
 	int64_t differ_factor_only = 0;
 };
 
+struct MirrorRecord {
+	int32_t x = 0;
+	int32_t y = 0;
+	uint8_t gpu_tier = 0;
+	uint8_t mirror_tier = 0;
+	uint8_t flags = 0;
+	uint8_t entries = 0;
+	uint16_t gpu_slots[MAX_ENTRIES] = {};
+	uint16_t mirror_slots[MAX_ENTRIES] = {};
+	float gpu_factors[MAX_ENTRIES + 2] = {};
+	float mirror_factors[MAX_ENTRIES + 2] = {};
+	float margins[CUT_KIND_COUNT] = {};
+};
+
+static_assert(sizeof(MirrorRecord) == 140);
+
+static constexpr uint8_t MIRROR_BY_CUT = 1;
+static constexpr uint8_t MIRROR_BY_G = 2;
+
 bool same_slot_set(const Dump &p_dump, int p_index, const Resolved &p_out) {
 	const int64_t pixels = int64_t(p_dump.width) * p_dump.height;
 	const uint32_t own_limit = p_dump.entries - 1;
@@ -874,7 +893,7 @@ bool near_threshold(const Dump &p_dump, const Vector2i &p_pixel, const Surface &
 	return false;
 }
 
-DumpTally compare_dump(const Dump &p_dump, int p_print) {
+DumpTally compare_dump(const Dump &p_dump, int p_print, LocalVector<MirrorRecord> *r_records = nullptr) {
 	DumpTally tally;
 	int print_outside = p_print;
 	int print_inside = p_print;
@@ -891,7 +910,8 @@ DumpTally compare_dump(const Dump &p_dump, int p_print) {
 			const Surface own = own_surface(p_dump, index);
 			float margin = 1e30f;
 			uint32_t kind = CUT_NONE;
-			const Resolved out = resolve(Vector2i(x, y), own, p_dump.entries, p_dump.rebuild, p_dump, &margin, &kind);
+			float kind_margins[CUT_KIND_COUNT];
+			const Resolved out = resolve(Vector2i(x, y), own, p_dump.entries, p_dump.rebuild, p_dump, &margin, &kind, kind_margins);
 			const bool by_cut = margin < 1e-4f;
 			const bool by_g = near_threshold(p_dump, Vector2i(x, y), own);
 			const bool in_class = by_cut || by_g;
@@ -916,6 +936,27 @@ DumpTally compare_dump(const Dump &p_dump, int p_print) {
 			if (same && factors_ok) {
 				tally.worst_factor = MAX(tally.worst_factor, worst);
 				continue;
+			}
+			if (r_records != nullptr) {
+				MirrorRecord record;
+				record.x = x;
+				record.y = y;
+				record.gpu_tier = uint8_t(gpu_tier);
+				record.mirror_tier = uint8_t(out.tier);
+				record.flags = (by_cut ? MIRROR_BY_CUT : 0) | (by_g ? MIRROR_BY_G : 0);
+				record.entries = uint8_t(p_dump.entries);
+				for (uint32_t e = 0; e < p_dump.entries; e++) {
+					record.gpu_slots[e] = p_dump.slots[e * pixels + index];
+					record.mirror_slots[e] = uint16_t(out.slots[e]);
+				}
+				for (uint32_t e = 0; e < p_dump.entries + 2; e++) {
+					record.gpu_factors[e] = float(p_dump.factors[e * pixels + index]) / 65535.0f;
+					record.mirror_factors[e] = out.factors[e];
+				}
+				for (uint32_t k = 0; k < CUT_KIND_COUNT; k++) {
+					record.margins[k] = kind_margins[k];
+				}
+				r_records->push_back(record);
 			}
 			if (in_class) {
 				tally.differ++;
@@ -950,6 +991,21 @@ DumpTally compare_dump(const Dump &p_dump, int p_print) {
 		}
 	}
 	return tally;
+}
+
+bool write_mirror(const String &p_path, const LocalVector<MirrorRecord> &p_records) {
+	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::WRITE);
+	if (file.is_null()) {
+		return false;
+	}
+	const char magic[8] = { 'D', 'I', '1', 'Q', 'M', 'I', 'R', '1' };
+	bool ok = file->store_buffer(reinterpret_cast<const uint8_t *>(magic), 8);
+	ok = file->store_32(uint32_t(sizeof(MirrorRecord))) && ok;
+	ok = file->store_32(p_records.size()) && ok;
+	if (!p_records.is_empty()) {
+		ok = file->store_buffer(reinterpret_cast<const uint8_t *>(p_records.ptr()), uint64_t(p_records.size()) * sizeof(MirrorRecord)) && ok;
+	}
+	return ok;
 }
 
 template <typename T>
@@ -1005,7 +1061,13 @@ TEST_CASE("[DirectQuarter][Dump] The mirror resolves a GPU dump as the GPU did")
 	REQUIRE(read_layers(dir.path_join(files["depth_full"]), dump.depth_full, pixels));
 	REQUIRE(read_layers(dir.path_join(files["normal_full"]), dump.normal_full, pixels));
 	build_blocks(dump);
-	const DumpTally tally = compare_dump(dump, 20);
+	LocalVector<MirrorRecord> records;
+	const DumpTally tally = compare_dump(dump, 20, &records);
+	const String mirror_path = path + ".mirror.bin";
+	const bool mirror_ok = write_mirror(mirror_path, records);
+	MESSAGE(doctest::String(vformat("DI1Q_DUMP_MIRROR %s: %d records of %d bytes, written %s", mirror_path, int64_t(records.size()), int64_t(sizeof(MirrorRecord)), mirror_ok ? "yes" : "no").utf8().get_data()));
+	CHECK(mirror_ok);
+	CHECK_EQ(int64_t(records.size()), tally.differ + tally.outside + tally.factor_off);
 	MESSAGE(doctest::String(vformat("DI1Q_DUMP %s: compared %d, past the region %d, threshold class %d (limit %d), different outside the class %d, factors off by more than 1e-3 %d, worst factor difference %f", path, tally.compared, tally.past_region, tally.threshold, tally.compared / 10000, tally.outside, tally.factor_off, tally.worst_factor).utf8().get_data()));
 	MESSAGE(doctest::String(vformat("DI1Q_DUMP_CLASS: class %d (g band %d; cut kept order %d, kept against dropped %d, rest key %d); differing in the class %d (g band %d; cut kept order %d, kept against dropped %d, rest key %d)", tally.threshold, tally.class_g, tally.class_cut[CUT_KEPT_ORDER], tally.class_cut[CUT_KEPT_DROPPED], tally.class_cut[CUT_REST_KEY], tally.differ, tally.differ_g, tally.differ_cut[CUT_KEPT_ORDER], tally.differ_cut[CUT_KEPT_DROPPED], tally.differ_cut[CUT_REST_KEY]).utf8().get_data()));
 	MESSAGE(doctest::String(vformat("DI1Q_DUMP_DIFFER: tier %d, slot order only %d, slot set %d, factor only %d; of those flagged by a cut margin: exactly 0 %d; up to 1e-7, 0 included %d; 1e-7 to 1e-6 %d; 1e-6 to 1e-5 %d; 1e-5 to 1e-4 %d", tally.differ_tier, tally.differ_order_only, tally.differ_slot_set, tally.differ_factor_only, tally.differ_margin_zero, tally.differ_margin_bucket[0], tally.differ_margin_bucket[1], tally.differ_margin_bucket[2], tally.differ_margin_bucket[3]).utf8().get_data()));
@@ -1083,7 +1145,9 @@ int clear_pixel(const Dump &p_dump) {
 
 TEST_CASE("[DirectQuarter] The dump comparison reads a mirror-made dump as equal and finds one changed pixel") {
 	const Dump dump = synthetic_dump();
-	const DumpTally same = compare_dump(dump, 0);
+	LocalVector<MirrorRecord> same_records;
+	const DumpTally same = compare_dump(dump, 0, &same_records);
+	CHECK_EQ(same_records.size(), 0u);
 	CHECK_EQ(same.compared, int64_t(dump.width) * dump.height);
 	CHECK_EQ(same.outside, 0);
 	CHECK_EQ(same.factor_off, 0);
@@ -1100,10 +1164,39 @@ TEST_CASE("[DirectQuarter] The dump comparison reads a mirror-made dump as equal
 	CHECK_EQ(compare_dump(tier_changed, 0).outside, 1);
 	Dump slot_changed = synthetic_dump();
 	slot_changed.slots[pick] = uint16_t(slot_changed.slots[pick] + 1);
-	CHECK_EQ(compare_dump(slot_changed, 0).outside, 1);
+	LocalVector<MirrorRecord> changed_records;
+	CHECK_EQ(compare_dump(slot_changed, 0, &changed_records).outside, 1);
+	REQUIRE_EQ(changed_records.size(), 1u);
+	CHECK_EQ(changed_records[0].x, pick % dump.width);
+	CHECK_EQ(changed_records[0].y, pick / dump.width);
+	CHECK_EQ(int(changed_records[0].flags), 0);
+	CHECK_EQ(int(changed_records[0].gpu_slots[0]), int(changed_records[0].mirror_slots[0]) + 1);
+	CHECK_EQ(changed_records[0].gpu_slots[1], changed_records[0].mirror_slots[1]);
 	Dump factor_changed = synthetic_dump();
 	factor_changed.factors[pick] = uint16_t(factor_changed.factors[pick] > 30000 ? factor_changed.factors[pick] - 1000 : factor_changed.factors[pick] + 1000);
 	CHECK_EQ(compare_dump(factor_changed, 0).factor_off, 1);
+}
+
+TEST_CASE("[DirectQuarter] Each cut kind's margin is the smallest of its own kind, and the least of them is the cut margin") {
+	const Dump dump = synthetic_dump();
+	int with_cut = 0;
+	for (int i = 0; i < dump.width * dump.height; i++) {
+		float margin = 1e30f;
+		uint32_t kind = CUT_NONE;
+		float kind_margins[CUT_KIND_COUNT];
+		resolve(Vector2i(i % dump.width, i / dump.width), own_surface(dump, i), dump.entries, dump.rebuild, dump, &margin, &kind, kind_margins);
+		CHECK_EQ(kind_margins[CUT_NONE], 1e30f);
+		float least = 1e30f;
+		for (uint32_t k = CUT_KEPT_ORDER; k < CUT_KIND_COUNT; k++) {
+			least = MIN(least, kind_margins[k]);
+		}
+		CHECK_EQ(least, margin);
+		if (kind != CUT_NONE) {
+			with_cut++;
+			CHECK_EQ(kind_margins[kind], margin);
+		}
+	}
+	CHECK(with_cut > 0);
 }
 
 } // namespace TestDirectQuarter
