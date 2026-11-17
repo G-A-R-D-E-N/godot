@@ -526,12 +526,21 @@ void main() {
 	uint flags = 0u;
 	float hit_distance = DDGI_MISS_DISTANCE;
 	uint seed = ray_scene_hash(rtgi_shade_key(pixel, rtgi.frame));
+	if (!rtgi_is_finite(origin) || !rtgi_is_finite(direction)) {
+		flags |= RTGI_FLAG_NONFINITE_ORIGIN;
+	}
 	if (ray_scene_trace(origin, direction, ddgi.max_distance, false, false, seed, hit)) {
+		vec3 hit_normal = ray_scene_hit_normal(hit);
+		if ((rtgi.flags & RTGI_FRAME_FLAG_DEBUG_NONFINITE_NORMAL) != 0u) {
+			hit_normal = vec3(uintBitsToFloat(0x7fc00000u));
+		}
+		if (!rtgi_is_finite(hit_normal)) {
+			flags |= RTGI_FLAG_NONFINITE_NORMAL;
+		}
 		vec4 shaded = shade_hit(origin, direction, hit, seed);
 		radiance = shaded.rgb;
 		hit_distance = hit.t;
 		point = origin + direction * hit.t;
-		vec3 hit_normal = ray_scene_hit_normal(hit);
 		normal_packed = rtgi_pack_normal(hit.backface ? -hit_normal : hit_normal);
 		if (shaded.a < 0.0) {
 			flags |= RTGI_FLAG_BACKFACE;

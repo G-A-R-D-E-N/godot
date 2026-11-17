@@ -105,6 +105,7 @@ RtgiPass::Settings RtgiPass::get_project_settings() {
 	settings.ddgi_wrong_noise = CLAMP(float(GLOBAL_GET_CACHED(float, "rendering/global_illumination/rtgi/ddgi_wrong_noise")), 0.0f, 16.0f);
 	settings.ddgi_wrong_floor = CLAMP(float(GLOBAL_GET_CACHED(float, "rendering/global_illumination/rtgi/ddgi_wrong_floor")), 1e-6f, 1e6f);
 	settings.ddgi_wrong_rho = CLAMP(float(GLOBAL_GET_CACHED(float, "rendering/global_illumination/rtgi/ddgi_wrong_rho")), 0.0f, 1.0f);
+	settings.debug_nonfinite_normal = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/rtgi/debug_nonfinite_normal");
 	return settings;
 }
 
@@ -466,6 +467,9 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 	const bool ssgi_texture = inputs.ssgi_length.is_valid();
 	if (ssgi_texture) {
 		flags |= FRAME_FLAG_SSGI_VALID_TEXTURE;
+	}
+	if (settings.debug_nonfinite_normal) {
+		flags |= FRAME_FLAG_DEBUG_NONFINITE_NORMAL;
 	}
 
 	const bool tile_memory_on = settings.ddgi_wrong_events || settings.ddgi_wrong_memory;
@@ -855,6 +859,10 @@ void RtgiPass::_read_counters(const Ref<RtgiBuffers> &p_buffers) {
 	const Vector<uint8_t> data = RD::get_singleton()->buffer_get_data(counter_buffer);
 	if (data.size() == int64_t(sizeof(p_buffers->last_counters))) {
 		memcpy(p_buffers->last_counters, data.ptr(), sizeof(p_buffers->last_counters));
+		p_buffers->counted_frames++;
+		for (int i = 0; i < COUNTER_MAX; i++) {
+			p_buffers->counter_totals[i] += p_buffers->last_counters[i];
+		}
 	}
 }
 
@@ -953,6 +961,15 @@ void RtgiPass::_write_status(const Ref<RenderSceneBuffersRD> &p_render_buffers, 
 		counters["restarted"] = int64_t(values[COUNTER_RESTARTED]);
 		counters["tiles_wrong_events"] = int64_t(values[COUNTER_TILES_WRONG_EVENTS]);
 		counters["tiles_wrong_memory"] = int64_t(values[COUNTER_TILES_WRONG_MEMORY]);
+		counters["nonfinite_origin"] = int64_t(values[COUNTER_NONFINITE_ORIGIN]);
+		counters["nonfinite_normal"] = int64_t(values[COUNTER_NONFINITE_NORMAL]);
+		counters["counted_frames"] = int64_t(p_buffers->counted_frames);
+		static const char *const names[COUNTER_MAX] = { "tiles_total", "tiles_traced", "trace_pixels", "rays", "hits", "sky_misses", "backface", "history_rejects", "restarted", "tiles_wrong_events", "tiles_wrong_memory", "nonfinite_origin", "nonfinite_normal" };
+		Dictionary totals;
+		for (int i = 0; i < COUNTER_MAX; i++) {
+			totals[names[i]] = int64_t(p_buffers->counter_totals[i]);
+		}
+		counters["totals"] = totals;
 		status["gpu_counters"] = counters;
 	}
 	if (const RtgiResampleBackend *registered = GIModuleHooks::get_singleton()->get_rtgi_backend()) {
