@@ -151,6 +151,8 @@ private:
 			uint64_t particles_render_pass = 0;
 
 			RID uniform_set;
+
+			bool buffers_failed = false;
 		};
 
 		uint32_t blend_shape_count = 0;
@@ -174,6 +176,7 @@ private:
 		HashSet<Mesh *> shadow_owners;
 
 		String path;
+		bool buffers_failed_reported = false;
 
 		Dependency dependency;
 	};
@@ -276,6 +279,7 @@ private:
 	_FORCE_INLINE_ void _multimesh_mark_dirty(MultiMesh *multimesh, int p_index, bool p_aabb);
 	_FORCE_INLINE_ void _multimesh_mark_all_dirty(MultiMesh *multimesh, bool p_data, bool p_aabb);
 	_FORCE_INLINE_ void _multimesh_re_create_aabb(MultiMesh *multimesh, const float *p_data, int p_instances);
+	_FORCE_INLINE_ void _multimesh_create_indirect_command_buffer(MultiMesh *multimesh);
 
 	/* Skeleton */
 
@@ -460,6 +464,11 @@ public:
 	_FORCE_INLINE_ bool mesh_surface_has_lod(void *p_surface) const {
 		Mesh::Surface *s = reinterpret_cast<Mesh::Surface *>(p_surface);
 		return s->lod_count > 0;
+	}
+
+	_FORCE_INLINE_ bool mesh_surface_has_buffers(void *p_surface) const {
+		Mesh::Surface *s = reinterpret_cast<Mesh::Surface *>(p_surface);
+		return s && !s->buffers_failed;
 	}
 
 	_FORCE_INLINE_ uint32_t mesh_surface_get_vertices_drawn_count(void *p_surface) const {

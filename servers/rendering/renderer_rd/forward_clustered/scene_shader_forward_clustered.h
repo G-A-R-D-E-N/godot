@@ -329,6 +329,7 @@ public:
 
 		virtual bool is_animated() const;
 		virtual bool casts_shadows() const;
+		virtual bool blends_additively() const;
 		virtual RenderingServerTypes::ShaderNativeSourceCode get_native_source_code() const;
 		virtual Pair<ShaderRD *, RID> get_native_shader_and_version() const;
 		uint16_t _get_shader_version(PipelineVersion p_pipeline_version, uint32_t p_color_pass_flags, bool p_ubershader) const;

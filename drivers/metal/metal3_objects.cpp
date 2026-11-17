@@ -319,34 +319,11 @@ QueryPool *QueryPool::create(MTL::Device *p_device, uint32_t p_count) {
 	QueryPool *pool = memnew(QueryPool);
 	pool->sample_buffer = sample_buffer;
 	pool->dummy_buffer = NS::TransferPtr(p_device->newBuffer(1, MTL::ResourceStorageModePrivate | MTL::ResourceHazardTrackingModeUntracked));
-	pool->device = p_device;
-	p_device->sampleTimestamps(&pool->cpu_base, &pool->gpu_base);
 	pool->count = p_count;
 	return pool;
 }
 
-double QueryPool::_resolve_timestamp_to_nano() {
-	if (timestamp_to_nano != 0.0) {
-		return timestamp_to_nano;
-	}
-
-	MTL::Timestamp cpu_now = 0;
-	MTL::Timestamp gpu_now = 0;
-	device->sampleTimestamps(&cpu_now, &gpu_now);
-	if (gpu_now <= gpu_base || cpu_now <= cpu_base) {
-		return 0.0; // Too soon to correlate; try again on the next readback.
-	}
-	timestamp_to_nano = (double)(cpu_now - cpu_base) / (double)(gpu_now - gpu_base);
-	return timestamp_to_nano;
-}
-
 void QueryPool::get_results(uint32_t p_count, uint64_t *r_results) {
-	double to_nano = _resolve_timestamp_to_nano();
-	if (to_nano == 0.0) {
-		memset(r_results, 0, p_count * sizeof(uint64_t));
-		return;
-	}
-
 	NS::Data *data = sample_buffer->resolveCounterRange(NS::Range::Make(0, p_count));
 	ERR_FAIL_NULL(data);
 	const MTL::CounterResultTimestamp *src = (const MTL::CounterResultTimestamp *)data->bytes();
@@ -354,12 +331,12 @@ void QueryPool::get_results(uint32_t p_count, uint64_t *r_results) {
 	for (uint32_t i = 0; i < p_count; i++) {
 		// A slot the GPU never wrote resolves to the error value; hold the previous
 		// reading so the profiler reports a zero length span rather than garbage.
-		last = src[i].timestamp == COUNTER_ERROR_VALUE ? last : uint64_t((double)src[i].timestamp * to_nano);
+		last = src[i].timestamp == COUNTER_ERROR_VALUE ? last : src[i].timestamp;
 		r_results[i] = last;
 	}
 }
 
-void MDCommandBuffer::timestamp_write(QueryPool *p_pool, uint32_t p_index) {
+void MDCommandBuffer::timestamp_write(QueryPool *p_pool, uint32_t p_index, MTL::Fence *p_fence) {
 	end();
 
 	NS::SharedPtr<MTL::BlitPassDescriptor> desc = NS::TransferPtr(MTL::BlitPassDescriptor::alloc()->init());
@@ -375,9 +352,11 @@ void MDCommandBuffer::timestamp_write(QueryPool *p_pool, uint32_t p_index) {
 	enc->setLabel(NS::String::string(vformat("Timestamp %03d", p_index).utf8().get_data(), NS::UTF8StringEncoding));
 #endif
 	_fence_wait(enc);
+	enc->waitForFence(p_fence);
 	// An encoder with no commands may be elided, which would drop the sample.
 	enc->fillBuffer(p_pool->get_dummy_buffer(), NS::Range::Make(0, 1), 0);
 	_fence_update(enc);
+	enc->updateFence(p_fence);
 	enc->endEncoding();
 }
 
@@ -411,14 +390,17 @@ void MDCommandBuffer::bind_pipeline(RDD::PipelineID p_pipeline) {
 		}
 
 		if (render.pipeline != rp) {
+			if (render.pipeline && render.pipeline->shader != rp->shader) {
+				// Push constants belong to the previous shader; RD requires them to be supplied again.
+				render.dirty.clear_flag(RenderState::DIRTY_PUSH);
+				push_constant_binding = MetalPushConstantBinding();
+			}
 			render.dirty.set_flag((RenderState::DirtyFlag)(RenderState::DIRTY_PIPELINE | RenderState::DIRTY_RASTER));
 			// Mark all uniforms as dirty, as variants of a shader pipeline may have a different entry point ABI,
 			// due to setting force_active_argument_buffer_resources = true for spirv_cross::CompilerMSL::Options.
-			// As a result, uniform sets with the same layout will generate redundant binding warnings when
-			// capturing a Metal frame in Xcode.
 			//
-			// If we don't mark as dirty, then some bindings will generate a validation error.
-			// binding_cache.clear();
+			// binding_cache is kept, so unchanged bindings are not reissued. Slots written outside the
+			// cache (push constants, view mask) are invalidated at the write site in _render_set_dirty_state.
 			render.mark_uniforms_dirty();
 			render.pipeline = rp;
 			render.raster_state = rp->raster_state;
@@ -426,11 +408,17 @@ void MDCommandBuffer::bind_pipeline(RDD::PipelineID p_pipeline) {
 	} else if (p->type == MDPipelineType::Compute) {
 		DEV_ASSERT(type == MDCommandBufferStateType::Compute);
 
-		if (compute.pipeline != p) {
+		MDComputePipeline *cp = (MDComputePipeline *)p;
+		if (compute.pipeline != cp) {
+			if (compute.pipeline && compute.pipeline->shader != cp->shader) {
+				// Push constants belong to the previous shader; RD requires them to be supplied again.
+				compute.dirty.clear_flag(ComputeState::DIRTY_PUSH);
+				push_constant_binding = MetalPushConstantBinding();
+			}
 			compute.dirty.set_flag(ComputeState::DIRTY_PIPELINE);
 			binding_cache.clear();
 			compute.mark_uniforms_dirty();
-			compute.pipeline = (MDComputePipeline *)p;
+			compute.pipeline = cp;
 		}
 	}
 }
@@ -1045,12 +1033,16 @@ void MDCommandBuffer::_render_set_dirty_state() {
 	_render_bind_uniform_sets();
 
 	if (render.dirty.has_flag(RenderState::DIRTY_PUSH)) {
+		uint32_t slot = push_constant_binding.get_binding();
 		if (push_constant_binding.has(RDD::SHADER_STAGE_VERTEX)) {
-			render.encoder->setVertexBytes(push_constant_data, push_constant_data_len, push_constant_binding.get_binding());
+			render.encoder->setVertexBytes(push_constant_data, push_constant_data_len, slot);
+			render.arg_buffer_cache[RenderState::ARG_BUFFER_STAGE_VERTEX].invalidate_buffer(slot);
 		}
 		if (push_constant_binding.has(RDD::SHADER_STAGE_FRAGMENT)) {
-			render.encoder->setFragmentBytes(push_constant_data, push_constant_data_len, push_constant_binding.get_binding());
+			render.encoder->setFragmentBytes(push_constant_data, push_constant_data_len, slot);
+			render.arg_buffer_cache[RenderState::ARG_BUFFER_STAGE_FRAGMENT].invalidate_buffer(slot);
 		}
+		binding_cache.invalidate_buffer(slot);
 	}
 
 	const MDSubpass &subpass = render.get_subpass();
@@ -1058,6 +1050,7 @@ void MDCommandBuffer::_render_set_dirty_state() {
 		uint32_t view_range[2] = { 0, subpass.view_count };
 		render.encoder->setVertexBytes(view_range, sizeof(view_range), VIEW_MASK_BUFFER_INDEX);
 		render.encoder->setFragmentBytes(view_range, sizeof(view_range), VIEW_MASK_BUFFER_INDEX);
+		binding_cache.invalidate_buffer(VIEW_MASK_BUFFER_INDEX);
 	}
 
 	if (render.dirty.has_flag(RenderState::DIRTY_PIPELINE)) {
@@ -1630,7 +1623,9 @@ void MDCommandBuffer::_compute_set_dirty_state() {
 
 	if (compute.dirty.has_flag(ComputeState::DIRTY_PUSH)) {
 		if (push_constant_binding.has(RDD::SHADER_STAGE_COMPUTE)) {
-			compute.encoder->setBytes(push_constant_data, push_constant_data_len, push_constant_binding.get_binding());
+			uint32_t slot = push_constant_binding.get_binding();
+			compute.encoder->setBytes(push_constant_data, push_constant_data_len, slot);
+			binding_cache.invalidate_buffer(slot);
 		}
 	}
 

@@ -597,6 +597,7 @@ Error RenderingDeviceDriverVulkan::_initialize_device_extensions() {
 	_register_requested_device_extension(VK_NV_RAY_TRACING_VALIDATION_EXTENSION_NAME, false);
 	_register_requested_device_extension(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, false);
 	_register_requested_device_extension(VK_KHR_RAY_QUERY_EXTENSION_NAME, false);
+	_register_requested_device_extension(VK_KHR_SPIRV_1_4_EXTENSION_NAME, false);
 
 	// We don't actually use this extension, but some runtime components on some platforms
 	// can and will fill the validation layers with useless info otherwise if not enabled.
@@ -612,6 +613,7 @@ Error RenderingDeviceDriverVulkan::_initialize_device_extensions() {
 	}
 #endif
 	_register_requested_device_extension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME, false);
+	_register_requested_device_extension(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME, false);
 
 	{
 		// Debug marker extensions.
@@ -1600,6 +1602,14 @@ Error RenderingDeviceDriverVulkan::_initialize_allocator() {
 	if (buffer_device_address_support) {
 		allocator_info.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
 	}
+	memory_budget_support = context_driver->functions_get().GetPhysicalDeviceProperties2 != nullptr && enabled_device_extension_names.has(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+	if (memory_budget_support) {
+		allocator_info.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
+	}
+	// See GH-125146 for context.
+	if (physical_device_properties.vendorID == RenderingContextDriver::Vendor::VENDOR_AMD && physical_device_properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
+		allocator_info.flags |= VMA_ALLOCATOR_CREATE_IGNORE_MAX_MEMORY_ALLOCATION_COUNT_BIT;
+	}
 	VkResult err = vmaCreateAllocator(&allocator_info, &allocator);
 	ERR_FAIL_COND_V_MSG(err, ERR_CANT_CREATE, vformat("Couldn't create Vulkan memory allocator (VkResult error %d).", err));
 
@@ -1875,7 +1885,7 @@ void RenderingDeviceDriverVulkan::_set_object_name(VkObjectType p_object_type, u
 		// Debug marker extensions.
 		CharString obj_data = p_object_name.utf8();
 		VkDebugMarkerObjectNameInfoEXT name_info;
-		name_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+		name_info.sType = VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_NAME_INFO_EXT;
 		name_info.pNext = nullptr;
 		name_info.objectType = _convert_to_debug_report_objectType(p_object_type);
 		name_info.object = p_object_handle;
@@ -2056,6 +2066,9 @@ RDD::BufferID RenderingDeviceDriverVulkan::buffer_create(uint64_t p_size, BitFie
 				alloc_create_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 			}
 			alloc_create_info.preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+			if (Engine::get_singleton()->is_extra_gpu_memory_tracking_enabled() && p_usage.has_flag(BUFFER_USAGE_DYNAMIC_PERSISTENT_BIT)) {
+				alloc_create_info.requiredFlags |= VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+			}
 			if (p_size <= SMALL_ALLOCATION_MAX_SIZE) {
 				uint32_t mem_type_index = 0;
 				vmaFindMemoryTypeIndexForBufferInfo(allocator, &create_info, &alloc_create_info, &mem_type_index);
@@ -2300,6 +2313,10 @@ VkSampleCountFlagBits RenderingDeviceDriverVulkan::_ensure_supported_sample_coun
 	return VK_SAMPLE_COUNT_1_BIT;
 }
 
+RDD::TextureSamples RenderingDeviceDriverVulkan::texture_get_nearest_supported_samples(const TextureFormat &p_format) {
+	return TextureSamples(Math::get_shift_from_power_of_2((uint32_t)_ensure_supported_sample_count(p_format.samples)));
+}
+
 RDD::TextureID RenderingDeviceDriverVulkan::texture_create(const TextureFormat &p_format, const TextureView &p_view) {
 	VkImageCreateInfo create_info = {};
 	create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -2350,7 +2367,8 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create(const TextureFormat &
 	create_info.mipLevels = p_format.mipmaps;
 	create_info.arrayLayers = p_format.array_layers;
 
-	create_info.samples = _ensure_supported_sample_count(p_format.samples);
+	ERR_FAIL_COND_V_MSG(texture_get_nearest_supported_samples(p_format) != p_format.samples, TextureID(), "Unsupported sample count.");
+	create_info.samples = RD_TO_VK_SAMPLE_COUNT[p_format.samples];
 	create_info.tiling = (p_format.usage_bits & TEXTURE_USAGE_CPU_READ_BIT) ? VK_IMAGE_TILING_LINEAR : VK_IMAGE_TILING_OPTIMAL;
 
 	// Usage.
@@ -4949,8 +4967,8 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
 				acceleration_structure_write->accelerationStructureCount = 1;
 				acceleration_structure_write->pAccelerationStructures = &accel_info->vk_acceleration_structure;
 
-				vk_writes[i].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-				vk_writes[i].pNext = acceleration_structure_write;
+				vk_writes[writes_amount].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+				vk_writes[writes_amount].pNext = acceleration_structure_write;
 			} break;
 			default: {
 				DEV_ASSERT(false);
@@ -7230,7 +7248,7 @@ inline String RenderingDeviceDriverVulkan::get_vulkan_result(VkResult err) {
 /********************/
 
 void RenderingDeviceDriverVulkan::begin_segment(uint32_t p_frame_index, uint32_t p_frames_drawn) {
-	// Per-frame segments are not required in Vulkan.
+	vmaSetCurrentFrameIndex(allocator, p_frames_drawn);
 }
 
 void RenderingDeviceDriverVulkan::end_segment() {
@@ -7347,6 +7365,23 @@ uint64_t RenderingDeviceDriverVulkan::get_total_memory_used() {
 
 uint64_t RenderingDeviceDriverVulkan::get_lazily_memory_used() {
 	return vmaCalculateLazilyAllocatedBytes(allocator);
+}
+
+DeviceMemoryBudget RenderingDeviceDriverVulkan::get_device_memory_budget() {
+	if (!memory_budget_support) {
+		return DeviceMemoryBudget();
+	}
+	const VkPhysicalDeviceMemoryProperties *memory_properties = nullptr;
+	vmaGetMemoryProperties(allocator, &memory_properties);
+
+	VmaBudget *budgets = ALLOCA_ARRAY(VmaBudget, memory_properties->memoryHeapCount);
+	vmaGetHeapBudgets(allocator, budgets);
+
+	return device_memory_budget_from_heaps(memory_properties->memoryHeapCount, [&](uint32_t p_heap, bool &r_device_local, uint64_t &r_usage, uint64_t &r_budget) {
+		r_device_local = (memory_properties->memoryHeaps[p_heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0;
+		r_usage = budgets[p_heap].usage;
+		r_budget = budgets[p_heap].budget;
+	});
 }
 
 uint64_t RenderingDeviceDriverVulkan::limit_get(Limit p_limit) {
@@ -7491,9 +7526,17 @@ bool RenderingDeviceDriverVulkan::has_feature(Features p_feature) {
 		case SUPPORTS_POINT_SIZE:
 			return true;
 		case SUPPORTS_RAY_QUERY:
+#if VULKAN_RAYTRACING_ENABLED
 			return acceleration_structure_capabilities.acceleration_structure_support && ray_query_support;
+#else
+			return false;
+#endif
 		case SUPPORTS_RAYTRACING_PIPELINE:
+#if VULKAN_RAYTRACING_ENABLED
 			return acceleration_structure_capabilities.acceleration_structure_support && raytracing_capabilities.raytracing_pipeline_support;
+#else
+			return false;
+#endif
 		case SUPPORTS_HDR_OUTPUT:
 #if defined(WINDOWS_ENABLED)
 			// When using a Vulkan swapchain on Windows, some configurations

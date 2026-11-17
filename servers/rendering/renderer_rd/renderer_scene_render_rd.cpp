@@ -718,7 +718,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 		const float auto_exposure_adaptation = RSG::camera_attributes->camera_attributes_get_auto_exposure_adaptation(p_render_data->camera_attributes);
 		const float auto_exposure_adaptation_pivot = RSG::camera_attributes->camera_attributes_get_auto_exposure_adaptation_pivot(p_render_data->camera_attributes);
 		if (auto_exposure_histogram) {
-			luminance->luminance_histogram_meter(rb->get_internal_texture(), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate,
+			luminance->luminance_histogram_meter(rb->get_internal_texture(0), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate,
 					RSG::camera_attributes->camera_attributes_get_auto_exposure_clip_low(p_render_data->camera_attributes),
 					RSG::camera_attributes->camera_attributes_get_auto_exposure_clip_high(p_render_data->camera_attributes),
 					RSG::camera_attributes->camera_attributes_get_auto_exposure_center_weight(p_render_data->camera_attributes),
@@ -727,7 +727,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 			if (auto_exposure_meter == RSE::AUTO_EXPOSURE_METER_LOG_HISTOGRAM) {
 				WARN_PRINT_ONCE("The log histogram auto-exposure meter needs the compute effects path; using the mean meter.");
 			}
-			luminance->luminance_reduction(rb->get_internal_texture(), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate, RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_limit(p_render_data->camera_attributes), auto_exposure_adaptation, auto_exposure_adaptation_pivot);
+			luminance->luminance_reduction(rb->get_internal_texture(0), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate, RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_limit(p_render_data->camera_attributes), auto_exposure_adaptation, auto_exposure_adaptation_pivot);
 		}
 		if (auto_exposure_log) {
 			const float luminance_multiplier = rb->get_luminance_multiplier();
@@ -1613,7 +1613,7 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 	ERR_FAIL_COND(rb.is_null());
 
 	// View count of our render target must match our camera data.
-	ERR_FAIL_COND(rb->get_view_count() != p_camera_data->view_count);
+	ERR_FAIL_COND_MSG(rb->get_view_count() != p_camera_data->view_count, "The current camera doesn't match the view count of the viewport. Please make sure the correct camera is used or is set to current.");
 
 	// setup scene data
 	RenderSceneDataRD scene_data;
@@ -1746,7 +1746,7 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 
 	Color clear_color;
 	if (p_render_buffers.is_valid() && p_reflection_probe.is_null()) {
-		if (is_dynamic_gi_supported()) {
+		if (is_dynamic_gi_supported() && get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_UNSHADED) {
 			ddgi.update(rb, p_camera_data->main_transform.origin);
 			surfel_gi.update(rb, RendererRD::RayScene::get_singleton()->get_anchor(), p_camera_data->main_projection, p_camera_data->main_transform, rb->get_internal_size());
 		}

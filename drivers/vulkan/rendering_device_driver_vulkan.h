@@ -160,6 +160,7 @@ class RenderingDeviceDriverVulkan : public RenderingDeviceDriver {
 	StorageBufferCapabilities storage_buffer_capabilities;
 	RenderingShaderContainerFormatVulkan shader_container_format;
 	bool buffer_device_address_support = false;
+	bool memory_budget_support = false;
 	bool vulkan_memory_model_support = false;
 	bool vulkan_memory_model_device_scope_support = false;
 	AccelerationStructureCapabilities acceleration_structure_capabilities;
@@ -296,6 +297,7 @@ public:
 
 public:
 	virtual TextureID texture_create(const TextureFormat &p_format, const TextureView &p_view) override final;
+	virtual TextureSamples texture_get_nearest_supported_samples(const TextureFormat &p_format) override final;
 	virtual TextureID texture_create_from_extension(uint64_t p_native_texture, TextureType p_type, DataFormat p_format, uint32_t p_array_layers, bool p_depth_stencil, uint32_t p_mipmaps) override final;
 	virtual TextureID texture_create_shared(TextureID p_original_texture, const TextureView &p_view) override final;
 	virtual TextureID texture_create_shared_from_slice(TextureID p_original_texture, const TextureView &p_view, TextureSliceType p_slice_type, uint32_t p_layer, uint32_t p_layers, uint32_t p_mipmap, uint32_t p_mipmaps) override final;
@@ -796,6 +798,7 @@ public:
 	virtual uint64_t get_resource_native_handle(DriverResource p_type, ID p_driver_id) override final;
 	virtual uint64_t get_total_memory_used() override final;
 	virtual uint64_t get_lazily_memory_used() override final;
+	virtual DeviceMemoryBudget get_device_memory_budget() override final;
 	virtual uint64_t limit_get(Limit p_limit) override final;
 	virtual uint64_t api_trait_get(ApiTrait p_trait) override final;
 	virtual bool has_feature(Features p_feature) override final;

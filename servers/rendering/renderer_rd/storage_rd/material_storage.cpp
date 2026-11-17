@@ -654,6 +654,10 @@ bool MaterialStorage::ShaderData::is_parameter_texture(const StringName &p_param
 	return uniforms[p_param].is_texture();
 }
 
+bool MaterialStorage::ShaderData::blends_additively() const {
+	return false;
+}
+
 RD::PipelineColorBlendState::Attachment MaterialStorage::ShaderData::blend_mode_to_blend_attachment(BlendMode p_mode) {
 	RD::PipelineColorBlendState::Attachment attachment;
 
@@ -1083,6 +1087,7 @@ RID MaterialStorage::MaterialData::get_default_texture_id(ShaderLanguage::DataTy
 	switch (p_type) {
 		case ShaderLanguage::TYPE_ISAMPLER2D:
 		case ShaderLanguage::TYPE_USAMPLER2D:
+		case ShaderLanguage::TYPE_SAMPLEREXT:
 		case ShaderLanguage::TYPE_SAMPLER2D: {
 			switch (p_hint) {
 				case ShaderLanguage::ShaderNode::Uniform::HINT_DEFAULT_BLACK: {

@@ -334,6 +334,14 @@ bool WorkerThreadPool::_try_promote_low_priority_task() {
 		low_priority_task_queue.remove(low_priority_task_queue.first());
 		task_queue.add_last(&low_prio_task->task_elem);
 		low_priority_threads_used++;
+		if (runlevel == RUNLEVEL_PRE_EXIT_LANGUAGES && !low_priority_task_queue.first()) {
+			for (ThreadData &th : threads) {
+				if (!th.pre_exited_languages) {
+					th.cond_var.notify_one();
+					th.signaled = true;
+				}
+			}
+		}
 		return true;
 	} else {
 		return false;

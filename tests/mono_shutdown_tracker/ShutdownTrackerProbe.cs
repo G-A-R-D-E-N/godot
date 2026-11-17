@@ -70,6 +70,60 @@ public partial class ShutdownTrackerProbe : Node
                 tree.Quit();
                 return;
             }
+            if (args.Contains("--zombie-binding"))
+            {
+                ZombieBinding.Run();
+                tree.Quit();
+                return;
+            }
+            if (args.Contains("--zombie-rewrap"))
+            {
+                ZombieBinding.RunRewrap();
+                tree.Quit();
+                return;
+            }
+            if (args.Contains("--zombie-scripted"))
+            {
+                ZombieBinding.RunScripted();
+                tree.Quit();
+                return;
+            }
+            if (args.Contains("--zombie-scripted-child"))
+            {
+                ZombieBinding.RunScriptedChild();
+                tree.Quit();
+                return;
+            }
+            if (args.Contains("--zombie-scripted-held"))
+            {
+                ZombieBinding.RunScriptedHeld();
+                tree.Quit();
+                return;
+            }
+            if (args.Contains("--zombie-scripted-ignore"))
+            {
+                ZombieBinding.RunScriptedIgnore();
+                tree.Quit();
+                return;
+            }
+            if (args.Contains("--zombie-scripted-replace"))
+            {
+                ZombieBinding.RunScriptedReplace();
+                tree.Quit();
+                return;
+            }
+            if (args.Contains("--zombie-scripted-replace-child"))
+            {
+                ZombieBinding.RunScriptedReplaceChild();
+                tree.Quit();
+                return;
+            }
+            if (args.Contains("--zombie-scripted-stress"))
+            {
+                ZombieBinding.RunScriptedStress();
+                tree.Quit();
+                return;
+            }
             if (!running)
             {
                 BlockFinalizers();

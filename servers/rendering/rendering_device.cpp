@@ -39,6 +39,7 @@
 #include "core/os/os.h"
 #include "core/profiling/profiling.h"
 #include "core/templates/fixed_vector.h"
+#include "servers/rendering/pipeline_cache_temps.h"
 #include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
 #include "servers/rendering/rendering_device_binds.h"
 #include "servers/rendering/rendering_shader_container.h"
@@ -280,7 +281,7 @@ Vector<uint8_t> RenderingDevice::shader_compile_spirv_from_source(ShaderStage p_
 #ifdef MODULE_GLSLANG_ENABLED
 		case ShaderLanguage::SHADER_LANGUAGE_GLSL: {
 			ShaderLanguageVersion language_version = driver->get_shader_container_format().get_shader_language_version();
-			ShaderSpirvVersion spirv_version = driver->get_shader_container_format().get_shader_spirv_version();
+			ShaderSpirvVersion spirv_version = driver->get_shader_container_format().get_shader_spirv_version(p_stage);
 			return compile_glslang_shader(p_stage, ShaderIncludeDB::parse_include_files(p_source_code), language_version, spirv_version, r_error);
 		}
 #endif
@@ -351,6 +352,7 @@ void RenderingDevice::_tlas_remove_blas_dependencies(AccelerationStructure *p_tl
 
 RID RenderingDevice::blas_create(Span<AccelerationStructureGeometry> p_geometries, BitField<AccelerationStructureFlagBits> p_flags) {
 	ERR_FAIL_COND_V_MSG(!has_feature(SUPPORTS_RAYTRACING_PIPELINE) && !has_feature(SUPPORTS_RAY_QUERY), RID(), "The current rendering device has neither raytracing pipeline nor ray query support.");
+	ERR_FAIL_COND_V_MSG(p_flags.has_flag(ACCELERATION_STRUCTURE_RAY_QUERY_ONLY_BIT), RID(), "ACCELERATION_STRUCTURE_RAY_QUERY_ONLY_BIT is only valid for a TLAS.");
 
 	thread_local LocalVector<RDD::AccelerationStructureGeometry> rdd_geometries;
 	rdd_geometries.resize(p_geometries.size());
@@ -373,6 +375,7 @@ RID RenderingDevice::blas_create(Span<AccelerationStructureGeometry> p_geometrie
 		Buffer *vertex_buffer = vertex_buffer_owner.get_or_null(rd_geometry.vertex_buffer);
 		ERR_FAIL_NULL_V(vertex_buffer, RID());
 
+		ERR_FAIL_COND_V_MSG(!vertex_buffer->usage.has_flag(RDD::BUFFER_USAGE_DEVICE_ADDRESS_BIT) || !vertex_buffer->usage.has_flag(RDD::BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT), RID(), "The vertex buffer of geometry " + itos(i) + " must be created with BUFFER_CREATION_DEVICE_ADDRESS_BIT and BUFFER_CREATION_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT to be used in a BLAS.");
 		ERR_FAIL_COND_V_MSG((rd_geometry.vertex_offset + rd_geometry.vertex_count * rd_geometry.vertex_stride) > vertex_buffer->size, RID(), "The specified vertex offset and count are outside the range of the vertex buffer.");
 		ERR_FAIL_COND_V_MSG(rd_geometry.vertex_format >= DataFormat::DATA_FORMAT_MAX, RID(), "An invalid vertex format was specified.");
 
@@ -394,6 +397,7 @@ RID RenderingDevice::blas_create(Span<AccelerationStructureGeometry> p_geometrie
 			IndexBuffer *index_buffer = index_buffer_owner.get_or_null(rd_geometry.index_buffer);
 			ERR_FAIL_NULL_V(index_buffer, RID());
 
+			ERR_FAIL_COND_V_MSG(!index_buffer->usage.has_flag(RDD::BUFFER_USAGE_DEVICE_ADDRESS_BIT) || !index_buffer->usage.has_flag(RDD::BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT), RID(), "The index buffer of geometry " + itos(i) + " must be created with BUFFER_CREATION_DEVICE_ADDRESS_BIT and BUFFER_CREATION_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT to be used in a BLAS.");
 			uint32_t index_stride = (index_buffer->format == INDEX_BUFFER_FORMAT_UINT32 ? sizeof(uint32_t) : sizeof(uint16_t));
 			ERR_FAIL_COND_V_MSG((rd_geometry.index_offset + rd_geometry.index_count * index_stride) > index_buffer->size, RID(), "The specified index offset and count are outside the range of the index buffer.");
 #ifdef DEBUG_ENABLED
@@ -472,10 +476,14 @@ BitField<RDD::BufferUsageBits> RenderingDevice::_creation_to_usage_bits(BitField
 
 RID RenderingDevice::tlas_create(uint32_t p_max_instance_count, BitField<AccelerationStructureFlagBits> p_flags) {
 	ERR_FAIL_COND_V_MSG(!has_feature(SUPPORTS_RAYTRACING_PIPELINE) && !has_feature(SUPPORTS_RAY_QUERY), RID(), "The current rendering device has neither raytracing pipeline nor ray query support.");
+	ERR_FAIL_COND_V_MSG(p_flags.has_flag(ACCELERATION_STRUCTURE_RAY_QUERY_ONLY_BIT) && !has_feature(SUPPORTS_RAY_QUERY), RID(), "ACCELERATION_STRUCTURE_RAY_QUERY_ONLY_BIT needs ray query support.");
 
 	AccelerationStructure acceleration_structure;
 	acceleration_structure.type = RDD::ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
-	acceleration_structure.driver_id = driver->tlas_create(p_max_instance_count, p_flags);
+	acceleration_structure.ray_query_only = p_flags.has_flag(ACCELERATION_STRUCTURE_RAY_QUERY_ONLY_BIT);
+	BitField<AccelerationStructureFlagBits> driver_flags = p_flags;
+	driver_flags.clear_flag(ACCELERATION_STRUCTURE_RAY_QUERY_ONLY_BIT);
+	acceleration_structure.driver_id = driver->tlas_create(p_max_instance_count, driver_flags);
 	ERR_FAIL_COND_V_MSG(!acceleration_structure.driver_id, RID(), "Failed to create TLAS.");
 
 	acceleration_structure.draw_tracker = RDG::resource_tracker_create();
@@ -586,11 +594,11 @@ Error RenderingDevice::tlas_build(RID p_tlas, Span<AccelerationStructureInstance
 		rdd_instance.transform = rd_instance.transform;
 		rdd_instance.id = rd_instance.id;
 		rdd_instance.mask = rd_instance.mask;
-		rdd_instance.hit_sbt_offset = _decode_hit_sbt_range_offset(rd_instance.hit_sbt_range);
+		rdd_instance.hit_sbt_offset = tlas->ray_query_only ? 0 : _decode_hit_sbt_range_offset(rd_instance.hit_sbt_range);
 		rdd_instance.flags = rd_instance.flags;
 
 		if (rd_instance.blas.is_valid()) {
-			ERR_FAIL_COND_V_MSG(!rd_instance.hit_sbt_range, ERR_INVALID_PARAMETER, "Instance " + itos(i) + " has an invalid hit shader binding table range.");
+			ERR_FAIL_COND_V_MSG(!tlas->ray_query_only && !rd_instance.hit_sbt_range, ERR_INVALID_PARAMETER, "Instance " + itos(i) + " has an invalid hit shader binding table range.");
 
 			AccelerationStructure *blas = acceleration_structure_owner.get_or_null(rd_instance.blas);
 			ERR_FAIL_NULL_V(blas, ERR_INVALID_PARAMETER);
@@ -1646,6 +1654,8 @@ RID RenderingDevice::texture_create(const TextureFormat &p_format, const Texture
 	}
 
 	ERR_FAIL_INDEX_V(format.samples, TEXTURE_SAMPLES_MAX, RID());
+	ERR_FAIL_COND_V_MSG(format.samples > TEXTURE_SAMPLES_1 && format.texture_type != TEXTURE_TYPE_2D && format.texture_type != TEXTURE_TYPE_2D_ARRAY, RID(),
+			"Multisample textures must be 2D or 2D array.");
 
 	ERR_FAIL_COND_V_MSG(format.usage_bits == 0, RID(), "No usage bits specified (at least one is needed)");
 
@@ -1763,6 +1773,7 @@ RID RenderingDevice::texture_create(const TextureFormat &p_format, const Texture
 
 	Texture texture;
 	format.usage_bits |= forced_usage_bits;
+	format.samples = driver->texture_get_nearest_supported_samples(format);
 	texture.driver_id = driver->texture_create(format, tv);
 	ERR_FAIL_COND_V(!texture.driver_id, RID());
 	texture.type = format.texture_type;
@@ -2974,6 +2985,12 @@ bool RenderingDevice::texture_is_valid(RID p_texture) {
 	ERR_RENDER_THREAD_GUARD_V(false);
 
 	return texture_owner.owns(p_texture);
+}
+
+RD::TextureSamples RenderingDevice::texture_get_nearest_supported_samples(const TextureFormat &p_format) {
+	ERR_RENDER_THREAD_GUARD_V(TEXTURE_SAMPLES_1);
+
+	return driver->texture_get_nearest_supported_samples(p_format);
 }
 
 RD::TextureFormat RenderingDevice::texture_get_format(RID p_texture) {
@@ -6814,23 +6831,30 @@ void RenderingDevice::compute_list_bind_compute_pipeline(ComputeListID p_list, R
 		const uint32_t *pformats = pipeline->set_formats.ptr(); // Pipeline set formats.
 
 		uint32_t first_invalid_set = UINT32_MAX; // All valid by default.
-		switch (driver->api_trait_get(RDD::API_TRAIT_SHADER_CHANGE_INVALIDATION)) {
-			case RDD::SHADER_CHANGE_INVALIDATION_ALL_BOUND_UNIFORM_SETS: {
-				first_invalid_set = 0;
-			} break;
-			case RDD::SHADER_CHANGE_INVALIDATION_INCOMPATIBLE_SETS_PLUS_CASCADE: {
-				for (uint32_t i = 0; i < pcount; i++) {
-					if (compute_list.state.sets[i].pipeline_expected_format != pformats[i]) {
-						first_invalid_set = i;
-						break;
-					}
-				}
-			} break;
-			case RDD::SHADER_CHANGE_INVALIDATION_ALL_OR_NONE_ACCORDING_TO_LAYOUT_HASH: {
-				if (compute_list.state.pipeline_shader_layout_hash != pipeline->shader_layout_hash) {
+		if (pipeline->push_constant_size != compute_list.state.pipeline_push_constant_size) {
+			// All sets must be invalidated as the pipeline layout is not compatible if the push constant range is different.
+			compute_list.state.pipeline_push_constant_size = pipeline->push_constant_size;
+			compute_list.state.push_constant_size = 0;
+			first_invalid_set = 0;
+		} else {
+			switch (driver->api_trait_get(RDD::API_TRAIT_SHADER_CHANGE_INVALIDATION)) {
+				case RDD::SHADER_CHANGE_INVALIDATION_ALL_BOUND_UNIFORM_SETS: {
 					first_invalid_set = 0;
-				}
-			} break;
+				} break;
+				case RDD::SHADER_CHANGE_INVALIDATION_INCOMPATIBLE_SETS_PLUS_CASCADE: {
+					for (uint32_t i = 0; i < pcount; i++) {
+						if (compute_list.state.sets[i].pipeline_expected_format != pformats[i]) {
+							first_invalid_set = i;
+							break;
+						}
+					}
+				} break;
+				case RDD::SHADER_CHANGE_INVALIDATION_ALL_OR_NONE_ACCORDING_TO_LAYOUT_HASH: {
+					if (compute_list.state.pipeline_shader_layout_hash != pipeline->shader_layout_hash) {
+						first_invalid_set = 0;
+					}
+				} break;
+			}
 		}
 
 		for (uint32_t i = 0; i < pcount; i++) {
@@ -8279,6 +8303,12 @@ uint64_t RenderingDevice::get_memory_usage(MemoryType p_type) const {
 		case MEMORY_TOTAL: {
 			return driver->get_total_memory_used();
 		}
+		case MEMORY_DEVICE_BUDGET: {
+			return driver->get_device_memory_budget().budget;
+		}
+		case MEMORY_DEVICE_USAGE: {
+			return driver->get_device_memory_budget().usage;
+		}
 		default: {
 			DEV_ASSERT(false);
 			return 0;
@@ -8286,7 +8316,7 @@ uint64_t RenderingDevice::get_memory_usage(MemoryType p_type) const {
 	}
 }
 
-void RenderingDevice::_begin_frame(bool p_presented) {
+void RenderingDevice::_begin_frame(bool p_presented, bool p_mid_frame) {
 	GodotProfileZoneGroupedFirst(_profile_zone, "_stall_for_frame");
 	// Before writing to this frame, wait for it to be finished.
 	_stall_for_frame(frame);
@@ -8328,16 +8358,34 @@ void RenderingDevice::_begin_frame(bool p_presented) {
 		download_staging_buffers.used = false;
 	}
 
-	if (frames[frame].timestamp_count) {
-		driver->timestamp_query_pool_get_results(frames[frame].timestamp_pool, frames[frame].timestamp_count, frames[frame].timestamp_result_values.ptr());
-		driver->command_timestamp_query_pool_reset(frames[frame].command_buffer, frames[frame].timestamp_pool, frames[frame].timestamp_count);
-		SWAP(frames[frame].timestamp_names, frames[frame].timestamp_result_names);
-		SWAP(frames[frame].timestamp_cpu_values, frames[frame].timestamp_cpu_result_values);
+	Frame &f = frames[frame];
+	if (f.timestamp_count) {
+		const uint32_t carry = f.timestamp_carry_count;
+		const uint32_t take = MIN(f.timestamp_count, max_timestamp_query_elements - carry);
+		if (take) {
+			driver->timestamp_query_pool_get_results(f.timestamp_pool, take, f.timestamp_carry_values.ptr() + carry);
+		}
+		driver->command_timestamp_query_pool_reset(f.command_buffer, f.timestamp_pool, f.timestamp_count);
+		for (uint32_t i = 0; i < take; i++) {
+			f.timestamp_carry_names[carry + i] = f.timestamp_names[i];
+			f.timestamp_carry_cpu_values[carry + i] = f.timestamp_cpu_values[i];
+		}
+		if (take < f.timestamp_count) {
+			ERR_PRINT_ONCE(vformat("Timestamps captured in one frame across mid-frame flushes exceed %d; the rest of them are dropped.", max_timestamp_query_elements));
+		}
+		f.timestamp_carry_count = carry + take;
+	}
+	f.timestamp_count = 0;
+	if (p_mid_frame) {
+		return;
 	}
 
-	frames[frame].timestamp_result_count = frames[frame].timestamp_count;
-	frames[frame].timestamp_count = 0;
-	frames[frame].index = Engine::get_singleton()->get_frames_drawn();
+	SWAP(f.timestamp_carry_names, f.timestamp_result_names);
+	SWAP(f.timestamp_carry_cpu_values, f.timestamp_cpu_result_values);
+	SWAP(f.timestamp_carry_values, f.timestamp_result_values);
+	f.timestamp_result_count = f.timestamp_carry_count;
+	f.timestamp_carry_count = 0;
+	f.index = Engine::get_singleton()->get_frames_drawn();
 }
 
 void RenderingDevice::_end_frame() {
@@ -8560,7 +8608,7 @@ void RenderingDevice::_flush_and_stall_for_all_frames(bool p_begin_frame) {
 	_execute_frame(false);
 
 	if (p_begin_frame) {
-		_begin_frame();
+		_begin_frame(false, true);
 	} else {
 		_stall_for_frame(frame);
 	}
@@ -8728,6 +8776,10 @@ Error RenderingDevice::initialize(RenderingContextDriver *p_context, DisplayServ
 		frames[i].timestamp_cpu_result_values.resize(max_timestamp_query_elements);
 		frames[i].timestamp_result_values.resize(max_timestamp_query_elements);
 		frames[i].timestamp_result_count = 0;
+		frames[i].timestamp_carry_names.resize(max_timestamp_query_elements);
+		frames[i].timestamp_carry_cpu_values.resize(max_timestamp_query_elements);
+		frames[i].timestamp_carry_values.resize(max_timestamp_query_elements);
+		frames[i].timestamp_carry_count = 0;
 
 		// Assign the main queue family and command pool to the command buffer pool.
 		frames[i].command_buffer_pool.pool = frames[i].command_pool;
@@ -8942,7 +8994,9 @@ void RenderingDevice::_save_pipeline_cache(void *p_data) {
 		return;
 	}
 
-	const String temp_path = self->pipeline_cache_file_path + ".tmp";
+	remove_stale_pipeline_cache_temps(self->pipeline_cache_file_path, (uint64_t)OS::get_singleton()->get_unix_time());
+
+	const String temp_path = self->pipeline_cache_file_path + "." + itos(OS::get_singleton()->get_process_id()) + ".tmp";
 	Ref<DirAccess> dir = DirAccess::create_for_path(temp_path);
 	ERR_FAIL_COND(dir.is_null());
 	bool written = false;
@@ -8956,7 +9010,7 @@ void RenderingDevice::_save_pipeline_cache(void *p_data) {
 	}
 	if (!written || dir->rename(temp_path, self->pipeline_cache_file_path) != OK) {
 		dir->remove(temp_path);
-		WARN_PRINT(vformat("Couldn't save the pipeline cache to '%s'. The previous file is kept if the write failed; on Windows it may be lost if the rename failed.", self->pipeline_cache_file_path));
+		WARN_PRINT(vformat("Couldn't save the pipeline cache to '%s'. The previous file is kept.", self->pipeline_cache_file_path));
 		return;
 	}
 	print_verbose(vformat("Updated PSO cache (%.1f MiB)", cache_blob.size() / (1024.0f * 1024.0f)));
@@ -9360,6 +9414,7 @@ void RenderingDevice::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("texture_resolve_multisample", "from_texture", "to_texture"), &RenderingDevice::texture_resolve_multisample);
 
 	ClassDB::bind_method(D_METHOD("texture_get_format", "texture"), &RenderingDevice::_texture_get_format);
+	ClassDB::bind_method(D_METHOD("texture_get_nearest_supported_samples", "format"), &RenderingDevice::_texture_get_nearest_supported_samples);
 #ifndef DISABLE_DEPRECATED
 	ClassDB::bind_method(D_METHOD("texture_get_native_handle", "texture"), &RenderingDevice::texture_get_native_handle);
 #endif
@@ -9887,6 +9942,7 @@ void RenderingDevice::_bind_methods() {
 	BIND_BITFIELD_FLAG(ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT);
 	BIND_BITFIELD_FLAG(ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT);
 	BIND_BITFIELD_FLAG(ACCELERATION_STRUCTURE_LOW_MEMORY_BIT);
+	BIND_BITFIELD_FLAG(ACCELERATION_STRUCTURE_RAY_QUERY_ONLY_BIT);
 
 	BIND_BITFIELD_FLAG(ACCELERATION_STRUCTURE_GEOMETRY_OPAQUE_BIT);
 	BIND_BITFIELD_FLAG(ACCELERATION_STRUCTURE_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT);
@@ -10104,6 +10160,8 @@ void RenderingDevice::_bind_methods() {
 	BIND_ENUM_CONSTANT(MEMORY_TEXTURES);
 	BIND_ENUM_CONSTANT(MEMORY_BUFFERS);
 	BIND_ENUM_CONSTANT(MEMORY_TOTAL);
+	BIND_ENUM_CONSTANT(MEMORY_DEVICE_BUDGET);
+	BIND_ENUM_CONSTANT(MEMORY_DEVICE_USAGE);
 
 	BIND_CONSTANT(INVALID_ID);
 	BIND_CONSTANT(INVALID_FORMAT_ID);
@@ -10197,6 +10255,11 @@ RID RenderingDevice::_texture_create_shared_from_slice(const Ref<RDTextureView> 
 	ERR_FAIL_COND_V(p_view.is_null(), RID());
 
 	return texture_create_shared_from_slice(p_view->base, p_with_texture, p_layer, p_mipmap, p_mipmaps, p_slice_type, p_layers);
+}
+
+RD::TextureSamples RenderingDevice::_texture_get_nearest_supported_samples(const Ref<RDTextureFormat> &p_format) {
+	ERR_FAIL_COND_V(p_format.is_null(), TEXTURE_SAMPLES_1);
+	return texture_get_nearest_supported_samples(p_format->base);
 }
 
 Ref<RDTextureFormat> RenderingDevice::_texture_get_format(RID p_rd_texture) {

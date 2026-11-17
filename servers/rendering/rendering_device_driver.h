@@ -47,6 +47,7 @@
 
 #include "core/object/object.h"
 #include "core/templates/paged_allocator.h"
+#include "servers/rendering/device_memory_budget.h"
 #include "servers/rendering/rendering_context_driver.h"
 #include "servers/rendering/rendering_device_commons.h"
 
@@ -279,6 +280,7 @@ public:
 	};
 
 	virtual TextureID texture_create(const TextureFormat &p_format, const TextureView &p_view) = 0;
+	virtual TextureSamples texture_get_nearest_supported_samples(const TextureFormat &p_format) = 0;
 	virtual TextureID texture_create_from_extension(uint64_t p_native_texture, TextureType p_type, DataFormat p_format, uint32_t p_array_layers, bool p_depth_stencil, uint32_t p_mipmaps) = 0;
 	// texture_create_shared_*() can only use original, non-view textures as original. RenderingDevice is responsible for ensuring that.
 	virtual TextureID texture_create_shared(TextureID p_original_texture, const TextureView &p_view) = 0;
@@ -948,6 +950,7 @@ public:
 	virtual uint64_t get_resource_native_handle(DriverResource p_type, ID p_driver_id) = 0;
 	virtual uint64_t get_total_memory_used() = 0;
 	virtual uint64_t get_lazily_memory_used() = 0;
+	virtual DeviceMemoryBudget get_device_memory_budget() { return DeviceMemoryBudget(); }
 	virtual uint64_t limit_get(Limit p_limit) = 0;
 	virtual uint64_t api_trait_get(ApiTrait p_trait);
 	virtual bool has_feature(Features p_feature) = 0;

@@ -311,7 +311,7 @@ VkAllocationCallbacks *RenderingContextDriverVulkan::get_allocation_callbacks(Vk
 			driver_memory_tracker[header->type][header->allocation_scope].sub(header->size);
 			driver_memory_tracker[header->type][header->allocation_scope].add(size);
 
-			uint8_t *ret = reinterpret_cast<uint8_t *>(Memory::realloc_aligned_static(header, size + alignment, header->size + alignment, alignment));
+			uint8_t *ret = reinterpret_cast<uint8_t *>(Memory::realloc_aligned_static(header, size + alignment, MIN(size, header->size) + alignment, alignment));
 			if (ret == nullptr) {
 				return nullptr;
 			}
@@ -603,6 +603,9 @@ VKAPI_ATTR VkBool32 VKAPI_CALL RenderingContextDriverVulkan::_debug_messenger_ca
 	if (p_callback_data->objectCount > 0) {
 		objects_string = "\n\tObjects - " + String::num_int64(p_callback_data->objectCount);
 		for (uint32_t object = 0; object < p_callback_data->objectCount; ++object) {
+			if (p_callback_data->pObjects[object].sType != VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT) {
+				continue;
+			}
 			objects_string +=
 					"\n\t\tObject[" + String::num_int64(object) + "]" +
 					" - " + string_VkObjectType(p_callback_data->pObjects[object].objectType) +

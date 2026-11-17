@@ -77,19 +77,20 @@ void Resource::_resource_path_changed() {
 }
 
 void Resource::set_path(const String &p_path, bool p_take_over) {
-	if (path_cache == p_path) {
-		return;
-	}
-
 	if (p_path.is_empty()) {
 		p_take_over = false; // Can't take over an empty path
+	} else if (path_cache == p_path) {
+		return;
 	}
 
 	{
 		MutexLock lock(ResourceCache::lock);
 
 		if (!path_cache.is_empty()) {
-			ResourceCache::resources.erase(path_cache);
+			HashMap<String, Resource *>::Iterator E = ResourceCache::resources.find(path_cache);
+			if (E && E->value == this) {
+				ResourceCache::resources.remove(E);
+			}
 		}
 
 		path_cache = "";
@@ -864,6 +865,8 @@ Ref<Resource> ResourceCache::get_ref(const String &p_path) {
 			(*res)->path_cache = String();
 			resources.erase(p_path);
 			res = nullptr;
+		} else if (ref.is_valid() && !resources.has(p_path)) {
+			ref.unref();
 		}
 	}
 
@@ -875,17 +878,24 @@ void ResourceCache::get_cached_resources(List<Ref<Resource>> *p_resources) {
 
 	LocalVector<String> to_remove;
 
-	for (KeyValue<String, Resource *> &E : resources) {
-		Ref<Resource> ref = Ref<Resource>(E.value);
+	LocalVector<Pair<String, Resource *>> entries;
+	for (const KeyValue<String, Resource *> &E : resources) {
+		entries.push_back(Pair<String, Resource *>(E.key, E.value));
+	}
+
+	for (const Pair<String, Resource *> &E : entries) {
+		Ref<Resource> ref = Ref<Resource>(E.second);
 
 		if (ref.is_null()) {
 			// This resource is in the process of being deleted, ignore its existence
-			E.value->path_cache = String();
-			to_remove.push_back(E.key);
+			E.second->path_cache = String();
+			to_remove.push_back(E.first);
 			continue;
 		}
 
-		p_resources->push_back(ref);
+		if (resources.has(E.first)) {
+			p_resources->push_back(ref);
+		}
 	}
 
 	for (const String &E : to_remove) {

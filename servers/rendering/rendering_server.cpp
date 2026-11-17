@@ -3892,7 +3892,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/subsurface_scattering/subsurface_scattering_scale", PROPERTY_HINT_RANGE, "0.001,1,0.001"), 0.05);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/subsurface_scattering/subsurface_scattering_depth_scale", PROPERTY_HINT_RANGE, "0.001,1,0.001"), 0.01);
 
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/limits/global_shader_variables/buffer_size", PROPERTY_HINT_RANGE, "16,1048576,1"), 65536);
+	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/limits/global_shader_variables/buffer_size", PROPERTY_HINT_RANGE, "1024,1048576,1"), 65536);
 
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/lightmapping/probe_capture/update_speed", PROPERTY_HINT_RANGE, "0.001,256,0.001"), 15);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/lightmapping/primitive_meshes/texel_size", PROPERTY_HINT_RANGE, "0.001,100,0.001"), 0.2);
@@ -3918,6 +3918,8 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/energy", PROPERTY_HINT_RANGE, "0.0,16.0,0.01"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/bounce_energy", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/debug_view", PROPERTY_HINT_ENUM, "Disabled,Irradiance,Ray Hits,Normals,Probe State,Probe Visibility"), 0);
+
+	GLOBAL_DEF("rendering/global_illumination/ray_scene/skip_additive_surfaces", true);
 
 	GLOBAL_DEF("rendering/global_illumination/surfels/enabled", false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/surfels/capacity", PROPERTY_HINT_RANGE, "4096,1048576,1"), 131072);

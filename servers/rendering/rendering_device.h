@@ -478,6 +478,7 @@ public:
 	bool texture_is_shared(RID p_texture);
 	bool texture_is_valid(RID p_texture);
 	TextureFormat texture_get_format(RID p_texture);
+	TextureSamples texture_get_nearest_supported_samples(const TextureFormat &p_format);
 	Size2i texture_size(RID p_texture);
 #ifndef DISABLE_DEPRECATED
 	uint64_t texture_get_native_handle(RID p_texture);
@@ -1353,6 +1354,7 @@ private:
 
 		// --- Top Level ---
 		uint32_t max_instance_count = 0;
+		bool ray_query_only = false;
 
 		struct InstanceBuffer {
 			RDD::BufferID driver_id;
@@ -1660,6 +1662,7 @@ private:
 			RID pipeline_shader;
 			RDD::ShaderID pipeline_shader_driver_id;
 			uint32_t pipeline_shader_layout_hash = 0;
+			uint32_t pipeline_push_constant_size = 0;
 			uint32_t local_group_size[3] = { 0, 0, 0 };
 			uint8_t push_constant_data[MAX_PUSH_CONSTANT_SIZE] = {};
 			uint32_t push_constant_size = 0;
@@ -1863,6 +1866,10 @@ private:
 		TightLocalVector<uint64_t> timestamp_cpu_result_values;
 		TightLocalVector<uint64_t> timestamp_result_values;
 		uint32_t timestamp_result_count = 0;
+		TightLocalVector<String> timestamp_carry_names;
+		TightLocalVector<uint64_t> timestamp_carry_cpu_values;
+		TightLocalVector<uint64_t> timestamp_carry_values;
+		uint32_t timestamp_carry_count = 0;
 		uint64_t index = 0;
 	};
 
@@ -1895,7 +1902,7 @@ protected:
 
 public:
 	void _free_internal(RID p_id);
-	void _begin_frame(bool p_presented = false);
+	void _begin_frame(bool p_presented = false, bool p_mid_frame = false);
 	void _end_frame();
 	void _execute_frame(bool p_present);
 	void _stall_for_frame(uint32_t p_frame);
@@ -1950,7 +1957,9 @@ public:
 	enum MemoryType {
 		MEMORY_TEXTURES,
 		MEMORY_BUFFERS,
-		MEMORY_TOTAL
+		MEMORY_TOTAL,
+		MEMORY_DEVICE_BUDGET,
+		MEMORY_DEVICE_USAGE
 	};
 
 	uint64_t get_memory_usage(MemoryType p_type) const;
@@ -2009,6 +2018,7 @@ private:
 	RID _texture_create_shared(const Ref<RDTextureView> &p_view, RID p_with_texture);
 	RID _texture_create_shared_from_slice(const Ref<RDTextureView> &p_view, RID p_with_texture, uint32_t p_layer, uint32_t p_mipmap, uint32_t p_mipmaps = 1, TextureSliceType p_slice_type = TEXTURE_SLICE_2D, uint32_t p_layers = 0);
 	Ref<RDTextureFormat> _texture_get_format(RID p_rd_texture);
+	TextureSamples _texture_get_nearest_supported_samples(const Ref<RDTextureFormat> &p_format);
 
 	FramebufferFormatID _framebuffer_format_create(const TypedArray<RDAttachmentFormat> &p_attachments, uint32_t p_view_count);
 	FramebufferFormatID _framebuffer_format_create_multipass(const TypedArray<RDAttachmentFormat> &p_attachments, const TypedArray<RDFramebufferPass> &p_passes, uint32_t p_view_count);

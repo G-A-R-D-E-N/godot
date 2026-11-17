@@ -221,21 +221,8 @@ RID RendererSceneRenderImplementation::RenderForwardMobile::RenderBufferDataForw
 	return RID();
 }
 
-RID RenderForwardMobile::RenderBufferDataForwardMobile::get_color_fbs(FramebufferConfigType p_config_type, bool p_resolve_depth) {
+RID RenderForwardMobile::RenderBufferDataForwardMobile::get_vrs_texture() {
 	ERR_FAIL_NULL_V(render_buffers, RID());
-
-	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
-	ERR_FAIL_NULL_V(texture_storage, RID());
-
-	// We use our framebuffer cache here instead of building these in RenderBufferDataForwardMobile::configure
-	// This approach ensures we only build the framebuffers we actually need for this viewport.
-	// In the (near) future this means that if we cycle through a texture chain for our render target, we'll also support
-	// this.
-
-	RSE::ViewportMSAA msaa_3d = render_buffers->get_msaa_3d();
-	bool use_msaa = msaa_3d != RSE::VIEWPORT_MSAA_DISABLED;
-
-	uint32_t view_count = render_buffers->get_view_count();
 
 	RID vrs_texture;
 #ifndef XR_DISABLED
@@ -254,6 +241,27 @@ RID RenderForwardMobile::RenderBufferDataForwardMobile::get_color_fbs(Framebuffe
 	if (vrs_texture.is_null() && render_buffers->has_texture(RB_SCOPE_VRS, RB_TEXTURE)) {
 		vrs_texture = render_buffers->get_texture(RB_SCOPE_VRS, RB_TEXTURE);
 	}
+
+	return vrs_texture;
+}
+
+RID RenderForwardMobile::RenderBufferDataForwardMobile::get_color_fbs(FramebufferConfigType p_config_type, bool p_resolve_depth) {
+	ERR_FAIL_NULL_V(render_buffers, RID());
+
+	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
+	ERR_FAIL_NULL_V(texture_storage, RID());
+
+	// We use our framebuffer cache here instead of building these in RenderBufferDataForwardMobile::configure
+	// This approach ensures we only build the framebuffers we actually need for this viewport.
+	// In the (near) future this means that if we cycle through a texture chain for our render target, we'll also support
+	// this.
+
+	RSE::ViewportMSAA msaa_3d = render_buffers->get_msaa_3d();
+	bool use_msaa = msaa_3d != RSE::VIEWPORT_MSAA_DISABLED;
+
+	uint32_t view_count = render_buffers->get_view_count();
+
+	RID vrs_texture = get_vrs_texture();
 
 	Vector<RID> textures;
 	int color_buffer_id = 0;
@@ -382,6 +390,9 @@ void RenderForwardMobile::mesh_generate_pipelines(RID p_mesh, bool p_background_
 		}
 
 		void *mesh_surface = mesh_storage->mesh_get_surface(p_mesh, i);
+		if (!mesh_storage->mesh_surface_has_buffers(mesh_surface)) {
+			continue;
+		}
 		void *mesh_surface_shadow = mesh_surface;
 		SceneShaderForwardMobile::MaterialData *material = static_cast<SceneShaderForwardMobile::MaterialData *>(material_storage->material_get_data(materials[i], RendererRD::MaterialStorage::SHADER_TYPE_3D));
 		if (material == nullptr || !material->shader_data->is_valid()) {
@@ -395,7 +406,10 @@ void RenderForwardMobile::mesh_generate_pipelines(RID p_mesh, bool p_background_
 			if (material_shadow != nullptr) {
 				shader_shadow = material_shadow->shader_data;
 				if (shadow_mesh.is_valid()) {
-					mesh_surface_shadow = mesh_storage->mesh_get_surface(shadow_mesh, i);
+					void *shadow_surface = mesh_storage->mesh_get_surface(shadow_mesh, i);
+					if (mesh_storage->mesh_surface_has_buffers(shadow_surface)) {
+						mesh_surface_shadow = shadow_surface;
+					}
 				}
 			}
 		}
@@ -1088,7 +1102,8 @@ void RenderForwardMobile::_render_scene(RenderDataRD *p_render_data, const Color
 
 	if (render_target.is_valid()) {
 		// Set subsampled images as not allowed on this render target, if we are using incompatible rendering features.
-		texture_storage->render_target_set_subsampled_allowed(render_target, using_subpass_post_process);
+		bool has_vrs_texture = rb_data.is_valid() && rb_data->get_vrs_texture().is_valid();
+		texture_storage->render_target_set_subsampled_allowed(render_target, using_subpass_post_process && has_vrs_texture);
 	}
 
 	if (p_render_data->scene_data->view_count > 1) {
@@ -2990,8 +3005,8 @@ void RenderForwardMobile::_update_global_pipeline_data_requirements_from_project
 	const bool positional_shadow_16_bits = GLOBAL_GET("rendering/lights_and_shadows/positional_shadow/atlas_16_bits");
 	global_pipeline_data_required.use_16_bit_shadows = directional_shadow_16_bits || positional_shadow_16_bits;
 	global_pipeline_data_required.use_32_bit_shadows = !directional_shadow_16_bits || !positional_shadow_16_bits;
-	global_pipeline_data_required.target_samples = RenderSceneBuffersRD::msaa_to_samples(RSE::ViewportMSAA(msaa_2d_mode));
-	global_pipeline_data_required.texture_samples = RenderSceneBuffersRD::msaa_to_samples(RSE::ViewportMSAA(msaa_3d_mode));
+	global_pipeline_data_required.target_samples = RenderSceneBuffersRD::msaa_to_samples(RendererRD::TextureStorage::render_target_get_nearest_supported_msaa(RSE::ViewportMSAA(msaa_2d_mode), false));
+	global_pipeline_data_required.texture_samples = RenderSceneBuffersRD::msaa_to_samples(RenderSceneBuffersRD::get_nearest_supported_msaa_3d(RSE::ViewportMSAA(msaa_3d_mode), _render_buffers_can_be_storage()));
 }
 
 void RenderForwardMobile::_update_global_pipeline_data_requirements_from_light_storage() {
@@ -3002,6 +3017,12 @@ void RenderForwardMobile::_update_global_pipeline_data_requirements_from_light_s
 
 void RenderForwardMobile::_geometry_instance_add_surface_with_material(GeometryInstanceForwardMobile *ginstance, uint32_t p_surface, SceneShaderForwardMobile::MaterialData *p_material, uint32_t p_material_id, uint32_t p_shader_id, RID p_mesh) {
 	RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
+	if (!mesh_storage->mesh_surface_has_buffers(mesh_storage->mesh_get_surface(p_mesh, p_surface))) {
+		if (ginstance->data->dirty_dependencies) {
+			RSG::utilities->base_update_dependency(p_mesh, &ginstance->data->dependency_tracker);
+		}
+		return;
+	}
 	uint32_t flags = 0;
 
 	if (p_material->shader_data->uses_sss) {
@@ -3071,6 +3092,9 @@ void RenderForwardMobile::_geometry_instance_add_surface_with_material(GeometryI
 
 		if (shadow_mesh.is_valid()) {
 			surface_shadow = mesh_storage->mesh_get_surface(shadow_mesh, p_surface);
+			if (!mesh_storage->mesh_surface_has_buffers(surface_shadow)) {
+				surface_shadow = nullptr;
+			}
 		}
 
 	} else {
