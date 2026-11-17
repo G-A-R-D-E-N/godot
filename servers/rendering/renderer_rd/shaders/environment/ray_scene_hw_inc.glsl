@@ -35,7 +35,7 @@ uint ray_scene_hw_cull_mask(uint p_caster_mask) {
 	return RAY_SCENE_HW_ALL_GROUPS;
 }
 
-bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, uint p_skip, uint p_caster_mask, uint p_seed, out RaySceneHit r_hit) {
+bool ray_scene_trace_masked_near(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, uint p_skip, uint p_caster_mask, uint p_seed, float p_near_backface, out RaySceneHit r_hit) {
 	r_hit.t = p_t_max;
 	r_hit.instance = RAY_SCENE_NO_HIT;
 	r_hit.triangle = 0u;
@@ -57,42 +57,55 @@ bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool
 	}
 #endif
 
+	float near_backface = min(p_near_backface, p_t_max);
 	rayQueryEXT query;
-	rayQueryInitializeEXT(query, ray_scene_tlas, ray_flags, cull_mask, p_origin, 0.0, p_direction, p_t_max);
-	while (rayQueryProceedEXT(query)) {
-		uint index = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(query, false));
-		if (!exact && RAY_SCENE_CASTER_SKIPS(ray_scene_instances.data[index].layer_mask, p_caster_mask)) {
-			continue;
+	for (uint pass = near_backface > 0.0 ? 0u : 1u; pass < 2u; pass++) {
+		bool near_pass = pass == 0u;
+		if (!near_pass && near_backface > 0.0 && near_backface >= p_t_max) {
+			break;
 		}
-		uint triangle = ray_scene_hw_triangle(index, uint(rayQueryGetIntersectionGeometryIndexEXT(query, false)), uint(rayQueryGetIntersectionPrimitiveIndexEXT(query, false)));
+		rayQueryInitializeEXT(query, ray_scene_tlas, near_pass ? ray_flags | gl_RayFlagsNoOpaqueEXT : ray_flags, cull_mask, p_origin, near_pass ? 0.0 : near_backface, p_direction, near_pass ? near_backface : p_t_max);
+		while (rayQueryProceedEXT(query)) {
+			uint index = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(query, false));
+			if (!exact && RAY_SCENE_CASTER_SKIPS(ray_scene_instances.data[index].layer_mask, p_caster_mask)) {
+				continue;
+			}
+			uint triangle = ray_scene_hw_triangle(index, uint(rayQueryGetIntersectionGeometryIndexEXT(query, false)), uint(rayQueryGetIntersectionPrimitiveIndexEXT(query, false)));
 #ifdef RAY_SCENE_EXCLUDE
-		if (exclude_count != 0u && ray_scene_excluded(ray_scene_hw_material(index, triangle))) {
-			continue;
-		}
+			if (exclude_count != 0u && ray_scene_excluded(ray_scene_hw_material(index, triangle))) {
+				continue;
+			}
 #endif
-		RaySceneMaterial material = ray_scene_materials.data[ray_scene_hw_material(index, triangle)];
-		if ((material.flags & skip_mask) != 0u) {
-			continue;
-		}
-		bool blend = (material.flags & RAY_SCENE_MATERIAL_BLEND) != 0u;
-		if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
-			r_hit.t = rayQueryGetIntersectionTEXT(query, true);
-			r_hit.instance = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(query, true));
-			r_hit.blend = ray_scene_hw_blend(r_hit.instance, ray_scene_hw_triangle(r_hit.instance, uint(rayQueryGetIntersectionGeometryIndexEXT(query, true)), uint(rayQueryGetIntersectionPrimitiveIndexEXT(query, true))));
-		}
-		RAY_SCENE_TIE_LIMIT(limit, r_hit, blend, tie_scale);
-		if (rayQueryGetIntersectionTEXT(query, false) >= limit) {
-			continue;
-		}
+			RaySceneMaterial material = ray_scene_materials.data[ray_scene_hw_material(index, triangle)];
+			if ((material.flags & skip_mask) != 0u) {
+				continue;
+			}
+			if (near_pass && !rayQueryGetIntersectionFrontFaceEXT(query, false) && (material.flags & (RAY_SCENE_MATERIAL_TWO_SIDED | RAY_SCENE_MATERIAL_BLEND)) == 0u) {
+				continue;
+			}
+			bool blend = (material.flags & RAY_SCENE_MATERIAL_BLEND) != 0u;
+			if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
+				r_hit.t = rayQueryGetIntersectionTEXT(query, true);
+				r_hit.instance = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(query, true));
+				r_hit.blend = ray_scene_hw_blend(r_hit.instance, ray_scene_hw_triangle(r_hit.instance, uint(rayQueryGetIntersectionGeometryIndexEXT(query, true)), uint(rayQueryGetIntersectionPrimitiveIndexEXT(query, true))));
+			}
+			RAY_SCENE_TIE_LIMIT(limit, r_hit, blend, tie_scale);
+			if (rayQueryGetIntersectionTEXT(query, false) >= limit) {
+				continue;
+			}
 #ifdef RAY_SCENE_ALPHA
-		if (!ray_scene_alpha_passes(material.flags, triangle, index, rayQueryGetIntersectionBarycentricsEXT(query, false).yx, seed)) {
-			continue;
-		}
+			if (!ray_scene_alpha_passes(material.flags, triangle, index, rayQueryGetIntersectionBarycentricsEXT(query, false).yx, seed)) {
+				continue;
+			}
 #endif
-		if (blend && RAY_SCENE_COVERAGE_MISSES(seed, triangle, index, material.coverage)) {
-			continue;
+			if (blend && RAY_SCENE_COVERAGE_MISSES(seed, triangle, index, material.coverage)) {
+				continue;
+			}
+			rayQueryConfirmIntersectionEXT(query);
 		}
-		rayQueryConfirmIntersectionEXT(query);
+		if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
+			break;
+		}
 	}
 
 	if (rayQueryGetIntersectionTypeEXT(query, true) == gl_RayQueryCommittedIntersectionNoneEXT) {

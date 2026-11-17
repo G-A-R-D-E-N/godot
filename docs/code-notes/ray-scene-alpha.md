@@ -282,7 +282,7 @@ apply cut-outs. A cut-out surface casts a solid shadow there, while DDGI and ReS
 
 ## Hardware accept rule (`servers/rendering/renderer_rd/shaders/environment/ray_scene_hw_inc.glsl`)
 
-- `ray_scene_trace_masked`, main candidate loop: `ray_scene_alpha_passes` runs after the tie limit reject and before
+- `ray_scene_trace_masked_near` (wrapped by `ray_scene_trace_masked`), candidate loop of both the near and the main pass (see ray-scene-near-backface.md): `ray_scene_alpha_passes` runs after the tie limit reject and before
   the BLEND coverage miss, so a rejected cut-out is never confirmed. It uses the same table, layer, seed
   (`RAY_SCENE_COVERAGE_SEED` of the caller's seed), global triangle (`ray_scene_hw_triangle`) and instance (the custom
   index, which is the software instance index) as the software rule.
