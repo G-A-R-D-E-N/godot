@@ -6324,9 +6324,12 @@
 			Always draw, even if the instance would be culled by occlusion culling. Does not affect view frustum culling.
 		</constant>
 		<constant name="INSTANCE_FLAG_RAY_SCENE_ONLY" value="4" enum="InstanceFlags">
-			Keeps the instance out of the camera draw lists while the global illumination ray scene still traces it. Mesh instances only; set the base first. The instance must still pass the ray scene region and layer tests. Shadow casting is separate; set it off on the instance if the proxy must not cast. Off by default.
+			Keeps the instance out of the camera draw lists while the global illumination ray scene still traces it. Mesh instances only; set the base first. The instance must still pass the ray scene region and layer tests. It still draws into the raster shadow maps if it casts shadows; set [constant INSTANCE_FLAG_NO_RASTER_SHADOW] as well to keep it out of them. Off by default.
 		</constant>
-		<constant name="INSTANCE_FLAG_MAX" value="5" enum="InstanceFlags">
+		<constant name="INSTANCE_FLAG_NO_RASTER_SHADOW" value="5" enum="InstanceFlags">
+			Keeps the instance out of the raster shadow maps of every light (directional cascades, omni, spot and area lights), and stops its rebuilds and changes from marking those lights' shadows dirty. Camera drawing and the global illumination ray scene are unchanged, so with [constant INSTANCE_FLAG_RAY_SCENE_ONLY] and [constant SHADOW_CASTING_SETTING_ON] the instance blocks ray-traced shadow and bounce rays only. Use that pair on static meshes: a skinned or blend shape mesh with both flags no longer gets its per-frame mesh update. Off by default.
+		</constant>
+		<constant name="INSTANCE_FLAG_MAX" value="6" enum="InstanceFlags">
 			Represents the size of the [enum InstanceFlags] enum.
 		</constant>
 		<constant name="SHADOW_CASTING_SETTING_OFF" value="0" enum="ShadowCastingSetting">

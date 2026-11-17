@@ -220,7 +220,7 @@ void RendererSceneCull::_instance_pair(Instance *p_A, Instance *p_B) {
 		geom->lights.insert(B);
 		light->geometries.insert(A);
 
-		if (geom->can_cast_shadows) {
+		if (InstanceData::casts_raster_shadow(geom->can_cast_shadows, A->no_raster_shadow)) {
 			light->make_shadow_dirty();
 		}
 
@@ -345,7 +345,7 @@ void RendererSceneCull::_instance_unpair(Instance *p_A, Instance *p_B) {
 		geom->lights.erase(B);
 		light->geometries.erase(A);
 
-		if (geom->can_cast_shadows) {
+		if (InstanceData::casts_raster_shadow(geom->can_cast_shadows, A->no_raster_shadow)) {
 			light->make_shadow_dirty();
 		}
 
@@ -971,7 +971,7 @@ void RendererSceneCull::instance_set_layer_mask(RID p_instance, uint32_t p_mask)
 		ERR_FAIL_NULL(geom->geometry_instance);
 		geom->geometry_instance->set_layer_mask(p_mask);
 
-		if (geom->can_cast_shadows) {
+		if (InstanceData::casts_raster_shadow(geom->can_cast_shadows, instance->no_raster_shadow)) {
 			for (HashSet<RendererSceneCull::Instance *>::Iterator I = geom->lights.begin(); I != geom->lights.end(); ++I) {
 				InstanceLightData *light = static_cast<InstanceLightData *>((*I)->base_data);
 				light->make_shadow_dirty();
@@ -1009,7 +1009,7 @@ void RendererSceneCull::instance_geometry_set_transparency(RID p_instance, float
 		ERR_FAIL_NULL(geom->geometry_instance);
 		geom->geometry_instance->set_transparency(p_transparency);
 
-		if (changed && dithered_instance_fade && geom->can_cast_shadows) {
+		if (changed && dithered_instance_fade && InstanceData::casts_raster_shadow(geom->can_cast_shadows, instance->no_raster_shadow)) {
 			for (const Instance *E : geom->lights) {
 				InstanceLightData *light = static_cast<InstanceLightData *>(E->base_data);
 				light->make_shadow_dirty();
@@ -1355,6 +1355,28 @@ void RendererSceneCull::instance_geometry_set_flag(RID p_instance, RSE::Instance
 					idata.flags |= InstanceData::FLAG_RAY_SCENE_ONLY;
 				} else {
 					idata.flags &= ~InstanceData::FLAG_RAY_SCENE_ONLY;
+				}
+			}
+		} break;
+		case RSE::INSTANCE_FLAG_NO_RASTER_SHADOW: {
+			if (p_enabled == instance->no_raster_shadow) {
+				return;
+			}
+
+			if (((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) && instance->base_data && static_cast<InstanceGeometryData *>(instance->base_data)->can_cast_shadows) {
+				for (const Instance *E : static_cast<InstanceGeometryData *>(instance->base_data)->lights) {
+					static_cast<InstanceLightData *>(E->base_data)->make_shadow_dirty();
+				}
+			}
+
+			instance->no_raster_shadow = p_enabled;
+
+			if (instance->scenario && instance->array_index >= 0) {
+				InstanceData &idata = instance->scenario->instance_data[instance->array_index];
+				if (instance->no_raster_shadow) {
+					idata.flags |= InstanceData::FLAG_NO_RASTER_SHADOW;
+				} else {
+					idata.flags &= ~InstanceData::FLAG_NO_RASTER_SHADOW;
 				}
 			}
 		} break;
@@ -1763,7 +1785,7 @@ void RendererSceneCull::_update_instance(Instance *p_instance) const {
 		InstanceGeometryData *geom = static_cast<InstanceGeometryData *>(p_instance->base_data);
 		//make sure lights are updated if it casts shadow
 
-		if (geom->can_cast_shadows) {
+		if (InstanceData::casts_raster_shadow(geom->can_cast_shadows, p_instance->no_raster_shadow)) {
 			for (const Instance *E : geom->lights) {
 				InstanceLightData *light = static_cast<InstanceLightData *>(E->base_data);
 				light->make_shadow_dirty();
@@ -1899,6 +1921,9 @@ void RendererSceneCull::_update_instance(Instance *p_instance) const {
 		}
 		if (p_instance->ray_scene_only && p_instance->base_type == RSE::INSTANCE_MESH) {
 			idata.flags |= InstanceData::FLAG_RAY_SCENE_ONLY;
+		}
+		if (p_instance->no_raster_shadow) {
+			idata.flags |= InstanceData::FLAG_NO_RASTER_SHADOW;
 		}
 
 		p_instance->scenario->instance_data.push_back(idata);
@@ -2486,7 +2511,7 @@ bool RendererSceneCull::_light_instance_update_shadow(Instance *p_instance, cons
 					for (int j = 0; j < (int)instance_shadow_cull_result.size(); j++) {
 						Instance *instance = instance_shadow_cull_result[j];
 						const bool is_inactive_particle = (instance->base_type == RSE::INSTANCE_PARTICLES) && RSG::particles_storage->particles_is_inactive(instance->base);
-						if (!instance->visible || !((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) || !static_cast<InstanceGeometryData *>(instance->base_data)->can_cast_shadows || !(p_visible_layers & instance->layer_mask & RSG::light_storage->light_get_shadow_caster_mask(p_instance->base)) || is_inactive_particle) {
+						if (!instance->visible || !((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) || !InstanceData::casts_raster_shadow(static_cast<InstanceGeometryData *>(instance->base_data)->can_cast_shadows, instance->no_raster_shadow) || !(p_visible_layers & instance->layer_mask & RSG::light_storage->light_get_shadow_caster_mask(p_instance->base)) || is_inactive_particle) {
 							continue;
 						} else {
 							if (static_cast<InstanceGeometryData *>(instance->base_data)->material_is_animated) {
@@ -2570,7 +2595,7 @@ bool RendererSceneCull::_light_instance_update_shadow(Instance *p_instance, cons
 					for (int j = 0; j < (int)instance_shadow_cull_result.size(); j++) {
 						Instance *instance = instance_shadow_cull_result[j];
 						const bool is_inactive_particle = (instance->base_type == RSE::INSTANCE_PARTICLES) && RSG::particles_storage->particles_is_inactive(instance->base);
-						if (!instance->visible || !((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) || !static_cast<InstanceGeometryData *>(instance->base_data)->can_cast_shadows || !(p_visible_layers & instance->layer_mask & RSG::light_storage->light_get_shadow_caster_mask(p_instance->base)) || is_inactive_particle) {
+						if (!instance->visible || !((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) || !InstanceData::casts_raster_shadow(static_cast<InstanceGeometryData *>(instance->base_data)->can_cast_shadows, instance->no_raster_shadow) || !(p_visible_layers & instance->layer_mask & RSG::light_storage->light_get_shadow_caster_mask(p_instance->base)) || is_inactive_particle) {
 							continue;
 						} else {
 							if (static_cast<InstanceGeometryData *>(instance->base_data)->material_is_animated) {
@@ -2639,7 +2664,7 @@ bool RendererSceneCull::_light_instance_update_shadow(Instance *p_instance, cons
 			for (int j = 0; j < (int)instance_shadow_cull_result.size(); j++) {
 				Instance *instance = instance_shadow_cull_result[j];
 				const bool is_inactive_particle = (instance->base_type == RSE::INSTANCE_PARTICLES) && RSG::particles_storage->particles_is_inactive(instance->base);
-				if (!instance->visible || !((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) || !static_cast<InstanceGeometryData *>(instance->base_data)->can_cast_shadows || !(p_visible_layers & instance->layer_mask & RSG::light_storage->light_get_shadow_caster_mask(p_instance->base)) || is_inactive_particle) {
+				if (!instance->visible || !((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) || !InstanceData::casts_raster_shadow(static_cast<InstanceGeometryData *>(instance->base_data)->can_cast_shadows, instance->no_raster_shadow) || !(p_visible_layers & instance->layer_mask & RSG::light_storage->light_get_shadow_caster_mask(p_instance->base)) || is_inactive_particle) {
 					continue;
 				} else {
 					if (static_cast<InstanceGeometryData *>(instance->base_data)->material_is_animated) {
@@ -2706,7 +2731,7 @@ bool RendererSceneCull::_light_instance_update_shadow(Instance *p_instance, cons
 			for (int j = 0; j < (int)instance_shadow_cull_result.size(); j++) {
 				Instance *instance = instance_shadow_cull_result[j];
 				const bool is_inactive_particle = (instance->base_type == RSE::INSTANCE_PARTICLES) && RSG::particles_storage->particles_is_inactive(instance->base);
-				if (!instance->visible || !((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) || !static_cast<InstanceGeometryData *>(instance->base_data)->can_cast_shadows || !(p_visible_layers & instance->layer_mask & RSG::light_storage->light_get_shadow_caster_mask(p_instance->base)) || is_inactive_particle) {
+				if (!instance->visible || !((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) || !InstanceData::casts_raster_shadow(static_cast<InstanceGeometryData *>(instance->base_data)->can_cast_shadows, instance->no_raster_shadow) || !(p_visible_layers & instance->layer_mask & RSG::light_storage->light_get_shadow_caster_mask(p_instance->base)) || is_inactive_particle) {
 					continue;
 				} else {
 					if (static_cast<InstanceGeometryData *>(instance->base_data)->material_is_animated) {
@@ -2995,14 +3020,14 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 		if (!HIDDEN_BY_VISIBILITY_CHECKS) {
 			if (cull_data.cull->ray_scene_region.has_volume() && LAYER_CHECK && cull_data.scenario->instance_aabbs[i].in_aabb(cull_data.cull->ray_scene_region) && VIS_CHECK) {
 				uint32_t base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
-				if (base_type == RSE::INSTANCE_MESH) {
+				if (InstanceData::enters_ray_scene(idata.flags)) {
 					cull_result.ray_scene_geometry_instances.push_back(idata.instance_geometry);
 				} else if (base_type == RSE::INSTANCE_LIGHT && RSG::light_storage->light_get_type(idata.base_rid) != RSE::LIGHT_DIRECTIONAL) {
 					cull_result.ray_scene_lights.push_back(RID::from_uint64(idata.instance_data_rid));
 				}
 			}
 
-			if (!(idata.flags & InstanceData::FLAG_RAY_SCENE_ONLY) && ((LAYER_CHECK && IN_FRUSTUM(cull_data.cull->frustum) && VIS_CHECK && !OCCLUSION_CULLED) || (cull_data.scenario->instance_data[i].flags & InstanceData::FLAG_IGNORE_ALL_CULLING))) {
+			if (InstanceData::draws_in_camera(idata.flags) && ((LAYER_CHECK && IN_FRUSTUM(cull_data.cull->frustum) && VIS_CHECK && !OCCLUSION_CULLED) || (cull_data.scenario->instance_data[i].flags & InstanceData::FLAG_IGNORE_ALL_CULLING))) {
 				uint32_t base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
 				if (base_type == RSE::INSTANCE_LIGHT) {
 					cull_result.lights.push_back(idata.instance);
@@ -3321,7 +3346,7 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 						uint32_t base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
 
 						const bool is_inactive_particle = (base_type == RSE::INSTANCE_PARTICLES) && RSG::particles_storage->particles_is_inactive(idata.base_rid);
-						if (((1 << base_type) & RSE::INSTANCE_GEOMETRY_MASK) && idata.flags & InstanceData::FLAG_CAST_SHADOWS && (LAYER_CHECK & cull_data.cull->shadows[j].caster_mask) && !is_inactive_particle) {
+						if (((1 << base_type) & RSE::INSTANCE_GEOMETRY_MASK) && InstanceData::casts_raster_shadow(idata.flags) && (LAYER_CHECK & cull_data.cull->shadows[j].caster_mask) && !is_inactive_particle) {
 							cull_result.directional_shadows[j].cascade_geometry_instances[k].push_back(idata.instance_geometry);
 							mesh_visible = true;
 						}
@@ -4401,9 +4426,11 @@ void RendererSceneCull::_update_dirty_instance(Instance *p_instance) const {
 
 			if (can_cast_shadows != geom->can_cast_shadows) {
 				//ability to cast shadows change, let lights now
-				for (const Instance *E : geom->lights) {
-					InstanceLightData *light = static_cast<InstanceLightData *>(E->base_data);
-					light->make_shadow_dirty();
+				if (!p_instance->no_raster_shadow) {
+					for (const Instance *E : geom->lights) {
+						InstanceLightData *light = static_cast<InstanceLightData *>(E->base_data);
+						light->make_shadow_dirty();
+					}
 				}
 
 				geom->can_cast_shadows = can_cast_shadows;
