@@ -74,7 +74,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwayland-bin
+          sudo apt-get install -y libwayland-bin gdb
           python -m pip install --disable-pip-version-check scons==4.11.1
           dotnet --version
           scons --version
@@ -111,7 +111,21 @@ jobs:
           python modules/mono/build_scripts/build_assemblies.py --godot-output-dir=./bin --precision=double
 
       - name: Unit tests
-        run: ./bin/godot.linuxbsd.editor.double.x86_64.mono --headless --test --force-colors
+        timeout-minutes: 45
+        run: |
+          ./bin/godot.linuxbsd.editor.double.x86_64.mono --headless --test --force-colors -s &
+          pid=$!
+          (sleep 1200; echo "::error::Unit tests still running after 20 minutes; dumping thread stacks"; nproc
+            for g in "gdb" "sudo -n gdb"; do
+              out=$($g -p "$pid" -batch -ex "thread apply all bt" 2>&1 || true)
+              case "$out" in *"Thread "*) echo "$out" | tail -n 800; break ;; *) echo "$g: $out" | tail -n 5 ;; esac
+            done
+            kill -9 "$pid") &
+          watchdog=$!
+          rc=0; wait "$pid" || rc=$?
+          kill "$watchdog" 2>/dev/null || true
+          wait "$watchdog" 2>/dev/null || true
+          exit "$rc"
 
       - name: Package editor
         run: |
@@ -189,6 +203,7 @@ jobs:
           python modules/mono/build_scripts/build_assemblies.py --godot-output-dir=./bin --precision=double
 
       - name: Unit tests
+        timeout-minutes: 45
         run: ./bin/godot.windows.editor.double.x86_64.mono.exe --headless --test --force-colors
 
       - name: Mono shutdown tracker regression
@@ -218,9 +233,12 @@ jobs:
   publish-release:
     name: Publish engine release
     needs: [static-checks, linux-editor, windows-editor]
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/engine-4.8.0-dev-') }}
+    if: ${{ github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/engine-4.8.0-dev-') || github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    concurrency:
+      group: engine-release
+      cancel-in-progress: false
     permissions:
       contents: write
     env:
@@ -252,15 +270,16 @@ jobs:
 
       - name: Publish GitHub release
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
         run: |
           set -euo pipefail
+          TAG=${TAG:-engine-4.8.0-dev-${GITHUB_SHA:0:10}}
           pkg=$(ls stage/linux64/GodotSharp/Tools/nupkgs/ | sed -n 's/^Godot\.NET\.Sdk\.\(.*\)\.nupkg$/\1/p')
           test -n "$pkg"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" assets/* --clobber
           else
-            gh release create "$TAG" assets/* --verify-tag \
+            gh release create "$TAG" assets/* --target "$GITHUB_SHA" \
               --title "Garden engine 4.8.0-dev double + Mono (${GITHUB_SHA:0:10})" \
               --notes "Built by CI from $GITHUB_SHA. .NET packages: $pkg."
           fi

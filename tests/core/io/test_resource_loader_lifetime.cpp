@@ -55,6 +55,20 @@ public:
 		release.post();
 	}
 
+	bool await_release() {
+		// A test that misses a post parks this worker for good, and two parked workers starve
+		// the pool on a small CI runner so the next load deadlocks. Give up instead.
+		uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 10000;
+		while (!release.try_wait()) {
+			if (OS::get_singleton()->get_ticks_msec() >= deadline) {
+				ERR_PRINT("ResourceLoader test gate was never released; keeping the worker pool alive.");
+				return false;
+			}
+			OS::get_singleton()->delay_usec(1000);
+		}
+		return true;
+	}
+
 	bool recognize_path(const String &p_path, const String &p_type) const override {
 		return p_path.ends_with(".loader_lifetime");
 	}
@@ -63,7 +77,7 @@ public:
 			bool p_use_sub_threads, float *r_progress, CacheMode p_cache_mode) override {
 		task_id = WorkerThreadPool::get_singleton()->get_caller_task_id();
 		entered.post();
-		release.wait();
+		await_release();
 		if (r_error) {
 			*r_error = OK;
 		}
@@ -115,7 +129,7 @@ public:
 		resource->connect_changed(callable_mp(this, &NestedLoader::on_resource_changed));
 		task_id = WorkerThreadPool::get_singleton()->get_caller_task_id();
 		entered.post();
-		release.wait();
+		await_release();
 		return resource;
 	}
 };
@@ -147,7 +161,7 @@ public:
 				OS::get_singleton()->delay_usec(100);
 			}
 			entered.post();
-			release.wait();
+			await_release();
 			middle.unref();
 			child_resource->emit_changed();
 			emitted_while_loading = true;
