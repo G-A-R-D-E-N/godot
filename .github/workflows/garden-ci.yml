@@ -13,7 +13,8 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}|${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  # Tags and main must finish (especially publish-release); job-level engine-release is not enough alone.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 permissions:
   contents: read
@@ -74,7 +75,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwayland-bin
+          sudo apt-get install -y libwayland-bin gdb
           python -m pip install --disable-pip-version-check scons==4.11.1 zstandard
           dotnet --version
           scons --version
