@@ -124,14 +124,14 @@ vec3 origin_surfel_position = vec3(0.0);
 vec3 origin_surfel_normal = vec3(0.0, 1.0, 0.0);
 #endif
 
-vec4 shade_hit(vec3 p_origin, vec3 p_direction, RaySceneHit hit, uint p_seed) {
+vec4 shade_hit_normal(vec3 p_origin, vec3 p_direction, RaySceneHit hit, vec3 p_normal, uint p_seed) {
 	RaySceneMaterial material = ray_scene_hit_material(hit);
 	bool two_sided = hit.blend || bool(material.flags & RAY_SCENE_MATERIAL_TWO_SIDED);
 	if (hit.backface && !two_sided) {
 		return vec4(0.0, 0.0, 0.0, -hit.t);
 	}
 
-	vec3 normal = ray_scene_hit_normal(hit);
+	vec3 normal = p_normal;
 	if (hit.backface) {
 		normal = -normal;
 	}
@@ -159,6 +159,10 @@ vec4 shade_hit(vec3 p_origin, vec3 p_direction, RaySceneHit hit, uint p_seed) {
 	}
 	vec3 radiance = material.emission * params.emission_exposure + material.albedo * irradiance;
 	return vec4(min(radiance, vec3(DDGI_MAX_RADIANCE)), hit.t);
+}
+
+vec4 shade_hit(vec3 p_origin, vec3 p_direction, RaySceneHit hit, uint p_seed) {
+	return shade_hit_normal(p_origin, p_direction, hit, ray_scene_hit_normal(hit), p_seed);
 }
 
 vec4 shade_ray(vec3 p_origin, vec3 p_direction, float p_max_distance, uint p_seed) {
@@ -500,6 +504,12 @@ float rtgi_origin_offset(float p_view_distance, vec3 p_anchor_position, float p_
 	return max(rtgi.origin_scale * error, rtgi.origin_floor * p_view_distance);
 }
 
+void store_dropped(ivec2 p_pixel, uint p_flags, uint p_tag) {
+	imageStore(rtgi_candidate_first, p_pixel, uvec4(0u));
+	imageStore(rtgi_candidate_second, p_pixel, uvec4(0u, p_flags << 16u, 0u, p_tag));
+	imageStore(ray_image, p_pixel, vec4(0.0, 0.0, 0.0, -1.0));
+}
+
 void main() {
 	ivec2 trace_pixel = ivec2(gl_GlobalInvocationID.xy);
 	if (any(greaterThanEqual(trace_pixel, rtgi.trace_size))) {
@@ -515,10 +525,7 @@ void main() {
 	bool candidate = (tile & RTGI_TILE_TRACE) != 0u && depth != 0.0;
 	bool traced = candidate && rtgi_thin_keeps(uvec2(trace_pixel), rtgi.frame, rtgi.seed, rtgi.ray_fraction);
 	if (!traced) {
-		uint skipped = RTGI_FLAG_NO_CANDIDATE | RTGI_FLAG_NOT_TRACED | (candidate ? RTGI_FLAG_THINNED : 0u);
-		imageStore(rtgi_candidate_first, trace_pixel, uvec4(0u));
-		imageStore(rtgi_candidate_second, trace_pixel, uvec4(0u, skipped << 16u, 0u, tag));
-		imageStore(ray_image, trace_pixel, vec4(0.0, 0.0, 0.0, -1.0));
+		store_dropped(trace_pixel, RTGI_FLAG_NO_CANDIDATE | RTGI_FLAG_NOT_TRACED | (candidate ? RTGI_FLAG_THINNED : 0u), tag);
 		return;
 	}
 
@@ -550,12 +557,22 @@ void main() {
 	uint flags = 0u;
 	float hit_distance = DDGI_MISS_DISTANCE;
 	uint seed = ray_scene_hash(uint(pixel.y) * 65537u + uint(pixel.x) + rtgi.frame * 6271u);
+	if (!rtgi_is_finite(origin) || !rtgi_is_finite(direction)) {
+		flags |= RTGI_FLAG_NONFINITE_ORIGIN;
+	}
 	if (ray_scene_trace(origin, direction, ddgi.max_distance, false, seed, hit)) {
-		vec4 shaded = shade_hit(origin, direction, hit, seed);
+		vec3 hit_normal = ray_scene_hit_normal(hit);
+		if ((rtgi.flags & RTGI_FRAME_FLAG_DEBUG_NONFINITE_NORMAL) != 0u) {
+			hit_normal = vec3(uintBitsToFloat(0x7fc00000u));
+		}
+		if (!rtgi_is_finite(hit_normal)) {
+			store_dropped(trace_pixel, flags | RTGI_FLAG_NONFINITE_NORMAL | RTGI_FLAG_NO_CANDIDATE | RTGI_FLAG_THINNED, tag);
+			return;
+		}
+		vec4 shaded = shade_hit_normal(origin, direction, hit, hit_normal, seed);
 		radiance = shaded.rgb;
 		hit_distance = hit.t;
 		point = origin + direction * hit.t;
-		vec3 hit_normal = ray_scene_hit_normal(hit);
 		normal_packed = rtgi_pack_normal(hit.backface ? -hit_normal : hit_normal);
 		if (shaded.a < 0.0) {
 			flags |= RTGI_FLAG_BACKFACE;

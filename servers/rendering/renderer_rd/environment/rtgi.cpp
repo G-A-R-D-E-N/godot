@@ -94,6 +94,7 @@ RtgiPass::Settings RtgiPass::get_project_settings() {
 	settings.restart_quiet_frames = CLAMP(int(GLOBAL_GET_CACHED(int, "rendering/global_illumination/rtgi/restart_quiet_frames")), 0, 1024);
 	settings.directional_jump_degrees = CLAMP(float(GLOBAL_GET_CACHED(float, "rendering/global_illumination/rtgi/directional_jump_degrees")), 0.1f, 180.0f);
 	settings.directional_jump_floor = MAX(float(GLOBAL_GET_CACHED(float, "rendering/global_illumination/rtgi/directional_jump_floor")), 0.0f);
+	settings.debug_nonfinite_normal = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/rtgi/debug_nonfinite_normal");
 	return settings;
 }
 
@@ -433,6 +434,9 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 	if (ssgi_texture) {
 		flags |= FRAME_FLAG_SSGI_VALID_TEXTURE;
 	}
+	if (settings.debug_nonfinite_normal) {
+		flags |= FRAME_FLAG_DEBUG_NONFINITE_NORMAL;
+	}
 
 	const Transform3D previous_transform = p_buffers->have_previous ? p_buffers->previous_transform : inputs.camera_transform;
 	const Projection previous_projection = p_buffers->have_previous ? p_buffers->previous_projection : inputs.projection;
@@ -655,6 +659,10 @@ void RtgiPass::_read_counters(const Ref<RtgiBuffers> &p_buffers) {
 	const Vector<uint8_t> data = RD::get_singleton()->buffer_get_data(counter_buffer);
 	if (data.size() == int64_t(sizeof(p_buffers->last_counters))) {
 		memcpy(p_buffers->last_counters, data.ptr(), sizeof(p_buffers->last_counters));
+		p_buffers->counted_frames++;
+		for (int i = 0; i < COUNTER_MAX; i++) {
+			p_buffers->counter_totals[i] += p_buffers->last_counters[i];
+		}
 	}
 }
 
@@ -738,6 +746,15 @@ void RtgiPass::_write_status(const Ref<RenderSceneBuffersRD> &p_render_buffers, 
 		counters["valid_rays"] = int64_t(values[COUNTER_RAYS]) - int64_t(values[COUNTER_BACKFACE]);
 		counters["history_rejects"] = int64_t(values[COUNTER_HISTORY_REJECTS]);
 		counters["restarted"] = int64_t(values[COUNTER_RESTARTED]);
+		counters["nonfinite_origin"] = int64_t(values[COUNTER_NONFINITE_ORIGIN]);
+		counters["nonfinite_normal"] = int64_t(values[COUNTER_NONFINITE_NORMAL]);
+		counters["counted_frames"] = int64_t(p_buffers->counted_frames);
+		static const char *const names[COUNTER_MAX] = { "tiles_total", "tiles_traced", "trace_pixels", "rays", "hits", "sky_misses", "backface", "history_rejects", "restarted", "nonfinite_origin", "nonfinite_normal" };
+		Dictionary totals;
+		for (int i = 0; i < COUNTER_MAX; i++) {
+			totals[names[i]] = int64_t(p_buffers->counter_totals[i]);
+		}
+		counters["totals"] = totals;
 		status["gpu_counters"] = counters;
 	}
 	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::WRITE);

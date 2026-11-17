@@ -7,6 +7,8 @@
 #define RTGI_FLAG_NOT_TRACED 16u
 #define RTGI_FLAG_GUIDED 32u
 #define RTGI_FLAG_THINNED 64u
+#define RTGI_FLAG_NONFINITE_ORIGIN 128u
+#define RTGI_FLAG_NONFINITE_NORMAL 256u
 
 #define RTGI_TILE_TRACE 1u
 #define RTGI_TILE_REASON_DDGI 2u
@@ -23,6 +25,7 @@
 #define RTGI_FRAME_FLAG_SSGI_VALID_TEXTURE 32u
 #define RTGI_FRAME_FLAG_SOFT_CUT 64u
 #define RTGI_FRAME_FLAG_RESTART_SPHERES 128u
+#define RTGI_FRAME_FLAG_DEBUG_NONFINITE_NORMAL 256u
 
 #define RTGI_DEBUG_NONE 0u
 #define RTGI_DEBUG_TILE_CLASS 1u
@@ -97,6 +100,10 @@ vec3 rtgi_candidate_radiance(uvec4 p_second) {
 	vec2 rg = unpackHalf2x16(p_second.x);
 	vec2 b = unpackHalf2x16(p_second.y & 0xFFFFu);
 	return vec3(rg.x, rg.y, b.x);
+}
+
+bool rtgi_is_finite(vec3 p_value) {
+	return !(any(isnan(p_value)) || any(isinf(p_value)));
 }
 
 uint rtgi_candidate_flags(uvec4 p_second) {
