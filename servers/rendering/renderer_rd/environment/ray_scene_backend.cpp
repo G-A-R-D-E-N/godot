@@ -32,6 +32,7 @@
 
 #include "core/config/project_settings.h"
 #include "servers/rendering/renderer_rd/environment/ray_accel.h"
+#include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 
 using namespace RendererRD;
 
@@ -217,6 +218,11 @@ void RayScene::append_uniforms(LocalVector<RD::Uniform> &r_uniforms) const {
 	if (hardware) {
 		r_uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_ACCELERATION_STRUCTURE, 7, accel->get_tlas()));
 	}
+	if (alpha_enabled) {
+		r_uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 9, triangle_uv_buffer));
+		r_uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 13, alpha_store.get_table_buffer()));
+		r_uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 14, Vector<RID>({ MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_ENABLED), alpha_store.get_layer_texture() })));
+	}
 }
 
 void RayScene::_hw_begin() {
@@ -350,7 +356,9 @@ void RayScene::_hw_update(const LocalVector<BuildPrimitive> &p_primitives, bool 
 		record.instance_class = hw_classes[i];
 		records.push_back(record);
 	}
-	accel->update_tlas(records, p_rebuilt || groups_changed, hw_skipped_cap, hw_skipped_unbuilt);
+	if (accel->update_tlas(records, p_rebuilt || groups_changed, hw_skipped_cap, hw_skipped_unbuilt)) {
+		hw_tlas_builds++;
+	}
 	if (!accel->is_ready()) {
 		refuse_hardware("the TLAS could not be built");
 	}

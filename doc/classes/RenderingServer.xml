@@ -6324,9 +6324,15 @@
 			Always draw, even if the instance would be culled by occlusion culling. Does not affect view frustum culling.
 		</constant>
 		<constant name="INSTANCE_FLAG_RAY_SCENE_ONLY" value="4" enum="InstanceFlags">
-			Keeps the instance out of the camera draw lists while the global illumination ray scene still traces it. Mesh instances only; set the base first. The instance must still pass the ray scene region and layer tests. Shadow casting is separate; set it off on the instance if the proxy must not cast. Off by default.
+			Keeps the instance out of the camera draw lists while the global illumination ray scene still traces it. Mesh instances only; set the base first. The instance must still pass the ray scene region and layer tests. Shadow casting is separate: with shadow casting off the instance casts no raster shadow, and global illumination shadow rays pass through it unless [constant INSTANCE_FLAG_RAY_SCENE_OCCLUDER] is set. Off by default.
 		</constant>
-		<constant name="INSTANCE_FLAG_MAX" value="5" enum="InstanceFlags">
+		<constant name="INSTANCE_FLAG_RAY_SCENE_OCCLUDER" value="5" enum="InstanceFlags">
+			Makes a mesh instance with shadow casting off still block global illumination shadow rays, so it gives ray traced shadows without raster shadows. Other shadow casting settings are unchanged, and a material's [code]gi_shadow_pass[/code] still lets shadow rays through. Mesh instances only; set the base first. Off by default.
+		</constant>
+		<constant name="INSTANCE_FLAG_RAY_SCENE_EXCLUDE" value="6" enum="InstanceFlags">
+			Keeps a mesh instance out of the global illumination ray scene while the camera still draws it, so it neither blocks nor bounces global illumination rays. Raster shadows are unchanged. With [constant INSTANCE_FLAG_RAY_SCENE_ONLY] also set the instance is in neither. Mesh instances only; set the base first. Off by default.
+		</constant>
+		<constant name="INSTANCE_FLAG_MAX" value="7" enum="InstanceFlags">
 			Represents the size of the [enum InstanceFlags] enum.
 		</constant>
 		<constant name="SHADOW_CASTING_SETTING_OFF" value="0" enum="ShadowCastingSetting">

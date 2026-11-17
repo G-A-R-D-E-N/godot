@@ -3330,6 +3330,8 @@ void RenderingServer::_bind_methods() {
 	BIND_ENUM_CONSTANT(RSE::INSTANCE_FLAG_DRAW_NEXT_FRAME_IF_VISIBLE);
 	BIND_ENUM_CONSTANT(RSE::INSTANCE_FLAG_IGNORE_OCCLUSION_CULLING);
 	BIND_ENUM_CONSTANT(RSE::INSTANCE_FLAG_RAY_SCENE_ONLY);
+	BIND_ENUM_CONSTANT(RSE::INSTANCE_FLAG_RAY_SCENE_OCCLUDER);
+	BIND_ENUM_CONSTANT(RSE::INSTANCE_FLAG_RAY_SCENE_EXCLUDE);
 	BIND_ENUM_CONSTANT(RSE::INSTANCE_FLAG_MAX);
 
 	BIND_ENUM_CONSTANT(RSE::SHADOW_CASTING_SETTING_OFF);
@@ -3957,6 +3959,11 @@ void RenderingServer::init() {
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/backend", PROPERTY_HINT_ENUM, "Software,Hardware,Auto"), 0);
 	GLOBAL_DEF("rendering/global_illumination/ray_scene/skip_additive_surfaces", true);
+	GLOBAL_DEF("rendering/global_illumination/ray_scene/alpha_test", false);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/max_alpha_layers", PROPERTY_HINT_RANGE, "16,2048,1"), 512);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/alpha_mode", PROPERTY_HINT_ENUM, "Stochastic,Threshold"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/alpha_layer_size", PROPERTY_HINT_RANGE, "256,512,256"), 256);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/alpha_fill_texels_per_frame", PROPERTY_HINT_RANGE, "1048576,1073741824,1"), 67108864);
 
 	GLOBAL_DEF("rendering/global_illumination/direct/enabled", false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/entries", PROPERTY_HINT_ENUM, "4:4,6:6,8:8"), 6);

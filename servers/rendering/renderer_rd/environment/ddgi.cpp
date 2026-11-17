@@ -235,7 +235,7 @@ void DDGI::init(SkyRD *p_sky) {
 	}
 
 	use_octmap_array = p_sky->sky_use_octmap_array;
-	trace_defines = vformat("\n#define RAY_SCENE_BLAS_STACK_SIZE %d\n#define RAY_SCENE_TLAS_STACK_SIZE %d\n", RayScene::BLAS_MAX_DEPTH, RayScene::TLAS_MAX_DEPTH) + (use_octmap_array ? "\n#define USE_RADIANCE_OCTMAP_ARRAY\n" : "");
+	trace_defines = vformat("\n#define RAY_SCENE_BLAS_STACK_SIZE %d\n#define RAY_SCENE_TLAS_STACK_SIZE %d\n", RayScene::BLAS_MAX_DEPTH, RayScene::TLAS_MAX_DEPTH) + (use_octmap_array ? "\n#define USE_RADIANCE_OCTMAP_ARRAY\n" : "") + RayScene::alpha_shader_defines();
 	trace_shader.initialize(_trace_modes(), trace_defines);
 	trace_shader_version = trace_shader.version_create();
 	for (int i = 0; i < TRACE_MODE_MAX; i++) {

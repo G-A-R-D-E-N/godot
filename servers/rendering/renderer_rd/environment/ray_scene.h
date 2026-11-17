@@ -40,6 +40,7 @@
 #include "core/templates/paged_array.h"
 #include "core/templates/safe_refcount.h"
 #include "servers/rendering/renderer_rd/environment/gi_epochs.h"
+#include "servers/rendering/renderer_rd/environment/ray_scene_alpha.h"
 #include "servers/rendering/rendering_device.h"
 #include "servers/rendering/rendering_server_enums.h"
 #include "servers/rendering/rendering_server_types.h"
@@ -75,7 +76,9 @@ public:
 		MATERIAL_FLAG_SHADOW_ONLY = 16,
 	};
 
-	static constexpr uint32_t CANDIDATE_FLAGS = MATERIAL_FLAG_SKIP | MATERIAL_FLAG_BLEND | MATERIAL_FLAG_SHADOW_PASS | MATERIAL_FLAG_SHADOW_ONLY;
+	static constexpr uint32_t MATERIAL_ALPHA_SHIFT = 8;
+	static constexpr uint32_t MATERIAL_ALPHA_MASK = 0xFFFFFF00;
+	static constexpr uint32_t CANDIDATE_FLAGS = MATERIAL_FLAG_SKIP | MATERIAL_FLAG_BLEND | MATERIAL_FLAG_SHADOW_PASS | MATERIAL_FLAG_SHADOW_ONLY | MATERIAL_ALPHA_MASK;
 
 	enum InstanceClass {
 		INSTANCE_CLASS_OPAQUE,
@@ -103,6 +106,10 @@ public:
 		uint32_t surface;
 		float e1[4];
 		float e2[4];
+	};
+
+	struct TriangleUv {
+		uint32_t uv[3];
 	};
 
 	struct Instance {
@@ -139,6 +146,7 @@ public:
 
 	static_assert(sizeof(Light) == 96);
 	static_assert(sizeof(Instance) == 64);
+	static_assert(sizeof(TriangleUv) == 12);
 	static_assert((uint64_t(TLAS_LEAF_SIZE) << TLAS_MAX_DEPTH) <= (uint64_t(1) << 24), "A hardware instance custom index is 24 bits.");
 
 	struct LightCensus {
@@ -174,10 +182,13 @@ public:
 	static void build_bvh(LocalVector<BuildPrimitive> &p_primitives, uint32_t p_max_leaf, uint32_t p_max_depth, LocalVector<Node> &r_nodes);
 	static float light_energy(float p_energy, float p_intensity, RSE::LightType p_type, bool p_physical_units, float p_exposure, const Vector2 &p_area_size, bool p_area_normalize);
 	static void pack_area(const Basis &p_basis, const Vector2 &p_area_size, Light &r_light);
-	static uint32_t shadow_cast_flags(RSE::ShadowCastingSetting p_setting);
+	static uint32_t shadow_cast_flags(RSE::ShadowCastingSetting p_setting, bool p_occluder = false);
 	static uint64_t surface_candidates(uint32_t p_surface, uint32_t p_flags);
 	static uint32_t instance_class(uint64_t p_candidates, uint64_t p_split);
 	static uint32_t hw_instance_mask(uint32_t p_layer_mask, const uint32_t *p_groups, uint32_t p_group_count);
+	static uint32_t float_to_half(float p_value);
+	static uint32_t pack_half2(float p_x, float p_y);
+	static bool alpha_uv_unsafe(float p_extent, float p_scale, uint32_t p_layer_size);
 
 private:
 	static RayScene *singleton;
@@ -186,11 +197,14 @@ private:
 
 	struct MeshEntry {
 		LocalVector<Vector3> positions;
+		LocalVector<uint32_t> uvs;
 		LocalVector<uint32_t> indices;
 		LocalVector<uint32_t> triangle_surface;
+		LocalVector<float> surface_uv_extent;
 		uint32_t surface_count = 0;
 		LocalVector<Node> nodes;
 		LocalVector<Triangle> bvh_triangles;
+		LocalVector<TriangleUv> bvh_uvs;
 		bool built = false;
 		uint32_t build_serial = 0;
 		uint32_t node_offset = 0;
@@ -223,8 +237,34 @@ private:
 		int32_t bounce_index = -1;
 	};
 
+	struct AlphaCounts {
+		uint32_t cutout_materials = 0;
+		uint32_t solid_no_texture = 0;
+		uint32_t solid_custom0 = 0;
+		uint32_t solid_degenerate = 0;
+		uint32_t solid_always = 0;
+		uint32_t solid_refused = 0;
+		uint32_t vertex_alpha_ignored = 0;
+		uint32_t live_surfaces = 0;
+		uint32_t pending_surfaces = 0;
+		uint32_t solid_unsafe_uv = 0;
+		uint32_t layers = 0;
+		uint32_t layers_ready = 0;
+		uint32_t table_entries = 0;
+		uint32_t layers_released = 0;
+		uint32_t layers_evicted = 0;
+	};
+
 	LocalVector<Material> materials;
 	HashMap<RID, CachedMaterial> material_cache;
+	RayAlphaStore alpha_store;
+	AlphaCounts alpha_counts;
+	AlphaCounts reported_alpha_counts;
+	uint64_t tlas_rebuilds = 0;
+	uint64_t hw_tlas_builds = 0;
+	uint64_t reported_tlas_rebuilds = 0;
+	uint64_t reported_hw_tlas_builds = 0;
+	uint64_t tlas_report_msec = 0;
 	enum AlbedoSource {
 		ALBEDO_GI,
 		ALBEDO_GI_CAPPED,
@@ -259,8 +299,11 @@ private:
 	RID material_buffer;
 	RID light_buffer;
 	RID scene_data_buffer;
+	RID triangle_uv_buffer;
 	uint32_t blas_node_capacity = 0;
 	uint32_t triangle_capacity = 0;
+	uint32_t triangle_uv_capacity = 0;
+	bool alpha_enabled = false;
 	uint32_t instance_capacity = 0;
 	uint32_t tlas_node_capacity = 0;
 	uint32_t material_capacity = 0;
@@ -289,7 +332,14 @@ private:
 	void _capture_surface(MeshEntry &r_mesh, uint32_t p_surface, const RenderingServerTypes::SurfaceData &p_surface_data);
 	void _build_blas(MeshEntry &p_mesh);
 	void _assemble(const LocalVector<RID> &p_meshes);
-	void _material_entry(RID p_material, RID p_mesh, uint32_t p_surface, Material &r_material);
+	void _material_entry(RID p_material, RID p_mesh, uint32_t p_surface, Material &r_material, float &r_alpha_threshold);
+	void _alpha_entry(RID p_material, Material &r_material, float p_alpha_threshold);
+	bool _surface_uv_unsafe(const MeshEntry &p_mesh, uint32_t p_surface, uint32_t p_entry) const;
+	bool _alpha_live(uint32_t p_flags) const;
+	bool _alpha_ready() const;
+	void _alpha_instance(const MeshEntry &p_mesh, uint32_t p_surface, Material &r_material);
+	void _print_alpha();
+	void _print_tlas_rebuilds(bool p_final);
 	void _warn_albedo_fallback(RID p_material, RID p_texture, RID p_mesh, uint32_t p_surface);
 	void _instance_slots(RID p_material, CachedMaterial &r_cached) const;
 	void _pack_light(RID p_light_instance, bool p_physical_units, float p_exposure, uint32_t p_limit, LocalVector<Light> &r_lights);
@@ -316,7 +366,7 @@ public:
 
 	void update(const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const Vector<RID> &p_directional_lights, RID p_camera_attributes, const Vector3 &p_camera_position);
 
-	bool is_ready() const { return scene_data_buffer.is_valid() && blas_node_buffer.is_valid() && tlas_node_buffer.is_valid() && (!accel || _hw_ready()); }
+	bool is_ready() const { return scene_data_buffer.is_valid() && blas_node_buffer.is_valid() && tlas_node_buffer.is_valid() && (!accel || _hw_ready()) && (!alpha_enabled || _alpha_ready()); }
 	bool uses_hardware() const { return accel != nullptr; }
 	void refuse_hardware(const String &p_reason);
 	RID get_tlas() const;
@@ -332,6 +382,13 @@ public:
 	RID get_material_buffer() const { return material_buffer; }
 	RID get_light_buffer() const { return light_buffer; }
 	RID get_scene_data_buffer() const { return scene_data_buffer; }
+	RID get_triangle_uv_buffer() const { return triangle_uv_buffer; }
+	bool is_alpha_enabled() const { return alpha_enabled; }
+	static String alpha_shader_defines();
+	RID get_alpha_table_buffer() const { return alpha_store.get_table_buffer(); }
+	uint64_t get_alpha_change_serial() const { return alpha_store.get_change_serial(); }
+	RID get_alpha_layer_texture() const { return alpha_store.get_layer_texture(); }
+	const RayAlphaStore &get_alpha_store() const { return alpha_store; }
 
 	RayScene();
 	~RayScene();
