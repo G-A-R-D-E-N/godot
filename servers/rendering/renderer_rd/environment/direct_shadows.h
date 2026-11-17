@@ -163,6 +163,7 @@ private:
 		FILTER_CLAMP,
 		FILTER_FIRST,
 		FILTER_SECOND,
+		FILTER_SECOND_EXTERNAL,
 		FILTER_MAX,
 	};
 
@@ -205,7 +206,7 @@ private:
 
 	static Vector<String> _trace_modes();
 	bool _ensure_hw();
-	void _filter(const Ref<RenderSceneBuffersRD> &p_render_buffers, Ref<ViewportData> p_viewport, const Settings &p_settings);
+	void _filter(const Ref<RenderSceneBuffersRD> &p_render_buffers, Ref<ViewportData> p_viewport, const Settings &p_settings, bool p_external);
 	RID _debug_target(const Ref<RenderSceneBuffersRD> &p_render_buffers, const Settings &p_settings);
 	void _ensure_textures(const Ref<RenderSceneBuffersRD> &p_render_buffers, Ref<ViewportData> p_viewport, const Settings &p_settings);
 	Ref<ViewportData> _viewport(const Ref<RenderSceneBuffersRD> &p_render_buffers);

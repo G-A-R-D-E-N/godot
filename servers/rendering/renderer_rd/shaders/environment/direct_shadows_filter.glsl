@@ -197,8 +197,13 @@ float range_weight(float p_own, float p_other, float p_noise) {
 
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+#if defined(MODE_SECOND) && !defined(EXTERNAL_ENTRIES)
+	uint own_limit = params.entries - 1u;
+	uint rest_layer = own_limit;
+#else
 	uint own_limit = params.head_entries;
 	uint rest_layer = params.entries - 1u;
+#endif
 	uint layers = rest_layer + 3u;
 	ivec2 tile_origin = ivec2(gl_WorkGroupID.xy) * 8 - HALO;
 	load_tile(tile_origin, rest_layer + 1u);
@@ -333,6 +338,7 @@ void main() {
 		value = total[i] > 0.0 ? NO_EVIDENCE_GAP + (1.0 - NO_EVIDENCE_GAP) * value : 0.0;
 #endif
 #ifdef MODE_SECOND
+#ifdef EXTERNAL_ENTRIES
 		if (i >= own_limit && i < rest_layer) {
 			vec2 tail = imageLoad(accum_image, ivec3(pixel, int(i))).rg;
 			value = tail.y > 0.0 ? tail.x / tail.y : 1.0;
@@ -340,6 +346,11 @@ void main() {
 		if (params.force_one != 0u && !(params.tail_visibility == 2u && i >= own_limit && i < rest_layer)) {
 			value = 1.0;
 		}
+#else
+		if (params.force_one != 0u) {
+			value = 1.0;
+		}
+#endif
 #endif
 		imageStore(out_image, ivec3(pixel, int(i)), vec4(value));
 	}

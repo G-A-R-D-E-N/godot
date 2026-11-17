@@ -79,6 +79,7 @@ DirectShadows::DirectShadows() {
 	filter_modes.push_back("\n#define MODE_CLAMP\n");
 	filter_modes.push_back("\n#define MODE_FIRST\n");
 	filter_modes.push_back("\n#define MODE_SECOND\n");
+	filter_modes.push_back("\n#define MODE_SECOND\n#define EXTERNAL_ENTRIES\n");
 	filter_shader.initialize(filter_modes);
 	filter_shader_version = filter_shader.version_create();
 	for (int i = 0; i < FILTER_MAX; i++) {
@@ -429,7 +430,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	rd->compute_list_end();
 
 	if (settings.filtered()) {
-		_filter(rb, viewport, settings);
+		_filter(rb, viewport, settings, external);
 	}
 
 	viewport->last_frame = p_input.frame;
@@ -438,7 +439,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	return true;
 }
 
-void DirectShadows::_filter(const Ref<RenderSceneBuffersRD> &p_render_buffers, Ref<ViewportData> p_viewport, const Settings &p_settings) {
+void DirectShadows::_filter(const Ref<RenderSceneBuffersRD> &p_render_buffers, Ref<ViewportData> p_viewport, const Settings &p_settings, bool p_external) {
 	RD *rd = RD::get_singleton();
 	UniformSetCacheRD *cache = UniformSetCacheRD::get_singleton();
 	const bool flip = p_viewport->flip;
@@ -494,7 +495,7 @@ void DirectShadows::_filter(const Ref<RenderSceneBuffersRD> &p_render_buffers, R
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 11, _debug_target(p_render_buffers, p_settings)));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 19, scratch));
 		RENDER_TIMESTAMP("Direct Shadows Filter Second");
-		run(FILTER_SECOND, uniforms);
+		run(p_external ? FILTER_SECOND_EXTERNAL : FILTER_SECOND, uniforms);
 	}
 }
 
