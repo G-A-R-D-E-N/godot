@@ -3298,7 +3298,9 @@ void fragment_shader(in SceneData scene_data) {
 
 #ifndef USE_VERTEX_LIGHTING
 #ifdef DIRECT_RESAMPLED_ROUTE
-	direct_record_begin(scene_data, vertex);
+	if (sc_use_direct_resampled()) {
+		direct_record_begin(scene_data, vertex);
+	}
 #endif
 	{ //omni lights
 
@@ -3338,7 +3340,7 @@ void fragment_shader(in SceneData scene_data) {
 				}
 
 #ifdef DIRECT_RESAMPLED_ROUTE
-				int direct_passes = direct_route(omni_lights.data[light_index].flags, omni_lights.data[light_index].position, omni_lights.data[light_index].inv_radius, omni_lights.data[light_index].attenuation, false, vec3(0.0), 0.0, 1.0);
+				int direct_passes = sc_use_direct_resampled() ? direct_route(omni_lights.data[light_index].flags, omni_lights.data[light_index].position, omni_lights.data[light_index].inv_radius, omni_lights.data[light_index].attenuation, false, vec3(0.0), 0.0, 1.0) : -1;
 				if (direct_passes == 0) {
 					continue;
 				}
@@ -3421,7 +3423,7 @@ void fragment_shader(in SceneData scene_data) {
 				}
 
 #ifdef DIRECT_RESAMPLED_ROUTE
-				int direct_passes = direct_route(spot_lights.data[light_index].flags, spot_lights.data[light_index].position, spot_lights.data[light_index].inv_radius, spot_lights.data[light_index].attenuation, true, spot_lights.data[light_index].direction, spot_lights.data[light_index].cone_angle, spot_lights.data[light_index].cone_attenuation);
+				int direct_passes = sc_use_direct_resampled() ? direct_route(spot_lights.data[light_index].flags, spot_lights.data[light_index].position, spot_lights.data[light_index].inv_radius, spot_lights.data[light_index].attenuation, true, spot_lights.data[light_index].direction, spot_lights.data[light_index].cone_angle, spot_lights.data[light_index].cone_attenuation) : -1;
 				if (direct_passes == 0) {
 					continue;
 				}
@@ -3778,7 +3780,7 @@ void fragment_shader(in SceneData scene_data) {
 		specular_buffer.rgb = vec3(0.0);
 	}
 #ifdef DIRECT_RESAMPLED_ROUTE
-	if (direct_no_layer) {
+	if (sc_use_direct_resampled() && direct_no_layer) {
 		diffuse_buffer.rgb = vec3(16384.0, 0.0, 16384.0);
 		specular_buffer.rgb = vec3(0.0);
 	}
@@ -3803,7 +3805,7 @@ void fragment_shader(in SceneData scene_data) {
 		frag_color.rgb = debug_lighting_component(sc_debug_lighting_component(), diffuse_light, direct_specular_light, ambient_light, indirect_specular_light, output_emission, fog, ssr_confidence, persistent_ao, specular_source, ambient_source, surfel_coverage.y);
 	}
 #ifdef DIRECT_RESAMPLED_ROUTE
-	if (direct_no_layer) {
+	if (sc_use_direct_resampled() && direct_no_layer) {
 		frag_color.rgb = vec3(16384.0, 0.0, 16384.0);
 	}
 #endif
