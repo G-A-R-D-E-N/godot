@@ -38,9 +38,5 @@ if lab:
 else:
     env_gi_restir_di.add_source_files(
         env.modules_sources,
-        [
-            f
-            for f in env_gi_restir_di.Glob("*.cpp")
-            if f.name not in lab_sources and not f.name.endswith(".gen.cpp")
-        ],
+        [f for f in env_gi_restir_di.Glob("*.cpp") if f.name not in lab_sources and not f.name.endswith(".gen.cpp")],
     )

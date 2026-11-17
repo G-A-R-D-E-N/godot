@@ -298,3 +298,5 @@
 *.py                                          @godotengine/buildsystem
 SConstruct                                    @godotengine/buildsystem
 SCsub                                         @godotengine/buildsystem
+/modules/gi_restir_di/                          @NomadsReach
+/docs/code-notes/                               @NomadsReach

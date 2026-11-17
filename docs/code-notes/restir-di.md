@@ -23,15 +23,15 @@ external-entries mode and the opaque pass shades heads, tail samples or nothing.
 - `direct_lights.h:GpuSlot` is 48 bytes. It gains the anchor offset (reset position minus live position, world, so the
   entry pass ranks a flickering lamp where it was last reset) and the mean colour: linear colour times render energy at
   the lamp's mean energy, with fade and exposure, as `LightData.color` is built. A colour rather than a mean-to-live
-  ratio, because live energy is 0 at a flicker trough. `RenderingServer.light_set_direct_mean_energy` sets the mean
+  ratio, because live energy is 0 at a flicker through. `RenderingServer.light_set_direct_mean_energy` sets the mean
   energy; -1 (the default) means the live energy.
 - `Params.head_entries` is DI-1's own entry count. Outside external mode it is entries - 1, so DI-1 is unchanged. In
   external mode the slot layers are heads, then tails, then the rest layer at entries - 1. Tail layers hold slot 0, so a
   pipeline without bit 15 never matches one and falls back to the rest ratio.
 - Entry texture (r32ui array, written by the module, read by DI-1 at set 0 binding 20): layers 0 to H-1 head slots, then
   three layers per tail sample: slot with the half-float blue rest scale in the top 16 bits, the share-out weight as
-  float bits, then red and green rest scales as two halves. The rest scale is the sample's coloured target over the
-  tail's coloured target sum, times its resampling weight Sum p / p_y (times the candidate count m in exact mode); DI-1
+  float bits, then red and green rest scales as two halves. The rest scale is the sample's colored target over the
+  tail's colored target sum, times its resampling weight Sum p / p_y (times the candidate count m in exact mode); DI-1
   adds visibility times it to the rest ratio. Every tail sample of a pixel gets the same share-out weight (Sum p / K, or
   Sum p / m in exact mode) and DI-1 floors them with one dynamic flag, so its picks are uniform across the samples,
   which that scale assumes. Shares of p_k in exact mode would have let DI-1's floors over-weight a dim lamp in the
@@ -41,7 +41,7 @@ external-entries mode and the opaque pass shades heads, tail samples or nothing.
   that weight by K. A negative weight means the live energy arm: the tail sample is shaded with the live colour instead
   of the mean. A tail of K lamps or fewer is shaded exactly, each lamp weight K.
 - DI-1's external mode: `consider` reports every lamp it walks to `add_external`, with zero-weight lamps too, so a tail
-  sample at a flicker trough still finds its position and gets a ray; only lamps with weight count toward the rest. A
+  sample at a flicker through still finds its position and gets a ray; only lamps with weight count toward the rest. A
   pixel is empty only when no own entry, no rest lamp and no tail sample were seen. The share-out skips its ray loop
   when there is nothing to pick.
 - `di_sampler_inc.glsl` holds what the entry pass and the opaque loop must compute the same way: the lamp window and
@@ -94,7 +94,7 @@ external-entries mode and the opaque pass shades heads, tail samples or nothing.
 - Design calls beside the ones above: E_h reaches the opaque pass from texture sizes (DI-1's slot layers - 1 - the
   record's tail layers), with no new uniform; DI-1's external mode still walks the cell for the rest key, target and
   flags with no streaming pick, a second cell walk that is part of the measured cost; tail layers skip DI-1's history
-  match, clamp and both filter passes, as centre and as neighbour, and tail rays don't write the ray record, as rest
+  match, clamp and both filter passes, as center and as neighbor, and tail rays don't write the ray record, as rest
   rays don't.
 - The hit mode's race (`di_race_*`, `di_hit_pick`) keys on a lamp id. `_pack_light` writes the light instance's RID
   local index into `RaySceneLight.pad`, the same low 32 bits DI-1's K4 keys lamps by, and 0 is a real id. Core doesn't
@@ -118,7 +118,7 @@ wrote before.
 - Temporal reuse: the entry pass folds in the previous frame's pick for the same surface, found by reprojection where
   the previous depth and normal match, with its mass cut to `m_temporal_cap`. A stored mass is cut to `m_stored_cap`.
 - Spatial reuse: a second variant of the same shader combines the pick with up to `spatial_neighbors` picks at random
-  points within `spatial_radius` pixels (at a render height of 1440, scaled with the height), only where the neighbour
+  points within `spatial_radius` pixels (at a render height of 1440, scaled with the height), only where the neighbor
   holds a pick this frame and its depth and normal are similar.
 - B1 combines by mass alone, which is biased. U1 combines with pairwise MIS, weighting each candidate by its target at
   the other pixel's surface, and leaves the visibility prior out on reservoir pixels.
