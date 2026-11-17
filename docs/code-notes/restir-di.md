@@ -28,6 +28,15 @@ external-entries mode and the opaque pass shades heads, tail samples or nothing.
 - `Params.head_entries` is DI-1's own entry count. Outside external mode it is entries - 1, so DI-1 is unchanged. In
   external mode the slot layers are heads, then tails, then the rest layer at entries - 1. Tail layers hold slot 0, so a
   pipeline without bit 15 never matches one and falls back to the rest ratio.
+- The second filter pass has two variants. `FILTER_SECOND_EXTERNAL` (`EXTERNAL_ENTRIES`) has the head and tail split
+  and the tail block; `FILTER_SECOND` reads entries - 1 as both the head count and the rest layer and has no tail block,
+  as at the base. `_filter` takes the external one only in external mode. Outside it the two give the same values,
+  because head_entries is entries - 1 and tail_visibility is 0, so a change to one must keep that.
+- The forward shader tests bit 15 (`sc_use_direct_resampled()`) at every use of the route: the record read, the route
+  call in both lamp loops, the layer test in `direct_shadow_factor`, the tail color in `light_process_omni` and
+  `light_process_spot`, and the `debug/log` mark. With bit 15 at 0 each is a constant branch once the pipeline is
+  specialized, as DI-1's bit 14 test at its call is, so the off path does not depend on the driver proving the route's
+  globals constant through the lamp loop.
 - Entry texture (r32ui array, written by the module, read by DI-1 at set 0 binding 20): layers 0 to H-1 head slots, then
   three layers per tail sample: slot with the half-float blue rest scale in the top 16 bits, the share-out weight as
   float bits, then red and green rest scales as two halves. The rest scale is the sample's colored target over the
