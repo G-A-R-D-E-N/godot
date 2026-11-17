@@ -104,6 +104,9 @@ namespace Godot
 
         ~GodotObject()
         {
+            if (DisposablesTracker.ShuttingDown)
+                return;
+
             DisposeOwned(false);
         }
 

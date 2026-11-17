@@ -74,7 +74,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwayland-bin
+          sudo apt-get install -y libwayland-bin gdb
           python -m pip install --disable-pip-version-check scons==4.11.1
           dotnet --version
           scons --version
