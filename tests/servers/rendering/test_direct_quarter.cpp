@@ -805,7 +805,54 @@ struct DumpTally {
 	int64_t outside = 0;
 	int64_t factor_off = 0;
 	float worst_factor = 0.0f;
+	int64_t class_g = 0;
+	int64_t class_cut[CUT_KIND_COUNT] = {};
+	int64_t differ = 0;
+	int64_t differ_g = 0;
+	int64_t differ_cut[CUT_KIND_COUNT] = {};
+	int64_t differ_margin_zero = 0;
+	int64_t differ_margin_bucket[5] = {};
+	int64_t differ_tier = 0;
+	int64_t differ_order_only = 0;
+	int64_t differ_slot_set = 0;
+	int64_t differ_factor_only = 0;
 };
+
+bool same_slot_set(const Dump &p_dump, int p_index, const Resolved &p_out) {
+	const int64_t pixels = int64_t(p_dump.width) * p_dump.height;
+	const uint32_t own_limit = p_dump.entries - 1;
+	if (p_dump.slots[own_limit * pixels + p_index] != p_out.slots[own_limit]) {
+		return false;
+	}
+	for (uint32_t e = 0; e < own_limit; e++) {
+		bool gpu_in_mirror = false;
+		bool mirror_in_gpu = false;
+		for (uint32_t f = 0; f < own_limit; f++) {
+			gpu_in_mirror = gpu_in_mirror || p_out.slots[f] == p_dump.slots[e * pixels + p_index];
+			mirror_in_gpu = mirror_in_gpu || p_dump.slots[f * pixels + p_index] == p_out.slots[e];
+		}
+		if (!gpu_in_mirror || !mirror_in_gpu) {
+			return false;
+		}
+	}
+	return true;
+}
+
+int margin_bucket(float p_margin) {
+	if (p_margin <= 1e-7f) {
+		return 0;
+	}
+	if (p_margin <= 1e-6f) {
+		return 1;
+	}
+	if (p_margin <= 1e-5f) {
+		return 2;
+	}
+	if (p_margin < 1e-4f) {
+		return 3;
+	}
+	return 4;
+}
 
 bool near_threshold(const Dump &p_dump, const Vector2i &p_pixel, const Surface &p_own) {
 	Surface own = p_own;
@@ -829,6 +876,8 @@ bool near_threshold(const Dump &p_dump, const Vector2i &p_pixel, const Surface &
 
 DumpTally compare_dump(const Dump &p_dump, int p_print) {
 	DumpTally tally;
+	int print_outside = p_print;
+	int print_inside = p_print;
 	const int64_t pixels = int64_t(p_dump.width) * p_dump.height;
 	for (int y = 0; y < p_dump.height; y++) {
 		for (int x = 0; x < p_dump.width; x++) {
@@ -841,7 +890,20 @@ DumpTally compare_dump(const Dump &p_dump, int p_print) {
 			tally.compared++;
 			const Surface own = own_surface(p_dump, index);
 			float margin = 1e30f;
-			const Resolved out = resolve(Vector2i(x, y), own, p_dump.entries, p_dump.rebuild, p_dump, &margin);
+			uint32_t kind = CUT_NONE;
+			const Resolved out = resolve(Vector2i(x, y), own, p_dump.entries, p_dump.rebuild, p_dump, &margin, &kind);
+			const bool by_cut = margin < 1e-4f;
+			const bool by_g = near_threshold(p_dump, Vector2i(x, y), own);
+			const bool in_class = by_cut || by_g;
+			if (in_class) {
+				tally.threshold++;
+			}
+			if (by_g) {
+				tally.class_g++;
+			}
+			if (by_cut) {
+				tally.class_cut[kind]++;
+			}
 			bool same = out.tier == gpu_tier;
 			for (uint32_t e = 0; e < p_dump.entries; e++) {
 				same = same && out.slots[e] == p_dump.slots[e * pixels + index];
@@ -855,18 +917,35 @@ DumpTally compare_dump(const Dump &p_dump, int p_print) {
 				tally.worst_factor = MAX(tally.worst_factor, worst);
 				continue;
 			}
-			const bool in_class = margin < 1e-4f || near_threshold(p_dump, Vector2i(x, y), own);
 			if (in_class) {
-				tally.threshold++;
+				tally.differ++;
+				if (by_g) {
+					tally.differ_g++;
+				}
+				if (by_cut) {
+					tally.differ_cut[kind]++;
+					tally.differ_margin_zero += margin == 0.0f ? 1 : 0;
+					tally.differ_margin_bucket[margin_bucket(margin)]++;
+				}
+				if (out.tier != gpu_tier) {
+					tally.differ_tier++;
+				} else if (!same && same_slot_set(p_dump, index, out)) {
+					tally.differ_order_only++;
+				} else if (!same) {
+					tally.differ_slot_set++;
+				} else {
+					tally.differ_factor_only++;
+				}
 			} else if (!same) {
 				tally.outside++;
 			} else {
 				tally.factor_off++;
 				tally.worst_factor = MAX(tally.worst_factor, worst);
 			}
-			if (p_print > 0 && !in_class) {
-				p_print--;
-				MESSAGE(vformat("pixel (%d, %d): GPU tier %d slot0 %d factor0 %f; mirror tier %d slot0 %d factor0 %f; cut margin %f", x, y, gpu_tier, p_dump.slots[index], float(p_dump.factors[index]) / 65535.0f, out.tier, out.slots[0], out.factors[0], margin).utf8().get_data());
+			int &budget = in_class ? print_inside : print_outside;
+			if (budget > 0) {
+				budget--;
+				MESSAGE(doctest::String(vformat("DI1Q_DUMP_PIXEL (%d, %d) %s: GPU tier %d slots %d %d %d factor0 %f; mirror tier %d slots %d %d %d factor0 %f; cut margin %.9f kind %d; g band %s", x, y, in_class ? "in the class" : "OUTSIDE the class", gpu_tier, p_dump.slots[index], p_dump.slots[pixels + index], p_dump.entries > 2 ? p_dump.slots[2 * pixels + index] : 0u, float(p_dump.factors[index]) / 65535.0f, out.tier, out.slots[0], out.slots[1], out.slots[2], out.factors[0], margin, kind, by_g ? "yes" : "no").utf8().get_data()));
 			}
 		}
 	}
@@ -877,7 +956,7 @@ template <typename T>
 bool read_layers(const String &p_path, LocalVector<T> &r_out, int64_t p_values) {
 	const Vector<uint8_t> bytes = FileAccess::get_file_as_bytes(p_path);
 	if (int64_t(bytes.size()) != p_values * int64_t(sizeof(T))) {
-		MESSAGE(vformat("%s holds %d bytes, not %d", p_path, bytes.size(), p_values * int64_t(sizeof(T))).utf8().get_data());
+		MESSAGE(doctest::String(vformat("%s holds %d bytes, not %d", p_path, bytes.size(), p_values * int64_t(sizeof(T))).utf8().get_data()));
 		return false;
 	}
 	r_out.resize(p_values);
@@ -927,7 +1006,9 @@ TEST_CASE("[DirectQuarter][Dump] The mirror resolves a GPU dump as the GPU did")
 	REQUIRE(read_layers(dir.path_join(files["normal_full"]), dump.normal_full, pixels));
 	build_blocks(dump);
 	const DumpTally tally = compare_dump(dump, 20);
-	MESSAGE(vformat("DI1Q_DUMP %s: compared %d, past the region %d, threshold class %d (limit %d), different outside the class %d, factors off by more than 1e-3 %d, worst factor difference %f", path, tally.compared, tally.past_region, tally.threshold, tally.compared / 10000, tally.outside, tally.factor_off, tally.worst_factor).utf8().get_data());
+	MESSAGE(doctest::String(vformat("DI1Q_DUMP %s: compared %d, past the region %d, threshold class %d (limit %d), different outside the class %d, factors off by more than 1e-3 %d, worst factor difference %f", path, tally.compared, tally.past_region, tally.threshold, tally.compared / 10000, tally.outside, tally.factor_off, tally.worst_factor).utf8().get_data()));
+	MESSAGE(doctest::String(vformat("DI1Q_DUMP_CLASS: class %d (g band %d; cut kept order %d, kept against dropped %d, rest key %d); differing in the class %d (g band %d; cut kept order %d, kept against dropped %d, rest key %d)", tally.threshold, tally.class_g, tally.class_cut[CUT_KEPT_ORDER], tally.class_cut[CUT_KEPT_DROPPED], tally.class_cut[CUT_REST_KEY], tally.differ, tally.differ_g, tally.differ_cut[CUT_KEPT_ORDER], tally.differ_cut[CUT_KEPT_DROPPED], tally.differ_cut[CUT_REST_KEY]).utf8().get_data()));
+	MESSAGE(doctest::String(vformat("DI1Q_DUMP_DIFFER: tier %d, slot order only %d, slot set %d, factor only %d; of those flagged by a cut margin: exactly 0 %d; up to 1e-7, 0 included %d; 1e-7 to 1e-6 %d; 1e-6 to 1e-5 %d; 1e-5 to 1e-4 %d", tally.differ_tier, tally.differ_order_only, tally.differ_slot_set, tally.differ_factor_only, tally.differ_margin_zero, tally.differ_margin_bucket[0], tally.differ_margin_bucket[1], tally.differ_margin_bucket[2], tally.differ_margin_bucket[3]).utf8().get_data()));
 
 	CHECK_EQ(tally.outside, 0);
 	CHECK_EQ(tally.factor_off, 0);
@@ -1006,7 +1087,7 @@ TEST_CASE("[DirectQuarter] The dump comparison reads a mirror-made dump as equal
 	CHECK_EQ(same.compared, int64_t(dump.width) * dump.height);
 	CHECK_EQ(same.outside, 0);
 	CHECK_EQ(same.factor_off, 0);
-	CHECK_EQ(same.threshold, 0);
+	CHECK_EQ(same.differ, 0);
 	int tier_two = 0;
 	for (uint8_t t : dump.tier) {
 		tier_two += t == TIER_WIDE ? 1 : 0;

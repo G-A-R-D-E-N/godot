@@ -150,13 +150,31 @@ inline Vector2i bracket(const Vector2i &p_pixel) {
 	return Vector2i((p_pixel.x - 1) >> 1, (p_pixel.y - 1) >> 1);
 }
 
+enum CutKind : uint32_t {
+	CUT_NONE,
+	CUT_KEPT_ORDER,
+	CUT_KEPT_DROPPED,
+	CUT_REST_KEY,
+	CUT_KIND_COUNT,
+};
+
 template <typename BlockAt>
-Resolved resolve(const Vector2i &p_pixel, const Surface &p_own, uint32_t p_entries, const Rebuild &p_rebuild, const BlockAt &p_block_at, float *r_cut_margin = nullptr) {
+Resolved resolve(const Vector2i &p_pixel, const Surface &p_own, uint32_t p_entries, const Rebuild &p_rebuild, const BlockAt &p_block_at, float *r_cut_margin = nullptr, uint32_t *r_cut_kind = nullptr) {
 	Resolved out;
 	const uint32_t own_limit = p_entries - 1;
 	float margin = 1e30f;
+	uint32_t kind = CUT_NONE;
+	const auto take = [&](float p_value, uint32_t p_kind) {
+		if (p_value < margin) {
+			margin = p_value;
+			kind = p_kind;
+		}
+	};
 	if (r_cut_margin != nullptr) {
 		*r_cut_margin = margin;
+	}
+	if (r_cut_kind != nullptr) {
+		*r_cut_kind = kind;
 	}
 	for (uint32_t i = 0; i < own_limit + 3; i++) {
 		out.factors[i] = 1.0f;
@@ -255,10 +273,10 @@ Resolved resolve(const Vector2i &p_pixel, const Surface &p_own, uint32_t p_entri
 		SWAP(merged_score[i], merged_score[best]);
 	}
 	for (uint32_t i = 0; i + 1 < kept; i++) {
-		margin = MIN(margin, (merged_score[i] - merged_score[i + 1]) / MAX(merged_score[i], 1e-20f));
+		take((merged_score[i] - merged_score[i + 1]) / MAX(merged_score[i], 1e-20f), CUT_KEPT_ORDER);
 	}
 	for (uint32_t m = kept; m < merged_count && kept > 0; m++) {
-		margin = MIN(margin, (merged_score[kept - 1] - merged_score[m]) / MAX(merged_score[kept - 1], 1e-20f));
+		take((merged_score[kept - 1] - merged_score[m]) / MAX(merged_score[kept - 1], 1e-20f), CUT_KEPT_DROPPED);
 	}
 	for (uint32_t i = 0; i < own_limit; i++) {
 		const uint32_t slot = i < kept ? merged_slot[i] : 0;
@@ -303,11 +321,14 @@ Resolved resolve(const Vector2i &p_pixel, const Surface &p_own, uint32_t p_entri
 	}
 	for (int u = 0; u < used_count; u++) {
 		if (used[u]->slots[own_limit] != 0 && used[u]->slots[own_limit] != rest_key) {
-			margin = MIN(margin, (rest_weight - key_sums[u]) / MAX(rest_weight, 1e-20f));
+			take((rest_weight - key_sums[u]) / MAX(rest_weight, 1e-20f), CUT_REST_KEY);
 		}
 	}
 	if (r_cut_margin != nullptr) {
 		*r_cut_margin = margin;
+	}
+	if (r_cut_kind != nullptr) {
+		*r_cut_kind = kind;
 	}
 
 	out.slots[own_limit] = rest_key;
