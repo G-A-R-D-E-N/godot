@@ -35,6 +35,7 @@
 #include "core/io/file_access.h"
 #include "core/io/json.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
+#include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
 #include "servers/rendering/rendering_server_globals.h"
@@ -372,8 +373,9 @@ bool DirectShadows::prepare_lamps(const FrameInput &p_input, DirectLightTable &p
 	Shells shells;
 	shells.scene = ray_scene;
 	p_table.write_slots(lamp_data, exclude_data, &shells);
-	if (!lamps_dump_request.is_empty()) {
+	if (!lamps_dump_request.is_empty() && lamps_dump_request != served_request) {
 		p_table.write_lamps(lamp_dump);
+		LightStorage::get_singleton()->write_direct_dump_lamps(dump_lamp_data, lamp_dump.size() / DirectLightTable::LAMP_VALUES);
 		dump_hard_resets = p_table.get_hard_resets();
 		dump_dynamic_lamp_frames = p_table.get_dynamic_lamp_frames();
 	}
@@ -781,6 +783,14 @@ void DirectShadows::serve_dump_request(const Ref<RenderSceneBuffersRD> &p_render
 	}
 	lamps_file.unref();
 	files["lamps"] = lamps_path.get_file();
+	const String lamps2_path = request + ".lamps2.bin";
+	Ref<FileAccess> lamps2_file = FileAccess::open(lamps2_path, FileAccess::WRITE);
+	ok = ok && lamps2_file.is_valid();
+	if (lamps2_file.is_valid() && !dump_lamp_data.is_empty()) {
+		ok = lamps2_file->store_buffer(reinterpret_cast<const uint8_t *>(dump_lamp_data.ptr()), dump_lamp_data.size() * sizeof(float)) && ok;
+	}
+	lamps2_file.unref();
+	files["lamps2"] = lamps2_path.get_file();
 	const Vector<uint8_t> counters = rd->buffer_get_data(counter_buffer);
 	ok = ok && counters.size() >= int(COUNTER_BYTES);
 
@@ -793,19 +803,34 @@ void DirectShadows::serve_dump_request(const Ref<RenderSceneBuffersRD> &p_render
 	if (viewport->quarter) {
 		report["block_width"] = viewport->grid.x;
 		report["block_height"] = viewport->grid.y;
-		const Projection inverse = viewport->last_projection.inverse();
-		Array inverse_values;
-		for (int c = 0; c < 4; c++) {
-			for (int r = 0; r < 4; r++) {
-				inverse_values.push_back(float(inverse.columns[c][r]));
-			}
-		}
-		report["inv_projection"] = inverse_values;
 	}
+	const Projection inverse = viewport->last_projection.inverse();
+	Array inverse_values;
+	for (int c = 0; c < 4; c++) {
+		for (int r = 0; r < 4; r++) {
+			inverse_values.push_back(float(inverse.columns[c][r]));
+		}
+	}
+	report["inv_projection"] = inverse_values;
+	Array camera_origin;
+	Array camera_basis;
+	for (int r = 0; r < 3; r++) {
+		camera_origin.push_back(double(viewport->last_camera.origin[r]));
+		for (int c = 0; c < 3; c++) {
+			camera_basis.push_back(double(viewport->last_camera.basis.rows[r][c]));
+		}
+	}
+	report["camera_origin"] = camera_origin;
+	report["camera_basis"] = camera_basis;
+	Array jitter;
+	jitter.push_back(double(viewport->last_jitter.x));
+	jitter.push_back(double(viewport->last_jitter.y));
+	report["jitter"] = jitter;
 	report["frame"] = viewport->last_frame;
 	report["precise"] = viewport->precise;
 	report["files"] = files;
 	report["lamp_slots"] = lamp_dump.size() / DirectLightTable::LAMP_VALUES;
+	report["lamp2_values"] = DirectLightTable::DUMP_LAMP_VALUES;
 	report["hard_resets"] = dump_hard_resets;
 	report["dynamic_lamp_frames"] = dump_dynamic_lamp_frames;
 	RayScene *ray_scene = RayScene::get_singleton();

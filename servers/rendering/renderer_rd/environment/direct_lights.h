@@ -47,6 +47,7 @@ public:
 	static constexpr float MIN_RESET_DISTANCE = 0.5f;
 	static constexpr float RESET_RANGE_FRACTION = 0.1f;
 	static constexpr uint32_t LAMP_VALUES = 4;
+	static constexpr uint32_t DUMP_LAMP_VALUES = 20;
 	static constexpr uint32_t MAX_SHELLS = 7;
 	static constexpr uint32_t EXCLUDE_SHIFT = 3;
 	static constexpr uint32_t EXCLUDE_COUNT_MASK = (1u << EXCLUDE_SHIFT) - 1;

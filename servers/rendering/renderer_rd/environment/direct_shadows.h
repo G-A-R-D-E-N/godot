@@ -236,6 +236,7 @@ private:
 	LocalVector<DirectLightTable::GpuSlot> lamp_data;
 	LocalVector<DirectLightTable::GpuExclude> exclude_data;
 	LocalVector<float> lamp_dump;
+	LocalVector<float> dump_lamp_data;
 	uint64_t dump_hard_resets = 0;
 	uint64_t dump_dynamic_lamp_frames = 0;
 	String served_request;

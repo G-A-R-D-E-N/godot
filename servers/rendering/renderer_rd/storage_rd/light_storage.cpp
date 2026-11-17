@@ -47,6 +47,47 @@ LightStorage *LightStorage::get_singleton() {
 	return singleton;
 }
 
+void LightStorage::write_direct_dump_lamps(LocalVector<float> &r_values, uint32_t p_slots) const {
+	const uint32_t values = DirectLightTable::DUMP_LAMP_VALUES;
+	r_values.resize(p_slots * values);
+	for (uint32_t i = 0; i < r_values.size(); i++) {
+		r_values[i] = 0.0f;
+	}
+	for (uint32_t i = 0; i < omni_light_count + spot_light_count; i++) {
+		const bool spot = i >= omni_light_count;
+		const uint32_t index = spot ? i - omni_light_count : i;
+		const LightData &light = spot ? spot_lights[index] : omni_lights[index];
+		if ((light.flags & 1u) == 0u) {
+			continue;
+		}
+		const uint32_t slot = (light.flags >> 1) & 0xFFFFu;
+		if (slot == DirectLightTable::NO_SLOT || slot >= p_slots) {
+			continue;
+		}
+		float *row = &r_values[slot * values];
+		row[0] = light.color[0];
+		row[1] = light.color[1];
+		row[2] = light.color[2];
+		row[3] = light.inv_radius;
+		row[4] = light.attenuation;
+		row[5] = spot ? 2.0f : 1.0f;
+		row[6] = light.position[0];
+		row[7] = light.position[1];
+		row[8] = light.position[2];
+		row[9] = light.direction[0];
+		row[10] = light.direction[1];
+		row[11] = light.direction[2];
+		row[12] = light.cos_spot_angle;
+		row[13] = light.inv_spot_attenuation;
+		row[14] = light.specular_amount;
+		row[15] = light.shadow_opacity;
+		row[16] = float((light.flags >> 17) & 0xFFu);
+		row[17] = light.size;
+		row[18] = float(index);
+		row[19] += 1.0f;
+	}
+}
+
 float LightStorage::light_render_energy(float p_energy, float p_intensity, RSE::LightType p_type, bool p_physical_units) {
 	float energy = p_energy;
 	if (!p_physical_units) {

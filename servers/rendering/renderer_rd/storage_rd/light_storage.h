@@ -533,6 +533,7 @@ public:
 	static LightStorage *get_singleton();
 	static float light_render_energy(float p_energy, float p_intensity, RSE::LightType p_type, bool p_physical_units);
 	DirectLightTable &get_direct_lights() { return direct_lights; }
+	void write_direct_dump_lamps(LocalVector<float> &r_values, uint32_t p_slots) const;
 	const HashMap<RID, uint32_t> &get_direct_shells() const { return direct_shells; }
 
 	LightStorage();
