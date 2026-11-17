@@ -2539,6 +2539,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("light_set_distance_fade", "decal", "enabled", "begin", "shadow", "length"), &RenderingServer::light_set_distance_fade);
 	ClassDB::bind_method(D_METHOD("light_set_reverse_cull_face_mode", "light", "enabled"), &RenderingServer::light_set_reverse_cull_face_mode);
 	ClassDB::bind_method(D_METHOD("light_set_shadow_caster_mask", "light", "mask"), &RenderingServer::light_set_shadow_caster_mask);
+	ClassDB::bind_method(D_METHOD("light_set_direct_shadow", "light", "owned", "movement", "size", "clearance", "shells", "surfaces"), &RenderingServer::light_set_direct_shadow, DEFVAL(0.0), DEFVAL(TypedArray<RID>()), DEFVAL(PackedInt32Array()));
 	ClassDB::bind_method(D_METHOD("light_set_bake_mode", "light", "bake_mode"), &RenderingServer::light_set_bake_mode);
 	ClassDB::bind_method(D_METHOD("light_set_max_sdfgi_cascade", "light", "cascade"), &RenderingServer::light_set_max_sdfgi_cascade);
 	ClassDB::bind_method(D_METHOD("light_set_allow_contact_shadows", "light", "enable"), &RenderingServer::light_set_allow_contact_shadows);
@@ -3902,6 +3903,41 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/sdfgi/frames_to_converge", PROPERTY_HINT_ENUM, "5 (Less Latency but Lower Quality),10,15,20,25,30 (More Latency but Higher Quality)"), 5);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/sdfgi/frames_to_update_lights", PROPERTY_HINT_ENUM, "1 (Slower),2,4,8,16 (Faster)"), 2);
 
+	GLOBAL_DEF("rendering/global_illumination/compositor/extra_provider", false);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/compositor/debug_provider", false);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/compositor/debug_pattern", 0);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/compositor/debug_coverage", 1.0);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/compositor/debug_radiance", 0.0);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/compositor/debug_dump_path", "");
+	GLOBAL_DEF("rendering/global_illumination/rtgi/enabled", false);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/rtgi/rays_per_pixel", PROPERTY_HINT_RANGE, "0.0,4.0,0.01"), 0.25);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/rtgi/resolution_scale", PROPERTY_HINT_RANGE, "0.25,1.0,0.25"), 0.5);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/rtgi/target_samples", PROPERTY_HINT_RANGE, "1,255,1"), 6);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/rtgi/history_cap", PROPERTY_HINT_RANGE, "1,255,1"), 6);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/rtgi/atrous_iterations", PROPERTY_HINT_RANGE, "0,6,1"), 3);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/rtgi/normal_sigma", PROPERTY_HINT_RANGE, "1.0,512.0,0.1"), 32.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/rtgi/depth_sigma", PROPERTY_HINT_RANGE, "0.05,16.0,0.01"), 1.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/rtgi/variance_sigma", PROPERTY_HINT_RANGE, "0.1,64.0,0.1"), 4.0);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/ddgi_alpha_min", 0.6);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/ssgi_min_frames", 4.0);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/check_period", 8);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/force_trace", false);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/seed", 1);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/origin_scale", 2.0);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/origin_floor", 0.0);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/soft_cut_count", 0);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/luma_dead_zone", 16.0);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/mirror_below_surface", true);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/restart_spheres", true);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/restart_screen_wide", false);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/restart_quiet_frames", 0);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/directional_jump_degrees", 2.0);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/directional_jump_floor", 0.0);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/gpu_counters", false);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/debug_status_path", "");
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/debug_view", 0);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/debug_dump_path", "");
+
 	GLOBAL_DEF("rendering/global_illumination/ddgi/enabled", false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/probe_grid_horizontal", PROPERTY_HINT_RANGE, "8,64,1"), 32);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/probe_grid_vertical", PROPERTY_HINT_RANGE, "4,32,1"), 16);
@@ -3919,7 +3955,23 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/bounce_energy", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/debug_view", PROPERTY_HINT_ENUM, "Disabled,Irradiance,Ray Hits,Normals,Probe State,Probe Visibility"), 0);
 
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/backend", PROPERTY_HINT_ENUM, "Software,Hardware,Auto"), 0);
 	GLOBAL_DEF("rendering/global_illumination/ray_scene/skip_additive_surfaces", true);
+
+	GLOBAL_DEF("rendering/global_illumination/direct/enabled", false);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/entries", PROPERTY_HINT_ENUM, "4:4,6:6,8:8"), 6);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/rays_per_pixel", PROPERTY_HINT_RANGE, "1,2,1"), 1);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/direct/ray_bias", PROPERTY_HINT_RANGE, "0,0.2,0.001"), 0.02);
+	GLOBAL_DEF("rendering/global_illumination/direct/reference", false);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/debug_view", PROPERTY_HINT_ENUM, "Off,First Entry,All Lamps,First Slot,Lamp Count,Samples,Filtered First Entry"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/history_cap", PROPERTY_HINT_RANGE, "0,256,1"), 32);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/dynamic_history_cap", PROPERTY_HINT_RANGE, "1,256,1"), 2);
+	GLOBAL_DEF("rendering/global_illumination/direct/filter", true);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/direct/filter_kernel_scale", PROPERTY_HINT_RANGE, "0,4,0.01"), 1.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/direct/filter_range_sigmas", PROPERTY_HINT_RANGE, "0,8,0.1"), 1.5);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/direct/clamp_sigmas", PROPERTY_HINT_RANGE, "0,8,0.1"), 3.0);
+	GLOBAL_DEF("rendering/global_illumination/direct/force_factor_one", false);
+	GLOBAL_DEF(PropertyInfo(Variant::STRING, "rendering/global_illumination/direct/dump_request", PROPERTY_HINT_GLOBAL_SAVE_FILE, "*.json"), "");
 
 	GLOBAL_DEF("rendering/global_illumination/surfels/enabled", false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/surfels/capacity", PROPERTY_HINT_RANGE, "4096,1048576,1"), 131072);

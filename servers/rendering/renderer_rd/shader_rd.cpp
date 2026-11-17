@@ -268,6 +268,8 @@ void ShaderRD::_initialize_version(Version *p_version) {
 	p_version->variant_data.resize(variant_defines.size());
 	p_version->group_compilation_tasks.resize_initialized(group_enabled.size());
 	p_version->group_loaded_from_cache.resize_initialized(group_enabled.size());
+	p_version->group_started.resize_initialized(group_enabled.size());
+	p_version->group_started.fill(false);
 }
 
 void ShaderRD::_clear_version(Version *p_version) {
@@ -340,7 +342,11 @@ void ShaderRD::_build_variant_code(StringBuilder &builder, uint32_t p_variant, c
 				}
 			} break;
 			case StageTemplate::Chunk::TYPE_TEXT: {
-				builder.append(chunk.text.get_data());
+				if (strstr(general_defines.get_data(), "#define SHADER_GLSL_VERSION_460") && strstr(chunk.text.get_data(), "#version 450")) {
+					builder.append(String::utf8(chunk.text.get_data()).replace("#version 450", "#version 460"));
+				} else {
+					builder.append(chunk.text.get_data());
+				}
 			} break;
 		}
 	}
@@ -723,6 +729,11 @@ void ShaderRD::_compile_version_start(Version *p_version, int p_group) {
 	if (!group_enabled[p_group]) {
 		return;
 	}
+
+	if (p_version->group_started.size() <= p_group || p_version->group_started[p_group]) {
+		return;
+	}
+	p_version->group_started.write[p_group] = true;
 
 	p_version->dirty = false;
 

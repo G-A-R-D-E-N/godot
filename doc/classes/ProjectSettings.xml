@@ -3181,6 +3181,9 @@
 			If [code]true[/code], disables the threaded optimization feature from the NVIDIA drivers, which are known to cause stuttering in most OpenGL applications.
 			[b]Note:[/b] This setting only works on Windows, as threaded optimization is disabled by default on other platforms.
 		</member>
+		<member name="rendering/global_illumination/compositor/extra_provider" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], the global illumination compositor reads the extra provider slot: a diffuse radiance and coverage pair written by a ray-traced global illumination provider is blended over the ambient light after the DDGI, surfel and voxel stages. Nothing changes while no provider writes to the slot.
+		</member>
 		<member name="rendering/global_illumination/ddgi/bounce_energy" type="float" setter="" getter="" default="1.0">
 			How much of the probes' own light is fed back into the rays, which gives multiple bounces of indirect light. 0 gives a single bounce.
 		</member>
@@ -3229,12 +3232,84 @@
 		<member name="rendering/global_illumination/ddgi/view_bias" type="float" setter="" getter="" default="0.25">
 			Offset of the sample point towards the camera, in units of probe spacing, to reduce light leaking and self-shadowing.
 		</member>
+		<member name="rendering/global_illumination/direct/clamp_sigmas" type="float" setter="" getter="" default="3.0">
+			How far, in standard deviations of the rays nearby, a lamp's history may stay from those rays before it is pulled back, while that lamp or something in its range has moved recently. [code]0[/code] turns the clamp off.
+		</member>
+		<member name="rendering/global_illumination/direct/enabled" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], traces ray-traced direct shadows of local lights in the Forward+ renderer: omni and spot lights get stable slots and change events (see [method RenderingServer.light_set_direct_shadow]), the depth pre-pass writes normal and roughness, and each pixel gets shadow factors. It doesn't need [member rendering/global_illumination/ddgi/enabled]: the ray scene starts the first time either setting is on and stays on until the next start. Its region is sized from the DDGI grid settings even while DDGI is off. Owned lights with a ray entry use it in place of their shadow map and contact shadow in the opaque pass; transparent objects keep the shadow map.
+		</member>
+		<member name="rendering/global_illumination/direct/debug_view" type="int" setter="" getter="" default="0">
+			Shows the raw ray-traced direct shadow factors in place of the image. [code]1[/code] is the brightest lamp's factor, [code]2[/code] is the light kept over the light before shadows, [code]3[/code] colors each pixel by its brightest lamp, [code]4[/code] is the number of lamps reaching the pixel, [code]5[/code] is the brightest lamp's sample count, and [code]6[/code] is the brightest lamp's filtered factor.
+		</member>
+		<member name="rendering/global_illumination/direct/dump_request" type="String" setter="" getter="" default="&quot;&quot;">
+			If not empty, the next frame that has shadow factors writes them to raw files next to this path, a JSON summary at this path, and a [code].done[/code] file after it. Each new path is served once.
+		</member>
+		<member name="rendering/global_illumination/direct/filter" type="bool" setter="" getter="" default="true">
+			Runs the neighbourhood clamp and the spatial filter over the shadow factors. Off, the opaque pass reads the temporal factors as they are. Always off in the reference mode and with a history cap of [code]0[/code].
+		</member>
+		<member name="rendering/global_illumination/direct/filter_kernel_scale" type="float" setter="" getter="" default="1.0">
+			Scales the spatial filter's width against a lamp's size over the pixel's footprint.
+		</member>
+		<member name="rendering/global_illumination/direct/filter_range_sigmas" type="float" setter="" getter="" default="1.5">
+			How far a neighbour's shadow factor may sit from the pixel's own before the spatial filter stops using it, in standard errors of the two pixels' sample counts. Keeps hard shadow edges from bleeding. [code]0[/code] turns the test off.
+		</member>
+		<member name="rendering/global_illumination/direct/force_factor_one" type="bool" setter="" getter="" default="false">
+			Debug: writes every shadow factor as [code]1[/code], so owned lamps with a matching entry shade as unshadowed.
+		</member>
+		<member name="rendering/global_illumination/direct/history_cap" type="int" setter="" getter="" default="32">
+			Samples kept in a lamp's history per pixel, cut to [member rendering/global_illumination/direct/dynamic_history_cap] while the lamp is dynamic. [code]0[/code] keeps every sample and uses the larger history format, for long-run measurements.
+		</member>
+		<member name="rendering/global_illumination/direct/dynamic_history_cap" type="int" setter="" getter="" default="2">
+			Samples kept in a lamp's history per pixel while the lamp has moved, or a shadow caster has moved in its range, within the last 30 frames. It counts rays, so a lamp that gets only a share of a pixel's rays takes longer to clear in frames.
+		</member>
+		<member name="rendering/global_illumination/direct/entries" type="int" setter="" getter="" default="6">
+			The number of shadow entries per pixel. One of them is shared by every lamp past the first ones.
+		</member>
+		<member name="rendering/global_illumination/direct/ray_bias" type="float" setter="" getter="" default="0.02">
+			How far shadow rays start from the surface along its normal, in meters.
+		</member>
+		<member name="rendering/global_illumination/direct/rays_per_pixel" type="int" setter="" getter="" default="1">
+			The number of shadow rays traced per pixel per frame, shared between its entries.
+		</member>
+		<member name="rendering/global_illumination/direct/reference" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], traces 16 stratified rays for every entry at every pixel every frame and accumulates them without a limit. This is for checking the shadow factors, not for playing.
+		</member>
 		<member name="rendering/global_illumination/gi/use_half_resolution" type="bool" setter="" getter="" default="false" keywords="size">
 			If [code]true[/code], renders [VoxelGI] and SDFGI ([member Environment.sdfgi_enabled]) buffers at halved resolution (e.g. 960×540 when the viewport size is 1920×1080). This improves performance significantly when VoxelGI or SDFGI is enabled, at the cost of artifacts that may be visible on polygon edges. The loss in quality becomes less noticeable as the viewport resolution increases. [LightmapGI] rendering is not affected by this setting.
 			[b]Note:[/b] This property is only read when the project starts. To set half-resolution GI at run-time, call [method RenderingServer.gi_set_use_half_resolution] instead.
 		</member>
+		<member name="rendering/global_illumination/ray_scene/backend" type="int" setter="" getter="" default="0">
+			Selects how GI rays (DDGI, surfel and shadow rays) find their hits in the ray scene. [b]Software[/b] walks the ray scene's own BVH in compute shaders and runs on every Vulkan, Direct3D 12 and Metal device. [b]Hardware[/b] traces the same triangles through Vulkan ray queries, building one bottom-level acceleration structure per mesh and one top-level structure per frame; it falls back to [b]Software[/b] with a warning when the device has no ray query support. [b]Auto[/b] picks [b]Hardware[/b] when ray queries are available and [b]Software[/b] otherwise, without a warning. Both backends report the same hits, materials and shadow-caster rules. Read on every ray scene update, so a change applies on the next frame.
+		</member>
 		<member name="rendering/global_illumination/ray_scene/skip_additive_surfaces" type="bool" setter="" getter="" default="true">
 			If [code]true[/code], surfaces whose spatial shader uses [code]blend_add[/code] are left out of the GI ray scene: DDGI, surfel and shadow rays pass through them, and they neither block nor bounce light. Additive surfaces add light to what is behind them and hide nothing, so they stand for light (glows, beams, screens), not matter. Their emission is not traced either. If [code]false[/code], they are opaque hits with their base color as albedo. Read on every ray scene update, so a change applies on the next frame.
+		</member>
+		<member name="rendering/global_illumination/rtgi/atrous_iterations" type="int" setter="" getter="" default="3">
+			Number of edge-aware filter passes the ray-traced global illumination runs on its temporally accumulated result. Each pass doubles the filter step. [code]0[/code] disables the filter.
+		</member>
+		<member name="rendering/global_illumination/rtgi/depth_sigma" type="float" setter="" getter="" default="1.0">
+			Scales the depth tolerance of the temporal reprojection and of the filter of the ray-traced global illumination. Smaller values reject more history across depth edges.
+		</member>
+		<member name="rendering/global_illumination/rtgi/enabled" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], a ray-traced diffuse global illumination pass traces one cosine-weighted ray per selected pixel at reduced resolution, where screen-space and probe lighting are unreliable, accumulates it over time and publishes it to the global illumination compositor as the extra provider. Needs [member rendering/global_illumination/ddgi/enabled], a single view and a ready ray scene. The result only reaches the image while [member rendering/global_illumination/compositor/extra_provider] is [code]true[/code].
+		</member>
+		<member name="rendering/global_illumination/rtgi/history_cap" type="int" setter="" getter="" default="6">
+			Highest number of frames the ray-traced global illumination accumulates per pixel. Lower values react faster to changes and are noisier.
+		</member>
+		<member name="rendering/global_illumination/rtgi/normal_sigma" type="float" setter="" getter="" default="32.0">
+			Sharpness of the normal edge-stopping weight of the ray-traced global illumination filter. Higher values stop the filter at smaller normal differences.
+		</member>
+		<member name="rendering/global_illumination/rtgi/rays_per_pixel" type="float" setter="" getter="" default="0.25">
+			Average number of rays traced per full resolution pixel. Values above what the trace resolution allows are capped; values below thin out the traced pixels.
+		</member>
+		<member name="rendering/global_illumination/rtgi/resolution_scale" type="float" setter="" getter="" default="0.5">
+			Resolution of the ray-traced global illumination relative to the internal resolution. [code]0.5[/code] traces one ray per two by two pixels.
+		</member>
+		<member name="rendering/global_illumination/rtgi/target_samples" type="int" setter="" getter="" default="6">
+			Number of accumulated frames at which the ray-traced global illumination counts as fully converged and reaches full coverage in the compositor.
+		</member>
+		<member name="rendering/global_illumination/rtgi/variance_sigma" type="float" setter="" getter="" default="4.0">
+			Sharpness of the luminance edge-stopping weight of the ray-traced global illumination filter, relative to the estimated noise. Lower values keep more detail and leave more noise.
 		</member>
 		<member name="rendering/global_illumination/sdfgi/frames_to_converge" type="int" setter="" getter="" default="5">
 			The number of frames to use for converging signed distance field global illumination. Higher values lead to a less noisy result, at the cost of taking a longer time to fully converge. This means the scene's global illumination will be too dark for a longer period of time, especially when the camera moves fast. The actual convergence speed depends on rendered framerate. For example, with the default setting of 30 frames, rendering at 60 FPS will make SDFGI fully converge after 0.5 seconds. See also [member rendering/global_illumination/sdfgi/frames_to_update_lights] and [member rendering/global_illumination/sdfgi/probe_ray_count].

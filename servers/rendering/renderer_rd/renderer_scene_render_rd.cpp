@@ -35,6 +35,7 @@
 #include "core/io/image.h"
 #include "core/object/callable_mp.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
+#include "servers/rendering/renderer_rd/environment/gi_epochs.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/framebuffer_cache_rd.h"
 #include "servers/rendering/renderer_rd/shaders/decal_data_inc.glsl.gen.h"
@@ -1590,7 +1591,7 @@ void RendererSceneRenderRD::_post_prepass_render(RenderDataRD *p_render_data, bo
 }
 
 AABB RendererSceneRenderRD::ray_scene_get_region(const Vector3 &p_camera_position) const {
-	if (!RendererRD::RayScene::get_singleton() || !RendererRD::DDGI::is_enabled()) {
+	if (!RendererRD::RayScene::get_singleton() || !RendererRD::RayScene::is_needed()) {
 		return AABB();
 	}
 	const RendererRD::DDGI::Settings settings = RendererRD::DDGI::get_project_settings();
@@ -1671,8 +1672,12 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 			scene_data.directional_shadow_pixel_size.y = 1.0 / directional_shadow_size;
 		}
 
+		const RID sky_rid = p_environment.is_valid() ? environment_get_sky(p_environment) : RID();
+		if (p_reflection_probe.is_null() && rb->update_gi_sky(sky_rid)) {
+			RendererRD::GIEpochs::get_singleton()->bump(RendererRD::GIEpochs::SOURCE_SKY);
+		}
+
 		if (p_environment.is_valid()) {
-			RID sky_rid = environment_get_sky(p_environment);
 			if (sky_rid.is_valid()) {
 				int radiance_size = sky.sky_get_radiance_size(sky_rid);
 				scene_data.radiance_pixel_size = 1.0f / radiance_size;
@@ -1812,6 +1817,7 @@ void RendererSceneRenderRD::set_debug_draw_mode(RSE::ViewportDebugDraw p_debug_d
 }
 
 void RendererSceneRenderRD::update() {
+	RendererRD::RayScene::watch_needed();
 	sky.publish_completed_cycles();
 	sky.update_dirty_skys();
 }
