@@ -281,6 +281,7 @@ public:
 			FLAG_GEOM_PROJECTOR_SOFTSHADOW_DIRTY = (1 << 23),
 			FLAG_IGNORE_ALL_CULLING = (1 << 24),
 			FLAG_RAY_SCENE_ONLY = (1 << 25),
+			FLAG_RAY_SCENE_EXCLUDE = (1 << 26),
 		};
 
 		uint32_t flags = 0;
@@ -421,6 +422,8 @@ public:
 
 		bool ignore_occlusion_culling;
 		bool ray_scene_only = false;
+		bool ray_scene_occluder = false;
+		bool ray_scene_exclude = false;
 		bool ignore_all_culling;
 
 		Vector<RID> materials;
