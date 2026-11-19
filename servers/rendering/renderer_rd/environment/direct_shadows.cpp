@@ -108,6 +108,8 @@ DirectShadows::DirectShadows() {
 	lamp_buffer_capacity = 4096;
 	lamp_buffer = RD::get_singleton()->storage_buffer_create(lamp_buffer_capacity);
 	RD::get_singleton()->set_resource_name(lamp_buffer, "Direct Shadows Lamps");
+	lamp_dummy = RD::get_singleton()->storage_buffer_create(sizeof(DirectLightTable::GpuSlot));
+	RD::get_singleton()->set_resource_name(lamp_dummy, "Direct Shadows Lamps Dummy");
 }
 
 DirectShadows::~DirectShadows() {
@@ -145,6 +147,9 @@ DirectShadows::~DirectShadows() {
 	}
 	if (resampled_dummy.is_valid()) {
 		rd->free_rid(resampled_dummy);
+	}
+	if (lamp_dummy.is_valid()) {
+		rd->free_rid(lamp_dummy);
 	}
 }
 

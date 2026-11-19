@@ -187,6 +187,7 @@ private:
 	RID counter_buffer;
 	RID debug_unused;
 	RID resampled_dummy;
+	RID lamp_dummy;
 	bool lamps_prepared = false;
 	String lamps_dump_request;
 	LocalVector<DirectLightTable::GpuSlot> lamp_data;
@@ -217,6 +218,7 @@ public:
 	RID get_lamp_buffer() const { return lamp_buffer; }
 	bool get_history(const Ref<RenderSceneBuffersRD> &p_render_buffers, uint64_t p_table_generation, RID &r_slots, RID &r_factors, Transform3D &r_camera, Projection &r_projection, RID &r_guide) const;
 	RID get_resampled_dummy() const { return resampled_dummy; }
+	RID get_lamp_dummy() const { return lamp_dummy; }
 	RID get_slots(const Ref<RenderSceneBuffersRD> &p_render_buffers) const;
 	RID get_factors(const Ref<RenderSceneBuffersRD> &p_render_buffers) const;
 	void release(const Ref<RenderSceneBuffersRD> &p_render_buffers);
