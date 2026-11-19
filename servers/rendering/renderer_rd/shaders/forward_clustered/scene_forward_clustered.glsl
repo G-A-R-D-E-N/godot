@@ -3297,6 +3297,32 @@ void fragment_shader(in SceneData scene_data) {
 	}
 
 #ifndef USE_VERTEX_LIGHTING
+#ifdef LIGHT_BACKLIGHT_USED
+#define DIRECT_ARGS_BACKLIGHT backlight,
+#else
+#define DIRECT_ARGS_BACKLIGHT
+#endif
+#ifdef LIGHT_TRANSMITTANCE_USED
+#define DIRECT_ARGS_TRANSMITTANCE transmittance_color, transmittance_depth, transmittance_boost,
+#else
+#define DIRECT_ARGS_TRANSMITTANCE
+#endif
+#ifdef LIGHT_RIM_USED
+#define DIRECT_ARGS_RIM rim, rim_tint,
+#else
+#define DIRECT_ARGS_RIM
+#endif
+#ifdef LIGHT_CLEARCOAT_USED
+#define DIRECT_ARGS_CLEARCOAT clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
+#else
+#define DIRECT_ARGS_CLEARCOAT
+#endif
+#ifdef LIGHT_ANISOTROPY_USED
+#define DIRECT_ARGS_ANISOTROPY binormal, tangent, anisotropy,
+#else
+#define DIRECT_ARGS_ANISOTROPY
+#endif
+#define DIRECT_LAMP_ARGS light_index, vertex, view, normal, vertex_ddx, vertex_ddy, f0, roughness, metallic, scene_data.taa_frame_count, albedo, alpha, screen_uv, energy_compensation, DIRECT_ARGS_BACKLIGHT DIRECT_ARGS_TRANSMITTANCE DIRECT_ARGS_RIM DIRECT_ARGS_CLEARCOAT DIRECT_ARGS_ANISOTROPY
 #ifdef DIRECT_RESAMPLED_ROUTE
 	if (sc_use_direct_resampled()) {
 		direct_record_begin(scene_data, vertex);
@@ -3340,47 +3366,28 @@ void fragment_shader(in SceneData scene_data) {
 				}
 
 #ifdef DIRECT_RESAMPLED_ROUTE
-				int direct_passes = sc_use_direct_resampled() ? direct_route(omni_lights.data[light_index].flags, omni_lights.data[light_index].position, omni_lights.data[light_index].inv_radius, omni_lights.data[light_index].attenuation, false, vec3(0.0), 0.0, 1.0) : -1;
-				if (direct_passes == 0) {
+				if (sc_use_direct_resampled()) {
+					int direct_passes = direct_route(omni_lights.data[light_index].flags, omni_lights.data[light_index].position, omni_lights.data[light_index].inv_radius, omni_lights.data[light_index].attenuation, false, vec3(0.0), 0.0, 1.0);
+					if (direct_passes == 0) {
+						continue;
+					}
+					for (int direct_pass = 0; direct_pass < max(direct_passes, 1); direct_pass++) {
+						float direct_scale = direct_passes > 0 ? direct_tail_pass(omni_lights.data[light_index].flags, omni_lights.data[light_index].color, direct_pass) : 1.0;
+						hvec3 lamp_diffuse = direct_passes > 0 ? hvec3(0.0) : diffuse_light;
+						hvec3 lamp_specular = direct_passes > 0 ? hvec3(0.0) : direct_specular_light;
+						light_process_omni(DIRECT_LAMP_ARGS lamp_diffuse, lamp_specular);
+						if (direct_passes > 0) {
+							diffuse_light += hvec3(vec3(lamp_diffuse) * direct_scale);
+							direct_specular_light += hvec3(vec3(lamp_specular) * direct_scale);
+						} else {
+							diffuse_light = lamp_diffuse;
+							direct_specular_light = lamp_specular;
+						}
+					}
 					continue;
 				}
-				for (int direct_pass = 0; direct_pass < max(direct_passes, 1); direct_pass++) {
-					float direct_scale = direct_passes > 0 ? direct_tail_pass(omni_lights.data[light_index].flags, omni_lights.data[light_index].color, direct_pass) : 1.0;
-					hvec3 lamp_diffuse = direct_passes > 0 ? hvec3(0.0) : diffuse_light;
-					hvec3 lamp_specular = direct_passes > 0 ? hvec3(0.0) : direct_specular_light;
 #endif
-					light_process_omni(light_index, vertex, view, normal, vertex_ddx, vertex_ddy, f0, roughness, metallic, scene_data.taa_frame_count, albedo, alpha, screen_uv, energy_compensation,
-#ifdef LIGHT_BACKLIGHT_USED
-							backlight,
-#endif
-#ifdef LIGHT_TRANSMITTANCE_USED
-							transmittance_color,
-							transmittance_depth,
-							transmittance_boost,
-#endif
-#ifdef LIGHT_RIM_USED
-							rim,
-							rim_tint,
-#endif
-#ifdef LIGHT_CLEARCOAT_USED
-							clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
-#endif // LIGHT_CLEARCOAT_USED
-#ifdef LIGHT_ANISOTROPY_USED
-							binormal, tangent, anisotropy,
-#endif
-#ifdef DIRECT_RESAMPLED_ROUTE
-							lamp_diffuse, lamp_specular);
-					if (direct_passes > 0) {
-						diffuse_light += hvec3(vec3(lamp_diffuse) * direct_scale);
-						direct_specular_light += hvec3(vec3(lamp_specular) * direct_scale);
-					} else {
-						diffuse_light = lamp_diffuse;
-						direct_specular_light = lamp_specular;
-					}
-				}
-#else
-						diffuse_light, direct_specular_light);
-#endif
+				light_process_omni(DIRECT_LAMP_ARGS diffuse_light, direct_specular_light);
 			}
 		}
 	}
@@ -3423,50 +3430,37 @@ void fragment_shader(in SceneData scene_data) {
 				}
 
 #ifdef DIRECT_RESAMPLED_ROUTE
-				int direct_passes = sc_use_direct_resampled() ? direct_route(spot_lights.data[light_index].flags, spot_lights.data[light_index].position, spot_lights.data[light_index].inv_radius, spot_lights.data[light_index].attenuation, true, spot_lights.data[light_index].direction, spot_lights.data[light_index].cone_angle, spot_lights.data[light_index].cone_attenuation) : -1;
-				if (direct_passes == 0) {
+				if (sc_use_direct_resampled()) {
+					int direct_passes = direct_route(spot_lights.data[light_index].flags, spot_lights.data[light_index].position, spot_lights.data[light_index].inv_radius, spot_lights.data[light_index].attenuation, true, spot_lights.data[light_index].direction, spot_lights.data[light_index].cone_angle, spot_lights.data[light_index].cone_attenuation);
+					if (direct_passes == 0) {
+						continue;
+					}
+					for (int direct_pass = 0; direct_pass < max(direct_passes, 1); direct_pass++) {
+						float direct_scale = direct_passes > 0 ? direct_tail_pass(spot_lights.data[light_index].flags, spot_lights.data[light_index].color, direct_pass) : 1.0;
+						hvec3 lamp_diffuse = direct_passes > 0 ? hvec3(0.0) : diffuse_light;
+						hvec3 lamp_specular = direct_passes > 0 ? hvec3(0.0) : direct_specular_light;
+						light_process_spot(DIRECT_LAMP_ARGS lamp_diffuse, lamp_specular);
+						if (direct_passes > 0) {
+							diffuse_light += hvec3(vec3(lamp_diffuse) * direct_scale);
+							direct_specular_light += hvec3(vec3(lamp_specular) * direct_scale);
+						} else {
+							diffuse_light = lamp_diffuse;
+							direct_specular_light = lamp_specular;
+						}
+					}
 					continue;
 				}
-				for (int direct_pass = 0; direct_pass < max(direct_passes, 1); direct_pass++) {
-					float direct_scale = direct_passes > 0 ? direct_tail_pass(spot_lights.data[light_index].flags, spot_lights.data[light_index].color, direct_pass) : 1.0;
-					hvec3 lamp_diffuse = direct_passes > 0 ? hvec3(0.0) : diffuse_light;
-					hvec3 lamp_specular = direct_passes > 0 ? hvec3(0.0) : direct_specular_light;
 #endif
-					light_process_spot(light_index, vertex, view, normal, vertex_ddx, vertex_ddy, f0, roughness, metallic, scene_data.taa_frame_count, albedo, alpha, screen_uv, energy_compensation,
-#ifdef LIGHT_BACKLIGHT_USED
-							backlight,
-#endif
-#ifdef LIGHT_TRANSMITTANCE_USED
-							transmittance_color,
-							transmittance_depth,
-							transmittance_boost,
-#endif
-#ifdef LIGHT_RIM_USED
-							rim,
-							rim_tint,
-#endif
-#ifdef LIGHT_CLEARCOAT_USED
-							clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
-#endif // LIGHT_CLEARCOAT_USED
-#ifdef LIGHT_ANISOTROPY_USED
-							binormal, tangent, anisotropy,
-#endif
-#ifdef DIRECT_RESAMPLED_ROUTE
-							lamp_diffuse, lamp_specular);
-					if (direct_passes > 0) {
-						diffuse_light += hvec3(vec3(lamp_diffuse) * direct_scale);
-						direct_specular_light += hvec3(vec3(lamp_specular) * direct_scale);
-					} else {
-						diffuse_light = lamp_diffuse;
-						direct_specular_light = lamp_specular;
-					}
-				}
-#else
-						diffuse_light, direct_specular_light);
-#endif
+				light_process_spot(DIRECT_LAMP_ARGS diffuse_light, direct_specular_light);
 			}
 		}
 	}
+#undef DIRECT_LAMP_ARGS
+#undef DIRECT_ARGS_BACKLIGHT
+#undef DIRECT_ARGS_TRANSMITTANCE
+#undef DIRECT_ARGS_RIM
+#undef DIRECT_ARGS_CLEARCOAT
+#undef DIRECT_ARGS_ANISOTROPY
 
 	if (sc_cluster_has_area_light()) { // area lights
 
