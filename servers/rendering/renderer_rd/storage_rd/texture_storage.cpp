@@ -703,8 +703,7 @@ void TextureStorage::_tex_blit_shader_initialize() {
 		tex_blit_modes.push_back("\n#define USE_OUTPUT1\n#define USE_OUTPUT2\n"); // 3 Outputs
 		tex_blit_modes.push_back("\n#define USE_OUTPUT1\n#define USE_OUTPUT2\n#define USE_OUTPUT3\n"); // 4 Outputs
 		String global_defines;
-		global_defines += "\n#define SAMPLERS_BINDING_FIRST_INDEX " + itos(SAMPLERS_BINDING_FIRST_INDEX) + "\n";
-		global_defines += "#define MAX_GLOBAL_SHADER_UNIFORMS 256\n"; // TODO: this is arbitrary for now
+		global_defines += "\n#define SAMPLERS_BINDING_FIRST_INDEX " + itos(BLIT_TEXTURE_SAMPLERS_BINDING_FIRST_INDEX) + "\n";
 		tex_blit_shader.shader.initialize(tex_blit_modes, global_defines);
 	}
 	material_storage->shader_set_data_request_function(MaterialStorage::SHADER_TYPE_TEXTURE_BLIT, MaterialStorage::_create_tex_blit_shader_funcs);
@@ -732,6 +731,7 @@ void TextureStorage::_tex_blit_shader_initialize() {
 		actions.base_uniform_string = "material.";
 		actions.base_texture_binding_index = 1;
 		actions.texture_layout_set = 1;
+		actions.global_buffer_array_variable = "global_shader_uniforms.data";
 
 		tex_blit_shader.compiler.initialize(actions);
 	}
@@ -1766,7 +1766,7 @@ void TextureStorage::texture_drawable_blit_rect(const TypedArray<RID> &p_texture
 	int TEX_BLIT_TEXTURE_SET = 0;
 	int srgb_mask = 0;
 	const int srgbMaskArray[4] = { 1, 2, 4, 8 };
-	LocalVector<RD::Uniform> texture_uniforms;
+	LocalVector<RD::Uniform> uniforms;
 
 	int i = 0;
 	while (i < 4) {
@@ -1796,9 +1796,17 @@ void TextureStorage::texture_drawable_blit_rect(const TypedArray<RID> &p_texture
 		} else {
 			u.append_id(default_tex_rid);
 		}
-		texture_uniforms.push_back(u);
+		uniforms.push_back(u);
 
 		i += 1;
+	}
+
+	{
+		RD::Uniform u;
+		u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+		u.binding = 4;
+		u.append_id(RendererRD::MaterialStorage::get_singleton()->global_shader_uniforms_get_storage_buffer());
+		uniforms.push_back(u);
 	}
 
 	// Calculates the Rects Offset & Size in UV space for Shader to scale Vertex Quad correctly
@@ -1854,9 +1862,9 @@ void TextureStorage::texture_drawable_blit_rect(const TypedArray<RID> &p_texture
 	RD::FramebufferFormatID fb_format = RD::get_singleton()->framebuffer_get_format(tex_blit_fb);
 	RD::get_singleton()->draw_list_bind_render_pipeline(draw_list, pipeline->get_render_pipeline(RD::INVALID_ID, fb_format, false, 0));
 
-	material_storage->samplers_rd_get_default().append_uniforms(texture_uniforms, 4);
+	material_storage->samplers_rd_get_default().append_uniforms(uniforms, BLIT_TEXTURE_SAMPLERS_BINDING_FIRST_INDEX);
 
-	uniform_texture_set = UniformSetCacheRD::get_singleton()->get_cache_vec(shaderRD, TEX_BLIT_TEXTURE_SET, texture_uniforms);
+	uniform_texture_set = UniformSetCacheRD::get_singleton()->get_cache_vec(shaderRD, TEX_BLIT_TEXTURE_SET, uniforms);
 
 	{
 		// Push Constants
@@ -4478,6 +4486,7 @@ void TextureStorage::_update_render_target(RenderTarget *rt) {
 
 	rt->color_format = render_target_get_color_format(rt->use_hdr, false);
 	rt->color_format_srgb = render_target_get_color_format(rt->use_hdr, true);
+	rt->msaa = render_target_get_nearest_supported_msaa(rt->msaa, rt->use_hdr);
 
 	if (rt->use_hdr) {
 		rt->image_format = rt->is_transparent ? Image::FORMAT_RGBAH : Image::FORMAT_RGBH;
@@ -5493,6 +5502,10 @@ uint32_t TextureStorage::render_target_get_color_usage_bits(bool p_msaa) {
 		// FIXME: Storage bit should only be requested when FSR is required.
 		return RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
 	}
+}
+
+RSE::ViewportMSAA TextureStorage::render_target_get_nearest_supported_msaa(RSE::ViewportMSAA p_msaa, bool p_use_hdr) {
+	return RenderSceneBuffersRD::get_nearest_supported_msaa(p_msaa, render_target_get_color_format(p_use_hdr, false), render_target_get_color_usage_bits(true));
 }
 
 void TextureStorage::texture_2d_attach_streaming_state(RID p_texture, RID p_streaming_state) {
