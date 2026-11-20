@@ -31,6 +31,7 @@
 #pragma once
 
 #include "core/templates/local_vector.h"
+#include "servers/rendering/gi_light_query.h"
 #include "servers/rendering/renderer_rd/environment/sky.h"
 #include "servers/rendering/renderer_rd/pipeline_deferred_rd.h"
 #include "servers/rendering/renderer_rd/shaders/environment/ddgi.glsl.gen.h"
@@ -76,12 +77,14 @@ public:
 		TRACE_MODE_DEBUG,
 		TRACE_MODE_SURFELS,
 		TRACE_MODE_RTGI,
+		TRACE_MODE_LIGHT_QUERY,
 		TRACE_MODE_MAX
 	};
 
 	enum TraceGroup {
 		TRACE_GROUP_BASE,
 		TRACE_GROUP_RTGI,
+		TRACE_GROUP_LIGHT_QUERY,
 	};
 
 	enum SkyFlags {
@@ -198,6 +201,8 @@ public:
 		RID debug_texture;
 		Size2i debug_size;
 		RID sky_texture;
+		RID light_query_buffer;
+		RID light_result_buffer;
 		TracePushConstant trace_constant = {};
 
 		void allocate(const Settings &p_settings);
@@ -229,11 +234,13 @@ private:
 	static Vector<ShaderRD::VariantDefine> _trace_modes();
 	bool _ensure_trace_hw();
 	bool _trace_usable(RayScene *p_ray_scene);
+	bool _light_query_pipeline_ready(bool p_hardware);
 
 	void _dispatch(Mode p_mode, const Ref<Volume> &p_volume, uint32_t p_x_groups, int32_t p_indirect_offset = -1);
 	void _reset_counts(const Ref<Volume> &p_volume, const Vector3 &p_camera_position);
 	void _trace(TraceMode p_mode, const Ref<Volume> &p_volume, RID p_output, const TracePushConstant &p_push_constant, uint32_t p_x_groups, uint32_t p_y_groups, RID p_indirect_buffer = RID(), uint32_t p_indirect_offset = 0, const LocalVector<RD::Uniform> *p_surfel_uniforms = nullptr);
 	void _fill_sky(TracePushConstant &r_push_constant, RID &r_sky_texture, RID p_environment, SkyRD::Sky *p_sky, RID p_camera_attributes) const;
+	void _fill_light_query_ambient(GiLightQuery::QueryHeader &r_header, RID p_environment, RID p_camera_attributes) const;
 
 public:
 	static bool is_enabled();
@@ -245,6 +252,7 @@ public:
 	void update(const Ref<RenderSceneBuffersRD> &p_render_buffers, const Vector3 &p_camera_position);
 	void trace_surfels(const Ref<Volume> &p_volume, const LocalVector<RD::Uniform> &p_surfel_uniforms, RID p_indirect_buffer, uint32_t p_indirect_offset);
 	bool trace_rtgi(const Ref<Volume> &p_volume, RID p_output, const LocalVector<RD::Uniform> &p_uniforms, uint32_t p_x_groups, uint32_t p_y_groups);
+	bool trace_light_queries(const Ref<Volume> &p_volume, RID p_render_target, RID p_environment, RID p_camera_attributes, uint32_t p_flags);
 	void process(const Ref<Volume> &p_volume, RID p_environment, SkyRD::Sky *p_sky, RID p_camera_attributes, const Projection &p_projection, const Transform3D &p_camera_transform, const Size2i &p_screen_size);
 };
 

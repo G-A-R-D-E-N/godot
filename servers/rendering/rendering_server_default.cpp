@@ -34,6 +34,7 @@
 #include "core/os/os.h"
 #include "core/profiling/profiling.h"
 #include "servers/display/display_server.h"
+#include "servers/rendering/gi_light_query.h"
 #include "servers/rendering/renderer_canvas_cull.h"
 #include "servers/rendering/renderer_scene_cull.h"
 #include "servers/rendering/rendering_device.h"
@@ -337,6 +338,10 @@ void RenderingServerDefault::set_frame_profiling_enabled(bool p_enable) {
 
 uint64_t RenderingServerDefault::get_frame_profile_frame() {
 	return frame_profile_frame;
+}
+
+Array RenderingServerDefault::viewport_gi_light_query_results(RID p_viewport) const {
+	return GiLightQuery::get_singleton()->get_results(p_viewport, OS::get_singleton()->get_ticks_usec(), uint32_t(RSG::rasterizer->get_frame_number()));
 }
 
 Vector<RenderingServerTypes::FrameProfileArea> RenderingServerDefault::get_frame_profile() {

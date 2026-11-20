@@ -8,6 +8,8 @@
 
 #if defined(MODE_DEBUG_RAYS) || defined(MODE_RTGI)
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+#elif defined(MODE_LIGHT_QUERY)
+layout(local_size_x = GI_LIGHT_QUERY_THREADS, local_size_y = 1, local_size_z = 1) in;
 #else
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 #endif
@@ -390,6 +392,284 @@ void main() {
 		}
 	}
 	imageStore(ray_image, pixel, vec4(color / (1.0 + color), 1.0));
+}
+
+#endif
+
+#ifdef MODE_LIGHT_QUERY
+
+struct GiLightQueryEntry {
+	vec3 position;
+	uint slot;
+	vec3 facing;
+	float sun_factor;
+};
+
+struct GiLightQueryResult {
+	vec3 rgb;
+	float y;
+	float coverage;
+	float body_y;
+	uint slot;
+	uint frame;
+	uint flags;
+	uint pad0;
+	uint pad1;
+	uint pad2;
+};
+
+layout(set = 3, binding = 0, std430) restrict readonly buffer GiLightQueries {
+	vec3 ambient_color;
+	float ambient_sky_mix;
+	uint count;
+	uint frame;
+	uint flags;
+	uint sun_mask;
+	GiLightQueryEntry data[];
+}
+light_queries;
+
+layout(set = 3, binding = 1, std430) restrict writeonly buffer GiLightQueryResults {
+	GiLightQueryResult data[];
+}
+light_query_results;
+
+shared uint light_query_directional[GI_LIGHT_QUERY_MAX_LIGHTS];
+shared uint light_query_area[GI_LIGHT_QUERY_MAX_LIGHTS];
+shared uint light_query_point[GI_LIGHT_QUERY_MAX_LIGHTS];
+shared uint light_query_directional_count;
+shared uint light_query_area_count;
+shared uint light_query_point_count;
+shared vec3 light_query_direct[GI_LIGHT_QUERY_THREADS];
+shared vec3 light_query_body[GI_LIGHT_QUERY_THREADS];
+
+float light_query_random(uint p_seed) {
+	return float(ray_scene_hash(p_seed) >> 8u) * (1.0 / 16777216.0);
+}
+
+void light_query_basis(vec3 p_normal, out vec3 r_tangent, out vec3 r_bitangent) {
+	vec3 up = abs(p_normal.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+	r_tangent = normalize(cross(up, p_normal));
+	r_bitangent = cross(p_normal, r_tangent);
+}
+
+vec3 light_query_point_value(RaySceneLight p_light, vec3 p_position, vec3 p_facing, out vec3 r_to_light, out float r_distance) {
+	vec3 relative = p_light.position - p_position;
+	r_distance = length(relative);
+	r_to_light = relative / max(r_distance, 1e-4);
+	float attenuation = ray_scene_omni_attenuation(max(r_distance, GI_LIGHT_QUERY_POINT_FLOOR), p_light.inv_radius, p_light.attenuation);
+	if (p_light.type == RAY_SCENE_LIGHT_SPOT) {
+		float spot_cos = max(dot(-r_to_light, p_light.direction), p_light.cos_spot_angle);
+		float spot_rim = max(1e-4, (1.0 - spot_cos) / (1.0 - p_light.cos_spot_angle));
+		attenuation *= 1.0 - pow(spot_rim, p_light.inv_spot_attenuation);
+	}
+	float n_dot_l = dot(p_facing, r_to_light);
+	if (n_dot_l <= 0.0 || attenuation <= 0.0) {
+		return vec3(0.0);
+	}
+	return p_light.color * (p_light.energy * attenuation * n_dot_l / 3.14159265359);
+}
+
+float light_query_area_window(RaySceneLight p_light, vec3 p_position) {
+	vec3 offset = p_position - p_light.position;
+	if (dot(p_light.direction, offset) <= 0.0) {
+		return 0.0;
+	}
+	vec2 extent = max(vec2(dot(p_light.half_a, p_light.half_a), dot(p_light.half_b, p_light.half_b)), vec2(1e-12));
+	vec2 closest = clamp(vec2(dot(offset, p_light.half_a), dot(offset, p_light.half_b)) / extent, -1.0, 1.0);
+	float closest_distance = length(offset - p_light.half_a * closest.x - p_light.half_b * closest.y);
+	return ray_scene_omni_attenuation(closest_distance, p_light.inv_radius, p_light.attenuation) * closest_distance * closest_distance;
+}
+
+vec3 light_query_area_sample(RaySceneLight p_light, uint p_sample, vec3 p_position, vec3 p_facing, uint p_seed) {
+	float window = light_query_area_window(p_light, p_position);
+	if (window <= 0.0) {
+		return vec3(0.0);
+	}
+	float u_long = (float(p_sample % GI_LIGHT_QUERY_AREA_LONG) + 0.5) * (2.0 / float(GI_LIGHT_QUERY_AREA_LONG)) - 1.0;
+	float u_short = (float(p_sample / GI_LIGHT_QUERY_AREA_LONG) + 0.5) * (2.0 / float(GI_LIGHT_QUERY_AREA_SHORT)) - 1.0;
+	vec2 rect_uv = dot(p_light.half_a, p_light.half_a) >= dot(p_light.half_b, p_light.half_b) ? vec2(u_long, u_short) : vec2(u_short, u_long);
+	vec3 relative = p_light.position + p_light.half_a * rect_uv.x + p_light.half_b * rect_uv.y - p_position;
+	float distance = length(relative);
+	vec3 to_light = relative / max(distance, 1e-4);
+	float attenuation = window * p_light.area * max(dot(-to_light, p_light.direction), 0.0) / max(distance * distance, 1e-8);
+	float n_dot_l = dot(p_facing, to_light);
+	if (n_dot_l <= 0.0 || attenuation <= 0.0) {
+		return vec3(0.0);
+	}
+	if (!ray_scene_unshadowed(p_position, p_facing, GI_LIGHT_QUERY_BIAS, to_light, distance, p_light.caster_mask, p_seed)) {
+		return vec3(0.0);
+	}
+	return p_light.color * (p_light.energy * attenuation * n_dot_l / 3.14159265359 / float(GI_LIGHT_QUERY_AREA_SAMPLES));
+}
+
+vec3 light_query_directional_sample(RaySceneLight p_light, uint p_sample, vec3 p_position, vec3 p_facing, vec3 p_tangent, vec3 p_bitangent, uint p_seed) {
+	vec3 to_light = -p_light.direction;
+	float n_dot_l = dot(p_facing, to_light);
+	if (n_dot_l <= 0.0) {
+		return vec3(0.0);
+	}
+	float angle = (float(p_sample) + light_query_random(p_seed)) * (6.2831853 / float(GI_LIGHT_QUERY_SUN_RAYS));
+	float radius = GI_LIGHT_QUERY_SUN_DISC * sqrt(light_query_random(p_seed ^ 0x2f8f3d5bu));
+	vec3 origin = p_position + (p_tangent * cos(angle) + p_bitangent * sin(angle)) * radius;
+	if (!ray_scene_unshadowed(origin, p_facing, GI_LIGHT_QUERY_BIAS, to_light, ddgi.max_distance, p_light.caster_mask, p_seed)) {
+		return vec3(0.0);
+	}
+	return p_light.color * (p_light.energy * n_dot_l / 3.14159265359 / float(GI_LIGHT_QUERY_SUN_RAYS));
+}
+
+vec3 light_query_finite(vec3 p_value) {
+	bvec3 bad = bvec3(uvec3(isnan(p_value)) | uvec3(isinf(p_value)));
+	return mix(p_value, vec3(0.0), bad);
+}
+
+vec3 light_query_clean(vec3 p_value) {
+	return max(light_query_finite(p_value), vec3(0.0));
+}
+
+float light_query_sun_scale(uint p_light, float p_sun_factor) {
+	return p_light < 32u && ((light_queries.sun_mask >> p_light) & 1u) != 0u ? p_sun_factor : 1.0;
+}
+
+vec3 light_query_sky(vec3 p_facing, vec3 p_tangent, vec3 p_bitangent) {
+	vec3 sum = vec3(0.0);
+	uint ring = GI_LIGHT_QUERY_SKY_SAMPLES / 2u;
+	for (uint i = 0u; i < GI_LIGHT_QUERY_SKY_SAMPLES; i++) {
+		float u = (float(i & 1u) + 0.5) * 0.5;
+		float phi = (float(i >> 1u) + 0.25 + 0.5 * float(i & 1u)) * (6.2831853 / float(ring));
+		float sin_theta = sqrt(u);
+		vec3 direction = p_tangent * (sin_theta * cos(phi)) + p_bitangent * (sin_theta * sin(phi)) + p_facing * sqrt(1.0 - u);
+		sum += min(sky_radiance_in(direction), vec3(DDGI_MAX_RADIANCE));
+	}
+	return sum / float(GI_LIGHT_QUERY_SKY_SAMPLES);
+}
+
+void main() {
+	uint local = gl_LocalInvocationIndex;
+	uint query_index = gl_WorkGroupID.x;
+	if (query_index >= light_queries.count) {
+		return;
+	}
+
+	GiLightQueryEntry query = light_queries.data[query_index];
+	vec3 position = query.position;
+	vec3 facing = query.facing;
+	vec3 tangent;
+	vec3 bitangent;
+	light_query_basis(facing, tangent, bitangent);
+
+	if (local == 0u) {
+		light_query_directional_count = 0u;
+		light_query_area_count = 0u;
+		light_query_point_count = 0u;
+	}
+	memoryBarrierShared();
+	barrier();
+
+	uint threads = uint(GI_LIGHT_QUERY_THREADS);
+	uint light_count = min(ray_scene.light_count, uint(GI_LIGHT_QUERY_MAX_LIGHTS));
+	for (uint i = local; i < light_count; i += threads) {
+		RaySceneLight light = ray_scene_lights.data[i];
+		if (light.type == RAY_SCENE_LIGHT_DIRECTIONAL) {
+			if (dot(facing, -light.direction) > 0.0) {
+				light_query_directional[atomicAdd(light_query_directional_count, 1u)] = i;
+			}
+			continue;
+		}
+		if (dot(light.color * light.energy, luminance_weights) <= 0.0) {
+			continue;
+		}
+		if (light.type == RAY_SCENE_LIGHT_AREA) {
+			if (light_query_area_window(light, position) > 0.0) {
+				light_query_area[atomicAdd(light_query_area_count, 1u)] = i;
+			}
+			continue;
+		}
+		vec3 to_light;
+		float distance;
+		if (dot(light_query_point_value(light, position, facing, to_light, distance), luminance_weights) > 0.0) {
+			light_query_point[atomicAdd(light_query_point_count, 1u)] = i;
+		}
+	}
+	memoryBarrierShared();
+	barrier();
+
+	uint seed_base = ray_scene_hash(query.slot * 9781u + 0x5bd1e995u);
+	vec3 direct = vec3(0.0);
+	vec3 body = vec3(0.0);
+	if (local != 0u) {
+		uint directional_end = light_query_directional_count * GI_LIGHT_QUERY_SUN_RAYS;
+		uint area_end = directional_end + light_query_area_count * GI_LIGHT_QUERY_AREA_SAMPLES;
+		uint total = area_end + light_query_point_count;
+		for (uint k = local - 1u; k < total; k += threads - 1u) {
+			uint seed = seed_base + k * 0x632be5abu;
+			if (k < directional_end) {
+				uint light_index = light_query_directional[k / GI_LIGHT_QUERY_SUN_RAYS];
+				RaySceneLight light = ray_scene_lights.data[light_index];
+				body += light_query_directional_sample(light, k % GI_LIGHT_QUERY_SUN_RAYS, position, facing, tangent, bitangent, seed) * light_query_sun_scale(light_index, query.sun_factor);
+			} else if (k < area_end) {
+				uint area_index = k - directional_end;
+				RaySceneLight light = ray_scene_lights.data[light_query_area[area_index / GI_LIGHT_QUERY_AREA_SAMPLES]];
+				direct += light_query_area_sample(light, area_index % GI_LIGHT_QUERY_AREA_SAMPLES, position, facing, seed);
+			} else {
+				RaySceneLight light = ray_scene_lights.data[light_query_point[k - area_end]];
+				vec3 to_light;
+				float distance;
+				vec3 value = light_query_point_value(light, position, facing, to_light, distance);
+				if (ray_scene_unshadowed(position, facing, GI_LIGHT_QUERY_BIAS, to_light, distance, light.caster_mask, seed)) {
+					direct += value;
+				}
+			}
+		}
+	}
+	light_query_direct[local] = light_query_finite(direct);
+	light_query_body[local] = light_query_finite(body);
+
+	vec3 indirect = vec3(0.0);
+	float coverage = 0.0;
+	if (local == 0u) {
+		vec4 probe = ddgi_sample_direction(position - ray_scene.camera_to_anchor, facing, vec3(0.0), facing, 0.0, DDGI_NO_VIEW_LIMIT);
+		vec3 ambient = light_queries.ambient_color;
+		if (light_queries.ambient_sky_mix > 0.0) {
+			ambient = mix(ambient, light_query_sky(facing, tangent, bitangent), light_queries.ambient_sky_mix);
+		}
+		coverage = isnan(probe.a) ? 0.0 : clamp(probe.a, 0.0, 1.0);
+		indirect = mix(light_query_finite(ambient), light_query_finite(probe.rgb * ddgi.energy), coverage);
+	}
+	memoryBarrierShared();
+	barrier();
+
+	if (local != 0u) {
+		return;
+	}
+	vec3 direct_sum = vec3(0.0);
+	vec3 body_sum = vec3(0.0);
+	for (uint i = 1u; i < threads; i++) {
+		direct_sum += light_query_direct[i];
+		body_sum += light_query_body[i];
+	}
+	float inv_exposure = params.emission_exposure > 0.0 && !isinf(params.emission_exposure) ? 1.0 / params.emission_exposure : 0.0;
+	if (inv_exposure <= 0.0) {
+		coverage = 0.0;
+	}
+	vec3 rgb = light_query_clean((indirect + direct_sum + body_sum) * inv_exposure);
+	vec3 body_rgb = min(light_query_clean(body_sum * inv_exposure), rgb);
+	uint flags = light_queries.flags;
+	flags |= query.sun_factor < 1.0 && light_queries.sun_mask != 0u ? GI_LIGHT_QUERY_FLAG_PARTIAL_CLOUD : 0u;
+	flags |= coverage <= 0.0 ? GI_LIGHT_QUERY_FLAG_NO_COVERAGE : 0u;
+
+	GiLightQueryResult result;
+	result.rgb = rgb;
+	result.y = dot(rgb, luminance_weights);
+	result.coverage = coverage;
+	result.body_y = dot(body_rgb, luminance_weights);
+	result.slot = query.slot;
+	result.frame = light_queries.frame;
+	result.flags = flags;
+	result.pad0 = 0u;
+	result.pad1 = 0u;
+	result.pad2 = 0u;
+	light_query_results.data[query_index] = result;
 }
 
 #endif

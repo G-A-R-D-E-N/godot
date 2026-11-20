@@ -946,6 +946,9 @@ void RayScene::_pack_light(RID p_light_instance, bool p_physical_units, float p_
 	if (r_ids) {
 		r_ids->push_back(p_light_instance);
 	}
+	if (type == RSE::LIGHT_DIRECTIONAL && r_lights.size() < 32 && direction.y < 0.0f && light_storage->light_directional_get_cloud_shadow_texture(light).is_valid()) {
+		cloud_mapped_mask |= 1u << r_lights.size();
+	}
 	r_lights.push_back(packed);
 }
 

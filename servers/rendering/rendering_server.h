@@ -639,6 +639,9 @@ public:
 	virtual void viewport_set_vrs_update_mode(RID p_viewport, RSE::ViewportVRSUpdateMode p_mode) = 0;
 	virtual void viewport_set_vrs_texture(RID p_viewport, RID p_texture) = 0;
 
+	virtual void viewport_gi_light_query(RID p_viewport, const PackedFloat32Array &p_queries, const PackedInt32Array &p_slots) = 0;
+	virtual Array viewport_gi_light_query_results(RID p_viewport) const = 0;
+
 	/* SKY API */
 
 	virtual RID sky_create() = 0;

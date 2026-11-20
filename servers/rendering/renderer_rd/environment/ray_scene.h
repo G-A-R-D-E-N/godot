@@ -444,6 +444,8 @@ private:
 	int64_t reported_additive_state = -2;
 	LocalVector<Light> lights;
 	LocalVector<Light> local_lights;
+	bool light_list_trimmed = false;
+	uint32_t cloud_mapped_mask = 0;
 	LightCensus census;
 	LightCensus printed_census;
 	LocalVector<Node> tlas_nodes;
@@ -573,6 +575,8 @@ public:
 	RID get_hw_remap_buffer() const { return hw_remap_buffer; }
 	void append_uniforms(LocalVector<RD::Uniform> &r_uniforms) const;
 	Vector3 get_anchor() const { return anchor; }
+	bool is_light_list_trimmed() const { return light_list_trimmed; }
+	uint32_t get_cloud_mapped_mask() const { return cloud_mapped_mask; }
 	bool shell_material_range(RID p_instance, uint32_t &r_offset, uint32_t &r_count) const;
 	void collect_moved_instances(uint64_t &r_signature, Vector3 &r_anchor, HashMap<uint64_t, AABB> &r_known, LocalVector<AABB> &r_moved) const;
 	RID get_blas_node_buffer() const { return blas_node_buffer; }
