@@ -87,8 +87,10 @@
 			<param index="1" name="percentile" type="float" />
 			<param index="2" name="ceiling" type="float" />
 			<param index="3" name="max_shift" type="float" />
+			<param index="4" name="adaptation_time" type="float" default="0.0" />
+			<param index="5" name="release_time" type="float" default="0.0" />
 			<description>
-				Sets the highlight rule of the log histogram meter. See [member CameraAttributes.auto_exposure_highlight_percentile].
+				Sets the highlight rule of the log histogram meter. See [member CameraAttributes.auto_exposure_highlight_percentile], [member CameraAttributes.auto_exposure_highlight_adaptation_time] and [member CameraAttributes.auto_exposure_highlight_release_time].
 			</description>
 		</method>
 		<method name="camera_attributes_set_auto_exposure_highlight_limit">

@@ -16,6 +16,8 @@ layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 layout(set = 0, binding = 0, std430) restrict buffer Histogram {
 	uint bins[BINS];
+	float shift;
+	float shift_valid;
 }
 histogram;
 
@@ -48,6 +50,10 @@ layout(push_constant, std430) uniform Params {
 	uint exponential;
 	float light_limit;
 	uint hold;
+	float highlight_rise;
+	float highlight_fall;
+	uint shift_stale;
+	uint pad0;
 }
 params;
 
@@ -150,12 +156,27 @@ void main() {
 	if (t == 0u) {
 		float prev = texelFetch(prev_luminance, ivec2(0, 0), 0).r;
 		float result = clamp(prev > 0.0 ? prev : params.min_luminance, params.min_luminance, params.max_luminance);
+		bool shift_valid = histogram.shift_valid > 0.5 && prev > 0.0 && params.set_immediate == 0u && params.shift_stale == 0u;
+		float shift = shift_valid ? histogram.shift : 0.0;
 		if (local_kept[0] > 0.0) {
 			float log_target = local_sum[0] / local_kept[0];
+			float stepped = log_target;
+			float raw = 0.0;
 			if (local_high[0] >= 0.0) {
 				float log_high = MIN_LOG2 + local_high[0] * BIN_WIDTH;
-				log_target = clamp(log_high - params.highlight_ceiling, log_target, log_target + params.highlight_max_shift);
+				stepped = clamp(log_high - params.highlight_ceiling, log_target, log_target + params.highlight_max_shift);
+				raw = clamp(log_high - params.highlight_ceiling - log_target, 0.0, params.highlight_max_shift);
 			}
+			if (!shift_valid) {
+				shift = raw;
+			} else {
+				shift = shift >= 0.0 ? min(shift, params.highlight_max_shift) : raw;
+				if (params.hold == 0u) {
+					float rate = raw > shift ? params.highlight_rise : params.highlight_fall;
+					shift = rate >= 1.0 ? raw : shift + (raw - shift) * rate;
+				}
+			}
+			log_target = shift == raw ? stepped : log_target + shift;
 			float target = luminance_adapt(exp2(log_target), params.adaptation, params.adaptation_pivot);
 			if (params.set_immediate != 0u || !(prev > 0.0)) {
 				result = clamp(target, params.min_luminance, params.max_luminance);
@@ -172,6 +193,8 @@ void main() {
 		if (params.hold != 0u && prev > 0.0) {
 			result = prev;
 		}
+		histogram.shift = shift;
+		histogram.shift_valid = (shift_valid || local_kept[0] > 0.0) ? 1.0 : 0.0;
 		imageStore(dest_luminance, ivec2(0, 0), vec4(result));
 	}
 #endif

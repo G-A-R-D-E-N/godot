@@ -729,6 +729,8 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 			histogram_policy.exponential = RSG::camera_attributes->camera_attributes_get_auto_exposure_exponential_response(p_render_data->camera_attributes);
 			histogram_policy.light_limit = auto_exposure_light_limit;
 			histogram_policy.hold = auto_exposure_hold;
+			histogram_policy.highlight_rise = AutoExposureGuard::highlight_rate(RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_adaptation_time(p_render_data->camera_attributes), time_step, set_immediate);
+			histogram_policy.highlight_fall = AutoExposureGuard::highlight_rate(RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_release_time(p_render_data->camera_attributes), time_step, set_immediate);
 			if (histogram_policy.exponential) {
 				histogram_policy.light_adjust = 1.0 - Math::exp(-time_step / MAX(RSG::camera_attributes->camera_attributes_get_auto_exposure_light_adaptation_time(p_render_data->camera_attributes), 0.001));
 				histogram_policy.dark_adjust = 1.0 - Math::exp(-time_step / MAX(RSG::camera_attributes->camera_attributes_get_auto_exposure_dark_adaptation_time(p_render_data->camera_attributes), 0.001));

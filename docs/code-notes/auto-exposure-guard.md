@@ -254,3 +254,40 @@ The mean meter's `auto_exposure_highlight_limit` caps each sampled pixel at the 
   an error, and the properties do nothing there. The class reference documents auto exposure as supported in Forward+
   only.
 - Compatibility: the renderer has no luminance code. The properties are stored and not used.
+
+## Highlight shift time
+
+`CameraAttributes.auto_exposure_highlight_adaptation_time` and `auto_exposure_highlight_release_time` (seconds, 0 to 60,
+default 0 each) give the log histogram meter's highlight shift its own state.
+
+- Shift: `raw = clamp(log_high - highlight_ceiling - log_mean, 0, highlight_max_shift)` in stops, the same amount the
+  rule used to add in one step, or 0 when the rule finds no mark. The target is `log_mean + shift`. Adaptation, the
+  response and the rise limit then act on it unchanged.
+- Update: a larger `raw` is approached at `highlight_rise = 1 - exp(-time_step / adaptation_time)` per frame, a smaller
+  one at `highlight_fall` from the release time. A time of 0 or a reset gives a rate of 1, which takes `raw` at once. A
+  frame with no time step (time scale 0) gives a rate of 0 for a time above 0, so a paused game neither deepens nor
+  releases the shift where that time is set; a direction whose time is 0 still follows `raw` at once.
+- Bound: a stored shift is cut to the current `highlight_max_shift` before the update, so lowering the cap takes
+  effect on the next frame. A stored shift that is not a number or below 0 is replaced by `raw`.
+- Why a slow rise and a short release: pan tests (day-turn-sanctuary) showed a symmetric slow filter still pumps, because
+  the shift rises and falls inside a turn and the lag adds its own swing. A slow rise keeps a passing sky patch from
+  building a shift. An instant release turned the shift into a lower envelope: a flickering source that drops under
+  the ceiling for one frame in twenty kept it near 0 (a review model: mean shift 0.07 of 2 stops). A release of a few
+  tenths of a second makes a one-frame dip cost about 5 % of the shift and still leaves no slow tail.
+- Exactness: the shader keeps the old expression `clamp(log_high - ceiling, log_mean, log_mean + max_shift)` as
+  `stepped` and uses it whenever the shift in use equals `raw` (both times 0, a reset, or a shift that has caught up).
+  Only a shift still moving toward `raw` uses `log_mean + shift`. `log_mean + raw` alone differs from the old value by
+  an ulp on some frames (0.1 % to 10 % in two float32 models), so both times at 0 would not have been the old rule bit
+  for bit. One doctest runs 4000 random cases with both rates at 1 against the old expression and asks for equality.
+- State: two floats after the 256 bins in the histogram storage buffer, `shift` and `shift_valid`. The per-frame
+  `buffer_clear` covers only the bins. The stored shift is used only when `shift_valid` is set, the previous luminance
+  is above 0, the frame is not `set_immediate`, and the mean meter has not run since the last histogram frame
+  (`LuminanceBuffers::histogram_shift_stale`, set by `luminance_reduction`, passed as `shift_stale` and cleared by the
+  histogram meter). Otherwise the frame takes `raw`. The buffer is created zeroed, so a new or resized view starts
+  invalid. A hold keeps the stored shift. A frame with no kept samples keeps the shift and its valid flag as they were.
+- CPU mirror for the tests: `AutoExposureGuard::highlight_rate`, `highlight_valid` (the four conditions above),
+  `highlight_stored` (the valid flag written back), `highlight_shift` and `highlight_step`.
+- Push constant: `highlight_rise`, `highlight_fall`, `shift_stale` and one pad word, 96 bytes in all.
+- A camera cut the game does not flag as a reset keeps the shift. Release is never slower than the release time, so
+  the darker side is never stuck; the brighter side may take up to the adaptation time to deepen after such a cut.
+- The mean meter and the raster path have no highlight rule and do not read these settings.

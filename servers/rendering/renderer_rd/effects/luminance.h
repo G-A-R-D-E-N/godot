@@ -49,6 +49,8 @@ struct LuminanceHistogramPolicy {
 	float dark_adjust = 1.0;
 	float light_limit = 0.0;
 	bool hold = false;
+	float highlight_rise = 1.0;
+	float highlight_fall = 1.0;
 };
 
 class Luminance {
@@ -110,6 +112,7 @@ private:
 	} luminance_reduce_raster;
 
 	static constexpr int LUMINANCE_HISTOGRAM_BINS = 256;
+	static constexpr int LUMINANCE_HISTOGRAM_STATE = 2;
 	static constexpr int LUMINANCE_HISTOGRAM_MAX_SAMPLES = 1 << 21;
 
 	enum LuminanceHistogramMode {
@@ -138,6 +141,10 @@ private:
 		uint32_t exponential;
 		float light_limit;
 		uint32_t hold;
+		float highlight_rise;
+		float highlight_fall;
+		uint32_t shift_stale;
+		uint32_t pad;
 	};
 
 	struct LuminanceHistogram {
@@ -161,6 +168,7 @@ public:
 		Vector<RID> reduce;
 		RID current;
 		RID histogram;
+		bool histogram_shift_stale = false;
 
 		virtual void configure(RenderSceneBuffersRD *p_render_buffers) override;
 		virtual void free_data() override;

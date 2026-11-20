@@ -747,7 +747,7 @@ public:
 	virtual void camera_attributes_set_auto_exposure_meter(RID p_camera_attributes, RSE::AutoExposureMeter p_meter, float p_clip_low, float p_clip_high, float p_center_weight) = 0;
 	virtual void camera_attributes_set_auto_exposure_response(RID p_camera_attributes, bool p_exponential, float p_light_adaptation_time, float p_dark_adaptation_time) = 0;
 	virtual void camera_attributes_set_auto_exposure_guard(RID p_camera_attributes, float p_light_adaptation_limit, bool p_hold) = 0;
-	virtual void camera_attributes_set_auto_exposure_highlight(RID p_camera_attributes, float p_percentile, float p_ceiling, float p_max_shift) = 0;
+	virtual void camera_attributes_set_auto_exposure_highlight(RID p_camera_attributes, float p_percentile, float p_ceiling, float p_max_shift, float p_adaptation_time, float p_release_time) = 0;
 
 	/* SCENARIO API */
 

@@ -112,7 +112,7 @@ void CameraAttributes::_update_auto_exposure_meter() {
 void CameraAttributes::_update_auto_exposure_response() {
 	RS::get_singleton()->camera_attributes_set_auto_exposure_response(camera_attributes, auto_exposure_exponential_response, auto_exposure_light_adaptation_time, auto_exposure_dark_adaptation_time);
 	RS::get_singleton()->camera_attributes_set_auto_exposure_guard(camera_attributes, auto_exposure_light_adaptation_limit, auto_exposure_hold);
-	RS::get_singleton()->camera_attributes_set_auto_exposure_highlight(camera_attributes, auto_exposure_highlight_percentile, auto_exposure_highlight_ceiling, auto_exposure_highlight_max_shift);
+	RS::get_singleton()->camera_attributes_set_auto_exposure_highlight(camera_attributes, auto_exposure_highlight_percentile, auto_exposure_highlight_ceiling, auto_exposure_highlight_max_shift, auto_exposure_highlight_adaptation_time, auto_exposure_highlight_release_time);
 	emit_changed();
 }
 
@@ -225,6 +225,24 @@ float CameraAttributes::get_auto_exposure_highlight_max_shift() const {
 	return auto_exposure_highlight_max_shift;
 }
 
+void CameraAttributes::set_auto_exposure_highlight_adaptation_time(float p_time) {
+	auto_exposure_highlight_adaptation_time = p_time;
+	_update_auto_exposure_response();
+}
+
+float CameraAttributes::get_auto_exposure_highlight_adaptation_time() const {
+	return auto_exposure_highlight_adaptation_time;
+}
+
+void CameraAttributes::set_auto_exposure_highlight_release_time(float p_time) {
+	auto_exposure_highlight_release_time = p_time;
+	_update_auto_exposure_response();
+}
+
+float CameraAttributes::get_auto_exposure_highlight_release_time() const {
+	return auto_exposure_highlight_release_time;
+}
+
 void CameraAttributes::set_auto_exposure_adaptation(float p_adaptation) {
 	auto_exposure_adaptation = CLAMP(p_adaptation, 0.0f, 1.0f);
 	_update_auto_exposure();
@@ -291,6 +309,10 @@ void CameraAttributes::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_auto_exposure_highlight_ceiling"), &CameraAttributes::get_auto_exposure_highlight_ceiling);
 	ClassDB::bind_method(D_METHOD("set_auto_exposure_highlight_max_shift", "max_shift"), &CameraAttributes::set_auto_exposure_highlight_max_shift);
 	ClassDB::bind_method(D_METHOD("get_auto_exposure_highlight_max_shift"), &CameraAttributes::get_auto_exposure_highlight_max_shift);
+	ClassDB::bind_method(D_METHOD("set_auto_exposure_highlight_adaptation_time", "time"), &CameraAttributes::set_auto_exposure_highlight_adaptation_time);
+	ClassDB::bind_method(D_METHOD("get_auto_exposure_highlight_adaptation_time"), &CameraAttributes::get_auto_exposure_highlight_adaptation_time);
+	ClassDB::bind_method(D_METHOD("set_auto_exposure_highlight_release_time", "time"), &CameraAttributes::set_auto_exposure_highlight_release_time);
+	ClassDB::bind_method(D_METHOD("get_auto_exposure_highlight_release_time"), &CameraAttributes::get_auto_exposure_highlight_release_time);
 	ClassDB::bind_method(D_METHOD("set_auto_exposure_adaptation", "adaptation"), &CameraAttributes::set_auto_exposure_adaptation);
 	ClassDB::bind_method(D_METHOD("get_auto_exposure_adaptation"), &CameraAttributes::get_auto_exposure_adaptation);
 
@@ -315,6 +337,8 @@ void CameraAttributes::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_highlight_percentile", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_auto_exposure_highlight_percentile", "get_auto_exposure_highlight_percentile");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_highlight_ceiling", PROPERTY_HINT_RANGE, "0,8,0.01"), "set_auto_exposure_highlight_ceiling", "get_auto_exposure_highlight_ceiling");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_highlight_max_shift", PROPERTY_HINT_RANGE, "0,12,0.01"), "set_auto_exposure_highlight_max_shift", "get_auto_exposure_highlight_max_shift");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_highlight_adaptation_time", PROPERTY_HINT_RANGE, "0,60,0.01,suffix:s"), "set_auto_exposure_highlight_adaptation_time", "get_auto_exposure_highlight_adaptation_time");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_highlight_release_time", PROPERTY_HINT_RANGE, "0,60,0.01,suffix:s"), "set_auto_exposure_highlight_release_time", "get_auto_exposure_highlight_release_time");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_exposure_adaptation", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_auto_exposure_adaptation", "get_auto_exposure_adaptation");
 
 	BIND_ENUM_CONSTANT(AUTO_EXPOSURE_METER_MEAN);

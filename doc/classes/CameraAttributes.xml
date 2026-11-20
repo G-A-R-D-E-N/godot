@@ -29,6 +29,9 @@
 		<member name="auto_exposure_exponential_response" type="bool" setter="set_auto_exposure_exponential_response" getter="is_auto_exposure_exponential_response" default="false">
 			If [code]true[/code], auto exposure moves toward its target in stops with [code]1 - exp(-delta / time)[/code], using [member auto_exposure_light_adaptation_time] when the scene gets brighter and [member auto_exposure_dark_adaptation_time] when it gets darker, so the path does not depend on the frame rate. If [code]false[/code], [member auto_exposure_speed] is used as before. Only the log histogram meter reads this.
 		</member>
+		<member name="auto_exposure_highlight_adaptation_time" type="float" setter="set_auto_exposure_highlight_adaptation_time" getter="get_auto_exposure_highlight_adaptation_time" default="0.0">
+			How fast the highlight rule may deepen its shift, in seconds. When the highlights ask for a larger shift than the one in use, the shift moves toward it by [code]1 - exp(-delta / time)[/code] each frame. A bright patch that passes through the view then barely moves the exposure. [code]0.0[/code] follows the highlights at once, the behavior before this setting. The shift starts from the current highlights on the first frame, after a reset and after the mean meter has run, stays as it is while [member auto_exposure_hold] is on, and, while this time is above [code]0.0[/code], does not deepen on a frame with no time step. A shift larger than [member auto_exposure_highlight_max_shift] is cut to it at once. Only the log histogram meter reads this. See also [member auto_exposure_highlight_release_time].
+		</member>
 		<member name="auto_exposure_highlight_ceiling" type="float" setter="set_auto_exposure_highlight_ceiling" getter="get_auto_exposure_highlight_ceiling" default="2.5">
 			How many stops above the exposure key the protected luminance may sit before the exposure is lowered.
 		</member>
@@ -42,6 +45,9 @@
 		</member>
 		<member name="auto_exposure_highlight_percentile" type="float" setter="set_auto_exposure_highlight_percentile" getter="get_auto_exposure_highlight_percentile" default="0.0">
 			Share of the weighted frame, by area, whose luminance the highlight rule protects. With [code]0.99[/code] the brightest 1% of the frame is ignored and the luminance below it is kept under [member auto_exposure_highlight_ceiling]. [code]0.0[/code] switches the rule off. Only the log histogram meter reads this.
+		</member>
+		<member name="auto_exposure_highlight_release_time" type="float" setter="set_auto_exposure_highlight_release_time" getter="get_auto_exposure_highlight_release_time" default="0.0">
+			How fast the highlight rule lets its shift go, in seconds, when the highlights ask for a smaller one: the shift moves toward it by [code]1 - exp(-delta / time)[/code] each frame. A short time, a few tenths of a second, keeps a light that flickers below the ceiling for single frames from undoing the shift, and still leaves no slow tail when the highlights leave the view. [code]0.0[/code] lets go at once. Only the log histogram meter reads this.
 		</member>
 		<member name="auto_exposure_histogram_clip_high" type="float" setter="set_auto_exposure_histogram_clip_high" getter="get_auto_exposure_histogram_clip_high" default="0.03">
 			The fraction of the total metering weight, taken from the brightest pixels, that the log histogram meter ignores, from [code]0.0[/code] to [code]0.45[/code]. Only used when [member auto_exposure_meter] is [constant AUTO_EXPOSURE_METER_LOG_HISTOGRAM].

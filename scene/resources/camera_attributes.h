@@ -75,6 +75,8 @@ protected:
 	float auto_exposure_highlight_percentile = 0.0;
 	float auto_exposure_highlight_ceiling = 2.5;
 	float auto_exposure_highlight_max_shift = 4.0;
+	float auto_exposure_highlight_adaptation_time = 0.0;
+	float auto_exposure_highlight_release_time = 0.0;
 	void _update_auto_exposure_response();
 	virtual void _update_auto_exposure() {}
 
@@ -119,6 +121,10 @@ public:
 	float get_auto_exposure_highlight_ceiling() const;
 	void set_auto_exposure_highlight_max_shift(float p_max_shift);
 	float get_auto_exposure_highlight_max_shift() const;
+	void set_auto_exposure_highlight_adaptation_time(float p_time);
+	float get_auto_exposure_highlight_adaptation_time() const;
+	void set_auto_exposure_highlight_release_time(float p_time);
+	float get_auto_exposure_highlight_release_time() const;
 	void set_auto_exposure_adaptation(float p_adaptation);
 	float get_auto_exposure_adaptation() const;
 
