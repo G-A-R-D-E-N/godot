@@ -84,11 +84,13 @@ private:
 		Vector<WorkerThreadPool::GroupID> group_compilation_tasks;
 		Vector<bool> group_loaded_from_cache;
 		Vector<bool> group_started;
+		Vector<bool> group_lazy;
 
 		Vector<Vector<uint8_t>> variant_data;
 		Vector<RID> variants;
 
 		bool valid;
+		bool creation_group_failed = false;
 		bool dirty;
 		bool initialize_needed;
 		bool embedded;
@@ -266,6 +268,30 @@ public:
 
 	static Vector<RD::ShaderStageSPIRVData> compile_stages(const Vector<String> &p_stage_sources, const Vector<uint64_t> &p_dynamic_buffers);
 	static PackedByteArray save_shader_cache_bytes(const LocalVector<int> &p_variants, const Vector<Vector<uint8_t>> &p_variant_data);
+
+	struct GroupVariantState {
+		bool enabled = false;
+		bool shader_valid = false;
+		int64_t data_size = 0;
+	};
+
+	struct GroupEndState {
+		bool version_valid = false;
+		bool creation_group_failed = false;
+		bool group_lazy = false;
+		bool cache_user_dir_valid = false;
+		bool loaded_from_cache = false;
+	};
+
+	struct GroupEndPlan {
+		bool group_ok = true;
+		bool version_valid = false;
+		bool creation_group_failed = false;
+		bool save_to_cache = false;
+		LocalVector<uint32_t> free_indices;
+	};
+
+	static GroupEndPlan plan_group_end(const LocalVector<GroupVariantState> &p_variants, const GroupEndState &p_state);
 
 	Vector<String> version_build_variant_stage_sources(RID p_version, int p_variant);
 	RenderingServerTypes::ShaderNativeSourceCode version_get_native_source_code(RID p_version);
