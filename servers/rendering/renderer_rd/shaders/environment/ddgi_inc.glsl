@@ -79,6 +79,12 @@ ivec3 ddgi_stats_texel(uint p_level, ivec3 p_slot) {
 	return ddgi_probe_texel(p_level + ddgi.level_count, p_slot);
 }
 
+#if defined(DDGI_MEDIUM_DIRECTIONAL) || defined(MODE_BLEND_IRRADIANCE)
+ivec3 ddgi_moment_texel(uint p_level, ivec3 p_slot, uint p_channel) {
+	return ddgi_probe_texel(p_level + p_channel * ddgi.level_count, p_slot);
+}
+#endif
+
 uint ddgi_tag(uint p_level, ivec3 p_local) {
 	uvec3 g = uvec3(ddgi.levels[p_level].g_min + p_local) & uvec3(0x3FFu);
 	return g.x | (g.y << 10) | (g.z << 20);
@@ -161,11 +167,140 @@ vec3 ddgi_sample_level(uint p_level, vec3 p_position, vec3 p_normal, vec3 p_view
 	return weight_sum > 0.0 ? irradiance / weight_sum : vec3(0.0);
 }
 
+#endif
+
+#if defined(DDGI_SAMPLING) || defined(DDGI_MEDIUM_SAMPLING)
+
 float ddgi_level_coverage(uint p_level, vec3 p_position) {
 	vec3 grid = (p_position - ddgi.levels[p_level].origin) / ddgi.levels[p_level].spacing;
 	vec3 edge = min(grid, vec3(ddgi.dims - 1) - grid);
 	return clamp(min(edge.x, min(edge.y, edge.z)) * 0.5, 0.0, 1.0);
 }
+
+#endif
+
+#ifdef DDGI_MEDIUM_SAMPLING
+
+vec3 ddgi_medium_level(uint p_level, vec3 p_position, out float r_weight, out float r_confidence
+#ifdef DDGI_MEDIUM_DIRECTIONAL
+		,
+		out vec3 r_moment[3]
+#endif
+) {
+	float spacing = ddgi.levels[p_level].spacing;
+	vec3 grid = (p_position - ddgi.levels[p_level].origin) / spacing;
+	ivec3 base = ivec3(floor(grid));
+	vec3 alpha = grid - vec3(base);
+
+	vec3 mean = vec3(0.0);
+#ifdef DDGI_MEDIUM_DIRECTIONAL
+	vec3 moment[3] = vec3[3](vec3(0.0), vec3(0.0), vec3(0.0));
+#endif
+	float weight_sum = 0.0;
+	float trilinear_sum = 0.0;
+	for (int i = 0; i < 8; i++) {
+		ivec3 corner = ivec3(i, i >> 1, i >> 2) & ivec3(1);
+		ivec3 local = clamp(base + corner, ivec3(0), ddgi.dims - 1);
+		ivec3 slot = ddgi_slot(p_level, local);
+		uvec4 data = texelFetch(ddgi_probe_texture, ddgi_probe_texel(p_level, slot), 0);
+		uint state = ddgi_state(data, p_level, local);
+		if (state == DDGI_STATE_NONE || state == DDGI_STATE_INSIDE) {
+			continue;
+		}
+
+		vec3 trilinear = mix(1.0 - alpha, alpha, vec3(corner));
+		float trilinear_weight = trilinear.x * trilinear.y * trilinear.z;
+		float weight = 1.0;
+#ifdef DDGI_MEDIUM_VISIBILITY
+		vec3 probe_position = ddgi_probe_position(p_level, local, ddgi_offset(data));
+		vec3 probe_to_point = p_position - probe_position;
+		float distance_to_point = length(probe_to_point);
+		vec2 distance_uv = (vec2(ddgi_tile_origin(slot, DDGI_DISTANCE_SIZE)) + 1.0 + vec3_to_oct(probe_to_point / max(distance_to_point, 1e-4)) * float(DDGI_DISTANCE_SIZE)) * ddgi.distance_texel_size;
+		vec2 moments = textureLod(sampler2DArray(ddgi_distance_texture, ddgi_linear_sampler), vec3(distance_uv, float(p_level)), 0.0).xy;
+		if (distance_to_point > moments.x) {
+			float variance = abs(moments.y - moments.x * moments.x);
+			float delta = distance_to_point - moments.x;
+			float chebyshev = variance / (variance + delta * delta);
+			weight *= chebyshev * chebyshev * chebyshev;
+			weight *= weight < 0.5 ? pow(weight, 7.0) * 128.0 : 1.0;
+		}
+
+		weight = max(1e-6, weight);
+		if (weight < 0.2) {
+			weight *= weight * weight * 25.0;
+		}
+#endif
+		weight *= trilinear_weight;
+
+		mean += weight * texelFetch(ddgi_mean_texture, ddgi_probe_texel(p_level, slot), 0).rgb;
+#ifdef DDGI_MEDIUM_DIRECTIONAL
+		for (uint c = 0u; c < 3u; c++) {
+			moment[c] += weight * texelFetch(ddgi_moment_texture, ddgi_moment_texel(p_level, slot, c), 0).xyz;
+		}
+#endif
+		weight_sum += weight;
+		trilinear_sum += trilinear_weight;
+	}
+
+	r_weight = weight_sum;
+	r_confidence = trilinear_sum > 0.0 ? clamp(weight_sum / trilinear_sum, 0.0, 1.0) : 0.0;
+#ifdef DDGI_MEDIUM_DIRECTIONAL
+	for (uint c = 0u; c < 3u; c++) {
+		r_moment[c] = weight_sum > 0.0 ? moment[c] / weight_sum : vec3(0.0);
+	}
+#endif
+	return weight_sum > 0.0 ? mean / weight_sum : vec3(0.0);
+}
+
+vec4 ddgi_sample_medium(vec3 p_position
+#ifdef DDGI_MEDIUM_DIRECTIONAL
+		,
+		out vec3 r_moment[3]
+#endif
+) {
+	vec4 result = vec4(0.0);
+#ifdef DDGI_MEDIUM_DIRECTIONAL
+	r_moment = vec3[3](vec3(0.0), vec3(0.0), vec3(0.0));
+#endif
+	for (uint level = 0; level < ddgi.level_count && result.a < 0.999; level++) {
+		float coverage = ddgi_level_coverage(level, p_position);
+		if (coverage <= 0.0) {
+			continue;
+		}
+		float weight_sum;
+		float confidence;
+#ifdef DDGI_MEDIUM_DIRECTIONAL
+		vec3 level_moment[3];
+		vec3 mean = ddgi_medium_level(level, p_position, weight_sum, confidence, level_moment);
+#else
+		vec3 mean = ddgi_medium_level(level, p_position, weight_sum, confidence);
+#endif
+		if (weight_sum <= 0.0) {
+			continue;
+		}
+		float share = coverage * confidence * (1.0 - result.a);
+		result.rgb += mean * share;
+#ifdef DDGI_MEDIUM_DIRECTIONAL
+		for (uint c = 0u; c < 3u; c++) {
+			r_moment[c] += level_moment[c] * share;
+		}
+#endif
+		result.a += share;
+	}
+	if (result.a > 0.0) {
+		result.rgb /= result.a;
+#ifdef DDGI_MEDIUM_DIRECTIONAL
+		for (uint c = 0u; c < 3u; c++) {
+			r_moment[c] /= result.a;
+		}
+#endif
+	}
+	return result;
+}
+
+#endif
+
+#ifdef DDGI_SAMPLING
 
 vec4 ddgi_sample_direction(vec3 p_position, vec3 p_normal, vec3 p_view, vec3 p_direction, float p_sharpen, float p_view_limit) {
 	vec4 result = vec4(0.0);

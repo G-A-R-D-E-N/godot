@@ -32,6 +32,7 @@
 
 #include "core/config/project_settings.h"
 #include "servers/rendering/renderer_rd/cluster_builder_rd.h"
+#include "servers/rendering/renderer_rd/environment/fog_ddgi.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
@@ -324,6 +325,7 @@ ALBEDO = vec3(1.0);
 			}
 		}
 
+		volumetric_fog.process_defines = defines;
 		volumetric_fog.process_shader.initialize(volumetric_fog_modes, defines);
 		volumetric_fog.process_shader.enable_group(_get_fog_shader_group());
 
@@ -343,6 +345,16 @@ void Fog::free_fog_shader() {
 	if (volumetric_fog.process_shader_version.is_valid()) {
 		volumetric_fog.process_shader.version_free(volumetric_fog.process_shader_version);
 	}
+	for (uint32_t d = 0; d < VolumetricFogShader::DDGI_SHADER_OBJECTS; d++) {
+		for (uint32_t v = 0; v < VolumetricFogShader::DDGI_VISIBILITY_VARIANTS; v++) {
+			volumetric_fog.ddgi_pipelines[d][v].free();
+		}
+		if (volumetric_fog.ddgi_shader_version[d].is_valid()) {
+			volumetric_fog.ddgi_shader[d].version_free(volumetric_fog.ddgi_shader_version[d]);
+			volumetric_fog.ddgi_shader_version[d] = RID();
+		}
+		volumetric_fog.ddgi_shader_state[d] = VolumetricFogShader::DDGI_SHADER_UNTRIED;
+	}
 	if (volumetric_fog.volume_ubo.is_valid()) {
 		RD::get_singleton()->free_rid(volumetric_fog.volume_ubo);
 	}
@@ -355,6 +367,61 @@ void Fog::free_fog_shader() {
 	if (volumetric_fog.default_material.is_valid()) {
 		material_storage->material_free(volumetric_fog.default_material);
 	}
+}
+
+bool Fog::_ensure_ddgi_shader(uint32_t p_directional) {
+	ERR_FAIL_UNSIGNED_INDEX_V(p_directional, VolumetricFogShader::DDGI_SHADER_OBJECTS, false);
+	VolumetricFogShader::DDGIShaderState &state = volumetric_fog.ddgi_shader_state[p_directional];
+	if (state != VolumetricFogShader::DDGI_SHADER_UNTRIED) {
+		return state == VolumetricFogShader::DDGI_SHADER_READY;
+	}
+
+	const String directional_define = p_directional ? "#define DDGI_MEDIUM_DIRECTIONAL\n" : "";
+	Vector<ShaderRD::VariantDefine> ddgi_modes;
+	int shader_group = 0;
+	for (int vk_memory_model = 0; vk_memory_model < 2; vk_memory_model++) {
+		for (int no_atomics = 0; no_atomics < 2; no_atomics++) {
+			String base_define = vk_memory_model ? "\n#define USE_VULKAN_MEMORY_MODEL" : "";
+			base_define += no_atomics ? "\n#define NO_IMAGE_ATOMICS" : "";
+			ddgi_modes.push_back(ShaderRD::VariantDefine(shader_group, base_define + "\n#define MODE_DENSITY\n#define ENABLE_DDGI\n" + directional_define, false));
+			ddgi_modes.push_back(ShaderRD::VariantDefine(shader_group, base_define + "\n#define MODE_DENSITY\n#define ENABLE_DDGI\n#define DDGI_MEDIUM_VISIBILITY\n" + directional_define, false));
+			shader_group++;
+		}
+	}
+
+	VolumetricFogProcessShaderRD &shader = volumetric_fog.ddgi_shader[p_directional];
+	if (shader.get_variant_count() == 0) {
+		shader.initialize(ddgi_modes, volumetric_fog.process_defines);
+	}
+	shader.enable_group(_get_fog_shader_group());
+	volumetric_fog.ddgi_shader_version[p_directional] = shader.version_create();
+
+	if (!shader.version_is_valid(volumetric_fog.ddgi_shader_version[p_directional])) {
+		state = VolumetricFogShader::DDGI_SHADER_FAILED;
+		ERR_PRINT(vformat("Volumetric fog DDGI shader %d failed to compile; the fog uses %s from now on.", p_directional, p_directional ? "the non-directional DDGI shader" : "the stock GI path"));
+		return false;
+	}
+
+	bool pipelines_valid = true;
+	for (uint32_t v = 0; v < VolumetricFogShader::DDGI_VISIBILITY_VARIANTS; v++) {
+		volumetric_fog.ddgi_pipelines[p_directional][v].create_compute_pipeline(shader.version_get_shader(volumetric_fog.ddgi_shader_version[p_directional], fog_ddgi_variant(_get_fog_variant(), v)));
+	}
+	for (uint32_t v = 0; v < VolumetricFogShader::DDGI_VISIBILITY_VARIANTS; v++) {
+		pipelines_valid = pipelines_valid && volumetric_fog.ddgi_pipelines[p_directional][v].get_rid().is_valid();
+	}
+	if (!pipelines_valid) {
+		for (uint32_t v = 0; v < VolumetricFogShader::DDGI_VISIBILITY_VARIANTS; v++) {
+			volumetric_fog.ddgi_pipelines[p_directional][v].free();
+		}
+		shader.version_free(volumetric_fog.ddgi_shader_version[p_directional]);
+		volumetric_fog.ddgi_shader_version[p_directional] = RID();
+		state = VolumetricFogShader::DDGI_SHADER_FAILED;
+		ERR_PRINT(vformat("Volumetric fog DDGI pipelines %d could not be made; the fog uses %s from now on.", p_directional, p_directional ? "the non-directional DDGI shader" : "the stock GI path"));
+		return false;
+	}
+
+	state = VolumetricFogShader::DDGI_SHADER_READY;
+	return true;
 }
 
 void Fog::FogShaderData::set_code(const String &p_code) {
@@ -1056,9 +1123,27 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 		}
 	}
 
-	bool using_sdfgi = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_gi_inject(p_settings.env) > 0.0001 && RendererSceneRenderRD::get_singleton()->environment_get_sdfgi_enabled(p_settings.env) && (p_settings.sdfgi.is_valid());
+	const float gi_inject = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_gi_inject(p_settings.env);
+	const bool fog_ddgi_setting = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/volumetric_fog");
+	const bool fog_ddgi_valid = p_settings.ddgi.is_valid() && p_settings.ddgi->ubo.is_valid() && p_settings.ddgi->mean.is_valid() && p_settings.ddgi->moment.is_valid();
+	const bool sdfgi_enabled = RendererSceneRenderRD::get_singleton()->environment_get_sdfgi_enabled(p_settings.env);
+	const bool sdfgi_valid = p_settings.sdfgi.is_valid();
+	FogGIChoice gi_choice = fog_gi_source(gi_inject, fog_ddgi_setting, fog_ddgi_valid, volumetric_fog.ddgi_shader_state[0] != VolumetricFogShader::DDGI_SHADER_FAILED, sdfgi_enabled, sdfgi_valid, uint32_t(p_voxel_gi_count));
+	uint32_t ddgi_object = 0;
+	uint32_t ddgi_visibility = 0;
+	if (gi_choice.use_ddgi) {
+		const float phase_g = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_anisotropy(p_settings.env);
+		ddgi_object = fog_ddgi_directional(GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/volumetric_fog_directional"), phase_g, volumetric_fog.ddgi_shader_state[1] != VolumetricFogShader::DDGI_SHADER_FAILED);
+		if (ddgi_object == 1 && !_ensure_ddgi_shader(1)) {
+			ddgi_object = 0;
+		}
+		if (ddgi_object == 0 && !_ensure_ddgi_shader(0)) {
+			gi_choice = fog_gi_source(gi_inject, fog_ddgi_setting, fog_ddgi_valid, false, sdfgi_enabled, sdfgi_valid, uint32_t(p_voxel_gi_count));
+		}
+		ddgi_visibility = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/volumetric_fog_visibility") ? 1 : 0;
+	}
 
-	if (using_sdfgi) {
+	if (gi_choice.bind_sdfgi) {
 		if (fog->sdfgi_uniform_set.is_null() || !RD::get_singleton()->uniform_set_is_valid(fog->sdfgi_uniform_set)) {
 			Vector<RD::Uniform> uniforms;
 
@@ -1161,7 +1246,7 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 	params.cam_rotation[10] = p_cam_transform.basis[2][2];
 	params.cam_rotation[11] = 0;
 	params.filter_axis = 0;
-	params.max_voxel_gi_instances = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_gi_inject(p_settings.env) > 0.001 ? p_voxel_gi_count : 0;
+	params.max_voxel_gi_instances = gi_choice.voxel_gi_count;
 	params.temporal_frame = RSG::rasterizer->get_frame_number() % VolumetricFog::MAX_TEMPORAL_FRAMES;
 
 	Transform3D to_prev_cam_view = p_prev_cam_inv_transform * p_cam_transform;
@@ -1207,12 +1292,21 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 
 	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 
-	int density_variant = using_sdfgi ? VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_DENSITY_WITH_SDFGI : VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_DENSITY;
-	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, volumetric_fog.process_pipelines[density_variant].get_rid());
+	int density_variant = gi_choice.bind_sdfgi ? VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_DENSITY_WITH_SDFGI : VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_DENSITY;
+	RID density_shader;
+	if (gi_choice.use_ddgi) {
+		density_shader = volumetric_fog.ddgi_shader[ddgi_object].version_get_shader(volumetric_fog.ddgi_shader_version[ddgi_object], fog_ddgi_variant(_get_fog_variant(), ddgi_visibility));
+		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, volumetric_fog.ddgi_pipelines[ddgi_object][ddgi_visibility].get_rid());
+	} else {
+		density_shader = volumetric_fog.process_shader.version_get_shader(volumetric_fog.process_shader_version, _get_fog_process_variant(density_variant));
+		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, volumetric_fog.process_pipelines[density_variant].get_rid());
+	}
 
 	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, params.temporal_clamp ? fog->gi_dependent_sets.process_uniform_set_density2 : fog->gi_dependent_sets.process_uniform_set_density, 0);
 
-	if (using_sdfgi) {
+	if (gi_choice.use_ddgi) {
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, UniformSetCacheRD::get_singleton()->get_cache_vec(density_shader, 1, p_settings.ddgi->gather_medium_uniforms()), 1);
+	} else if (gi_choice.bind_sdfgi) {
 		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, fog->sdfgi_uniform_set, 1);
 	}
 
@@ -1225,7 +1319,6 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 			u_cloud_shadow_textures.append_id(cloud_shadow_textures[i].is_valid() ? cloud_shadow_textures[i] : texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_WHITE));
 		}
 		RD::Uniform u_cloud_shadow_sampler(RD::UNIFORM_TYPE_SAMPLER, 1, material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS, RSE::CANVAS_ITEM_TEXTURE_REPEAT_ENABLED));
-		RID density_shader = volumetric_fog.process_shader.version_get_shader(volumetric_fog.process_shader_version, _get_fog_process_variant(density_variant));
 		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, UniformSetCacheRD::get_singleton()->get_cache(density_shader, 2, u_cloud_shadow_textures, u_cloud_shadow_sampler), 2);
 	}
 	RD::get_singleton()->compute_list_dispatch_threads(compute_list, fog->width, fog->height, fog->depth);

@@ -32,6 +32,7 @@
 
 #include "core/templates/rid_owner.h"
 #include "servers/rendering/environment/renderer_fog.h"
+#include "servers/rendering/renderer_rd/environment/ddgi.h"
 #include "servers/rendering/renderer_rd/environment/gi.h"
 #include "servers/rendering/renderer_rd/pipeline_deferred_rd.h"
 #include "servers/rendering/renderer_rd/shaders/environment/volumetric_fog.glsl.gen.h"
@@ -197,7 +198,24 @@ private:
 		RID process_shader_version;
 		PipelineDeferredRD process_pipelines[VOLUMETRIC_FOG_PROCESS_SHADER_MAX];
 
+		enum DDGIShaderState {
+			DDGI_SHADER_UNTRIED,
+			DDGI_SHADER_READY,
+			DDGI_SHADER_FAILED,
+		};
+
+		static constexpr uint32_t DDGI_SHADER_OBJECTS = 2;
+		static constexpr uint32_t DDGI_VISIBILITY_VARIANTS = 2;
+
+		String process_defines;
+		VolumetricFogProcessShaderRD ddgi_shader[DDGI_SHADER_OBJECTS];
+		RID ddgi_shader_version[DDGI_SHADER_OBJECTS];
+		PipelineDeferredRD ddgi_pipelines[DDGI_SHADER_OBJECTS][DDGI_VISIBILITY_VARIANTS];
+		DDGIShaderState ddgi_shader_state[DDGI_SHADER_OBJECTS] = { DDGI_SHADER_UNTRIED, DDGI_SHADER_UNTRIED };
+
 	} volumetric_fog;
+
+	bool _ensure_ddgi_shader(uint32_t p_directional);
 
 	Vector3i _point_get_position_in_froxel_volume(const Vector3 &p_point, float fog_end, const Vector2 &fog_near_size, const Vector2 &fog_far_size, float volumetric_fog_detail_spread, const Vector3 &fog_size, const Transform3D &p_cam_transform);
 
@@ -375,6 +393,7 @@ public:
 		ClusterBuilderRD *cluster_builder;
 		GI *gi;
 		Ref<GI::SDFGI> sdfgi;
+		Ref<DDGI::Volume> ddgi;
 		Ref<GI::RenderBuffersGI> rbgi;
 		RID env;
 		SkyRD *sky;
