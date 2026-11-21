@@ -65,7 +65,7 @@ static bool _sphere_caps(const RestirEventsUBO &p_ubo, const float *p_sphere, co
 bool restir_event_caps(const RestirEventsUBO &p_ubo, const Vector3 &p_position) {
 	const uint32_t count = MIN(p_ubo.counts[0], RESTIR_EVENT_MAX);
 	for (uint32_t i = 0; i < count; i++) {
-		if (i < p_ubo.counts[1] && !restir_event_first_fire(p_ubo.since_last[i], p_ubo.gates[0])) {
+		if (!restir_event_first_fire(p_ubo.since_last[i], p_ubo.gates[0])) {
 			continue;
 		}
 		if (_sphere_caps(p_ubo, p_ubo.sphere[i], p_position)) {
@@ -161,7 +161,7 @@ void restir_hold_pack(const RestirHoldRing &p_ring, const Vector3 &p_anchor, Res
 }
 
 bool restir_event_holds(const RestirEventsUBO &p_ubo, const Vector3 &p_sample) {
-	const uint32_t count = MIN(p_ubo.counts[1], RESTIR_EVENT_MAX);
+	const uint32_t count = MIN(p_ubo.counts[0], RESTIR_EVENT_MAX);
 	for (uint32_t i = 0; i < count; i++) {
 		const float dx = float(p_sample.x) - p_ubo.sphere[i][0];
 		const float dy = float(p_sample.y) - p_ubo.sphere[i][1];
@@ -250,7 +250,6 @@ void restir_plan_events(const RestirEventInputs &p_inputs, RestirEventPlan &r_pl
 		}
 	}
 	u.counts[0] = count;
-	u.counts[1] = count;
 	u.counts[2] = p_inputs.settings.event_m_cap;
 	u.counts[3] = p_inputs.settings.jump_m_cap;
 	u.params[0] = MAX(p_inputs.settings.reach_scale, 0.0f);

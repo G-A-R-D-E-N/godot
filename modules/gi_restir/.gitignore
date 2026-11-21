@@ -1,4 +1,3 @@
 shaders/restir_core_inc.glsl
 shaders/restir_core_*.glsl
-shaders/restir_core/
 __pycache__/

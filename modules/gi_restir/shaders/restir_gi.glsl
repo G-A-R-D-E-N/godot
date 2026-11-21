@@ -281,7 +281,7 @@ Reservoir rs_finish(Reservoir p_result, int p_sel, float p_total_m, Receiver p_r
 	Reservoir result = p_result;
 	result.m = uint(min(p_total_m, float(rf.m_max)));
 	result.depth = p_r.depth;
-	result.rnormal = rs_pack_normal(p_r.nrm);
+	result.rnormal = rtgi_pack_normal(p_r.nrm);
 	result.epoch = rf.epoch_tag;
 	if (p_sel > 0) {
 		result.flags |= p_source_flag;
@@ -354,7 +354,7 @@ Reservoir rs_from_candidate(ivec2 p_pixel, Receiver p_r) {
 	res.m = 1u;
 	res.age = 0u;
 	res.depth = p_r.depth;
-	res.rnormal = rs_pack_normal(p_r.nrm);
+	res.rnormal = rtgi_pack_normal(p_r.nrm);
 	res.epoch = rf.epoch_tag;
 	res.tag = second.w;
 #ifdef RESTIR_RAYS
