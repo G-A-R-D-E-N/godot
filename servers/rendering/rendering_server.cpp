@@ -2540,6 +2540,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("light_set_reverse_cull_face_mode", "light", "enabled"), &RenderingServer::light_set_reverse_cull_face_mode);
 	ClassDB::bind_method(D_METHOD("light_set_shadow_caster_mask", "light", "mask"), &RenderingServer::light_set_shadow_caster_mask);
 	ClassDB::bind_method(D_METHOD("light_set_direct_shadow", "light", "owned", "movement", "size", "clearance", "shells", "surfaces"), &RenderingServer::light_set_direct_shadow, DEFVAL(0.0), DEFVAL(TypedArray<RID>()), DEFVAL(PackedInt32Array()));
+	ClassDB::bind_method(D_METHOD("light_set_direct_mean_energy", "light", "energy"), &RenderingServer::light_set_direct_mean_energy);
 	ClassDB::bind_method(D_METHOD("light_set_bake_mode", "light", "bake_mode"), &RenderingServer::light_set_bake_mode);
 	ClassDB::bind_method(D_METHOD("light_set_max_sdfgi_cascade", "light", "cascade"), &RenderingServer::light_set_max_sdfgi_cascade);
 	ClassDB::bind_method(D_METHOD("light_set_allow_contact_shadows", "light", "enable"), &RenderingServer::light_set_allow_contact_shadows);
@@ -3971,6 +3972,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/direct/filter_range_sigmas", PROPERTY_HINT_RANGE, "0,8,0.1"), 1.5);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/direct/clamp_sigmas", PROPERTY_HINT_RANGE, "0,8,0.1"), 3.0);
 	GLOBAL_DEF("rendering/global_illumination/direct/force_factor_one", false);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/debug_cold_frames", PROPERTY_HINT_RANGE, "0,64,1"), 0);
 	GLOBAL_DEF(PropertyInfo(Variant::STRING, "rendering/global_illumination/direct/dump_request", PROPERTY_HINT_GLOBAL_SAVE_FILE, "*.json"), "");
 
 	GLOBAL_DEF("rendering/global_illumination/surfels/enabled", false);

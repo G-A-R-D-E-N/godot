@@ -198,6 +198,11 @@ void DirectLightTable::write_slots(LocalVector<GpuSlot> &r_slots, LocalVector<Gp
 		slot.reset_frame = uint32_t(record.reset_frame);
 		slot.dynamic = frame < record.dynamic_until ? 1 : 0;
 		slot.clearance = record.lamp.clearance;
+		const Vector3 anchor_offset = record.reset_position - record.lamp.position;
+		for (int k = 0; k < 3; k++) {
+			slot.anchor_offset[k] = float(anchor_offset[k]);
+			slot.mean_color[k] = record.lamp.mean_color[k];
+		}
 		if (!p_resolver) {
 			continue;
 		}

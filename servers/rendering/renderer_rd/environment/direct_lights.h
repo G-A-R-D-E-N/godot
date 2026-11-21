@@ -59,6 +59,7 @@ public:
 		float movement = 0.0f;
 		float size = -1.0f;
 		float clearance = 0.0f;
+		float mean_energy = -1.0f;
 		uint32_t shell_count = 0;
 		RID shell_instance[MAX_SHELLS];
 		int32_t shell_surface[MAX_SHELLS] = {};
@@ -78,6 +79,7 @@ public:
 		uint32_t resolved = 0;
 		RID shell_instance[MAX_SHELLS];
 		int32_t shell_surface[MAX_SHELLS] = {};
+		float mean_color[3] = {};
 
 		bool same_shells(const Lamp &p_other) const;
 	};
@@ -95,9 +97,11 @@ public:
 		uint32_t dynamic = 0;
 		float clearance = 0.0f;
 		uint32_t exclude = 0;
+		float anchor_offset[3] = {};
+		float mean_color[3] = {};
 	};
 
-	static_assert(sizeof(GpuSlot) == 24);
+	static_assert(sizeof(GpuSlot) == 48);
 
 	struct GpuExclude {
 		uint32_t first = 0;

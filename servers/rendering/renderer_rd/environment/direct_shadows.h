@@ -34,6 +34,7 @@
 #include "core/math/transform_3d.h"
 #include "core/templates/local_vector.h"
 #include "servers/rendering/renderer_rd/environment/direct_lights.h"
+#include "servers/rendering/renderer_rd/environment/direct_resampler_hooks.h"
 #include "servers/rendering/renderer_rd/pipeline_deferred_rd.h"
 #include "servers/rendering/renderer_rd/shaders/environment/direct_shadows.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/environment/direct_shadows_filter.glsl.gen.h"
@@ -59,21 +60,12 @@ namespace RendererRD {
 
 class DirectShadows {
 public:
-	struct FrameInput {
-		Ref<RenderSceneBuffersRD> render_buffers;
-		RID depth;
-		RID normal_roughness;
-		RID cluster_buffer;
-		RID omni_buffer;
-		RID spot_buffer;
-		Projection projection;
-		Transform3D camera;
-		Vector3 region_half;
-		uint32_t cluster_size = 32;
-		uint32_t cluster_max_elements = 512;
-		float z_far = 1.0f;
-		uint64_t frame = 0;
+	struct FrameInput : DirectFrameView {
 		uint64_t table_generation = 0;
+		RID entries;
+		uint32_t head_entries = 0;
+		uint32_t tail_samples = 0;
+		uint32_t tail_visibility = 0;
 	};
 
 	struct Settings {
@@ -83,6 +75,7 @@ public:
 		uint32_t debug_view = 0;
 		bool filter = true;
 		bool force_one = false;
+		uint32_t cold_frames = 0;
 		uint32_t history_cap = 32;
 		uint32_t dynamic_history_cap = 2;
 		float clamp_sigmas = 3.0f;
@@ -149,14 +142,20 @@ private:
 		float range_scale;
 		float dynamic_cap;
 		uint32_t count;
-		uint32_t pad;
+		uint32_t head_entries;
+		uint32_t tail_visibility;
+		uint32_t cold_frames;
+		uint32_t pad[2];
 	};
+	static_assert(sizeof(Params) == 384);
 
 	static constexpr uint32_t COUNTER_BYTES = 32;
 
 	enum TraceMode {
 		TRACE_CAPPED,
 		TRACE_PRECISE,
+		TRACE_CAPPED_EXTERNAL,
+		TRACE_PRECISE_EXTERNAL,
 		TRACE_MAX,
 	};
 
@@ -164,6 +163,7 @@ private:
 		FILTER_CLAMP,
 		FILTER_FIRST,
 		FILTER_SECOND,
+		FILTER_SECOND_EXTERNAL,
 		FILTER_MAX,
 	};
 
@@ -186,6 +186,10 @@ private:
 	uint32_t exclude_buffer_capacity = 0;
 	RID counter_buffer;
 	RID debug_unused;
+	RID resampled_dummy;
+	RID lamp_dummy;
+	bool lamps_prepared = false;
+	String lamps_dump_request;
 	LocalVector<DirectLightTable::GpuSlot> lamp_data;
 	LocalVector<DirectLightTable::GpuExclude> exclude_data;
 	LocalVector<float> lamp_dump;
@@ -203,13 +207,18 @@ private:
 
 	static Vector<String> _trace_modes();
 	bool _ensure_hw();
-	void _filter(const Ref<RenderSceneBuffersRD> &p_render_buffers, Ref<ViewportData> p_viewport, const Settings &p_settings);
+	void _filter(const Ref<RenderSceneBuffersRD> &p_render_buffers, Ref<ViewportData> p_viewport, const Settings &p_settings, bool p_external);
 	RID _debug_target(const Ref<RenderSceneBuffersRD> &p_render_buffers, const Settings &p_settings);
 	void _ensure_textures(const Ref<RenderSceneBuffersRD> &p_render_buffers, Ref<ViewportData> p_viewport, const Settings &p_settings);
 	Ref<ViewportData> _viewport(const Ref<RenderSceneBuffersRD> &p_render_buffers);
 
 public:
+	bool prepare_lamps(const FrameInput &p_input, DirectLightTable &p_table);
 	bool process(const FrameInput &p_input, DirectLightTable &p_table);
+	RID get_lamp_buffer() const { return lamp_buffer; }
+	bool get_history(const Ref<RenderSceneBuffersRD> &p_render_buffers, uint64_t p_table_generation, RID &r_slots, RID &r_factors, Transform3D &r_camera, Projection &r_projection, RID &r_guide) const;
+	RID get_resampled_dummy() const { return resampled_dummy; }
+	RID get_lamp_dummy() const { return lamp_dummy; }
 	RID get_slots(const Ref<RenderSceneBuffersRD> &p_render_buffers) const;
 	RID get_factors(const Ref<RenderSceneBuffersRD> &p_render_buffers) const;
 	void release(const Ref<RenderSceneBuffersRD> &p_render_buffers);

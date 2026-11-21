@@ -2114,8 +2114,13 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 
 	direct_shadow_slots = RID();
 	direct_shadow_factors = RID();
+	direct_resampled = RID();
+	RendererRD::DirectResampler *resampler = RendererRD::DirectResampler::get_singleton();
 	if (rb_data.is_valid() && !(p_use_direct_lights && p_render_data->scene_data->view_count == 1 && p_render_data->cluster_buffer.is_valid())) {
 		direct_shadows->release(rb);
+		if (resampler) {
+			resampler->release(rb);
+		}
 	} else if (rb_data.is_valid()) {
 		RENDER_TIMESTAMP("Direct Shadows");
 		RD::get_singleton()->draw_command_begin_label("Direct Shadows");
@@ -2134,9 +2139,29 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 		input.z_far = p_render_data->scene_data->z_far;
 		input.frame = RSG::rasterizer->get_frame_number();
 		input.table_generation = light_storage->get_direct_lights().get_generation();
+		RID record;
+		if (resampler && resampler->is_enabled() && direct_shadows->prepare_lamps(input, light_storage->get_direct_lights())) {
+			RendererRD::DirectResampler::Input resample_input;
+			static_cast<RendererRD::DirectFrameView &>(resample_input) = input;
+			resample_input.lamp_buffer = direct_shadows->get_lamp_buffer();
+			direct_shadows->get_history(rb, input.table_generation, resample_input.history_slots, resample_input.history_factors, resample_input.history_camera, resample_input.history_projection, resample_input.history_guide);
+			RendererRD::DirectResampler::Output resample_output;
+			if (resampler->run(resample_input, resample_output)) {
+				input.entries = resample_output.entries;
+				input.head_entries = resample_output.head_entries;
+				input.tail_samples = resample_output.tail_samples;
+				input.tail_visibility = resample_output.tail_visibility;
+				record = resample_output.record;
+				RENDER_TIMESTAMP("Direct Shadows Trace");
+				RD::get_singleton()->draw_command_begin_label("Direct Shadows Trace");
+			}
+		} else if (resampler) {
+			resampler->release(rb);
+		}
 		if (direct_shadows->process(input, light_storage->get_direct_lights())) {
 			direct_shadow_slots = direct_shadows->get_slots(rb);
 			direct_shadow_factors = direct_shadows->get_factors(rb);
+			direct_resampled = input.entries.is_valid() ? record : RID();
 		}
 		RD::get_singleton()->draw_command_end_label();
 	}
@@ -2690,6 +2715,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 	base_specialization.use_far_shadow = light_storage->has_far_shadow();
 	base_specialization.use_direct_shadow = direct_shadow_factors.is_valid();
+	base_specialization.use_direct_resampled = direct_resampled.is_valid();
 	if (current_cluster_builder) {
 		base_specialization.cluster_has_area_light = current_cluster_builder->get_cluster_count_by_type(ClusterBuilderRD::ELEMENT_TYPE_AREA_LIGHT) != 0;
 	}
@@ -2941,6 +2967,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	uint32_t transparent_pass_uniform_buffer_index = _setup_environment(p_render_data, is_reflection_probe, screen_size, screen_size, p_default_bg_color, false);
 
 	base_specialization.use_direct_shadow = false;
+	base_specialization.use_direct_resampled = false;
 
 	if (scene_state.used_back_depth_texture && rb_data.is_valid()) {
 		_render_back_depth_pass(p_render_data, reverse_cull, is_multiview, radiance_texture, samplers, transparent_pass_uniform_buffer_index, base_specialization);
@@ -4472,6 +4499,9 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		const bool direct_bound = p_render_data && p_render_list != RENDER_LIST_ALPHA && direct_shadow_factors.is_valid();
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 52, direct_bound ? direct_shadow_slots : black));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 53, direct_bound ? direct_shadow_factors : black));
+		const bool resampled_bound = direct_bound && direct_resampled.is_valid();
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 54, resampled_bound ? direct_resampled : direct_shadows->get_resampled_dummy()));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 55, resampled_bound ? direct_shadows->get_lamp_buffer() : direct_shadows->get_lamp_dummy()));
 	}
 
 	return UniformSetCacheRD::get_singleton()->get_cache_vec(scene_shader.get_default_shader_rd(is_multiview), RENDER_PASS_UNIFORM_SET, uniforms);
@@ -6070,6 +6100,9 @@ RenderForwardClustered::RenderForwardClustered() {
 
 RenderForwardClustered::~RenderForwardClustered() {
 	RD::get_singleton()->free_rid(default_sky_sh_buffer);
+	if (RendererRD::DirectResampler::get_singleton()) {
+		RendererRD::DirectResampler::get_singleton()->free_device_resources();
+	}
 
 	if (ss_effects != nullptr) {
 		memdelete(ss_effects);

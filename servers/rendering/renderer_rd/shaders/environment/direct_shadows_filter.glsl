@@ -83,7 +83,7 @@ void main() {
 	if (any(greaterThanEqual(pixel, params.size)) || imageLoad(guide_image, pixel).x == 0u) {
 		return;
 	}
-	uint own_limit = params.entries - 1u;
+	uint own_limit = params.head_entries;
 	uint slots[MAX_ENTRIES];
 	float rays[MAX_ENTRIES];
 	float hits[MAX_ENTRIES];
@@ -197,10 +197,16 @@ float range_weight(float p_own, float p_other, float p_noise) {
 
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+#if defined(MODE_SECOND) && !defined(EXTERNAL_ENTRIES)
 	uint own_limit = params.entries - 1u;
-	uint layers = own_limit + 3u;
+	uint rest_layer = own_limit;
+#else
+	uint own_limit = params.head_entries;
+	uint rest_layer = params.entries - 1u;
+#endif
+	uint layers = rest_layer + 3u;
 	ivec2 tile_origin = ivec2(gl_WorkGroupID.xy) * 8 - HALO;
-	load_tile(tile_origin, own_limit + 1u);
+	load_tile(tile_origin, rest_layer + 1u);
 	if (any(greaterThanEqual(pixel, params.size))) {
 		return;
 	}
@@ -241,7 +247,7 @@ void main() {
 		sum[i] = 0.0;
 		total[i] = 0.0;
 	}
-	uint rest_key = tile_slot(center_texel, own_limit);
+	uint rest_key = tile_slot(center_texel, rest_layer);
 #ifdef MODE_FIRST
 	const int step_size = 1;
 #else
@@ -304,22 +310,22 @@ void main() {
 					break;
 				}
 			}
-			if (rest_key != 0u && tile_slot(texel, own_limit) == rest_key) {
+			if (rest_key != 0u && tile_slot(texel, rest_layer) == rest_key) {
 #ifdef MODE_FIRST
 				vec4 rest = imageLoad(rest_image, at);
 				if (rest.a > 0.0) {
 					float evidence = base * min(rest.a, params.history_cap);
 					for (uint c = 0u; c < 3u; c++) {
-						sum[own_limit + c] += evidence * clamp(rest[c] / rest.a, 0.0, 1.0);
-						total[own_limit + c] += evidence;
+						sum[rest_layer + c] += evidence * clamp(rest[c] / rest.a, 0.0, 1.0);
+						total[rest_layer + c] += evidence;
 					}
 				}
 #else
 				for (uint c = 0u; c < 3u; c++) {
-					float seen = imageLoad(in_image, ivec3(at, int(own_limit + c))).r;
+					float seen = imageLoad(in_image, ivec3(at, int(rest_layer + c))).r;
 					if (seen > 0.0) {
-						sum[own_limit + c] += base * (seen - NO_EVIDENCE_GAP) / (1.0 - NO_EVIDENCE_GAP);
-						total[own_limit + c] += base;
+						sum[rest_layer + c] += base * (seen - NO_EVIDENCE_GAP) / (1.0 - NO_EVIDENCE_GAP);
+						total[rest_layer + c] += base;
 					}
 				}
 #endif
@@ -332,9 +338,19 @@ void main() {
 		value = total[i] > 0.0 ? NO_EVIDENCE_GAP + (1.0 - NO_EVIDENCE_GAP) * value : 0.0;
 #endif
 #ifdef MODE_SECOND
+#ifdef EXTERNAL_ENTRIES
+		if (i >= own_limit && i < rest_layer) {
+			vec2 tail = imageLoad(accum_image, ivec3(pixel, int(i))).rg;
+			value = tail.y > 0.0 ? tail.x / tail.y : 1.0;
+		}
+		if (params.force_one != 0u && !(params.tail_visibility == 2u && i >= own_limit && i < rest_layer)) {
+			value = 1.0;
+		}
+#else
 		if (params.force_one != 0u) {
 			value = 1.0;
 		}
+#endif
 #endif
 		imageStore(out_image, ivec3(pixel, int(i)), vec4(value));
 	}

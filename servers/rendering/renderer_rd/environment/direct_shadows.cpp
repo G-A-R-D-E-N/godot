@@ -50,6 +50,7 @@ DirectShadows::Settings DirectShadows::get_project_settings() {
 	settings.debug_view = MAX(int(GLOBAL_GET("rendering/global_illumination/direct/debug_view")), 0);
 	settings.filter = GLOBAL_GET("rendering/global_illumination/direct/filter");
 	settings.force_one = GLOBAL_GET("rendering/global_illumination/direct/force_factor_one");
+	settings.cold_frames = CLAMP(int(GLOBAL_GET("rendering/global_illumination/direct/debug_cold_frames")), 0, 64);
 	settings.history_cap = MAX(int(GLOBAL_GET("rendering/global_illumination/direct/history_cap")), 0);
 	settings.dynamic_history_cap = MAX(int(GLOBAL_GET("rendering/global_illumination/direct/dynamic_history_cap")), 1);
 	settings.clamp_sigmas = GLOBAL_GET("rendering/global_illumination/direct/clamp_sigmas");
@@ -62,6 +63,8 @@ Vector<String> DirectShadows::_trace_modes() {
 	Vector<String> modes;
 	modes.push_back("\n");
 	modes.push_back("\n#define PRECISE_HISTORY\n");
+	modes.push_back("\n#define EXTERNAL_ENTRIES\n");
+	modes.push_back("\n#define PRECISE_HISTORY\n#define EXTERNAL_ENTRIES\n");
 	return modes;
 }
 
@@ -76,6 +79,7 @@ DirectShadows::DirectShadows() {
 	filter_modes.push_back("\n#define MODE_CLAMP\n");
 	filter_modes.push_back("\n#define MODE_FIRST\n");
 	filter_modes.push_back("\n#define MODE_SECOND\n");
+	filter_modes.push_back("\n#define MODE_SECOND\n#define EXTERNAL_ENTRIES\n");
 	filter_shader.initialize(filter_modes);
 	filter_shader_version = filter_shader.version_create();
 	for (int i = 0; i < FILTER_MAX; i++) {
@@ -90,6 +94,22 @@ DirectShadows::DirectShadows() {
 	format.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT;
 	debug_unused = RD::get_singleton()->texture_create(format, RD::TextureView());
 	RD::get_singleton()->set_resource_name(debug_unused, "Direct Shadows Unused Debug");
+	RD::TextureFormat record_format;
+	record_format.format = RD::DATA_FORMAT_R32G32_UINT;
+	record_format.texture_type = RD::TEXTURE_TYPE_2D_ARRAY;
+	record_format.width = 1;
+	record_format.height = 1;
+	record_format.array_layers = 1;
+	record_format.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_UPDATE_BIT;
+	Vector<uint8_t> zero;
+	zero.resize_initialized(8);
+	resampled_dummy = RD::get_singleton()->texture_create(record_format, RD::TextureView(), Vector<Vector<uint8_t>>{ zero });
+	RD::get_singleton()->set_resource_name(resampled_dummy, "Direct Resampled Dummy");
+	lamp_buffer_capacity = 4096;
+	lamp_buffer = RD::get_singleton()->storage_buffer_create(lamp_buffer_capacity);
+	RD::get_singleton()->set_resource_name(lamp_buffer, "Direct Shadows Lamps");
+	lamp_dummy = RD::get_singleton()->storage_buffer_create(sizeof(DirectLightTable::GpuSlot));
+	RD::get_singleton()->set_resource_name(lamp_dummy, "Direct Shadows Lamps Dummy");
 }
 
 DirectShadows::~DirectShadows() {
@@ -124,6 +144,12 @@ DirectShadows::~DirectShadows() {
 	}
 	if (debug_unused.is_valid()) {
 		rd->free_rid(debug_unused);
+	}
+	if (resampled_dummy.is_valid()) {
+		rd->free_rid(resampled_dummy);
+	}
+	if (lamp_dummy.is_valid()) {
+		rd->free_rid(lamp_dummy);
 	}
 }
 
@@ -210,39 +236,13 @@ void DirectShadows::release(const Ref<RenderSceneBuffersRD> &p_render_buffers) {
 	viewport->last_frame = 0;
 }
 
-bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table) {
+bool DirectShadows::prepare_lamps(const FrameInput &p_input, DirectLightTable &p_table) {
 	RayScene *ray_scene = RayScene::get_singleton();
 	if (!ray_scene || !ray_scene->is_ready()) {
 		return false;
 	}
-	const bool hardware = ray_scene->uses_hardware();
-	if (hardware && !_ensure_hw()) {
-		ray_scene->refuse_hardware("the direct shadow shader or its pipeline could not be made");
-		return false;
-	}
-
 	RD *rd = RD::get_singleton();
-	const Settings settings = get_project_settings();
-	Ref<ViewportData> viewport = _viewport(p_input.render_buffers);
-	_ensure_textures(p_input.render_buffers, viewport, settings);
-	const String dump_request = GLOBAL_GET("rendering/global_illumination/direct/dump_request");
-	viewport->counted = !dump_request.is_empty() && dump_request != served_request;
-
-	const Size2i frame_size = p_input.render_buffers->get_internal_size();
-	if (p_input.frame != size_frame) {
-		size_frame = p_input.frame;
-		largest_size_before = largest_size;
-		largest_size = frame_size;
-	} else if (frame_size.x * frame_size.y > largest_size.x * largest_size.y) {
-		largest_size = frame_size;
-	}
-
-	if (viewport->table_generation != p_input.table_generation) {
-		viewport->table_generation = p_input.table_generation;
-		viewport->last_frame = 0;
-	}
-	viewport->flip = !viewport->flip;
-
+	lamps_dump_request = GLOBAL_GET("rendering/global_illumination/direct/dump_request");
 	if (p_input.frame != moved_frame) {
 		moved_frame = p_input.frame;
 		ray_scene->collect_moved_instances(moved_signature, moved_anchor, moved_known, moved);
@@ -257,7 +257,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	Shells shells;
 	shells.scene = ray_scene;
 	p_table.write_slots(lamp_data, exclude_data, &shells);
-	if (!dump_request.is_empty()) {
+	if (!lamps_dump_request.is_empty()) {
 		p_table.write_lamps(lamp_dump);
 		dump_hard_resets = p_table.get_hard_resets();
 		dump_dynamic_lamp_frames = p_table.get_dynamic_lamp_frames();
@@ -286,6 +286,54 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	if (exclude_bytes > 0) {
 		rd->buffer_update(exclude_buffer, 0, exclude_bytes, exclude_data.ptr());
 	}
+	lamps_prepared = true;
+	return true;
+}
+
+bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table) {
+	const bool prepared = lamps_prepared;
+	lamps_prepared = false;
+	RayScene *ray_scene = RayScene::get_singleton();
+	if (!ray_scene || !ray_scene->is_ready()) {
+		return false;
+	}
+	const bool hardware = ray_scene->uses_hardware();
+	if (hardware && !_ensure_hw()) {
+		ray_scene->refuse_hardware("the direct shadow shader or its pipeline could not be made");
+		return false;
+	}
+
+	RD *rd = RD::get_singleton();
+	Settings settings = get_project_settings();
+	const bool external = p_input.entries.is_valid();
+	if (external) {
+		const uint32_t entries = p_input.head_entries + p_input.tail_samples + 1;
+		ERR_FAIL_COND_V_MSG(p_input.tail_samples == 0 || entries > 8, false, "External direct entries need at least one tail sample and at most 7 head and tail entries.");
+		settings.entries = entries;
+	}
+	Ref<ViewportData> viewport = _viewport(p_input.render_buffers);
+	_ensure_textures(p_input.render_buffers, viewport, settings);
+
+	const Size2i frame_size = p_input.render_buffers->get_internal_size();
+	if (p_input.frame != size_frame) {
+		size_frame = p_input.frame;
+		largest_size_before = largest_size;
+		largest_size = frame_size;
+	} else if (frame_size.x * frame_size.y > largest_size.x * largest_size.y) {
+		largest_size = frame_size;
+	}
+
+	if (viewport->table_generation != p_input.table_generation) {
+		viewport->table_generation = p_input.table_generation;
+		viewport->last_frame = 0;
+	}
+	viewport->flip = !viewport->flip;
+
+	if (!prepared) {
+		prepare_lamps(p_input, p_table);
+		lamps_prepared = false;
+	}
+	viewport->counted = !lamps_dump_request.is_empty() && lamps_dump_request != served_request;
 
 	const Size2i size = p_input.render_buffers->get_internal_size();
 	const Projection inverse = p_input.projection.inverse();
@@ -320,12 +368,15 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	params.frame = uint32_t(p_input.frame);
 	params.last_frame = uint32_t(viewport->last_frame);
 	params.entries = settings.entries;
+	params.head_entries = external ? p_input.head_entries : settings.entries - 1;
+	params.tail_visibility = external ? p_input.tail_visibility : 0;
 	params.rays = settings.rays;
 	params.reference = settings.reference ? 1 : 0;
 	params.debug_view = settings.debug_view;
 	params.history_valid = viewport->last_frame != 0 ? 1 : 0;
 	params.filter_on = settings.filtered() ? 1 : 0;
 	params.force_one = settings.force_one ? 1 : 0;
+	params.cold_frames = external || settings.reference ? 0 : settings.cold_frames;
 	params.history_cap = float(settings.history_cap);
 	params.dynamic_cap = float(settings.dynamic_history_cap);
 	params.clamp_sigmas = settings.clamp_sigmas;
@@ -341,7 +392,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	}
 
 	RID sampler = MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
-	const int trace_mode = viewport->precise ? TRACE_PRECISE : TRACE_CAPPED;
+	const int trace_mode = external ? (viewport->precise ? TRACE_PRECISE_EXTERNAL : TRACE_CAPPED_EXTERNAL) : (viewport->precise ? TRACE_PRECISE : TRACE_CAPPED);
 	RID shader_rid = hardware ? shader_hw.version_get_shader(shader_hw_version, trace_mode) : shader.version_get_shader(shader_version, trace_mode);
 	const Ref<RenderSceneBuffersRD> &rb = p_input.render_buffers;
 	const bool flip = viewport->flip;
@@ -368,6 +419,9 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 17, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_GUIDE_OTHER : RB_DIRECT_GUIDE)));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 18, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_RAY)));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 19, exclude_buffer));
+	if (external) {
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 20, p_input.entries));
+	}
 
 	LocalVector<RD::Uniform> scene_uniforms;
 	scene_uniforms.reserve(8);
@@ -381,7 +435,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	rd->compute_list_end();
 
 	if (settings.filtered()) {
-		_filter(rb, viewport, settings);
+		_filter(rb, viewport, settings, external);
 	}
 
 	viewport->last_frame = p_input.frame;
@@ -390,7 +444,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	return true;
 }
 
-void DirectShadows::_filter(const Ref<RenderSceneBuffersRD> &p_render_buffers, Ref<ViewportData> p_viewport, const Settings &p_settings) {
+void DirectShadows::_filter(const Ref<RenderSceneBuffersRD> &p_render_buffers, Ref<ViewportData> p_viewport, const Settings &p_settings, bool p_external) {
 	RD *rd = RD::get_singleton();
 	UniformSetCacheRD *cache = UniformSetCacheRD::get_singleton();
 	const bool flip = p_viewport->flip;
@@ -446,7 +500,7 @@ void DirectShadows::_filter(const Ref<RenderSceneBuffersRD> &p_render_buffers, R
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 11, _debug_target(p_render_buffers, p_settings)));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 19, scratch));
 		RENDER_TIMESTAMP("Direct Shadows Filter Second");
-		run(FILTER_SECOND, uniforms);
+		run(p_external ? FILTER_SECOND_EXTERNAL : FILTER_SECOND, uniforms);
 	}
 }
 
@@ -457,6 +511,25 @@ RID DirectShadows::get_slots(const Ref<RenderSceneBuffersRD> &p_render_buffers) 
 
 RID DirectShadows::get_factors(const Ref<RenderSceneBuffersRD> &p_render_buffers) const {
 	return p_render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_FACTORS);
+}
+
+bool DirectShadows::get_history(const Ref<RenderSceneBuffersRD> &p_render_buffers, uint64_t p_table_generation, RID &r_slots, RID &r_factors, Transform3D &r_camera, Projection &r_projection, RID &r_guide) const {
+	if (!p_render_buffers->has_custom_data(RB_SCOPE_DIRECT_SHADOWS) || !p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_FACTORS)) {
+		return false;
+	}
+	Ref<ViewportData> viewport = p_render_buffers->get_custom_data(RB_SCOPE_DIRECT_SHADOWS);
+	if (viewport->last_frame == 0 || viewport->table_generation != p_table_generation) {
+		return false;
+	}
+	r_slots = get_slots(p_render_buffers);
+	if (r_slots.is_null()) {
+		return false;
+	}
+	r_factors = get_factors(p_render_buffers);
+	r_camera = viewport->last_camera;
+	r_projection = viewport->last_projection;
+	r_guide = p_render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, viewport->flip ? RB_DIRECT_GUIDE_OTHER : RB_DIRECT_GUIDE);
+	return true;
 }
 
 RID DirectShadows::get_debug_texture(const Ref<RenderSceneBuffersRD> &p_render_buffers) const {

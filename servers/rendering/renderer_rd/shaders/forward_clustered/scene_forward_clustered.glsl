@@ -1229,6 +1229,98 @@ uint cluster_get_range_clip_mask(uint i, uint z_min, uint z_max) {
 	return bitfieldInsert(uint(0), uint(0xFFFFFFFF), local_min, mask_width);
 }
 
+#if !defined(USE_SHADOW_TO_OPACITY) && !defined(USE_VERTEX_LIGHTING) && !defined(USE_MULTIVIEW) && !defined(MODE_RENDER_DEPTH)
+#define DIRECT_RESAMPLED_ROUTE
+#include "../environment/di_sampler_inc.glsl"
+
+bool direct_record_ok = false;
+vec3 direct_record_vertex = vec3(0.0);
+vec3 direct_record_normal = vec3(0.0);
+int direct_record_tails = 0;
+int direct_record_heads = 0;
+bool direct_record_check = false;
+bool direct_no_layer = false;
+
+void direct_record_begin(in SceneData scene_data, vec3 p_vertex) {
+	direct_record_ok = false;
+	direct_record_check = false;
+	if (!sc_use_direct_resampled()) {
+		return;
+	}
+	ivec2 pixel = ivec2(gl_FragCoord.xy);
+	int layers = textureSize(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), 0).z;
+	if (layers < 2) {
+		return;
+	}
+	uvec2 head = texelFetch(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), ivec3(pixel, 0), 0).xy;
+	float depth = uintBitsToFloat(head.y & 0x7FFFFFFFu);
+	if (!(depth > 0.0)) {
+		return;
+	}
+	vec2 uv = (vec2(pixel) + 0.5) * scene_data.screen_pixel_size;
+	vec4 view_h = inv_projection_matrix * vec4(uv * 2.0 - 1.0, depth, 1.0);
+	direct_record_vertex = view_h.xyz / view_h.w;
+	float record_depth = max(-direct_record_vertex.z, 1e-4);
+	if (abs(-p_vertex.z - record_depth) > 0.01 * record_depth) {
+		return;
+	}
+	direct_record_normal = di_oct_decode(unpackSnorm2x16(head.x));
+	direct_record_tails = layers - 1;
+	direct_record_heads = textureSize(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), 0).z - 1 - direct_record_tails;
+	direct_record_ok = direct_record_heads >= 0;
+	direct_record_check = direct_record_ok && (head.y & 0x80000000u) != 0u;
+}
+
+int direct_route(uint p_flags, vec3 p_position, float p_inv_radius, float p_decay, bool p_spot, vec3 p_direction, float p_cos_angle, float p_cone_attenuation) {
+	direct_head_layer = -1;
+	direct_tail_layer = -1;
+	if (!direct_record_ok || (p_flags & 1u) == 0u) {
+		return -1;
+	}
+	DiGeometry geometry = di_geometry(p_position, p_inv_radius, p_decay, p_spot, p_direction, p_cos_angle, p_cone_attenuation, direct_record_vertex);
+	if (!di_in_set(geometry, direct_record_normal)) {
+		return -1;
+	}
+	uint slot = (p_flags >> 1) & 0xFFFFu;
+	ivec2 pixel = ivec2(gl_FragCoord.xy);
+	for (int i = 0; i < direct_record_heads; i++) {
+		if (round(texelFetch(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), ivec3(pixel, i), 0).r * 65535.0) == float(slot)) {
+			direct_head_layer = i;
+			return -1;
+		}
+	}
+	int passes = 0;
+	for (int k = 0; k < direct_record_tails; k++) {
+		if (texelFetch(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), ivec3(pixel, k + 1), 0).x == slot) {
+			passes++;
+		}
+	}
+	direct_no_layer = direct_no_layer || (passes == 0 && direct_record_check);
+	return passes;
+}
+
+float direct_tail_pass(uint p_flags, vec3 p_live_color, int p_pass) {
+	uint slot = (p_flags >> 1) & 0xFFFFu;
+	ivec2 pixel = ivec2(gl_FragCoord.xy);
+	int seen = 0;
+	for (int k = 0; k < direct_record_tails; k++) {
+		uvec2 entry = texelFetch(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), ivec3(pixel, k + 1), 0).xy;
+		if (entry.x != slot) {
+			continue;
+		}
+		if (seen == p_pass) {
+			direct_tail_layer = direct_record_heads + k;
+			float weight = uintBitsToFloat(entry.y);
+			DirectSlotData data = direct_slots.data[slot];
+			direct_tail_color = weight < 0.0 ? p_live_color : vec3(data.mean_r, data.mean_g, data.mean_b);
+			return abs(weight) / float(direct_record_tails);
+		}
+		seen++;
+	}
+	return 0.0;
+}
+#endif
+
 float specular_occlusion_cone(float p_ao, float p_roughness, vec3 p_bent_normal, vec3 p_reflection) {
 	float cos_a_v = sqrt(1.0 - p_ao);
 	float limited_roughness = max(p_roughness, 0.01);
@@ -3205,6 +3297,37 @@ void fragment_shader(in SceneData scene_data) {
 	}
 
 #ifndef USE_VERTEX_LIGHTING
+#ifdef LIGHT_BACKLIGHT_USED
+#define DIRECT_ARGS_BACKLIGHT backlight,
+#else
+#define DIRECT_ARGS_BACKLIGHT
+#endif
+#ifdef LIGHT_TRANSMITTANCE_USED
+#define DIRECT_ARGS_TRANSMITTANCE transmittance_color, transmittance_depth, transmittance_boost,
+#else
+#define DIRECT_ARGS_TRANSMITTANCE
+#endif
+#ifdef LIGHT_RIM_USED
+#define DIRECT_ARGS_RIM rim, rim_tint,
+#else
+#define DIRECT_ARGS_RIM
+#endif
+#ifdef LIGHT_CLEARCOAT_USED
+#define DIRECT_ARGS_CLEARCOAT clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
+#else
+#define DIRECT_ARGS_CLEARCOAT
+#endif
+#ifdef LIGHT_ANISOTROPY_USED
+#define DIRECT_ARGS_ANISOTROPY binormal, tangent, anisotropy,
+#else
+#define DIRECT_ARGS_ANISOTROPY
+#endif
+#define DIRECT_LAMP_ARGS light_index, vertex, view, normal, vertex_ddx, vertex_ddy, f0, roughness, metallic, scene_data.taa_frame_count, albedo, alpha, screen_uv, energy_compensation, DIRECT_ARGS_BACKLIGHT DIRECT_ARGS_TRANSMITTANCE DIRECT_ARGS_RIM DIRECT_ARGS_CLEARCOAT DIRECT_ARGS_ANISOTROPY
+#ifdef DIRECT_RESAMPLED_ROUTE
+	if (sc_use_direct_resampled()) {
+		direct_record_begin(scene_data, vertex);
+	}
+#endif
 	{ //omni lights
 
 		uint cluster_omni_offset = cluster_offset;
@@ -3242,26 +3365,29 @@ void fragment_shader(in SceneData scene_data) {
 					continue; // Statically baked light and object uses lightmap, skip
 				}
 
-				light_process_omni(light_index, vertex, view, normal, vertex_ddx, vertex_ddy, f0, roughness, metallic, scene_data.taa_frame_count, albedo, alpha, screen_uv, energy_compensation,
-#ifdef LIGHT_BACKLIGHT_USED
-						backlight,
+#ifdef DIRECT_RESAMPLED_ROUTE
+				if (sc_use_direct_resampled()) {
+					int direct_passes = direct_route(omni_lights.data[light_index].flags, omni_lights.data[light_index].position, omni_lights.data[light_index].inv_radius, omni_lights.data[light_index].attenuation, false, vec3(0.0), 0.0, 1.0);
+					if (direct_passes == 0) {
+						continue;
+					}
+					for (int direct_pass = 0; direct_pass < max(direct_passes, 1); direct_pass++) {
+						float direct_scale = direct_passes > 0 ? direct_tail_pass(omni_lights.data[light_index].flags, omni_lights.data[light_index].color, direct_pass) : 1.0;
+						hvec3 lamp_diffuse = direct_passes > 0 ? hvec3(0.0) : diffuse_light;
+						hvec3 lamp_specular = direct_passes > 0 ? hvec3(0.0) : direct_specular_light;
+						light_process_omni(DIRECT_LAMP_ARGS lamp_diffuse, lamp_specular);
+						if (direct_passes > 0) {
+							diffuse_light += hvec3(vec3(lamp_diffuse) * direct_scale);
+							direct_specular_light += hvec3(vec3(lamp_specular) * direct_scale);
+						} else {
+							diffuse_light = lamp_diffuse;
+							direct_specular_light = lamp_specular;
+						}
+					}
+					continue;
+				}
 #endif
-#ifdef LIGHT_TRANSMITTANCE_USED
-						transmittance_color,
-						transmittance_depth,
-						transmittance_boost,
-#endif
-#ifdef LIGHT_RIM_USED
-						rim,
-						rim_tint,
-#endif
-#ifdef LIGHT_CLEARCOAT_USED
-						clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
-#endif // LIGHT_CLEARCOAT_USED
-#ifdef LIGHT_ANISOTROPY_USED
-						binormal, tangent, anisotropy,
-#endif
-						diffuse_light, direct_specular_light);
+				light_process_omni(DIRECT_LAMP_ARGS diffuse_light, direct_specular_light);
 			}
 		}
 	}
@@ -3303,29 +3429,38 @@ void fragment_shader(in SceneData scene_data) {
 					continue; // Statically baked light and object uses lightmap, skip
 				}
 
-				light_process_spot(light_index, vertex, view, normal, vertex_ddx, vertex_ddy, f0, roughness, metallic, scene_data.taa_frame_count, albedo, alpha, screen_uv, energy_compensation,
-#ifdef LIGHT_BACKLIGHT_USED
-						backlight,
+#ifdef DIRECT_RESAMPLED_ROUTE
+				if (sc_use_direct_resampled()) {
+					int direct_passes = direct_route(spot_lights.data[light_index].flags, spot_lights.data[light_index].position, spot_lights.data[light_index].inv_radius, spot_lights.data[light_index].attenuation, true, spot_lights.data[light_index].direction, spot_lights.data[light_index].cone_angle, spot_lights.data[light_index].cone_attenuation);
+					if (direct_passes == 0) {
+						continue;
+					}
+					for (int direct_pass = 0; direct_pass < max(direct_passes, 1); direct_pass++) {
+						float direct_scale = direct_passes > 0 ? direct_tail_pass(spot_lights.data[light_index].flags, spot_lights.data[light_index].color, direct_pass) : 1.0;
+						hvec3 lamp_diffuse = direct_passes > 0 ? hvec3(0.0) : diffuse_light;
+						hvec3 lamp_specular = direct_passes > 0 ? hvec3(0.0) : direct_specular_light;
+						light_process_spot(DIRECT_LAMP_ARGS lamp_diffuse, lamp_specular);
+						if (direct_passes > 0) {
+							diffuse_light += hvec3(vec3(lamp_diffuse) * direct_scale);
+							direct_specular_light += hvec3(vec3(lamp_specular) * direct_scale);
+						} else {
+							diffuse_light = lamp_diffuse;
+							direct_specular_light = lamp_specular;
+						}
+					}
+					continue;
+				}
 #endif
-#ifdef LIGHT_TRANSMITTANCE_USED
-						transmittance_color,
-						transmittance_depth,
-						transmittance_boost,
-#endif
-#ifdef LIGHT_RIM_USED
-						rim,
-						rim_tint,
-#endif
-#ifdef LIGHT_CLEARCOAT_USED
-						clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
-#endif // LIGHT_CLEARCOAT_USED
-#ifdef LIGHT_ANISOTROPY_USED
-						binormal, tangent, anisotropy,
-#endif
-						diffuse_light, direct_specular_light);
+				light_process_spot(DIRECT_LAMP_ARGS diffuse_light, direct_specular_light);
 			}
 		}
 	}
+#undef DIRECT_LAMP_ARGS
+#undef DIRECT_ARGS_BACKLIGHT
+#undef DIRECT_ARGS_TRANSMITTANCE
+#undef DIRECT_ARGS_RIM
+#undef DIRECT_ARGS_CLEARCOAT
+#undef DIRECT_ARGS_ANISOTROPY
 
 	if (sc_cluster_has_area_light()) { // area lights
 
@@ -3638,6 +3773,12 @@ void fragment_shader(in SceneData scene_data) {
 		diffuse_buffer.rgb = debug_lighting_component(sc_debug_lighting_component(), diffuse_light, direct_specular_light, ambient_light, indirect_specular_light, output_emission, fog, ssr_confidence, persistent_ao, specular_source, ambient_source, surfel_coverage.y);
 		specular_buffer.rgb = vec3(0.0);
 	}
+#ifdef DIRECT_RESAMPLED_ROUTE
+	if (sc_use_direct_resampled() && direct_no_layer) {
+		diffuse_buffer.rgb = vec3(16384.0, 0.0, 16384.0);
+		specular_buffer.rgb = vec3(0.0);
+	}
+#endif
 
 #else //MODE_SEPARATE_SPECULAR
 
@@ -3657,6 +3798,11 @@ void fragment_shader(in SceneData scene_data) {
 	if (sc_debug_lighting_component() != 0u) {
 		frag_color.rgb = debug_lighting_component(sc_debug_lighting_component(), diffuse_light, direct_specular_light, ambient_light, indirect_specular_light, output_emission, fog, ssr_confidence, persistent_ao, specular_source, ambient_source, surfel_coverage.y);
 	}
+#ifdef DIRECT_RESAMPLED_ROUTE
+	if (sc_use_direct_resampled() && direct_no_layer) {
+		frag_color.rgb = vec3(16384.0, 0.0, 16384.0);
+	}
+#endif
 
 #if defined(PREMUL_ALPHA_USED) && !defined(MODE_RENDER_DEPTH)
 	frag_color.rgb *= premul_alpha;

@@ -383,6 +383,12 @@ void LightStorage::light_set_direct_shadow(RID p_light, bool p_owned, float p_mo
 	}
 }
 
+void LightStorage::light_set_direct_mean_energy(RID p_light, float p_energy) {
+	Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL(light);
+	light->direct.mean_energy = p_energy >= 0.0f ? p_energy : -1.0f;
+}
+
 void LightStorage::_release_direct_shells(const DirectLightTable::Setting &p_setting) {
 	for (uint32_t i = 0; i < p_setting.shell_count; i++) {
 		uint32_t *count = direct_shells.getptr(p_setting.shell_instance[i]);
@@ -1342,6 +1348,16 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 			lamp.caster_mask = light->shadow_caster_mask;
 			lamp.type = type;
 			lamp.clearance = light->direct.clearance;
+			float mean_energy = energy;
+			if (light->direct.mean_energy >= 0.0f) {
+				mean_energy = light_render_energy(sign * light->direct.mean_energy * fade, light->param[RSE::LIGHT_PARAM_INTENSITY], type, RendererSceneRenderRD::get_singleton()->is_using_physical_light_units());
+				if (p_render_data->camera_attributes.is_valid()) {
+					mean_energy *= RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes);
+				}
+			}
+			lamp.mean_color[0] = linear_col.r * mean_energy;
+			lamp.mean_color[1] = linear_col.g * mean_energy;
+			lamp.mean_color[2] = linear_col.b * mean_energy;
 			lamp.shell_count = light->direct.shell_count;
 			const RayScene *ray_scene = RayScene::get_singleton();
 			for (uint32_t k = 0; k < lamp.shell_count; k++) {
