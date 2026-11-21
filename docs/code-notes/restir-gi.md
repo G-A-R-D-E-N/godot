@@ -1618,7 +1618,7 @@ streams are C2 and C2 + 1.
 
 Other `rtgi_rng_state` callers and the doctest that keeps C2 and C2 + 1 at least 5 from their seed sums (default seed
 1 and the `F_DETERMINISTIC` seed only) are under "Run counters", Seeds and CPU mirrors
-(`modules/gi_restir/restir_fold_mirror.cpp:83-102`, `modules/gi_restir/tests/test_restir_fold.h:649`); `resample` sets
+(`modules/gi_restir/restir_fold_mirror.cpp:83-102`, `modules/gi_restir/tests/test_restir_fold_rows.h:59`); `resample` sets
 `rf.seed` from `rendering/global_illumination/rtgi/seed` (default 1) plus the test seed offset.
 
 ### Clock, pre-frame and cuts — `modules/gi_restir/restir_gi.cpp`
@@ -1725,15 +1725,14 @@ clock and K 0 at K 0; 7 reads 4; U1 and feedback force 0), the harness dict roun
 survive; a dict without them reads 0, 0 and false), the cut rule (a `k_eff` change, or a mode or feedback change
 while K is set), the planner order (a Fold change is its own cut, after the request and backend cuts and before the
 origin and scene cuts), dirty-box localisation (the planner cuts only inside the dirty boxes when the feed localises
-a scene change), a world change (cuts everything, after the origin cut and before the scene check), and the hash
-spacing (`C2 sits at least 5 from C1 ...`, default and `F_DETERMINISTIC` seeds).
+a scene change), and a world change (cuts everything, after the origin cut and before the scene check).
 
 The `Mirror:` tests compare a C++ copy of the shader arithmetic with known answers: the isqrt from a seed one off
 either way, the draw at every allowed K (`KB9`: each s gets exactly its weight), rule 1 over every `h_s`, the stored
 bound and renewal cap, the bit layout (the write replaces bits 8 to 15 and keeps bits 0 to 7), carry, renewal and
 start, the static relock within 3K frames at K 8 and 32, and the hash values (`pcg(0)` 0x07BB2FE2, `pcg(1)`
 0xA8BEEA3C, `phi(3, 5)` 0x2D397518, psi_r 0x5072A4E0, psi_s 0xB99D54B9, `draw(psi_s, 8)` 7 and `draw(psi_s, 32)` 13;
-`test_restir_fold.h:635-646`). The hash, draw and isqrt copies are in
+`test_restir_fold.h:630-641`). The hash, draw and isqrt copies are in
 `modules/gi_restir/restir_fold_mirror.cpp`; the rule 1 and write copies are in the test header. They do not run the
 shader. `RestirGiCore::run_fold_test` (`restir_gi_core.cpp`) dispatches
 `modules/gi_restir/shaders/restir_fold_test.glsl` over the same draw, phi, psi and isqrt routines and returns its
@@ -1747,7 +1746,7 @@ not `rs_temporal_pixel`.
   `modules/gi_restir/restir_gi.cpp:429-465`).
 - Ray thinning: a refused thinned pixel keeps coverage 0 until a candidate arrives (see "The write"); the pre-frame
   does not remove the refusal.
-- The hash spacing test covers two seeds only (the default and `F_DETERMINISTIC`), so another seed must not assume it;
+- The hash spacing test (`test_restir_fold_rows.h`) covers two seeds only (the default and `F_DETERMINISTIC`), so another seed must not assume it;
   see Run counters, `get_fold_seeds` (`modules/gi_restir/restir_probe.cpp:392`).
 - Debug code 60 (`rf.debug_view`, `restir_gi.glsl:1210`) divides the temporal reject code by 11 before `rs_heat`
   clamps it, so `REJ_BOUND` (13) shows saturated.
@@ -1993,7 +1992,7 @@ swaps the TEMPORAL dispatch (`restir_gi.cpp` `resample`; see "Fold dump and self
     `restir_fold_rand_seed(1)` 0xF5F17964 and `(0x1234567)` 0x56F88133; other_seeds at (1, 0) gives 1033 values
     with C1 first, 1..8 next and the two hashed blocks at their ends, and every value at ring distance 5 or
     more from C2 and C2 + 1; at (1, 3) it gives 1041 values with the module's 4..11 and the offset seed hashed;
-    isqrt exact from 0 to 4096; draw at K 0 and 1 gives 0; n_valid and cut_rej over a planted histogram (1..16
+    draw at K 0 and 1 gives 0; n_valid and cut_rej over a planted histogram (1..16
     gives 136 and 10); the 42 names in order; a planted record packs to the known row; a default record packs
     -1 in every Fold field and 0 in every count; and the split and start-class fields pack after
     lineage_families with the earlier fields in place.
