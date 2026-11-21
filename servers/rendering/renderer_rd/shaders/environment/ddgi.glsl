@@ -139,6 +139,9 @@ void load_rays(uint p_list_index) {
 
 #ifdef MODE_BLEND_IRRADIANCE
 
+layout(rgba16f, set = 0, binding = 9) uniform restrict image2DArray mean_image;
+layout(rgba16f, set = 0, binding = 10) uniform restrict image2DArray moment_image;
+
 shared vec4 tile[DDGI_IRRADIANCE_SIZE][DDGI_IRRADIANCE_SIZE];
 
 void main() {
@@ -176,6 +179,41 @@ void main() {
 
 	ivec2 source = border_source(ivec2(gl_LocalInvocationID.xy), DDGI_IRRADIANCE_SIZE) - 1;
 	imageStore(irradiance_image, ivec3(tile_origin + ivec2(gl_LocalInvocationID.xy), int(probe.level)), tile[source.y][source.x]);
+
+	if (gl_LocalInvocationIndex == 0u) {
+		vec3 sum = vec3(0.0);
+		vec3 moment_r = vec3(0.0);
+		vec3 moment_g = vec3(0.0);
+		vec3 moment_b = vec3(0.0);
+		float count = 0.0;
+		for (uint r = 0; r < ddgi.rays_per_probe; r++) {
+			if (ray_values[r].a < 0.0) {
+				continue;
+			}
+			sum += ray_values[r].rgb;
+			moment_r += ray_values[r].r * ray_directions[r];
+			moment_g += ray_values[r].g * ray_directions[r];
+			moment_b += ray_values[r].b * ray_directions[r];
+			count += 1.0;
+		}
+		vec3 result = count > 0.0 ? sum / count : vec3(0.0);
+		ivec3 mean_texel = ddgi_probe_texel(probe.level, probe.slot);
+		vec3 previous = imageLoad(mean_image, mean_texel).rgb;
+		float hysteresis = probe_hysteresis(probe);
+		float updates = hysteresis > 0.0 ? tile[0][0].a - 1.0 : 0.0;
+		hysteresis = min(hysteresis * keep, updates / (updates + 1.0));
+		if (max3(abs(result - previous)) > ddgi.change_threshold * max(max3(previous), max3(result))) {
+			hysteresis *= 0.5;
+		}
+		imageStore(mean_image, mean_texel, vec4(mix(result, previous, hysteresis), 1.0));
+		vec3 moments[3] = vec3[3](moment_r, moment_g, moment_b);
+		for (uint c = 0u; c < 3u; c++) {
+			ivec3 moment_texel = ddgi_moment_texel(probe.level, probe.slot, c);
+			vec3 moment = count > 0.0 ? moments[c] / count : vec3(0.0);
+			vec3 previous_moment = imageLoad(moment_image, moment_texel).xyz;
+			imageStore(moment_image, moment_texel, vec4(mix(moment, previous_moment, hysteresis), 0.0));
+		}
+	}
 }
 
 #endif

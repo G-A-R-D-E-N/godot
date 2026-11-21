@@ -189,6 +189,8 @@ public:
 		RID irradiance;
 		RID distance;
 		RID probe_data;
+		RID mean;
+		RID moment;
 		RID rays;
 		RID probe_list_buffer;
 		RID schedule_groups_buffer;
@@ -204,6 +206,7 @@ public:
 		void schedule(const Vector3 &p_camera_position);
 		void fill_ubo(UBO &r_ubo, const Vector3 &p_camera_position) const;
 		LocalVector<RD::Uniform> gather_uniforms() const;
+		LocalVector<RD::Uniform> gather_medium_uniforms() const;
 
 		virtual void configure(RenderSceneBuffersRD *p_render_buffers) override {}
 		virtual void free_data() override;

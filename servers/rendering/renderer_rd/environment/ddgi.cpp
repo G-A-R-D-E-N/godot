@@ -98,9 +98,20 @@ void DDGI::Volume::allocate(const Settings &p_settings) {
 	probe_data = RD::get_singleton()->texture_create(tf, RD::TextureView());
 	RD::get_singleton()->set_resource_name(probe_data, "DDGI Probe Data");
 
+	tf.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
+	tf.array_layers = settings.level_count;
+	mean = RD::get_singleton()->texture_create(tf, RD::TextureView());
+	RD::get_singleton()->set_resource_name(mean, "DDGI Mean");
+
+	tf.array_layers = settings.level_count * 3;
+	moment = RD::get_singleton()->texture_create(tf, RD::TextureView());
+	RD::get_singleton()->set_resource_name(moment, "DDGI Moment");
+
 	RD::get_singleton()->texture_clear(irradiance, Color(0, 0, 0, 0), 0, 1, 0, settings.level_count);
 	RD::get_singleton()->texture_clear(distance, Color(0, 0, 0, 0), 0, 1, 0, settings.level_count);
 	RD::get_singleton()->texture_clear(probe_data, Color(0, 0, 0, 0), 0, 1, 0, settings.level_count * 2);
+	RD::get_singleton()->texture_clear(mean, Color(0, 0, 0, 0), 0, 1, 0, settings.level_count);
+	RD::get_singleton()->texture_clear(moment, Color(0, 0, 0, 0), 0, 1, 0, settings.level_count * 3);
 
 	RD::TextureFormat ray_format;
 	ray_format.texture_type = RD::TEXTURE_TYPE_2D;
@@ -140,8 +151,18 @@ LocalVector<RD::Uniform> DDGI::Volume::gather_uniforms() const {
 	return uniforms;
 }
 
+LocalVector<RD::Uniform> DDGI::Volume::gather_medium_uniforms() const {
+	LocalVector<RD::Uniform> uniforms;
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, ubo));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 1, probe_data));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 3, distance));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 4, mean));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 5, moment));
+	return uniforms;
+}
+
 void DDGI::Volume::free_data() {
-	RID *owned[] = { &irradiance, &distance, &probe_data, &rays, &probe_list_buffer, &schedule_groups_buffer, &dispatch_buffer, &ubo, &reset_ubo, &debug_texture };
+	RID *owned[] = { &irradiance, &distance, &probe_data, &mean, &moment, &rays, &probe_list_buffer, &schedule_groups_buffer, &dispatch_buffer, &ubo, &reset_ubo, &debug_texture };
 	for (RID *rid : owned) {
 		if (rid->is_valid()) {
 			RD::get_singleton()->free_rid(*rid);
@@ -357,6 +378,8 @@ void DDGI::_dispatch(Mode p_mode, const Ref<Volume> &p_volume, uint32_t p_x_grou
 		uniform_set = uniform_set_cache->get_cache(shader_rid, 0, u_ubo, u_list, u_rays, u_irradiance, u_distance, u_probe_data, RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 6, p_volume->dispatch_buffer));
 	} else if (p_mode == MODE_SCHEDULE_SELECT || p_mode == MODE_SCHEDULE_SCAN || p_mode == MODE_SCHEDULE_APPEND) {
 		uniform_set = uniform_set_cache->get_cache(shader_rid, 0, u_ubo, u_list, u_rays, u_irradiance, u_distance, u_probe_data, RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 7, p_volume->schedule_groups_buffer));
+	} else if (p_mode == MODE_BLEND_IRRADIANCE) {
+		uniform_set = uniform_set_cache->get_cache(shader_rid, 0, u_ubo, u_list, u_rays, u_irradiance, u_distance, u_probe_data, RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 9, p_volume->mean), RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, p_volume->moment));
 	} else {
 		uniform_set = uniform_set_cache->get_cache(shader_rid, 0, u_ubo, u_list, u_rays, u_irradiance, u_distance, u_probe_data);
 	}
