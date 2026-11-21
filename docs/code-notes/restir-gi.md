@@ -438,7 +438,7 @@ when both axes have a neighbour and its cosine with the shading normal exceeds 0
 Directions, cosines, Jacobians and visibility rays use this origin.
 
 `origin_scale` and `origin_floor` are the RTGI settings `rendering/global_illumination/rtgi/origin_scale` and
-`.../origin_floor` (internal, defaults 2.0 and 0.0, `servers/rendering/rendering_server.cpp:3926-3927`), both
+`.../origin_floor` (internal, defaults 2.0 and 0.0, `servers/rendering/rendering_server.cpp:3929-3930`), both
 clamped non-negative (`restir_gi.cpp:710-711`). Core's trace (`rtgi_geometric_normal` and
 `rtgi_origin_offset` in `servers/rendering/renderer_rd/shaders/environment/ddgi_trace.glsl`) uses the same rule with
 the screen-resolution depth buffer (a tap with depth 0 is skipped; the footprint falls back to the right-neighbour
@@ -657,8 +657,10 @@ later change does not reach a variant already compiled. When it is true every ra
 `DEFAULT_RD_TEXTURE_2D_ARRAY_WHITE`; otherwise `sky_radiance` is a `texture2D` and the default is
 `DEFAULT_RD_TEXTURE_WHITE` (`_sky_texture`, `restir_gi_core.cpp:662-666`). Ray variants also define
 `RAY_SCENE_BLAS_STACK_SIZE` and `RAY_SCENE_TLAS_STACK_SIZE` from `RayScene::BLAS_MAX_DEPTH` and `TLAS_MAX_DEPTH`, and
-`RESTIR_RAYS`; the HW variant adds `SHADER_GLSL_VERSION_460`, `GL_EXT_ray_query` and `RAY_SCENE_HW`; `VARIANT_NONE`
-gets no defines (`_defines`, `restir_gi_core.cpp:358-369`).
+`RESTIR_RAYS`, followed by `RayScene::alpha_shader_defines()` (`RAY_SCENE_ALPHA` while
+`rendering/global_illumination/ray_scene/alpha_test` is on, see `docs/code-notes/ray-scene-alpha.md`); the HW variant
+adds `SHADER_GLSL_VERSION_460`, `GL_EXT_ray_query` and `RAY_SCENE_HW`; `VARIANT_NONE` gets no defines (`_defines`,
+`restir_gi_core.cpp:358-369`).
 
 ### Harness and probe (`modules/gi_restir/restir_harness.cpp`)
 
@@ -1009,7 +1011,7 @@ frame flags; where the macro is undefined the key is the light index and the pic
   current state; both reach the module as spheres and exact duplicates are not dropped. A light that appears or
   disappears fires once with `since_last` UINT32_MAX and is not rate limited (`ddgi_light_tracker.cpp:216`,
   `:222` and `:247`). The tracker lists events whenever `rendering/global_illumination/rtgi/enabled` is on
-  (`ray_scene.cpp:1010`), so `events_read` counts them with `gi/event_reshade` off too.
+  (`ray_scene.cpp:1280`), so `events_read` counts them with `gi/event_reshade` off too.
 - `resample` copies the vector into `RestirEventSphere` (reach is the tracker's `half`) and then into
   `RestirEventsUBO`, so the host vector is valid only for that call.
   `static_assert(RESTIR_EVENT_MAX >= DDGILightTracker::MAX_EVENTS)`; `RESTIR_EVENT_MAX` is 64.

@@ -57,24 +57,32 @@ TEST_CASE("[RayScene] Cast setting flag known answers") {
 	CHECK(RayScene::shadow_cast_flags(RSE::SHADOW_CASTING_SETTING_DOUBLE_SIDED) == 0);
 	CHECK(RayScene::shadow_cast_flags(RSE::SHADOW_CASTING_SETTING_OFF) == RayScene::MATERIAL_FLAG_SHADOW_PASS);
 	CHECK(RayScene::shadow_cast_flags(RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY) == RayScene::MATERIAL_FLAG_SHADOW_ONLY);
+	CHECK(RayScene::shadow_cast_flags(RSE::SHADOW_CASTING_SETTING_ON, true) == 0);
+	CHECK(RayScene::shadow_cast_flags(RSE::SHADOW_CASTING_SETTING_DOUBLE_SIDED, true) == 0);
+	CHECK(RayScene::shadow_cast_flags(RSE::SHADOW_CASTING_SETTING_OFF, true) == 0);
+	CHECK(RayScene::shadow_cast_flags(RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY, true) == RayScene::MATERIAL_FLAG_SHADOW_ONLY);
 }
 
 TEST_CASE("[RayScene] Shadow and bounce rays per cast setting") {
 	struct Role {
 		const char *name;
 		RSE::ShadowCastingSetting setting;
+		bool occluder;
 		bool shadow_stops;
 		bool bounce_stops;
 	};
 	const Role roles[] = {
-		{ "caster, and the sun cap as ray scene only", RSE::SHADOW_CASTING_SETTING_ON, true, true },
-		{ "double sided caster", RSE::SHADOW_CASTING_SETTING_DOUBLE_SIDED, true, true },
-		{ "outside quiet caster", RSE::SHADOW_CASTING_SETTING_OFF, false, true },
-		{ "pane patch, cookie on or off", RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY, true, false },
+		{ "caster, and the sun cap as ray scene only", RSE::SHADOW_CASTING_SETTING_ON, false, true, true },
+		{ "double sided caster", RSE::SHADOW_CASTING_SETTING_DOUBLE_SIDED, false, true, true },
+		{ "outside quiet caster, and a culled room's quiet mesh", RSE::SHADOW_CASTING_SETTING_OFF, false, false, true },
+		{ "pane patch, cookie on or off", RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY, false, true, false },
+		{ "ray ground: cast off with the occluder opt in", RSE::SHADOW_CASTING_SETTING_OFF, true, true, true },
+		{ "caster with the occluder opt in", RSE::SHADOW_CASTING_SETTING_ON, true, true, true },
+		{ "pane patch with the occluder opt in", RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY, true, true, false },
 	};
 	for (const Role &role : roles) {
 		INFO(role.name);
-		const uint32_t flags = RayScene::shadow_cast_flags(role.setting);
+		const uint32_t flags = RayScene::shadow_cast_flags(role.setting, role.occluder);
 		CHECK(stops(flags, true) == role.shadow_stops);
 		CHECK(stops(flags, false) == role.bounce_stops);
 	}
@@ -82,10 +90,12 @@ TEST_CASE("[RayScene] Shadow and bounce rays per cast setting") {
 
 TEST_CASE("[RayScene] A skipped material passes every ray whatever the cast setting") {
 	for (RSE::ShadowCastingSetting setting : SETTINGS) {
-		INFO("setting ", int(setting));
-		const uint32_t flags = RayScene::shadow_cast_flags(setting) | RayScene::MATERIAL_FLAG_SKIP;
-		CHECK_FALSE(stops(flags, true));
-		CHECK_FALSE(stops(flags, false));
+		for (const bool occluder : { false, true }) {
+			INFO("setting ", int(setting), " occluder ", occluder);
+			const uint32_t flags = RayScene::shadow_cast_flags(setting, occluder) | RayScene::MATERIAL_FLAG_SKIP;
+			CHECK_FALSE(stops(flags, true));
+			CHECK_FALSE(stops(flags, false));
+		}
 	}
 }
 
