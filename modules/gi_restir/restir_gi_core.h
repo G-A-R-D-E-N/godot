@@ -220,6 +220,9 @@ struct RestirGiResources {
 	int32_t fold_lineage_refusal = RESTIR_FOLD_LINEAGE_REFUSAL_NONE;
 	bool fold_lineage_failed = false;
 
+	RID logged_texture(const char *p_name, RD::DataFormat p_format, const Size2i &p_size, RD::TextureType p_type, uint32_t p_layers, uint64_t p_bytes_per_pixel);
+	RID logged_buffer(const char *p_name, uint64_t p_bytes, Span<uint8_t> p_data = {});
+	void remove_log(const char *p_name);
 	bool allocate(const Size2i &p_size, bool p_debug = true);
 	void ensure_debug(bool p_needed);
 	void ensure_fold_dump(bool p_needed);
@@ -328,7 +331,6 @@ private:
 	bool initialized[VARIANT_MAX] = {};
 	bool valid[VARIANT_MAX] = {};
 	bool sky_valid[VARIANT_MAX] = {};
-	uint32_t hw_compiles = 0;
 	RID dummy_ubo;
 	RID dummy_probe;
 	RID dummy_float;
@@ -348,13 +350,12 @@ private:
 	void _free_fold_debug();
 
 	bool _ensure(Variant p_variant);
-	bool _compile(RestirGiShaderRD &r_shader, RID &r_version, const Vector<String> &p_modes, Variant p_variant, int p_first_pass);
+	bool _compile(RestirGiShaderRD &r_shader, RID &r_version, PipelineDeferredRD *r_pipelines, const Vector<String> &p_modes, Variant p_variant, const String &p_defines, bool p_strict_pipelines);
 	RID _shader_rid(Variant p_variant, PassMode p_mode);
 	String _defines(Variant p_variant) const;
 	void _upload(RID p_ubo, const RestirFrameParams &p_params, uint32_t p_pass_index);
 	RID _sky_texture(const RestirGiInputs &p_inputs) const;
 	RID _tile_texture(const RestirGiInputs &p_inputs);
-	void _bind_shade(RID p_shader, RD::ComputeListID p_list, const RestirGiInputs &p_inputs);
 	void _dispatch(Variant p_variant, PassMode p_mode, RID p_ubo, const LocalVector<RD::Uniform> &p_set0, const RestirGiInputs &p_inputs, const Size2i &p_size);
 
 public:
@@ -363,7 +364,6 @@ public:
 	bool is_variant_valid(Variant p_variant);
 	bool is_sky_valid(Variant p_variant);
 	bool hw_variant_compiled() const { return initialized[VARIANT_HW] && valid[VARIANT_HW]; }
-	uint32_t get_hw_compiles() const { return hw_compiles; }
 
 	void clear_history(RestirGiResources &r_resources, const RestirGiInputs &p_inputs);
 	bool run_capture(const RestirGiInputs &p_inputs, const Size2i &p_size, RID r_out[6]);

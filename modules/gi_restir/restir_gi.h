@@ -50,11 +50,8 @@ struct RestirGiState {
 	uint32_t light_soft_frames = 0;
 	uint32_t prev_epoch_tag = 0;
 	uint32_t cut_counts[RESTIR_CUT_MAX] = {};
-	uint32_t dirty_frames = 0;
 	uint32_t frames_since_cut = 0;
 	uint32_t frames = 0;
-	uint32_t history_uses = 0;
-	uint32_t history_cuts = 0;
 	uint32_t reval_frames = 0;
 	RestirHoldRing hold;
 	bool sky_reread = false;
@@ -153,6 +150,7 @@ class RestirGiBackend : public RendererRD::RtgiResampleBackend {
 	void _free_state(RestirGiState &r_state);
 	void _release_feed();
 	void _check_choices();
+	bool _refuse(const char *p_reason);
 
 public:
 	virtual bool is_active() const override;

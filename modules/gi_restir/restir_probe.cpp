@@ -393,16 +393,10 @@ Dictionary RestirProbe::get_fold_seeds() const {
 	const uint32_t rtgi_seed = uint32_t(int(GLOBAL_GET("rendering/global_illumination/rtgi/seed")));
 	const uint32_t seed_offset = restir_test_options().seed_offset;
 	const bool deterministic = GLOBAL_GET("rendering/global_illumination/restir/gi/deterministic");
-	const Vector<uint32_t> others = restir_fold_other_seeds(rtgi_seed, seed_offset);
-	PackedInt64Array other_seeds;
-	other_seeds.resize(others.size());
-	for (int i = 0; i < others.size(); i++) {
-		other_seeds.set(i, int64_t(others[i]));
-	}
 	Dictionary result;
 	result["c1_seed"] = int64_t(RESTIR_FOLD_C1);
 	result["c2_seed"] = int64_t(RESTIR_FOLD_C2);
-	result["other_seeds"] = other_seeds;
+	result["other_seeds"] = _fold_test_words(restir_fold_other_seeds(rtgi_seed, seed_offset));
 	result["rtgi_seed"] = int64_t(rtgi_seed);
 	result["seed_offset"] = int64_t(seed_offset);
 	result["deterministic"] = deterministic;
@@ -530,45 +524,30 @@ void RestirProbe::reset_pixel_sums() {
 	restir_pixel_sums() = RestirPixelSums();
 }
 
+static PackedFloat64Array _to_f64(const LocalVector<double> &p_values) {
+	PackedFloat64Array out;
+	out.resize(p_values.size());
+	if (p_values.size() > 0) {
+		memcpy(out.ptrw(), p_values.ptr(), size_t(p_values.size()) * sizeof(double));
+	}
+	return out;
+}
+
 Dictionary RestirProbe::get_pixel_sums() const {
 	const RestirPixelSums &sums = restir_pixel_sums();
-	PackedFloat64Array output_luma;
-	PackedFloat64Array covered;
-	PackedFloat64Array valid;
-	output_luma.resize(int(sums.output_luma.size()));
-	covered.resize(int(sums.covered.size()));
-	valid.resize(int(sums.valid.size()));
-	for (uint32_t i = 0; i < sums.output_luma.size(); i++) {
-		output_luma.set(int(i), sums.output_luma[i]);
-		covered.set(int(i), sums.covered[i]);
-		valid.set(int(i), sums.valid[i]);
-	}
 	Dictionary result;
 	result["width"] = sums.size.x;
 	result["height"] = sums.size.y;
 	result["frames"] = int64_t(sums.frames);
-	result["output_luma"] = output_luma;
-	result["covered"] = covered;
-	result["valid"] = valid;
+	result["output_luma"] = _to_f64(sums.output_luma);
+	result["covered"] = _to_f64(sums.covered);
+	result["valid"] = _to_f64(sums.valid);
 	static const char *const detail_names[RESTIR_DETAIL_COUNT] = { "cand_luma", "cand_n", "out_temporal", "out_spatial", "n_temporal", "n_spatial", "blocked" };
 	for (uint32_t d = 0; d < RESTIR_DETAIL_COUNT; d++) {
-		PackedFloat64Array values;
-		values.resize(int(sums.detail[d].size()));
-		for (uint32_t i = 0; i < sums.detail[d].size(); i++) {
-			values.set(int(i), sums.detail[d][i]);
-		}
-		result[detail_names[d]] = values;
+		result[detail_names[d]] = _to_f64(sums.detail[d]);
 	}
-	PackedFloat64Array reject_temporal;
-	PackedFloat64Array reject_spatial;
-	reject_temporal.resize(int(sums.reject_temporal.size()));
-	reject_spatial.resize(int(sums.reject_spatial.size()));
-	for (uint32_t i = 0; i < sums.reject_temporal.size(); i++) {
-		reject_temporal.set(int(i), sums.reject_temporal[i]);
-		reject_spatial.set(int(i), sums.reject_spatial[i]);
-	}
-	result["reject_temporal"] = reject_temporal;
-	result["reject_spatial"] = reject_spatial;
+	result["reject_temporal"] = _to_f64(sums.reject_temporal);
+	result["reject_spatial"] = _to_f64(sums.reject_spatial);
 	return result;
 }
 

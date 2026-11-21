@@ -48,30 +48,22 @@ void restir_plan_epochs(const RestirEpochInputs &p_inputs, RestirEpochPlan &r_pl
 	if (r_plan.light_changed) {
 		r_plan.light_soft_frames = p_inputs.m_light_frames;
 	}
-	if (p_inputs.history_cut) {
-		r_plan.cut = true;
-		r_plan.reason = RESTIR_CUT_REQUEST;
-		return;
-	}
-	if (p_inputs.hardware_changed) {
-		r_plan.cut = true;
-		r_plan.reason = RESTIR_CUT_BACKEND;
-		return;
-	}
-	if (p_inputs.fold_changed) {
-		r_plan.cut = true;
-		r_plan.reason = RESTIR_CUT_FOLD;
-		return;
-	}
-	if (r_plan.origin_changed) {
-		r_plan.cut = true;
-		r_plan.reason = RESTIR_CUT_ORIGIN;
-		return;
-	}
-	if (r_plan.world_changed) {
-		r_plan.cut = true;
-		r_plan.reason = RESTIR_CUT_WORLD;
-		return;
+	const struct {
+		bool hit;
+		RestirCutReason reason;
+	} order[] = {
+		{ p_inputs.history_cut, RESTIR_CUT_REQUEST },
+		{ p_inputs.hardware_changed, RESTIR_CUT_BACKEND },
+		{ p_inputs.fold_changed, RESTIR_CUT_FOLD },
+		{ r_plan.origin_changed, RESTIR_CUT_ORIGIN },
+		{ r_plan.world_changed, RESTIR_CUT_WORLD },
+	};
+	for (const auto &entry : order) {
+		if (entry.hit) {
+			r_plan.cut = true;
+			r_plan.reason = entry.reason;
+			return;
+		}
 	}
 	if (!r_plan.scene_changed) {
 		return;

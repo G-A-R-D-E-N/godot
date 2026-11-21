@@ -142,6 +142,31 @@ static RID _create_texture(RD::DataFormat p_format, const Size2i &p_size, RD::Te
 	return RD::get_singleton()->texture_create(format, RD::TextureView());
 }
 
+RID RestirGiResources::logged_texture(const char *p_name, RD::DataFormat p_format, const Size2i &p_size, RD::TextureType p_type, uint32_t p_layers, uint64_t p_bytes_per_pixel) {
+	RD *rd = RD::get_singleton();
+	const uint64_t before = rd->get_memory_usage(RD::MEMORY_TEXTURES);
+	RID rid = _create_texture(p_format, p_size, p_type, p_layers);
+	alloc_log.push_back({ p_name, uint64_t(p_size.x) * uint64_t(p_size.y) * p_bytes_per_pixel * p_layers, rd->get_memory_usage(RD::MEMORY_TEXTURES) - before, false });
+	return rid;
+}
+
+RID RestirGiResources::logged_buffer(const char *p_name, uint64_t p_bytes, Span<uint8_t> p_data) {
+	RD *rd = RD::get_singleton();
+	const uint64_t before = rd->get_memory_usage(RD::MEMORY_BUFFERS);
+	RID rid = rd->storage_buffer_create(p_bytes, p_data);
+	alloc_log.push_back({ p_name, p_bytes, rd->get_memory_usage(RD::MEMORY_BUFFERS) - before, true });
+	return rid;
+}
+
+void RestirGiResources::remove_log(const char *p_name) {
+	for (uint32_t i = 0; i < alloc_log.size(); i++) {
+		if (String(alloc_log[i].name) == p_name) {
+			alloc_log.remove_at(i);
+			return;
+		}
+	}
+}
+
 bool RestirGiResources::allocate(const Size2i &p_size, bool p_debug) {
 	free_all();
 	if (p_size.x <= 0 || p_size.y <= 0) {
@@ -150,40 +175,23 @@ bool RestirGiResources::allocate(const Size2i &p_size, bool p_debug) {
 	RD *rd = RD::get_singleton();
 	size = p_size;
 	alloc_log.clear();
-	const uint64_t pixels = uint64_t(p_size.x) * uint64_t(p_size.y);
-	auto texture = [&](const char *p_name, RD::DataFormat p_format, uint64_t p_bytes_per_pixel, uint32_t p_layers, RD::TextureType p_type) {
-		const uint64_t before = rd->get_memory_usage(RD::MEMORY_TEXTURES);
-		RID rid = _create_texture(p_format, p_size, p_type, p_layers);
-		alloc_log.push_back({ p_name, pixels * p_bytes_per_pixel * p_layers, rd->get_memory_usage(RD::MEMORY_TEXTURES) - before, false });
-		return rid;
-	};
 	const char *reservoir_names[3] = { "reservoir set 0", "reservoir set 1", "reservoir set 2" };
 	for (int i = 0; i < 3; i++) {
-		reservoir[i] = texture(reservoir_names[i], RD::DATA_FORMAT_R32G32B32A32_UINT, 16, 3, RD::TEXTURE_TYPE_2D_ARRAY);
+		reservoir[i] = logged_texture(reservoir_names[i], RD::DATA_FORMAT_R32G32B32A32_UINT, p_size, RD::TEXTURE_TYPE_2D_ARRAY, 3, 16);
 	}
-	vis_state = texture("vis_state", RD::DATA_FORMAT_R32_UINT, 4, 1, RD::TEXTURE_TYPE_2D);
-	info = texture("info", RD::DATA_FORMAT_R32_UINT, 4, 1, RD::TEXTURE_TYPE_2D);
-	radiance = texture("radiance", RD::DATA_FORMAT_R16G16B16A16_SFLOAT, 8, 1, RD::TEXTURE_TYPE_2D);
-	coverage = texture("coverage", RD::DATA_FORMAT_R16_SFLOAT, 2, 1, RD::TEXTURE_TYPE_2D);
+	vis_state = logged_texture("vis_state", RD::DATA_FORMAT_R32_UINT, p_size, RD::TEXTURE_TYPE_2D, 1, 4);
+	info = logged_texture("info", RD::DATA_FORMAT_R32_UINT, p_size, RD::TEXTURE_TYPE_2D, 1, 4);
+	radiance = logged_texture("radiance", RD::DATA_FORMAT_R16G16B16A16_SFLOAT, p_size, RD::TEXTURE_TYPE_2D, 1, 8);
+	coverage = logged_texture("coverage", RD::DATA_FORMAT_R16_SFLOAT, p_size, RD::TEXTURE_TYPE_2D, 1, 2);
 	if (p_debug) {
-		debug = texture("debug", RD::DATA_FORMAT_R16G16B16A16_SFLOAT, 8, 1, RD::TEXTURE_TYPE_2D);
+		debug = logged_texture("debug", RD::DATA_FORMAT_R16G16B16A16_SFLOAT, p_size, RD::TEXTURE_TYPE_2D, 1, 8);
 	}
 	debug_dummy = _create_texture(RD::DATA_FORMAT_R16G16B16A16_SFLOAT, Size2i(1, 1), RD::TEXTURE_TYPE_2D, 1);
 	group_count = uint32_t(Math::division_round_up(p_size.x, 8)) * uint32_t(Math::division_round_up(p_size.y, 8));
-	auto buffer = [&](const char *p_name, uint64_t p_bytes) {
-		const uint64_t before = rd->get_memory_usage(RD::MEMORY_BUFFERS);
-		RID rid = rd->storage_buffer_create(p_bytes);
-		alloc_log.push_back({ p_name, p_bytes, rd->get_memory_usage(RD::MEMORY_BUFFERS) - before, true });
-		return rid;
-	};
-	stats = buffer("stats", group_count * 16 * sizeof(float));
-	pass_stats = buffer("pass_stats", group_count * PASS_STATS_ROWS * PASS_STATS_STRIDE * sizeof(float));
-	event_bins = buffer("event_bins", RESTIR_EVENT_BINS * sizeof(uint32_t));
-	{
-		const uint64_t before = rd->get_memory_usage(RD::MEMORY_TEXTURES);
-		sel_dummy = _create_texture(RD::DATA_FORMAT_R32G32_UINT, Size2i(1, 1), RD::TEXTURE_TYPE_2D_ARRAY, 2);
-		alloc_log.push_back({ "sel_dummy", 16, rd->get_memory_usage(RD::MEMORY_TEXTURES) - before, false });
-	}
+	stats = logged_buffer("stats", group_count * 16 * sizeof(float));
+	pass_stats = logged_buffer("pass_stats", group_count * PASS_STATS_ROWS * PASS_STATS_STRIDE * sizeof(float));
+	event_bins = logged_buffer("event_bins", RESTIR_EVENT_BINS * sizeof(uint32_t));
+	sel_dummy = logged_texture("sel_dummy", RD::DATA_FORMAT_R32G32_UINT, Size2i(1, 1), RD::TEXTURE_TYPE_2D_ARRAY, 2, 8);
 	{
 		const uint64_t before = rd->get_memory_usage(RD::MEMORY_BUFFERS);
 		for (int i = 0; i < 6; i++) {
@@ -206,18 +214,11 @@ void RestirGiResources::ensure_debug(bool p_needed) {
 	}
 	RD *rd = RD::get_singleton();
 	if (p_needed && debug.is_null()) {
-		const uint64_t before = rd->get_memory_usage(RD::MEMORY_TEXTURES);
-		debug = _create_texture(RD::DATA_FORMAT_R16G16B16A16_SFLOAT, size, RD::TEXTURE_TYPE_2D, 1);
-		alloc_log.push_back({ "debug", uint64_t(size.x) * uint64_t(size.y) * 8u, rd->get_memory_usage(RD::MEMORY_TEXTURES) - before, false });
+		debug = logged_texture("debug", RD::DATA_FORMAT_R16G16B16A16_SFLOAT, size, RD::TEXTURE_TYPE_2D, 1, 8);
 	} else if (!p_needed && debug.is_valid()) {
 		rd->free_rid(debug);
 		debug = RID();
-		for (uint32_t i = 0; i < alloc_log.size(); i++) {
-			if (String(alloc_log[i].name) == "debug") {
-				alloc_log.remove_at(i);
-				break;
-			}
-		}
+		remove_log("debug");
 	}
 }
 
@@ -227,18 +228,11 @@ void RestirGiResources::ensure_fold_dump(bool p_needed) {
 	}
 	RD *rd = RD::get_singleton();
 	if (p_needed && fold_dump.is_null()) {
-		const uint64_t before = rd->get_memory_usage(RD::MEMORY_BUFFERS);
-		fold_dump = rd->storage_buffer_create(RESTIR_FOLD_DUMP_BYTES);
-		alloc_log.push_back({ "fold_dump", RESTIR_FOLD_DUMP_BYTES, rd->get_memory_usage(RD::MEMORY_BUFFERS) - before, true });
+		fold_dump = logged_buffer("fold_dump", RESTIR_FOLD_DUMP_BYTES);
 	} else if (!p_needed && fold_dump.is_valid()) {
 		rd->free_rid(fold_dump);
 		fold_dump = RID();
-		for (uint32_t i = 0; i < alloc_log.size(); i++) {
-			if (String(alloc_log[i].name) == "fold_dump") {
-				alloc_log.remove_at(i);
-				break;
-			}
-		}
+		remove_log("fold_dump");
 	}
 }
 
@@ -266,16 +260,11 @@ void RestirGiResources::ensure_fold_lineage(bool p_needed) {
 		return;
 	}
 	free_fold_lineage();
-	RD *rd = RD::get_singleton();
 	const char *names[2] = { "fold_lineage 0", "fold_lineage 1" };
 	for (int i = 0; i < 2; i++) {
-		const uint64_t before = rd->get_memory_usage(RD::MEMORY_TEXTURES);
-		fold_lineage[i] = _create_texture(RD::DATA_FORMAT_R32G32_UINT, size, RD::TEXTURE_TYPE_2D, 1);
-		alloc_log.push_back({ names[i], texels * 8u, rd->get_memory_usage(RD::MEMORY_TEXTURES) - before, false });
+		fold_lineage[i] = logged_texture(names[i], RD::DATA_FORMAT_R32G32_UINT, size, RD::TEXTURE_TYPE_2D, 1, 8);
 	}
-	const uint64_t before = rd->get_memory_usage(RD::MEMORY_TEXTURES);
-	fold_refused_id = _create_texture(RD::DATA_FORMAT_R32_UINT, size, RD::TEXTURE_TYPE_2D, 1);
-	alloc_log.push_back({ "fold_refused_id", texels * 4u, rd->get_memory_usage(RD::MEMORY_TEXTURES) - before, false });
+	fold_refused_id = logged_texture("fold_refused_id", RD::DATA_FORMAT_R32_UINT, size, RD::TEXTURE_TYPE_2D, 1, 4);
 	if (fold_lineage[0].is_null() || fold_lineage[1].is_null() || fold_refused_id.is_null()) {
 		free_fold_lineage();
 		fold_lineage_failed = true;
@@ -319,32 +308,12 @@ void RestirGiResources::free_all() {
 		allocated = false;
 		return;
 	}
-	for (int i = 0; i < 3; i++) {
-		if (reservoir[i].is_valid()) {
-			rd->free_rid(reservoir[i]);
-			reservoir[i] = RID();
-		}
-	}
-	RID *singles[] = { &vis_state, &info, &radiance, &coverage, &debug, &debug_dummy, &stats, &pass_stats, &sel_image, &sel_dummy, &count_ubo, &event_ubo, &event_bins, &sky_epoch };
+	RID *singles[] = { &reservoir[0], &reservoir[1], &reservoir[2], &vis_state, &info, &radiance, &coverage, &debug, &debug_dummy, &stats, &pass_stats, &sel_image, &sel_dummy, &ubo[0], &ubo[1], &ubo[2], &ubo[3], &ubo[4], &ubo[5], &dirty_ubo, &count_ubo, &event_ubo, &event_bins, &sky_epoch, &fold_dump };
 	for (RID *rid : singles) {
 		if (rid->is_valid()) {
 			rd->free_rid(*rid);
 			*rid = RID();
 		}
-	}
-	for (int i = 0; i < 6; i++) {
-		if (ubo[i].is_valid()) {
-			rd->free_rid(ubo[i]);
-			ubo[i] = RID();
-		}
-	}
-	if (dirty_ubo.is_valid()) {
-		rd->free_rid(dirty_ubo);
-		dirty_ubo = RID();
-	}
-	if (fold_dump.is_valid()) {
-		rd->free_rid(fold_dump);
-		fold_dump = RID();
 	}
 	allocated = false;
 	group_count = 0;
@@ -375,9 +344,6 @@ bool RestirGiCore::_ensure(Variant p_variant) {
 	}
 	initialized[p_variant] = true;
 	octmap_array = GLOBAL_GET("rendering/reflections/sky_reflections/texture_array_reflections");
-	if (p_variant == VARIANT_HW) {
-		hw_compiles++;
-	}
 	Vector<String> modes;
 	modes.push_back("\n#define MODE_CLEAR\n");
 	modes.push_back("\n#define MODE_TEMPORAL\n");
@@ -390,7 +356,7 @@ bool RestirGiCore::_ensure(Variant p_variant) {
 	modes.push_back("\n#define MODE_SPATIAL\n#define SPATIAL_WIDE\n");
 	modes.push_back("\n#define MODE_SPATIAL\n#define PASS_SPATIAL_COMPAT\n#define SPATIAL_WIDE\n");
 	modes.push_back("\n#define MODE_VALIDATE\n");
-	valid[p_variant] = _compile(shaders[p_variant], versions[p_variant], modes, p_variant, 0);
+	valid[p_variant] = _compile(shaders[p_variant], versions[p_variant], pipelines[p_variant], modes, p_variant, _defines(p_variant), false);
 	if (!valid[p_variant] || p_variant == VARIANT_NONE) {
 		return valid[p_variant];
 	}
@@ -401,12 +367,12 @@ bool RestirGiCore::_ensure(Variant p_variant) {
 	sky_modes.push_back("\n#define MODE_SPATIAL\n#define SPATIAL_WIDE\n#define SKY_REREAD\n");
 	sky_modes.push_back("\n#define MODE_SPATIAL\n#define PASS_SPATIAL_COMPAT\n#define SPATIAL_WIDE\n#define SKY_REREAD\n");
 	sky_modes.push_back("\n#define MODE_SKY_EPOCH\n");
-	sky_valid[p_variant] = _compile(sky_shaders[p_variant], sky_versions[p_variant], sky_modes, p_variant, PASS_SKY_FIRST);
+	sky_valid[p_variant] = _compile(sky_shaders[p_variant], sky_versions[p_variant], pipelines[p_variant] + PASS_SKY_FIRST, sky_modes, p_variant, _defines(p_variant), false);
 	return true;
 }
 
-bool RestirGiCore::_compile(RestirGiShaderRD &r_shader, RID &r_version, const Vector<String> &p_modes, Variant p_variant, int p_first_pass) {
-	r_shader.initialize(p_modes, _defines(p_variant));
+bool RestirGiCore::_compile(RestirGiShaderRD &r_shader, RID &r_version, PipelineDeferredRD *r_pipelines, const Vector<String> &p_modes, Variant p_variant, const String &p_defines, bool p_strict_pipelines) {
+	r_shader.initialize(p_modes, p_defines);
 	r_version = r_shader.version_create();
 	bool ok = p_variant != VARIANT_HW || r_shader.version_is_valid(r_version);
 	for (int i = 0; ok && i < p_modes.size(); i++) {
@@ -415,14 +381,14 @@ bool RestirGiCore::_compile(RestirGiShaderRD &r_shader, RID &r_version, const Ve
 			ok = false;
 			continue;
 		}
-		pipelines[p_variant][p_first_pass + i].create_compute_pipeline(shader_rid);
-		if (p_variant == VARIANT_HW && !pipelines[p_variant][p_first_pass + i].get_rid().is_valid()) {
+		r_pipelines[i].create_compute_pipeline(shader_rid);
+		if ((p_strict_pipelines || p_variant == VARIANT_HW) && !r_pipelines[i].get_rid().is_valid()) {
 			ok = false;
 		}
 	}
 	if (!ok) {
 		for (int i = 0; i < p_modes.size(); i++) {
-			pipelines[p_variant][p_first_pass + i].free();
+			r_pipelines[i].free();
 		}
 		r_shader.version_free(r_version);
 		r_version = RID();
@@ -525,27 +491,7 @@ bool RestirGiCore::_ensure_dump(Variant p_variant, bool p_lineage) {
 	}
 	RestirFoldDumpObjects *objects = memnew(RestirFoldDumpObjects);
 	objects->modes = modes.size();
-	objects->shader.initialize(modes, _defines(p_variant) + (p_lineage ? "\n#define RS_FOLD_DUMP\n#define RS_FOLD_LINEAGE\n" : "\n#define RS_FOLD_DUMP\n"));
-	objects->version = objects->shader.version_create();
-	bool ok = p_variant != VARIANT_HW || objects->shader.version_is_valid(objects->version);
-	for (int i = 0; ok && i < objects->modes; i++) {
-		RID shader_rid = objects->shader.version_get_shader(objects->version, i);
-		if (shader_rid.is_null()) {
-			ok = false;
-			continue;
-		}
-		objects->pipelines[i].create_compute_pipeline(shader_rid);
-		if (!objects->pipelines[i].get_rid().is_valid()) {
-			ok = false;
-		}
-	}
-	if (!ok) {
-		for (int i = 0; i < RESTIR_FOLD_DUMP_MODES; i++) {
-			objects->pipelines[i].free();
-		}
-		if (objects->version.is_valid()) {
-			objects->shader.version_free(objects->version);
-		}
+	if (!_compile(objects->shader, objects->version, objects->pipelines, modes, p_variant, _defines(p_variant) + (p_lineage ? "\n#define RS_FOLD_DUMP\n#define RS_FOLD_LINEAGE\n" : "\n#define RS_FOLD_DUMP\n"), true)) {
 		memdelete(objects);
 		return false;
 	}
@@ -688,10 +634,6 @@ RID RestirGiCore::_tile_texture(const RestirGiInputs &p_inputs) {
 	return dummy_tiles;
 }
 
-void RestirGiCore::_bind_shade(RID p_shader, RD::ComputeListID p_list, const RestirGiInputs &p_inputs) {
-	RD::get_singleton()->compute_list_bind_uniform_set(p_list, _shade_set(p_shader, p_inputs), 2);
-}
-
 RID RestirGiCore::_shade_set(RID p_shader, const RestirGiInputs &p_inputs) {
 	RD *rd = RD::get_singleton();
 	if (dummy_ubo.is_null()) {
@@ -736,7 +678,7 @@ void RestirGiCore::_dispatch(Variant p_variant, PassMode p_mode, RID p_ubo, cons
 		rd->compute_list_bind_uniform_set(list, cache->get_cache_vec(shader_rid, 1, set1), 1);
 		const bool sky_pass = p_mode >= PASS_TEMPORAL_SKY && p_mode <= PASS_SPATIAL_COMPAT_WIDE_SKY;
 		if (p_mode == PASS_FINAL || p_mode == PASS_SOURCE || p_mode == PASS_VALIDATE || sky_pass) {
-			_bind_shade(shader_rid, list, p_inputs);
+			rd->compute_list_bind_uniform_set(list, _shade_set(shader_rid, p_inputs), 2);
 		}
 	}
 	rd->compute_list_dispatch(list, uint32_t(Math::division_round_up(p_size.x, 8)), uint32_t(Math::division_round_up(p_size.y, 8)), 1);
@@ -903,13 +845,10 @@ void RestirGiCore::run_frame(RestirGiResources &r_resources, const RestirFramePa
 	params.tile_skip = params.tile_skip && p_inputs.tile_texture.is_valid();
 	const RID tiles = _tile_texture(p_inputs);
 	if (sky_reread && r_resources.sky_epoch.is_null()) {
-		RD *rd = RD::get_singleton();
 		Vector<uint8_t> zeros;
 		zeros.resize(sizeof(RestirSkyEpoch));
 		zeros.fill(0);
-		const uint64_t before = rd->get_memory_usage(RD::MEMORY_BUFFERS);
-		r_resources.sky_epoch = rd->storage_buffer_create(sizeof(RestirSkyEpoch), zeros);
-		r_resources.alloc_log.push_back({ "sky_epoch", sizeof(RestirSkyEpoch), rd->get_memory_usage(RD::MEMORY_BUFFERS) - before, true });
+		r_resources.sky_epoch = r_resources.logged_buffer("sky_epoch", sizeof(RestirSkyEpoch), zeros);
 	}
 	if (params.compat && (params.flags & RESTIR_F_PROBE_STATS) != 0u && r_resources.sel_image.is_null()) {
 		r_resources.sel_image = _create_texture(RD::DATA_FORMAT_R32G32_UINT, r_resources.size, RD::TEXTURE_TYPE_2D_ARRAY, 2);

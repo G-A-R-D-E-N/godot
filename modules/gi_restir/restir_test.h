@@ -41,7 +41,6 @@
 struct RestirTestOptions {
 	bool readback = false;
 	bool history = true;
-	bool force_software = false;
 	Color sky = Color(1, 1, 1, 1);
 	bool constant_sky = false;
 	uint32_t seed_offset = 0;
