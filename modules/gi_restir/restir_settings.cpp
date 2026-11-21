@@ -66,7 +66,7 @@ static const RestirSetting restir_table[] = {
 	{ Variant::STRING, "gi/compat_gate", PROPERTY_HINT_ENUM, "similar,none,binary", 0, "similar", true,
 			"Experimental. ReSTIR GI compatibility gate (internal): similar keeps the plane, normal and class test, none keeps only the class test, binary weights every similar tap equally." },
 	{ Variant::BOOL, "gi/compat_early_stop", PROPERTY_HINT_NONE, "", 1, "", true,
-			"Experimental. ReSTIR GI stops scoring taps once more than gi/spatial_neighbors taps score above 0.5 (internal)." },
+			"Experimental. ReSTIR GI stops scoring taps once more than gi/spatial_neighbors taps score above gi/compat_stop_score (internal)." },
 	{ Variant::INT, "gi/m_temporal_cap", PROPERTY_HINT_RANGE, "1,256,1", 20, "", false,
 			"Experimental. ReSTIR GI cap on the history count before temporal combine." },
 	{ Variant::BOOL, "gi/m_cap_follows_rate", PROPERTY_HINT_NONE, "", 1, "", false,
@@ -92,7 +92,7 @@ static const RestirSetting restir_table[] = {
 	{ Variant::INT, "gi/ramp_frames", PROPERTY_HINT_RANGE, "1,4096,1", 64, "", false,
 			"Experimental. ReSTIR GI confidence ramp: frames since the last history cut over which the cap grows linearly to its set value." },
 	{ Variant::STRING, "gi/revalidate", PROPERTY_HINT_ENUM, "off,budget,share", 0, "off", false,
-			"Experimental. ReSTIR GI stored-sample re-validation: budget turns every gi/revalidate_period-th frame into a re-validation frame that ignores the incoming candidates and re-traces and re-shades the stored sample of every pixel that had a candidate; share re-traces one in gi/revalidate_share pixels every frame. Where the ray lands on the same point the stored radiance is updated (at most 10 times brighter per update); a large change cuts the reservoir count, a lost sample resets it." },
+			"Experimental. ReSTIR GI stored-sample re-validation: budget turns every gi/revalidate_period-th frame into a re-validation frame that ignores the incoming candidates and re-traces and re-shades the stored sample of every pixel that had a candidate; share re-traces one in gi/revalidate_share pixels every frame. Where the ray lands on the same point the stored radiance is updated (at most gi/revalidate_growth times brighter per update); a large change cuts the reservoir count, a lost sample resets it." },
 	{ Variant::INT, "gi/revalidate_period", PROPERTY_HINT_RANGE, "2,16,1", 3, "", false,
 			"Experimental. ReSTIR GI re-validation: one frame in this many is a re-validation frame (budget form)." },
 	{ Variant::INT, "gi/revalidate_share", PROPERTY_HINT_RANGE, "1,1024,1", 8, "", false,
@@ -124,7 +124,7 @@ static const RestirSetting restir_table[] = {
 	{ Variant::INT, "gi/spatial_hold_frames", PROPERTY_HINT_RANGE, "1,256,1", 40, "", false,
 			"Experimental. ReSTIR GI light events: frames a first-fire sphere stays in the spatial hold, counted from its event frame." },
 	{ Variant::BOOL, "gi/sky_reread", PROPERTY_HINT_NONE, "", 0, "", false,
-			"Experimental. ReSTIR GI sky samples take their target weight and radiance from the live sky in the temporal, spatial and final passes instead of a stored radiance, and a sky epoch caps every receiver like a sun jump when the mean sky brightness leaves 0.8 to 1.25 times its value at the epoch's start (the cap needs gi/event_reshade). Needs the DDGI shading inputs; without them it has no effect. A change in whether it applies cuts the history." },
+			"Experimental. ReSTIR GI sky samples take their target weight and radiance from the live sky in the temporal, spatial and final passes instead of a stored radiance, and a sky epoch caps every receiver like a sun jump when the mean sky brightness leaves gi/sky_epoch_low to gi/sky_epoch_high times its value at the epoch's start (the cap needs gi/event_reshade). Needs the DDGI shading inputs; without them it has no effect. A change in whether it applies cuts the history." },
 	{ Variant::INT, "gi/fold_k", PROPERTY_HINT_RANGE, "0,64,1", 0, "", false,
 			"Experimental. ReSTIR GI stored-age bound (Fold): 0 (default) is off; 1 to 3 read as 4, and other values round down to a power of two, 4 to 64. When on, no reservoir in the temporal history carries a candidate older than this many view frames, and each pixel restarts its history on a staggered frame. Applies in B1, B2 and B2k with spatial feedback off; elsewhere it has no effect. A change of the effective bound, or of the mode or spatial feedback while it is set, cuts the history." },
 	{ Variant::BOOL, "gi/own_sampler", PROPERTY_HINT_NONE, "", 0, "", false,
@@ -155,6 +155,22 @@ static const RestirSetting restir_table[] = {
 			"Experimental. ReSTIR GI distance given to a sky sample, in world units: the length of a visibility ray towards the sky, of the segment a stored sky sample is tested with against changed-scene boxes, of the own sampler's trace, and the shading distance of a hit without DDGI." },
 	{ Variant::FLOAT, "gi/dirty_margin", PROPERTY_HINT_RANGE, "0,1,0.001", 0, "0.01", false,
 			"Experimental. ReSTIR GI padding added to each changed-scene box when stored samples that cross it are thrown away." },
+	{ Variant::FLOAT, "gi/radiance_clamp", PROPERTY_HINT_RANGE, "1,65504,1", 0, "60000", false,
+			"Experimental. ReSTIR GI tuning value: the most radiance a stored sample, a sky read or a shaded hit may carry per channel. Stored radiance is half precision, so the top of the range is the largest half." },
+	{ Variant::FLOAT, "gi/revalidate_growth", PROPERTY_HINT_RANGE, "1,1000,0.1", 0, "10", false,
+			"Experimental. ReSTIR GI re-validation tuning value: the stored radiance may grow by at most this factor of max(its luminance, gi/revalidate_floor) per update." },
+	{ Variant::FLOAT, "gi/revalidate_floor", PROPERTY_HINT_RANGE, "0.001,10,0.001", 0, "0.1", false,
+			"Experimental. ReSTIR GI re-validation tuning value: the luminance floor of the growth limit and of the change test, so a dark sample does not read a small absolute change as a large relative one." },
+	{ Variant::FLOAT, "gi/compat_score_scale", PROPERTY_HINT_RANGE, "0.001,10,0.00001", 0, "0.12615662", false,
+			"Experimental. ReSTIR GI compatibility selection tuning value: the position falloff length of a tap's score, as a share of the receiver's view distance. Lower scores distant taps lower. Used when gi/neighbor_selection is compatibility." },
+	{ Variant::FLOAT, "gi/compat_stop_score", PROPERTY_HINT_RANGE, "0,1,0.01", 0, "0.5", true,
+			"Experimental. ReSTIR GI compatibility selection tuning value (internal): a tap counts towards the early stop of gi/compat_early_stop when its score is above this." },
+	{ Variant::FLOAT, "gi/sky_epoch_low", PROPERTY_HINT_RANGE, "0.01,1,0.01", 0, "0.8", false,
+			"Experimental. ReSTIR GI sky epoch tuning value: a sky epoch starts when the mean sky brightness falls below this share of its value at the epoch's start. Needs gi/sky_reread." },
+	{ Variant::FLOAT, "gi/sky_epoch_high", PROPERTY_HINT_RANGE, "1,100,0.01", 0, "1.25", false,
+			"Experimental. ReSTIR GI sky epoch tuning value: a sky epoch starts when the mean sky brightness rises above this multiple of its value at the epoch's start. Needs gi/sky_reread." },
+	{ Variant::FLOAT, "gi/sky_blur_lod", PROPERTY_HINT_RANGE, "0,8,0.1", 0, "2", false,
+			"Experimental. ReSTIR GI sky tuning value: the mip level of the radiance sky texture that a sky sample reads. Higher reads a blurrier sky." },
 };
 
 static const int RESTIR_SETTING_COUNT = sizeof(restir_table) / sizeof(restir_table[0]);
@@ -200,6 +216,14 @@ static RestirReuseValues _reuse_values(T p_get) {
 	values.weight_clamp = p_get("gi/weight_clamp");
 	values.sky_distance = p_get("gi/sky_distance");
 	values.dirty_margin = p_get("gi/dirty_margin");
+	values.radiance_clamp = p_get("gi/radiance_clamp");
+	values.revalidate_growth = p_get("gi/revalidate_growth");
+	values.revalidate_floor = p_get("gi/revalidate_floor");
+	values.compat_score_scale = p_get("gi/compat_score_scale");
+	values.compat_stop_score = p_get("gi/compat_stop_score");
+	values.sky_epoch_low = p_get("gi/sky_epoch_low");
+	values.sky_epoch_high = p_get("gi/sky_epoch_high");
+	values.sky_blur_lod = p_get("gi/sky_blur_lod");
 	return values;
 }
 
@@ -227,6 +251,14 @@ void restir_reuse_apply(const RestirReuseValues &p_values, RestirFrameParams &r_
 	r_params.w_clamp = float(CLAMP(p_values.weight_clamp, 1.0, 1000.0));
 	r_params.sky_distance = float(CLAMP(p_values.sky_distance, 10.0, 100000.0));
 	r_params.dirty_margin = float(CLAMP(p_values.dirty_margin, 0.0, 1.0));
+	r_params.radiance_clamp = float(CLAMP(p_values.radiance_clamp, 1.0, 65504.0));
+	r_params.reval_growth = float(CLAMP(p_values.revalidate_growth, 1.0, 1000.0));
+	r_params.reval_floor = float(CLAMP(p_values.revalidate_floor, 0.001, 10.0));
+	r_params.compat_scale = float(CLAMP(p_values.compat_score_scale, 0.001, 10.0));
+	r_params.compat_stop_score = float(CLAMP(p_values.compat_stop_score, 0.0, 1.0));
+	r_params.sky_epoch_low = float(CLAMP(p_values.sky_epoch_low, 0.01, 1.0));
+	r_params.sky_epoch_high = float(CLAMP(p_values.sky_epoch_high, 1.0, 100.0));
+	r_params.sky_blur_lod = float(CLAMP(p_values.sky_blur_lod, 0.0, 8.0));
 }
 
 bool restir_setting_range(const String &p_name, double &r_min, double &r_max) {

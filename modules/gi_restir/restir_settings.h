@@ -44,6 +44,14 @@ struct RestirReuseValues {
 	double weight_clamp = 0.0;
 	double sky_distance = 0.0;
 	double dirty_margin = 0.0;
+	double radiance_clamp = 0.0;
+	double revalidate_growth = 0.0;
+	double revalidate_floor = 0.0;
+	double compat_score_scale = 0.0;
+	double compat_stop_score = 0.0;
+	double sky_epoch_low = 0.0;
+	double sky_epoch_high = 0.0;
+	double sky_blur_lod = 0.0;
 };
 
 void restir_register_settings();

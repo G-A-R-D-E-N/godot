@@ -71,7 +71,7 @@
 #define MAX_CAND 4
 #endif
 #define RS_PI 3.14159265359
-#define RS_LO_CLAMP 60000.0
+#define RS_LO_CLAMP rf.radiance_clamp
 #define STATS_STRIDE 16
 #define PS_STRIDE 32
 #define PS_TESTED 0
@@ -203,6 +203,15 @@ layout(set = 0, binding = 0, std140) uniform RestirFrame {
 
 	vec4 jitter_shift;
 	vec4 prev_jitter_shift;
+
+	float radiance_clamp;
+	float reval_growth;
+	float reval_floor;
+	float compat_scale;
+	float sky_epoch_low;
+	float sky_epoch_high;
+	float compat_stop_score;
+	float sky_blur_lod;
 }
 rf;
 

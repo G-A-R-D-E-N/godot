@@ -939,7 +939,9 @@ void RestirGiBackend::get_status(Dictionary &r_status) const {
 	r_status["invalid_choice"] = invalid_choice;
 	r_status["states"] = int64_t(states.size());
 	r_status["hw_variant_compiled"] = (core && core->hw_variant_compiled());
-	r_status["lo_clamp"] = 60000.0;
+	RestirFrameParams tuning;
+	restir_reuse_apply(restir_reuse_read(), tuning);
+	r_status["lo_clamp"] = double(tuning.radiance_clamp);
 	r_status["mode"] = int64_t(summary.mode);
 	r_status["denoise"] = _gi_text("denoise");
 	r_status["frame"] = int64_t(summary.frame);

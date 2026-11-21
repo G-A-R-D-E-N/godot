@@ -95,6 +95,14 @@ struct RestirFrameUBO {
 	uint32_t replay_pad;
 	float jitter_shift[4];
 	float previous_jitter_shift[4];
+	float radiance_clamp;
+	float reval_growth;
+	float reval_floor;
+	float compat_scale;
+	float sky_epoch_low;
+	float sky_epoch_high;
+	float compat_stop_score;
+	float sky_blur_lod;
 };
 
 struct RestirDirtyUBO {
@@ -103,7 +111,7 @@ struct RestirDirtyUBO {
 };
 
 static_assert(sizeof(RestirDirtyUBO) == 2048, "RestirDirtyUBO must match the std140 block in restir_gi_inc.glsl");
-static_assert(sizeof(RestirFrameUBO) == 432, "RestirFrameUBO must match the std140 block in restir_gi_inc.glsl");
+static_assert(sizeof(RestirFrameUBO) == 464, "RestirFrameUBO must match the std140 block in restir_gi_inc.glsl");
 static_assert(RESTIR_FOLD_F_PRE_FRAME == RESTIR_F_PRE_FRAME, "Fold's pre-frame bit must be the flags word's bit 19");
 
 static constexpr uint32_t PASS_STATS_ROWS = 4;
@@ -589,6 +597,14 @@ void RestirGiCore::_upload(RID p_ubo, const RestirFrameParams &p, uint32_t p_pas
 	u.prev_epoch_tag = p.prev_epoch_tag == 0xFFFFFFFFu ? p.epoch_tag : p.prev_epoch_tag;
 	u.dirty_count = MIN(p.dirty_count, 64u);
 	u.dirty_margin = p.dirty_margin;
+	u.radiance_clamp = p.radiance_clamp;
+	u.reval_growth = p.reval_growth;
+	u.reval_floor = p.reval_floor;
+	u.compat_scale = p.compat_scale;
+	u.sky_epoch_low = p.sky_epoch_low;
+	u.sky_epoch_high = p.sky_epoch_high;
+	u.compat_stop_score = p.compat_stop_score;
+	u.sky_blur_lod = p.sky_blur_lod;
 	for (int i = 0; i < 3; i++) {
 		u.shade_sky[i] = p.shade_sky[i];
 	}

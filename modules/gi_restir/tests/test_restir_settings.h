@@ -44,7 +44,7 @@ struct ReuseRow {
 	float RestirFrameParams::*field;
 };
 
-const ReuseRow REUSE_ROWS[9] = {
+const ReuseRow REUSE_ROWS[17] = {
 	{ "gi/plane_tolerance", &RestirReuseValues::plane_tolerance, &RestirFrameParams::tol_plane },
 	{ "gi/normal_angle", &RestirReuseValues::normal_angle, &RestirFrameParams::cos_normal },
 	{ "gi/roughness_tolerance", &RestirReuseValues::roughness_tolerance, &RestirFrameParams::class_tol },
@@ -54,6 +54,14 @@ const ReuseRow REUSE_ROWS[9] = {
 	{ "gi/weight_clamp", &RestirReuseValues::weight_clamp, &RestirFrameParams::w_clamp },
 	{ "gi/sky_distance", &RestirReuseValues::sky_distance, &RestirFrameParams::sky_distance },
 	{ "gi/dirty_margin", &RestirReuseValues::dirty_margin, &RestirFrameParams::dirty_margin },
+	{ "gi/radiance_clamp", &RestirReuseValues::radiance_clamp, &RestirFrameParams::radiance_clamp },
+	{ "gi/revalidate_growth", &RestirReuseValues::revalidate_growth, &RestirFrameParams::reval_growth },
+	{ "gi/revalidate_floor", &RestirReuseValues::revalidate_floor, &RestirFrameParams::reval_floor },
+	{ "gi/compat_score_scale", &RestirReuseValues::compat_score_scale, &RestirFrameParams::compat_scale },
+	{ "gi/compat_stop_score", &RestirReuseValues::compat_stop_score, &RestirFrameParams::compat_stop_score },
+	{ "gi/sky_epoch_low", &RestirReuseValues::sky_epoch_low, &RestirFrameParams::sky_epoch_low },
+	{ "gi/sky_epoch_high", &RestirReuseValues::sky_epoch_high, &RestirFrameParams::sky_epoch_high },
+	{ "gi/sky_blur_lod", &RestirReuseValues::sky_blur_lod, &RestirFrameParams::sky_blur_lod },
 };
 
 float applied(const ReuseRow &p_row, double p_value) {
@@ -90,6 +98,14 @@ TEST_CASE("[RestirSettings] The reuse limit defaults are the frame constants, bi
 	CHECK(constants.w_clamp == 20.0f);
 	CHECK(constants.sky_distance == 1000.0f);
 	CHECK(constants.dirty_margin == 0.01f);
+	CHECK(constants.radiance_clamp == 60000.0f);
+	CHECK(constants.reval_growth == 10.0f);
+	CHECK(constants.reval_floor == 0.1f);
+	CHECK(constants.compat_scale == 0.12615662f);
+	CHECK(constants.compat_stop_score == 0.5f);
+	CHECK(constants.sky_epoch_low == 0.8f);
+	CHECK(constants.sky_epoch_high == 1.25f);
+	CHECK(constants.sky_blur_lod == 2.0f);
 }
 
 TEST_CASE("[RestirSettings] Each reuse limit is held to its hinted range and its default lies inside") {

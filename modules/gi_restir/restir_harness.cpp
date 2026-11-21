@@ -91,6 +91,14 @@ Dictionary params_to_dict(const RestirFrameParams &p) {
 	d["prev_epoch_tag"] = int64_t(p.prev_epoch_tag);
 	d["dirty_count"] = int64_t(p.dirty_count);
 	d["dirty_margin"] = p.dirty_margin;
+	d["radiance_clamp"] = p.radiance_clamp;
+	d["reval_growth"] = p.reval_growth;
+	d["reval_floor"] = p.reval_floor;
+	d["compat_scale"] = p.compat_scale;
+	d["sky_epoch_low"] = p.sky_epoch_low;
+	d["sky_epoch_high"] = p.sky_epoch_high;
+	d["compat_stop_score"] = p.compat_stop_score;
+	d["sky_blur_lod"] = p.sky_blur_lod;
 	PackedFloat64Array boxes;
 	for (uint32_t i = 0; i < MIN(p.dirty_count, 64u); i++) {
 		boxes.push_back(p.dirty_min[i].x);
@@ -178,6 +186,14 @@ RestirFrameParams params_from_dict(const Dictionary &p_dict) {
 	RESTIR_GET("prev_epoch_tag", prev_epoch_tag, uint32_t)
 	RESTIR_GET("dirty_count", dirty_count, uint32_t)
 	RESTIR_GET("dirty_margin", dirty_margin, float)
+	RESTIR_GET("radiance_clamp", radiance_clamp, float)
+	RESTIR_GET("reval_growth", reval_growth, float)
+	RESTIR_GET("reval_floor", reval_floor, float)
+	RESTIR_GET("compat_scale", compat_scale, float)
+	RESTIR_GET("sky_epoch_low", sky_epoch_low, float)
+	RESTIR_GET("sky_epoch_high", sky_epoch_high, float)
+	RESTIR_GET("compat_stop_score", compat_stop_score, float)
+	RESTIR_GET("sky_blur_lod", sky_blur_lod, float)
 	RESTIR_GET("clock", fold_clock, uint32_t)
 	RESTIR_GET("k_eff", fold_k_eff, uint32_t)
 	RESTIR_GET("pre_frame", fold_pre_frame, bool)

@@ -151,6 +151,14 @@ struct RestirFrameParams {
 	uint32_t prev_epoch_tag = 0xFFFFFFFFu;
 	uint32_t dirty_count = 0;
 	float dirty_margin = 0.01f;
+	float radiance_clamp = 60000.0f;
+	float reval_growth = 10.0f;
+	float reval_floor = 0.1f;
+	float compat_scale = 0.12615662f;
+	float sky_epoch_low = RESTIR_SKY_EPOCH_LOW;
+	float sky_epoch_high = RESTIR_SKY_EPOCH_HIGH;
+	float compat_stop_score = 0.5f;
+	float sky_blur_lod = 2.0f;
 	bool sky_reread = false;
 	bool tile_skip = false;
 	bool pack_m = false;

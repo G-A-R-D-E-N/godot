@@ -87,9 +87,9 @@ vec3 rs_sky_radiance(vec3 p_direction) {
 		vec3 sky_dir = cross(sky_quat.xyz, p_direction);
 		sky_dir = p_direction + ((sky_dir * sky_quat.w) + cross(sky_quat.xyz, sky_dir)) * 2.0;
 #ifdef USE_RADIANCE_OCTMAP_ARRAY
-		radiance = textureLod(sampler2DArray(sky_radiance, sky_sampler), vec3(vec3_to_oct_with_border(sky_dir, rf.shade_sky_border), 0.0), 2.0).rgb * rf.shade_sky_energy;
+		radiance = textureLod(sampler2DArray(sky_radiance, sky_sampler), vec3(vec3_to_oct_with_border(sky_dir, rf.shade_sky_border), 0.0), rf.sky_blur_lod).rgb * rf.shade_sky_energy;
 #else
-		radiance = textureLod(sampler2D(sky_radiance, sky_sampler), vec3_to_oct_with_border(sky_dir, rf.shade_sky_border), 2.0).rgb * rf.shade_sky_energy;
+		radiance = textureLod(sampler2D(sky_radiance, sky_sampler), vec3_to_oct_with_border(sky_dir, rf.shade_sky_border), rf.sky_blur_lod).rgb * rf.shade_sky_energy;
 #endif
 	} else if ((rf.shade_sky_flags & RS_SKY_COLOR) != 0u) {
 		radiance = rf.shade_sky * rf.shade_sky_energy;
@@ -706,10 +706,9 @@ vec2 rs_spatial_offset(int p_index, uvec2 p_pixel) {
 #define COMPAT_MAX_M 8
 #define COMPAT_KEY_DIM 96u
 #define COMPAT_START_DIM 160u
-#define COMPAT_SCALE 0.12615662
 
 float rs_compat_score(Receiver p_r, Receiver p_q) {
-	float scale = length(p_r.true_view) * COMPAT_SCALE;
+	float scale = length(p_r.true_view) * rf.compat_scale;
 	float hp = exp(-length(p_r.true_view - p_q.true_view) / scale);
 	float c = clamp(dot(p_r.nrm, p_q.nrm), 0.0, 1.0);
 	float c2 = c * c;
@@ -810,7 +809,7 @@ int rs_select_neighbours(Receiver p_r, ivec2 p_pixel, int p_wanted, out ivec2 r_
 		float u = max(rs_rand(uvec2(p_pixel), COMPAT_KEY_DIM + t), 5.9604645e-8);
 		float key = log(u) / w;
 		if (listed == m && !(key > keys[m - 1])) {
-			if (h > 0.5) {
+			if (h > rf.compat_stop_score) {
 				above++;
 			}
 			if (early_stop && above > m) {
@@ -832,7 +831,7 @@ int rs_select_neighbours(Receiver p_r, ivec2 p_pixel, int p_wanted, out ivec2 r_
 		if (listed < m) {
 			listed++;
 		}
-		if (h > 0.5) {
+		if (h > rf.compat_stop_score) {
 			above++;
 		}
 		if (early_stop && above > m) {
@@ -1411,8 +1410,6 @@ void main() {
 
 #ifdef MODE_SKY_EPOCH
 
-#define RS_SKY_EPOCH_LOW 0.8
-#define RS_SKY_EPOCH_HIGH 1.25
 #define RS_SKY_EPOCH_SPAN 64
 
 shared float rs_epoch_sum[RS_SKY_EPOCH_SPAN];
@@ -1488,7 +1485,7 @@ void main() {
 		return;
 	}
 	float epoch = sky_epoch.luma;
-	if (luma < RS_SKY_EPOCH_LOW * epoch || luma > RS_SKY_EPOCH_HIGH * epoch) {
+	if (luma < rf.sky_epoch_low * epoch || luma > rf.sky_epoch_high * epoch) {
 		sky_epoch.jump = 1u;
 		sky_epoch.luma = luma;
 		sky_epoch.epochs += 1u;
@@ -1676,17 +1673,16 @@ void rs_validate_pixel(ivec2 px) {
 		}
 		fresh = rs_fresh_lo(q.origin, delta / dist, dist, uint(px.y) * 65537u + uint(px.x) + rf.frame * 6271u, landed);
 	}
-	const float lo_floor = 0.1;
 	float l_old = rs_luma(lo_old);
 	float l_new = rs_luma(fresh);
 	if (!landed) {
 		b.y = b.y & 0xFFFFu;
 		b.w = b.w & 0xFFFF0000u;
 	} else {
-		float limit = 10.0 * max(l_old, lo_floor);
+		float limit = rf.reval_growth * max(l_old, rf.reval_floor);
 		vec3 updated = l_new > limit ? fresh * (limit / l_new) : fresh;
 		updated = clamp(updated, vec3(0.0), vec3(RS_LO_CLAMP));
-		float change = abs(l_new - l_old) / max(max(l_old, l_new), lo_floor);
+		float change = abs(l_new - l_old) / max(max(l_old, l_new), rf.reval_floor);
 		b.x = packHalf2x16(updated.rg);
 		b.y = (packHalf2x16(vec2(updated.b, 0.0)) & 0xFFFFu) | (flags << 16u);
 		if (change > rf.reval_threshold) {
