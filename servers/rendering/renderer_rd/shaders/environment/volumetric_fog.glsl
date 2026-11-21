@@ -10,7 +10,9 @@
 
 layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
 
-#define DENSITY_SCALE 1024.0
+#define DENSITY_SCALE 1048576.0
+#define DENSITY_LIMIT 32.0
+#define COLOR_LIMIT 64.0
 
 #include "../cluster_data_inc.glsl"
 #include "../light_data_inc.glsl"
@@ -226,14 +228,46 @@ void main() {
 
 #ifdef DENSITY_USED
 		density *= cull_mask;
-		if (abs(density) > 0.001) {
-			int final_density = int(density * DENSITY_SCALE);
+		bool exact_color = false;
+		if (abs(density) > 0.0) {
+			density = clamp(density, -DENSITY_LIMIT, DENSITY_LIMIT);
+			int final_density = int(floor(density * DENSITY_SCALE + 0.5));
 #ifdef NO_IMAGE_ATOMICS
 			atomicAdd(density_only_map[lpos], uint(final_density));
 #else
 			imageAtomicAdd(density_only_map, pos, uint(final_density));
 #endif
+#ifndef NO_IMAGE_ATOMICS
+			exact_color = imageSize(light_only_map).z > scene_params.fog_volume_size.z;
+			if (exact_color && final_density > 0) {
+				ivec3 light_pos = ivec3(pos.xy, pos.z * 4);
+				imageAtomicAdd(light_only_map, light_pos + ivec3(0, 0, 3), uint(final_density));
+#ifdef EMISSION_USED
+				{
+					vec3 emission_amount = max(emission, vec3(0.0)) * density;
+					ivec3 emission_pos = ivec3(pos.xy, pos.z * 3);
+					for (int c = 0; c < 3; c++) {
+						if (emission_amount[c] > 0.0) {
+							imageAtomicAdd(emissive_only_map, emission_pos + ivec3(0, 0, c), uint(floor(min(emission_amount[c], COLOR_LIMIT) * DENSITY_SCALE + 0.5)));
+						}
+					}
+				}
+#endif
+#ifdef ALBEDO_USED
+				{
+					vec3 scattering_amount = clamp(albedo, vec3(0.0), vec3(1.0)) * density;
+					for (int c = 0; c < 3; c++) {
+						if (scattering_amount[c] > 0.0) {
+							imageAtomicAdd(light_only_map, light_pos + ivec3(0, 0, c), uint(floor(min(scattering_amount[c], COLOR_LIMIT) * DENSITY_SCALE + 0.5)));
+						}
+					}
+				}
+#endif
+			}
+#endif
+		}
 
+		if (!exact_color && abs(density) > 0.001) {
 #ifdef EMISSION_USED
 			{
 				emission *= clamp(density, 0.0, 1.0);

@@ -3127,6 +3127,11 @@
 			Scales the distance over which samples are taken for subsurface scattering effect. Changing this does not impact performance, but higher values will result in significant artifacts as the samples will become obviously spread out. A lower value results in a smaller spread of scattered light. See also [member rendering/environment/subsurface_scattering/subsurface_scattering_depth_scale].
 			[b]Note:[/b] This property is only read when the project starts. To set the subsurface scattering scale at runtime, call [method RenderingServer.sub_surface_scattering_set_scale] instead.
 		</member>
+		<member name="rendering/environment/volumetric_fog/exact_volume_color" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], [FogVolume]s store their scattering and emission in 32-bit fixed point per color channel, with the same scale as their density. Thin fog such as indoor dust keeps its true color, [member FogMaterial.albedo] is applied at any density, and emission is limited to 64 per meter for each volume instead of 4. This uses five more 32-bit planes of the froxel buffer (about 5 MiB at the default volume size and depth on a 16:9 viewport) and more atomic operations per volume. If [code]false[/code], the scattering and emission of all [FogVolume]s in a froxel are packed into one 32-bit value per froxel.
+			[b]Note:[/b] A [FogVolume] contributes at most 32 per meter of density and 64 per meter of scattering or emission per channel. Up to 63 overlapping volumes at those limits are summed exactly; beyond that, the froxel is left empty. Negative densities remove scattering and emission in proportion to the density they remove.
+			[b]Note:[/b] Only supported on devices with 32-bit image atomics whose 3D texture size limit is at least 4 times [member rendering/environment/volumetric_fog/volume_depth]. Elsewhere, a warning is printed and packed color is used.
+		</member>
 		<member name="rendering/environment/volumetric_fog/use_filter" type="int" setter="" getter="" default="1">
 			Enables filtering of the volumetric fog effect prior to integration. This substantially blurs the fog which reduces fine details but also smooths out harsh edges and aliasing artifacts. Disable when more detail is required.
 		</member>
