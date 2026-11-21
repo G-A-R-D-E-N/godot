@@ -99,6 +99,39 @@ TEST_CASE("[RayScene] Area light half axes ignore node scale") {
 	CHECK(light.area == doctest::Approx(0.125));
 }
 
+bool half_axes_zero(const RayScene::Light &p_light) {
+	for (int k = 0; k < 3; k++) {
+		if (p_light.half_a[k] != 0.0f || p_light.half_b[k] != 0.0f) {
+			return false;
+		}
+	}
+	return true;
+}
+
+TEST_CASE("[RayScene] Omni and spot carry the lamp size in area, area lights their rect, directional is untouched") {
+	const Basis basis = Basis(Vector3(0, 1, 0), 0.7) * Basis::from_scale(Vector3(3.0, 2.0, 5.0));
+	for (const RSE::LightType type : { RSE::LIGHT_OMNI, RSE::LIGHT_SPOT }) {
+		INFO("type ", int(type));
+		RayScene::Light light = {};
+		RayScene::pack_shape(type, basis, SIZE, 0.35f, light);
+		CHECK(light.area == 0.35f);
+		CHECK(half_axes_zero(light));
+		RayScene::Light point = {};
+		point.area = 9.0f;
+		RayScene::pack_shape(type, basis, Vector2(), 0.0f, point);
+		CHECK(point.area == 0.0f);
+	}
+	RayScene::Light rect = {};
+	RayScene::pack_shape(RSE::LIGHT_AREA, basis, SIZE, 0.35f, rect);
+	CHECK(rect.area == doctest::Approx(0.125));
+	CHECK(Vector3(rect.half_a[0], rect.half_a[1], rect.half_a[2]).length() == doctest::Approx(0.25));
+	RayScene::Light sun = {};
+	sun.area = 7.0f;
+	RayScene::pack_shape(RSE::LIGHT_DIRECTIONAL, basis, SIZE, 0.35f, sun);
+	CHECK(sun.area == 7.0f);
+	CHECK(half_axes_zero(sun));
+}
+
 constexpr float RANGE = 5.0f;
 
 RayScene::Light tracked_light(RSE::LightType p_type, uint32_t p_mask) {

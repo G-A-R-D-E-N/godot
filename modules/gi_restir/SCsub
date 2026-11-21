@@ -1,0 +1,46 @@
+#!/usr/bin/env python
+from misc.utility.scons_hints import *
+
+import importlib.util
+import os
+
+from methods import print_error
+
+Import("env")
+Import("env_modules")
+
+module_dir = Dir(".").abspath
+shim_spec = importlib.util.spec_from_file_location("restir_shim", os.path.join(module_dir, "restir_shim.py"))
+shim = importlib.util.module_from_spec(shim_spec)
+shim_spec.loader.exec_module(shim)
+
+env_gi_restir = env_modules.Clone()
+
+if "RD_GLSL" in env["BUILDERS"]:
+    shader_dir = os.path.join(module_dir, "shaders")
+    build_dir = env.Dir("#").abspath
+    core_dir = os.path.join(build_dir, "servers", "rendering", "renderer_rd", "shaders", "environment")
+    try:
+        mode, shim_deps = shim.write_shim(core_dir, shader_dir, build_dir)
+    except shim.ShimError as error:
+        print_error(str(error))
+        Exit(255)
+    print("gi_restir: core include mode " + mode)
+
+    glsl_files = ["shaders/restir_shim_check.glsl", "shaders/restir_gi.glsl", "shaders/restir_fold_test.glsl"]
+    per_file_shims = [File(os.path.join(shader_dir, shim.PER_FILE_PREFIX + name)) for name in shim.CORE_INCLUDES + shim.EXTRA_INCLUDES]
+    env_gi_restir.Depends(
+        [f + ".gen.h" for f in glsl_files],
+        [
+            File(os.path.join(shader_dir, shim.SHIM_NAME)),
+            "#glsl_builders.py",
+            File(os.path.join(shader_dir, "restir_gi_inc.glsl")),
+            File(os.path.join(shader_dir, "restir_fold_inc.glsl")),
+        ]
+        + per_file_shims
+        + [File(path) for path in shim_deps],
+    )
+    for glsl_file in glsl_files:
+        env_gi_restir.RD_GLSL(glsl_file)
+
+env_gi_restir.add_source_files(env.modules_sources, "*.cpp")

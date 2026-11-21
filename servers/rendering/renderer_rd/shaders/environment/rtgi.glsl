@@ -20,9 +20,11 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 #define RTGI_COUNTER_BACKFACE 6
 #define RTGI_COUNTER_HISTORY_REJECTS 7
 #define RTGI_COUNTER_RESTARTED 8
+#define RTGI_COUNTER_TILES_WRONG_EVENTS 9
+#define RTGI_COUNTER_TILES_WRONG_MEMORY 10
 
 layout(set = 0, binding = 15, std430) restrict buffer RtgiCounters {
-	uint words[9];
+	uint words[11];
 }
 rtgi_counters;
 
@@ -68,6 +70,16 @@ layout(set = 0, binding = 0, std140) uniform RtgiFrame {
 	uint restart_count;
 
 	vec4 restart_spheres[16];
+
+	uint ddgi_wrong_frames;
+	uint ddgi_wrong_bits;
+	uint n_target;
+	float ddgi_wrong_rho;
+
+	float ddgi_wrong_tau;
+	float ddgi_wrong_target;
+	float ddgi_wrong_noise;
+	float ddgi_wrong_floor;
 }
 rtgi;
 
@@ -104,10 +116,94 @@ layout(set = 0, binding = 3) uniform texture2D ssgi_length_texture;
 layout(rgba32f, set = 0, binding = 4) uniform restrict writeonly image2D geo_position;
 layout(rgba8, set = 0, binding = 5) uniform restrict writeonly image2D geo_normal;
 layout(r32ui, set = 0, binding = 6) uniform restrict writeonly uimage2D tile_output;
+layout(set = 0, binding = 7) uniform utexture2D tile_memory_previous;
+layout(r16ui, set = 0, binding = 8) uniform restrict writeonly uimage2D tile_memory_current;
+layout(set = 0, binding = 9) uniform texture2D geo_position_previous;
+layout(set = 0, binding = 10) uniform texture2D history_previous;
 
 shared uint shared_geometry;
 shared uint shared_ssgi_valid;
-shared float shared_ddgi[4];
+shared vec4 shared_ddgi[4];
+shared uint shared_ddgi_taps;
+shared uint shared_events;
+shared uint shared_memory;
+shared vec3 shared_history[64];
+
+bool rtgi_previous_trace_pixel(vec3 p_view_position, vec3 p_view_normal, out ivec2 r_pixel) {
+	r_pixel = ivec2(0);
+	vec4 previous_clip = rtgi.view_to_prev_clip * vec4(p_view_position, 1.0);
+	if (previous_clip.w <= 0.0) {
+		return false;
+	}
+	vec2 previous_uv = previous_clip.xy / previous_clip.w * 0.5 + 0.5;
+	int scale = max(rtgi.scale, 1);
+	vec2 tap_position = (previous_uv * vec2(rtgi.screen_size) - 0.5 - float(scale / 2)) / float(scale);
+	ivec2 tap = ivec2(floor(tap_position + 0.5));
+	if (any(lessThan(tap, ivec2(0))) || any(greaterThanEqual(tap, rtgi.trace_size))) {
+		return false;
+	}
+	vec4 previous_geometry = texelFetch(geo_position_previous, tap, 0);
+	if (previous_geometry.w < 0.5) {
+		return false;
+	}
+	vec3 previous_position = (rtgi.cur_to_prev_view * vec4(p_view_position, 1.0)).xyz;
+	vec3 previous_normal = normalize(mat3(rtgi.cur_to_prev_view) * p_view_normal);
+	float tolerance = rtgi.depth_sigma * 0.01 * max(-previous_position.z, 0.1) + 0.005;
+	if (abs(dot(previous_normal, previous_position - previous_geometry.xyz)) > tolerance) {
+		return false;
+	}
+	r_pixel = tap;
+	return true;
+}
+
+bool rtgi_tile_disagrees() {
+	float count = 0.0;
+	float sum = 0.0;
+	float sum_squared = 0.0;
+	for (uint i = 0u; i < 64u; i++) {
+		sum += shared_history[i].x;
+		sum_squared += shared_history[i].y;
+		count += shared_history[i].z;
+	}
+	float ddgi_count = 0.0;
+	float ddgi_sum = 0.0;
+	for (uint i = 0u; i < 4u; i++) {
+		if ((shared_ddgi_taps & (1u << i)) != 0u && shared_ddgi[i].a > 0.0) {
+			ddgi_sum += dot(shared_ddgi[i].rgb, rtgi_luma);
+			ddgi_count += 1.0;
+		}
+	}
+	if (count < 2.0 || ddgi_count < 1.0) {
+		return false;
+	}
+	float mean = sum / count;
+	float ddgi_mean = ddgi_sum / ddgi_count;
+	float variance = max(sum_squared - sum * mean, 0.0) / (count - 1.0);
+	float effective_count = count / (1.0 + rtgi.ddgi_wrong_rho * (count - 1.0));
+	float standard_error = sqrt(variance / effective_count);
+	float tau = rtgi.ddgi_wrong_tau;
+	return abs(mean - ddgi_mean) / max(ddgi_mean, rtgi.ddgi_wrong_floor) > tau && standard_error < tau * mean / 3.0;
+}
+
+uint rtgi_tile_memory(uint p_value) {
+	uint left = shared_memory & RTGI_MEMORY_FRAMES;
+	uint marks = shared_memory & (RTGI_MEMORY_EVENTS | RTGI_MEMORY_DISAGREE);
+	left = left > 0u ? left - 1u : 0u;
+	if (left == 0u) {
+		marks = 0u;
+	}
+	uint frames = clamp(rtgi.ddgi_wrong_frames, 1u, RTGI_MEMORY_FRAMES);
+	if ((rtgi.ddgi_wrong_bits & RTGI_DDGI_WRONG_EVENTS) != 0u && shared_events != 0u) {
+		left = frames;
+		marks |= RTGI_MEMORY_EVENTS;
+	}
+	bool traced = left > 0u || (p_value & (RTGI_TILE_REASON_DDGI | RTGI_TILE_REASON_SSGI | RTGI_TILE_REASON_CHECK | RTGI_TILE_REASON_FORCED)) != 0u;
+	if ((rtgi.ddgi_wrong_bits & RTGI_DDGI_WRONG_MEMORY) != 0u && traced && rtgi_tile_disagrees()) {
+		left = frames;
+		marks |= RTGI_MEMORY_DISAGREE;
+	}
+	return left | marks;
+}
 
 void main() {
 	ivec2 trace_pixel = ivec2(gl_GlobalInvocationID.xy);
@@ -116,8 +212,11 @@ void main() {
 	if (local_index == 0u) {
 		shared_geometry = 0u;
 		shared_ssgi_valid = 0u;
+		shared_ddgi_taps = 0u;
+		shared_events = 0u;
+		shared_memory = 0u;
 		for (int i = 0; i < 4; i++) {
-			shared_ddgi[i] = 1.0;
+			shared_ddgi[i] = vec4(0.0, 0.0, 0.0, 1.0);
 		}
 	}
 	barrier();
@@ -143,8 +242,36 @@ void main() {
 			vec3 world_position = to_world * view_position;
 			vec3 world_normal = normalize(to_world * rtgi_decode_normal(normal_roughness));
 			uint slot = uint(local.x == 6) + uint(local.y == 6) * 2u;
-			shared_ddgi[slot] = ddgi_sample(world_position, world_normal, -normalize(world_position)).a;
+			shared_ddgi[slot] = ddgi_sample(world_position, world_normal, -normalize(world_position));
+			atomicOr(shared_ddgi_taps, 1u << slot);
 		}
+		if ((rtgi.ddgi_wrong_bits & RTGI_DDGI_WRONG_EVENTS) != 0u) {
+			for (uint i = 0u; i < rtgi.restart_count; i++) {
+				vec3 offset = view_position - rtgi.restart_spheres[i].xyz;
+				if (dot(offset, offset) < rtgi.restart_spheres[i].w * rtgi.restart_spheres[i].w) {
+					atomicOr(shared_events, 1u);
+					break;
+				}
+			}
+		}
+		if ((rtgi.ddgi_wrong_bits & RTGI_DDGI_WRONG_READ) != 0u && all(equal(local, min(ivec2(RTGI_TILE / 2), rtgi.trace_size - 1 - (trace_pixel - local))))) {
+			ivec2 previous_pixel;
+			if (rtgi_previous_trace_pixel(view_position, rtgi_decode_normal(normal_roughness), previous_pixel)) {
+				shared_memory = texelFetch(tile_memory_previous, previous_pixel / RTGI_TILE, 0).r;
+			}
+		}
+	}
+	if ((rtgi.ddgi_wrong_bits & RTGI_DDGI_WRONG_MEMORY) != 0u) {
+		vec3 history_sample = vec3(0.0);
+		ivec2 previous_pixel;
+		if (geometry && rtgi_previous_trace_pixel(view_position, rtgi_decode_normal(normal_roughness), previous_pixel)) {
+			vec4 history = texelFetch(history_previous, previous_pixel, 0);
+			if (history.a > 0.0 && rtgi_is_finite(history.rgb)) {
+				float luma = dot(history.rgb, rtgi_luma);
+				history_sample = vec3(luma, luma * luma, 1.0);
+			}
+		}
+		shared_history[local_index] = history_sample;
 	}
 	if (in_range) {
 		imageStore(geo_position, trace_pixel, vec4(view_position, geometry ? 1.0 : 0.0));
@@ -155,9 +282,10 @@ void main() {
 	if (local_index == 0u && all(lessThan(gl_WorkGroupID.xy, uvec2(rtgi.tile_count)))) {
 		uint count = shared_geometry;
 		uint value = 0u;
+		uint memory = 0u;
 		if (count > 0u) {
 			value |= RTGI_TILE_HAS_GEOMETRY;
-			float ddgi_min = min(min(shared_ddgi[0], shared_ddgi[1]), min(shared_ddgi[2], shared_ddgi[3]));
+			float ddgi_min = min(min(shared_ddgi[0].a, shared_ddgi[1].a), min(shared_ddgi[2].a, shared_ddgi[3].a));
 			if (ddgi_min < rtgi.ddgi_alpha_min) {
 				value |= RTGI_TILE_REASON_DDGI;
 			}
@@ -171,7 +299,13 @@ void main() {
 			if (rtgi.force_trace != 0u) {
 				value |= RTGI_TILE_REASON_FORCED;
 			}
-			if ((value & (RTGI_TILE_REASON_DDGI | RTGI_TILE_REASON_SSGI | RTGI_TILE_REASON_CHECK | RTGI_TILE_REASON_FORCED)) != 0u) {
+			if ((rtgi.ddgi_wrong_bits & RTGI_DDGI_WRONG_ACTIVE) != 0u) {
+				memory = rtgi_tile_memory(value);
+				if ((memory & RTGI_MEMORY_FRAMES) != 0u) {
+					value |= RTGI_TILE_REASON_DDGI_WRONG;
+				}
+			}
+			if ((value & (RTGI_TILE_REASON_DDGI | RTGI_TILE_REASON_SSGI | RTGI_TILE_REASON_CHECK | RTGI_TILE_REASON_FORCED | RTGI_TILE_REASON_DDGI_WRONG)) != 0u) {
 				value |= RTGI_TILE_TRACE;
 			}
 			RTGI_COUNT(RTGI_COUNTER_TILES_TOTAL, 1u);
@@ -179,6 +313,15 @@ void main() {
 				RTGI_COUNT(RTGI_COUNTER_TILES_TRACED, 1u);
 				RTGI_COUNT(RTGI_COUNTER_TRACE_PIXELS, count);
 			}
+			if ((memory & RTGI_MEMORY_EVENTS) != 0u) {
+				RTGI_COUNT(RTGI_COUNTER_TILES_WRONG_EVENTS, 1u);
+			}
+			if ((memory & RTGI_MEMORY_DISAGREE) != 0u) {
+				RTGI_COUNT(RTGI_COUNTER_TILES_WRONG_MEMORY, 1u);
+			}
+		}
+		if ((rtgi.ddgi_wrong_bits & RTGI_DDGI_WRONG_ACTIVE) != 0u) {
+			imageStore(tile_memory_current, ivec2(gl_WorkGroupID.xy), uvec4(memory));
 		}
 		imageStore(tile_output, ivec2(gl_WorkGroupID.xy), uvec4(value));
 	}
@@ -232,8 +375,10 @@ void main() {
 	float accumulated_count = 0.0;
 	float accumulated_m1 = 0.0;
 	float accumulated_m2 = 0.0;
+	float accumulated_confidence = 0.0;
 	float accepted_weight = 0.0;
 	float history_existed = 0.0;
+	bool module_output = (rtgi.flags & RTGI_FRAME_FLAG_MODULE_OUTPUT) != 0u;
 
 	bool allow_history = (rtgi.flags & (RTGI_FRAME_FLAG_HISTORY_CUT | RTGI_FRAME_FLAG_CAMERA_CUT | RTGI_FRAME_FLAG_RESIZE | RTGI_FRAME_FLAG_BACKEND_SWITCH)) == 0u;
 	if (allow_history) {
@@ -271,6 +416,9 @@ void main() {
 				accumulated_count += tap_history.a * bilinear;
 				accumulated_m1 += tap_moments.x * bilinear;
 				accumulated_m2 += tap_moments.y * bilinear;
+				if (module_output) {
+					accumulated_confidence += tap_moments.w * bilinear;
+				}
 				accepted_weight += bilinear;
 			}
 		}
@@ -280,15 +428,16 @@ void main() {
 	vec3 radiance_previous = vec3(0.0);
 	float m1_previous = 0.0;
 	float m2_previous = 0.0;
+	float confidence_previous = 0.0;
 	float validity = 0.0;
 	if (accepted_weight > 0.01) {
 		float inverse_weight = 1.0 / accepted_weight;
 		radiance_previous = accumulated_radiance * inverse_weight;
 		count_previous = accumulated_count * inverse_weight;
-		if ((rtgi.flags & RTGI_FRAME_FLAG_SOFT_CUT) != 0u) {
+		if (!module_output && (rtgi.flags & RTGI_FRAME_FLAG_SOFT_CUT) != 0u) {
 			count_previous = min(count_previous, float(rtgi.soft_cut_count));
 		}
-		if ((rtgi.flags & RTGI_FRAME_FLAG_RESTART_SPHERES) != 0u) {
+		if (!module_output && (rtgi.flags & RTGI_FRAME_FLAG_RESTART_SPHERES) != 0u) {
 			for (uint i = 0u; i < rtgi.restart_count; i++) {
 				vec3 offset = position_current.xyz - rtgi.restart_spheres[i].xyz;
 				if (dot(offset, offset) < rtgi.restart_spheres[i].w * rtgi.restart_spheres[i].w) {
@@ -300,6 +449,7 @@ void main() {
 		}
 		m1_previous = accumulated_m1 * inverse_weight;
 		m2_previous = accumulated_m2 * inverse_weight;
+		confidence_previous = accumulated_confidence * inverse_weight;
 		validity = clamp(accepted_weight, 0.0, 1.0);
 	}
 	if (allow_history && history_existed > 0.01 && accepted_weight <= 0.01) {
@@ -313,7 +463,7 @@ void main() {
 			return;
 		}
 		imageStore(history_current, trace_pixel, vec4(radiance_previous, count_previous));
-		imageStore(moments_current, trace_pixel, vec4(m1_previous, m2_previous, validity, 0.0));
+		imageStore(moments_current, trace_pixel, vec4(m1_previous, m2_previous, validity, module_output ? confidence_previous : 0.0));
 		return;
 	}
 
@@ -323,9 +473,15 @@ void main() {
 	float luma = dot(radiance, rtgi_luma);
 	float m1_current = count_previous > 0.0 ? mix(m1_previous, luma, blend) : luma;
 	float m2_current = count_previous > 0.0 ? mix(m2_previous, luma * luma, blend) : luma * luma;
+	float confidence_current = 0.0;
+	if (module_output) {
+		float m_packed = uintBitsToFloat(second.z);
+		float confidence = rtgi.n_target > 0u && m_packed > 0.0 ? min(m_packed / float(rtgi.n_target), 1.0) : 0.0;
+		confidence_current = count_previous > 0.0 ? mix(confidence_previous, confidence, blend) : confidence;
+	}
 
 	imageStore(history_current, trace_pixel, vec4(radiance_current, count_current));
-	imageStore(moments_current, trace_pixel, vec4(m1_current, m2_current, validity, 0.0));
+	imageStore(moments_current, trace_pixel, vec4(m1_current, m2_current, validity, confidence_current));
 }
 
 #endif
@@ -481,6 +637,22 @@ layout(set = 0, binding = 6) uniform texture2D history_texture;
 layout(set = 0, binding = 7) uniform texture2D moments_texture;
 layout(rgba16f, set = 0, binding = 8) uniform restrict writeonly image2D slot_radiance;
 layout(r16f, set = 0, binding = 9) uniform restrict writeonly image2D slot_coverage;
+layout(set = 0, binding = 10) uniform utexture2D tile_texture;
+
+float rtgi_route_confidence(vec2 p_tap_position, float p_count, float p_confidence, float p_m1, float p_m2) {
+	float target = max(rtgi.target_samples, 1.0);
+	float share = 1.0;
+	if ((rtgi.ddgi_wrong_bits & RTGI_DDGI_WRONG_ACTIVE) != 0u && p_count >= 2.0) {
+		ivec2 trace_pixel = clamp(ivec2(floor(p_tap_position + 0.5)), ivec2(0), rtgi.trace_size - 1);
+		bool marked = (texelFetch(tile_texture, trace_pixel / RTGI_TILE, 0).r & RTGI_TILE_REASON_DDGI_WRONG) != 0u;
+		float deviation = sqrt(max(p_m2 - p_m1 * p_m1, 0.0)) / max(p_m1, rtgi.ddgi_wrong_floor);
+		if (marked && deviation < rtgi.ddgi_wrong_noise) {
+			target = 1.0;
+			share = clamp(rtgi.ddgi_wrong_target / float(rtgi.n_target), 1e-3, 1.0);
+		}
+	}
+	return min(clamp(p_count / target, 0.0, 1.0), clamp(p_confidence / share, 0.0, 1.0));
+}
 
 void main() {
 	ivec2 slot_pixel = ivec2(gl_GlobalInvocationID.xy);
@@ -507,6 +679,9 @@ void main() {
 	float sum_count = 0.0;
 	float sum_validity = 0.0;
 	float sum_bilinear = 0.0;
+	float sum_m1 = 0.0;
+	float sum_m2 = 0.0;
+	float sum_confidence = 0.0;
 	for (int k = 0; k < 4; k++) {
 		ivec2 offset = ivec2(k & 1, k >> 1);
 		ivec2 tap = base + offset;
@@ -528,7 +703,11 @@ void main() {
 		}
 		sum_radiance += texelFetch(filter_input, tap, 0).rgb * w;
 		sum_count += tap_history.a * w;
-		sum_validity += texelFetch(moments_texture, tap, 0).z * w;
+		vec4 tap_moments = texelFetch(moments_texture, tap, 0);
+		sum_validity += tap_moments.z * w;
+		sum_m1 += tap_moments.x * w;
+		sum_m2 += tap_moments.y * w;
+		sum_confidence += tap_moments.w * w;
 		sum_weight += w;
 	}
 	if (sum_weight <= 1e-5 || sum_bilinear <= 1e-5) {
@@ -538,6 +717,9 @@ void main() {
 	}
 	float inverse_weight = 1.0 / sum_weight;
 	float confidence = clamp(sum_count * inverse_weight / max(rtgi.target_samples, 1.0), 0.0, 1.0);
+	if ((rtgi.flags & RTGI_FRAME_FLAG_MODULE_OUTPUT) != 0u && rtgi.n_target > 0u) {
+		confidence = rtgi_route_confidence(tap_position, sum_count * inverse_weight, sum_confidence * inverse_weight, sum_m1 * inverse_weight, sum_m2 * inverse_weight);
+	}
 	float validity = clamp(sum_validity * inverse_weight, 0.0, 1.0);
 	float support = clamp(sum_weight / sum_bilinear, 0.0, 1.0);
 	float coverage = confidence * validity * support;

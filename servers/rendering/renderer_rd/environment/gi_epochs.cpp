@@ -34,6 +34,11 @@
 
 namespace RendererRD {
 
+uint32_t GIEpochs::_wrap(uint64_t p_value) {
+	const uint32_t value = uint32_t(p_value);
+	return value == 0 ? 1 : value;
+}
+
 GIEpochs *GIEpochs::get_singleton() {
 	static GIEpochs instance;
 	return &instance;
@@ -91,6 +96,12 @@ GISceneTracker::Change GISceneTracker::update(uint64_t p_signature, const LocalV
 	return change;
 }
 
+void GIEpochs::sync_ray_scene(uint64_t p_feed_serial, uint32_t p_structure_generation) {
+	feed_live = p_feed_serial != 0;
+	feed_serial = feed_live ? _wrap(p_feed_serial) : 0;
+	structure_generation = p_structure_generation;
+}
+
 void GIEpochs::bump(Source p_source) {
 	if (p_source < SOURCE_COUNT) {
 		epochs[p_source] = next(epochs[p_source]);
@@ -137,6 +148,147 @@ void GIEpochs::fill_record(GIProviderRecord &r_record) const {
 	if (r_record.origin_epoch != 0) {
 		r_record.flags |= GI_PROVIDER_FLAG_ORIGIN_EPOCH;
 	}
+}
+
+void GIEpochs::merge_boxes(LocalVector<AABB> &r_boxes, real_t p_distance) {
+	uint32_t count = r_boxes.size();
+	if (count < 2) {
+		return;
+	}
+	struct MinX {
+		bool operator()(const AABB &p_a, const AABB &p_b) const { return p_a.position.x < p_b.position.x; }
+	};
+	r_boxes.sort_custom<MinX>();
+	LocalVector<uint8_t> alive;
+	alive.resize(count);
+	for (uint32_t i = 0; i < count; i++) {
+		alive[i] = 1;
+	}
+	bool merged = true;
+	while (merged) {
+		merged = false;
+		for (uint32_t i = 0; i < count; i++) {
+			if (!alive[i]) {
+				continue;
+			}
+			for (uint32_t j = i + 1; j < count; j++) {
+				if (r_boxes[j].position.x > r_boxes[i].position.x + r_boxes[i].size.x + p_distance) {
+					break;
+				}
+				if (alive[j] && r_boxes[i].grow(p_distance).intersects(r_boxes[j])) {
+					r_boxes[i] = r_boxes[i].merge(r_boxes[j]);
+					alive[j] = 0;
+					merged = true;
+				}
+			}
+		}
+	}
+	uint32_t out = 0;
+	for (uint32_t i = 0; i < count; i++) {
+		if (alive[i]) {
+			r_boxes[out++] = r_boxes[i];
+		}
+	}
+	r_boxes.resize(out);
+}
+
+void GIEpochs::publish_dirty_frame(const LocalVector<AABB> &p_boxes, bool p_overflow, real_t p_merge_distance) {
+	if (!feed_live) {
+		return;
+	}
+	merge_distance = p_merge_distance;
+	DirtyFrame &frame = ring[feed_serial % DIRTY_RING_FRAMES];
+	frame.serial = feed_serial;
+	frame.scene_epoch = epochs[SOURCE_SCENE];
+	frame.structure_generation = structure_generation;
+	frame.overflow = p_overflow || p_boxes.size() > DIRTY_RING_BOXES;
+	frame.boxes.clear();
+	for (uint32_t i = 0; i < p_boxes.size() && i < DIRTY_RING_BOXES; i++) {
+		frame.boxes.push_back(p_boxes[i]);
+	}
+}
+
+void GIEpochs::clear_dirty_feed() {
+	for (uint32_t i = 0; i < DIRTY_RING_FRAMES; i++) {
+		ring[i].serial = 0;
+		ring[i].overflow = false;
+		ring[i].boxes.clear();
+	}
+}
+
+GIEpochs::DirtyResult GIEpochs::_finish(LocalVector<AABB> &r_boxes, bool p_overflow) const {
+	merge_boxes(r_boxes, merge_distance);
+	if (r_boxes.size() > DIRTY_QUERY_BOXES) {
+		r_boxes.resize(DIRTY_QUERY_BOXES);
+		p_overflow = true;
+	}
+	if (p_overflow) {
+		return DIRTY_OVERFLOW;
+	}
+	return r_boxes.is_empty() ? DIRTY_NONE : DIRTY_BOXES;
+}
+
+GIEpochs::DirtyResult GIEpochs::get_dirty_boxes_since_serial(uint32_t p_since_serial, LocalVector<AABB> &r_boxes) const {
+	r_boxes.clear();
+	if (!feed_live) {
+		return DIRTY_OVERFLOW;
+	}
+	const uint32_t behind = feed_serial - p_since_serial;
+	if (behind == 0) {
+		return DIRTY_NONE;
+	}
+	if (behind > DIRTY_RING_FRAMES) {
+		return DIRTY_OVERFLOW;
+	}
+	bool overflow = false;
+	for (uint32_t k = 1; k <= behind; k++) {
+		const uint32_t serial = p_since_serial + k;
+		const DirtyFrame &frame = ring[serial % DIRTY_RING_FRAMES];
+		if (frame.serial != serial) {
+			r_boxes.clear();
+			return DIRTY_OVERFLOW;
+		}
+		overflow = overflow || frame.overflow;
+		for (const AABB &box : frame.boxes) {
+			r_boxes.push_back(box);
+		}
+	}
+	return _finish(r_boxes, overflow);
+}
+
+GIEpochs::DirtyResult GIEpochs::get_dirty_boxes(uint32_t p_since_scene_epoch, LocalVector<AABB> &r_boxes) const {
+	r_boxes.clear();
+	if (epochs[SOURCE_SCENE] == 0) {
+		return DIRTY_OVERFLOW;
+	}
+	if (p_since_scene_epoch == epochs[SOURCE_SCENE]) {
+		return DIRTY_NONE;
+	}
+	if (!feed_live) {
+		return DIRTY_OVERFLOW;
+	}
+	bool overflow = false;
+	bool covered = false;
+	for (uint32_t k = 0; k < DIRTY_RING_FRAMES; k++) {
+		const uint32_t serial = feed_serial - k;
+		const DirtyFrame &frame = ring[serial % DIRTY_RING_FRAMES];
+		if (frame.serial != serial) {
+			break;
+		}
+		if (int32_t(frame.scene_epoch - p_since_scene_epoch) <= 0) {
+			covered = true;
+			break;
+		}
+		overflow = overflow || frame.overflow;
+		for (const AABB &box : frame.boxes) {
+			r_boxes.push_back(box);
+		}
+	}
+	if (!covered) {
+		r_boxes.clear();
+		return DIRTY_OVERFLOW;
+	}
+	return _finish(r_boxes, overflow);
 }
 
 } // namespace RendererRD

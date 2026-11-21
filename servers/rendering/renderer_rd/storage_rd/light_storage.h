@@ -688,6 +688,13 @@ public:
 		return light->param[RSE::LIGHT_PARAM_TRANSMITTANCE_BIAS];
 	}
 
+	_FORCE_INLINE_ float light_get_direct_size(RID p_light) const {
+		const Light *light = light_owner.get_or_null(p_light);
+		ERR_FAIL_NULL_V(light, 0.0);
+
+		return light->direct.resolved_size(light->param[RSE::LIGHT_PARAM_SIZE]);
+	}
+
 	virtual bool light_get_reverse_cull_face_mode(RID p_light) const override {
 		const Light *light = light_owner.get_or_null(p_light);
 		ERR_FAIL_NULL_V(light, false);

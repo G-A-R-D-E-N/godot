@@ -140,6 +140,53 @@ uint ray_scene_hash(uint p_value) {
 	return p_value;
 }
 
+#ifdef RAY_SCENE_REPLAY
+bool ray_scene_replay = false;
+
+#define RAY_SCENE_MIN_TARGET 5.421011e-20
+
+#define RAY_SCENE_LIGHT_KEY(m_index, m_id) (ray_scene_replay ? (m_id) : (m_index))
+#define RAY_SCENE_PICKS(m_stream, m_race) (ray_scene_replay ? (m_race) : (m_stream))
+
+float ray_scene_precise_divide(float p_a, float p_b) {
+	precise float quotient = p_a / p_b;
+	precise float residual = fma(-quotient, p_b, p_a);
+	precise float corrected = fma(residual, 1.0 / p_b, quotient);
+	return corrected;
+}
+
+float ray_scene_race_exponential(uint p_seed_hash, uint p_id) {
+	uint k = ray_scene_hash(p_seed_hash ^ ray_scene_hash(p_id)) >> 9u;
+	if (k < 4194304u) {
+		return -log((float(k) + 0.5) * exp2(-23.0));
+	}
+	precise float v = (8388607.5 - float(k)) * exp2(-23.0);
+	precise float t = v / (2.0 - v);
+	precise float t2 = t * t;
+	precise float series = 1.0 / 13.0;
+	series = fma(series, t2, 1.0 / 11.0);
+	series = fma(series, t2, 1.0 / 9.0);
+	series = fma(series, t2, 1.0 / 7.0);
+	series = fma(series, t2, 1.0 / 5.0);
+	series = fma(series, t2, 1.0 / 3.0);
+	series = fma(series, t2, 1.0);
+	return 2.0 * t * series;
+}
+
+bool ray_scene_race_step(inout float r_key, inout uint r_id, uint p_seed_hash, uint p_id, float p_weight) {
+	float key = ray_scene_precise_divide(ray_scene_race_exponential(p_seed_hash, p_id), p_weight);
+	if (key < r_key || (key == r_key && p_id < r_id)) {
+		r_key = key;
+		r_id = p_id;
+		return true;
+	}
+	return false;
+}
+#else
+#define RAY_SCENE_LIGHT_KEY(m_index, m_id) (m_index)
+#define RAY_SCENE_PICKS(m_stream, m_race) (m_stream)
+#endif
+
 vec3 ray_scene_safe_inverse(vec3 p_direction) {
 	vec3 safe = mix(vec3(1e-20), abs(p_direction), greaterThan(abs(p_direction), vec3(1e-20)));
 	return 1.0 / (safe * mix(vec3(-1.0), vec3(1.0), greaterThanEqual(p_direction, vec3(0.0))));
@@ -378,6 +425,12 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 	uint exact_mask[RAY_SCENE_EXACT_LIGHTS];
 	uint chosen_mask = RAY_SCENE_ALL_CASTERS;
 	uint local_count = 0u;
+#ifdef RAY_SCENE_REPLAY
+	uint exact_id[RAY_SCENE_EXACT_LIGHTS];
+	uint race_seed = ray_scene_hash(p_seed);
+	float race_key = uintBitsToFloat(0x7f800000u);
+	uint race_id = 0xFFFFFFFFu;
+#endif
 	for (uint i = 0u; i < ray_scene.light_count; i++) {
 		RaySceneLight light = ray_scene_lights.data[i];
 		vec3 to_light;
@@ -390,7 +443,7 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 			if (dot(light.direction, offset) <= 0.0) {
 				continue;
 			}
-			uint rect_seed = ray_scene_hash(p_seed + 0x68bc21ebu) ^ (i * 0x9e3779b9u);
+			uint rect_seed = ray_scene_hash(p_seed + 0x68bc21ebu) ^ (RAY_SCENE_LIGHT_KEY(i, light.pad) * 0x9e3779b9u);
 			vec2 rect_uv = vec2(float(ray_scene_hash(rect_seed) >> 8u), float(ray_scene_hash(rect_seed ^ 0x2f8f3d5bu) >> 8u)) * (2.0 / 16777216.0) - 1.0;
 			vec3 relative = light.position + light.half_a * rect_uv.x + light.half_b * rect_uv.y - p_position;
 			distance = length(relative);
@@ -417,7 +470,7 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 		}
 		vec3 light_value = light.color * (light.energy * attenuation * n_dot_l / 3.14159265359);
 		if (light.type == RAY_SCENE_LIGHT_DIRECTIONAL) {
-			if (ray_scene_unshadowed(p_position, p_normal, p_bias, to_light, distance, light.caster_mask, (p_seed + i * 0x632be5abu) ^ 0x85ebca6bu)) {
+			if (ray_scene_unshadowed(p_position, p_normal, p_bias, to_light, distance, light.caster_mask, (p_seed + RAY_SCENE_LIGHT_KEY(i, light.pad) * 0x632be5abu) ^ 0x85ebca6bu)) {
 				light_sum += light_value;
 			}
 			continue;
@@ -426,15 +479,23 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 		if (weight <= 0.0) {
 			continue;
 		}
+#ifdef RAY_SCENE_REPLAY
+		if (ray_scene_replay && !(weight >= RAY_SCENE_MIN_TARGET && !isinf(weight))) {
+			continue;
+		}
+#endif
 		total_weight += weight;
 		if (local_count < RAY_SCENE_EXACT_LIGHTS) {
 			exact_light[local_count] = light_value;
 			exact_direction[local_count] = to_light;
 			exact_distance[local_count] = distance;
 			exact_mask[local_count] = light.caster_mask;
+#ifdef RAY_SCENE_REPLAY
+			exact_id[local_count] = light.pad;
+#endif
 		}
 		local_count++;
-		if (float(ray_scene_hash(p_seed ^ (i * 0x9e3779b9u)) >> 8u) * total_weight < weight * 16777216.0) {
+		if (RAY_SCENE_PICKS(float(ray_scene_hash(p_seed ^ (i * 0x9e3779b9u)) >> 8u) * total_weight < weight * 16777216.0, ray_scene_race_step(race_key, race_id, race_seed, light.pad, weight))) {
 			chosen_light = light_value;
 			chosen_direction = to_light;
 			chosen_distance = distance;
@@ -444,7 +505,7 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 	}
 	if (local_count <= RAY_SCENE_EXACT_LIGHTS) {
 		for (uint i = 0u; i < local_count; i++) {
-			if (ray_scene_unshadowed(p_position, p_normal, p_bias, exact_direction[i], exact_distance[i], exact_mask[i], p_seed + (i + 0x10000u) * 0x632be5abu)) {
+			if (ray_scene_unshadowed(p_position, p_normal, p_bias, exact_direction[i], exact_distance[i], exact_mask[i], p_seed + (RAY_SCENE_LIGHT_KEY(i, exact_id[i]) + 0x10000u) * 0x632be5abu)) {
 				light_sum += exact_light[i];
 			}
 		}
@@ -453,3 +514,5 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 	}
 	return light_sum;
 }
+
+#define gi_hit_direct_light ray_scene_direct_light

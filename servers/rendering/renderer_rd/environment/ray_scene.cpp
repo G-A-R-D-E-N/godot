@@ -617,6 +617,14 @@ void RayScene::pack_area(const Basis &p_basis, const Vector2 &p_area_size, Light
 	r_light.area = p_area_size.x * p_area_size.y;
 }
 
+void RayScene::pack_shape(RSE::LightType p_type, const Basis &p_basis, const Vector2 &p_area_size, float p_direct_size, Light &r_light) {
+	if (p_type == RSE::LIGHT_AREA) {
+		pack_area(p_basis, p_area_size, r_light);
+	} else if (p_type != RSE::LIGHT_DIRECTIONAL) {
+		r_light.area = p_direct_size;
+	}
+}
+
 void RayScene::_pack_light(RID p_light_instance, bool p_physical_units, float p_exposure, uint32_t p_limit, LocalVector<Light> &r_lights) {
 	LightStorage *light_storage = LightStorage::get_singleton();
 	if (r_lights.size() >= p_limit || !light_storage->owns_light_instance(p_light_instance)) {
@@ -659,9 +667,7 @@ void RayScene::_pack_light(RID p_light_instance, bool p_physical_units, float p_
 	packed.inv_spot_attenuation = 1.0f / MAX(0.0001f, light_storage->light_get_param(light, RSE::LIGHT_PARAM_SPOT_ATTENUATION));
 	packed.caster_mask = light_storage->light_get_shadow_caster_mask(light);
 	packed.pad = p_light_instance.get_local_index();
-	if (type == RSE::LIGHT_AREA) {
-		pack_area(transform.basis, area_size, packed);
-	}
+	pack_shape(type, transform.basis, area_size, light_storage->light_get_direct_size(light), packed);
 	if (type != RSE::LIGHT_DIRECTIONAL) {
 		census.candidates++;
 		census.area_candidates += type == RSE::LIGHT_AREA;
@@ -789,6 +795,16 @@ bool RayScene::shell_material_range(RID p_instance, uint32_t &r_offset, uint32_t
 
 void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const Vector<RID> &p_directional_lights, RID p_camera_attributes, const Vector3 &p_camera_position) {
 	MutexLock lock(mesh_mutex);
+	feed_log_mode = CLAMP(int(GLOBAL_GET_CACHED(int, "rendering/global_illumination/ray_scene/debug_dirty_feed")), 0, 2);
+	if (feed_log_mode != 0) {
+		acquire_dirty_feed(FEED_DEBUG);
+	} else if (feed_consumers.get() & FEED_DEBUG) {
+		release_dirty_feed(FEED_DEBUG);
+	}
+	const bool feed_on = feed_consumers.get() != 0;
+	if (feed_on) {
+		feed_update_start = OS::get_singleton()->get_ticks_usec();
+	}
 	_backend_tick();
 
 	const Vector3 snapped = (p_camera_position / ANCHOR_GRID).floor() * ANCHOR_GRID;
@@ -847,6 +863,9 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			}
 		}
 	}
+	if (feed_on || feed_was_on) {
+		_feed_begin();
+	}
 	LocalVector<BuildPrimitive> primitives;
 	uint32_t signature = HASH_MURMUR3_SEED;
 	uint64_t scene_signature = 0;
@@ -886,6 +905,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		const uint32_t cast_flags = shadow_cast_flags(geometry->data->cast_shadows);
 		uint64_t material_candidates = 0;
 		uint64_t candidates = 0;
+		uint32_t feed_state = hash_murmur3_one_32(geometry->layer_mask);
 
 		for (uint32_t s = 0; s < mesh->surface_count; s++) {
 			RID material = geometry->data->material_override;
@@ -904,6 +924,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			}
 			materials.push_back(cached->entry);
 			materials[materials.size() - 1].flags |= cast_flags;
+			feed_state = feed_surface_state(feed_state, materials[materials.size() - 1].flags, materials[materials.size() - 1].coverage);
 			if (accel) {
 				material_candidates |= surface_candidates(s, cached->entry.flags);
 				candidates |= surface_candidates(s, materials[materials.size() - 1].flags);
@@ -916,8 +937,10 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 				}
 			}
 		}
+		bool hw_instance_usable = true;
 		if (accel) {
 			_hw_instance(mesh_rid, *mesh, material_candidates, candidates, transform, instance);
+			hw_instance_usable = hw_usable[hw_usable.size() - 1] != 0;
 		}
 
 		const AABB bounds = transform.xform(mesh->aabb);
@@ -928,6 +951,9 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			primitive.centroid[k] = bounds.position[k] + bounds.size[k] * 0.5f;
 		}
 		primitive.index = instances.size();
+		if (feed_on) {
+			_feed_observe(geometry, geometry->transform, mesh_rid, *mesh, hw_instance_usable, feed_state);
+		}
 		primitives.push_back(primitive);
 		instances.push_back(instance);
 		signature = hash_murmur3_buffer(&instance, sizeof(Instance), signature);
@@ -1013,4 +1039,13 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		RD::get_singleton()->set_resource_name(scene_data_buffer, "Ray Scene Data");
 	}
 	RD::get_singleton()->buffer_update(scene_data_buffer, 0, sizeof(SceneData), &scene_data);
+
+	if (feed_on) {
+		_feed_end();
+	}
+	GIEpochs::get_singleton()->sync_ray_scene(feed_was_on ? feed_serial : 0, structure_generation);
+	if (feed_was_on) {
+		GIEpochs::get_singleton()->publish_dirty_frame(feed.boxes, feed.overflow, real_t(GLOBAL_GET_CACHED(float, "rendering/global_illumination/ray_scene/dirty_merge_distance")));
+		_feed_log_line();
+	}
 }

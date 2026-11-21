@@ -33,9 +33,11 @@
 #include "core/math/projection.h"
 #include "core/math/transform_3d.h"
 #include "core/templates/paged_array.h"
+#include "core/templates/safe_refcount.h"
 #include "core/variant/dictionary.h"
 #include "servers/rendering/renderer_rd/environment/ddgi.h"
 #include "servers/rendering/renderer_rd/environment/gi_epochs.h"
+#include "servers/rendering/renderer_rd/environment/gi_module_hooks.h"
 #include "servers/rendering/renderer_rd/environment/rtgi_restarts.h"
 #include "servers/rendering/renderer_rd/pipeline_deferred_rd.h"
 #include "servers/rendering/renderer_rd/shaders/environment/rtgi.glsl.gen.h"
@@ -78,7 +80,18 @@ public:
 		FRAME_FLAG_SSGI_VALID_TEXTURE = 32,
 		FRAME_FLAG_SOFT_CUT = 64,
 		FRAME_FLAG_RESTART_SPHERES = 128,
+		FRAME_FLAG_MODULE_OUTPUT = 256,
+		FRAME_FLAG_REPLAY = 512,
 	};
+
+	enum DdgiWrongBits {
+		DDGI_WRONG_EVENTS = 1,
+		DDGI_WRONG_MEMORY = 2,
+		DDGI_WRONG_ACTIVE = 4,
+		DDGI_WRONG_READ = 8,
+	};
+
+	static constexpr uint32_t TILE_MEMORY_FRAMES = 255;
 
 	enum CutReason {
 		CUT_NONE,
@@ -87,6 +100,7 @@ public:
 		CUT_CAMERA,
 		CUT_BACKEND,
 		CUT_REQUEST,
+		CUT_MODULE,
 		CUT_MAX
 	};
 
@@ -100,6 +114,8 @@ public:
 		COUNTER_BACKFACE,
 		COUNTER_HISTORY_REJECTS,
 		COUNTER_RESTARTED,
+		COUNTER_TILES_WRONG_EVENTS,
+		COUNTER_TILES_WRONG_MEMORY,
 		COUNTER_MAX
 	};
 
@@ -128,6 +144,14 @@ public:
 		uint32_t restart_quiet_frames = 0;
 		float directional_jump_degrees = 2.0f;
 		float directional_jump_floor = 0.0f;
+		bool ddgi_wrong_events = false;
+		bool ddgi_wrong_memory = false;
+		uint32_t ddgi_wrong_frames = 16;
+		float ddgi_wrong_tau = 0.5f;
+		float ddgi_wrong_target = 2.0f;
+		float ddgi_wrong_noise = 0.25f;
+		float ddgi_wrong_floor = 0.05f;
+		float ddgi_wrong_rho = 1.0f;
 	};
 
 	struct FrameUBO {
@@ -167,10 +191,22 @@ public:
 		uint32_t restart_count;
 
 		float restart_spheres[RtgiRestarts::MAX_SPHERES][4];
+
+		uint32_t ddgi_wrong_frames;
+		uint32_t ddgi_wrong_bits;
+		uint32_t n_target;
+		float ddgi_wrong_rho;
+
+		float ddgi_wrong_tau;
+		float ddgi_wrong_target;
+		float ddgi_wrong_noise;
+		float ddgi_wrong_floor;
 	};
 
 	static_assert(offsetof(FrameUBO, restart_spheres) == 368);
-	static_assert(sizeof(FrameUBO) == 624);
+	static_assert(offsetof(FrameUBO, ddgi_wrong_frames) == 624);
+	static_assert(offsetof(FrameUBO, ddgi_wrong_tau) == 640);
+	static_assert(sizeof(FrameUBO) == 656);
 
 	struct TraceUBO {
 		float inv_projection[16];
@@ -224,6 +260,7 @@ public:
 		bool previous_hardware = false;
 		Transform3D previous_transform;
 		Projection previous_projection;
+		Projection previous_drawn_projection;
 		GIEpochs::Snapshot previous_epochs = {};
 		String refused;
 		float last_ray_fraction = 0.0f;
@@ -239,17 +276,34 @@ public:
 		uint64_t spheres_dropped = 0;
 		uint64_t spheres_behind = 0;
 		uint64_t events_lost = 0;
+		LocalVector<DDGILightTracker::Event> backend_events;
+		uint32_t backend_events_lost = 0;
 		uint64_t event_repeats = 0;
 		uint64_t region_crossings = 0;
 		uint64_t directional_jumps = 0;
 		uint64_t directional_repeats = 0;
+		bool previous_denoise = false;
+		bool backend_active = false;
+		uint64_t backend_frames = 0;
+		uint64_t backend_refusals = 0;
+		bool backend_ran = false;
+		bool tile_memory_written = false;
+		uint32_t last_ddgi_wrong_bits = 0;
+		uint64_t r5_frames = 0;
+		uint64_t r5_overflows = 0;
+		uint64_t module_output_frames = 0;
+		uint64_t route_frames = 0;
+		uint32_t last_n_target = 0;
+		RenderSceneBuffersRD *owner = nullptr;
 
-		virtual void configure(RenderSceneBuffersRD *p_render_buffers) override {}
-		virtual void free_data() override {}
+		virtual void configure(RenderSceneBuffersRD *p_render_buffers) override { owner = p_render_buffers; }
+		virtual void free_data() override;
 	};
 
 private:
 	static RtgiPass *singleton;
+	static SafeNumeric<uint64_t> release_free_data_total;
+	static SafeNumeric<uint64_t> release_pass_total;
 
 	RtgiShaderRD shader;
 	RID shader_version;
