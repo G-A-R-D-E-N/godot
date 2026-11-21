@@ -35,7 +35,6 @@
 
 #include "core/config/project_settings.h"
 #include "core/variant/variant.h"
-#include "servers/rendering/renderer_rd/environment/gi_provider.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/environment/rtgi.h"
 
@@ -356,9 +355,6 @@ bool RestirGiBackend::begin_frame(const RtgiFrameInputs &p_inputs) {
 	if (!p_inputs.buffers) {
 		return _refuse("no buffers");
 	}
-	if (p_inputs.candidate_layout_version != RTGI_CANDIDATE_LAYOUT_VERSION) {
-		return _refuse("candidate layout version");
-	}
 	if (p_inputs.trace_size.x <= 0 || p_inputs.trace_size.y <= 0 || p_inputs.candidate_first.is_null() || p_inputs.candidate_second.is_null() || p_inputs.geo_position.is_null() || p_inputs.geo_normal.is_null() || p_inputs.previous_geo_position.is_null() || p_inputs.previous_geo_normal.is_null()) {
 		return _refuse("missing inputs");
 	}
@@ -429,12 +425,6 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	if (options.freeze && state.have_history) {
 		r_output.radiance = state.resources.radiance;
 		r_output.coverage = state.resources.coverage;
-		r_output.debug = p_inputs.debug_view >= 0 ? state.resources.debug : RID();
-		r_output.record.flags = GI_PROVIDER_FLAG_SAMPLE_COUNT | GI_PROVIDER_FLAG_CONFIDENCE | GI_PROVIDER_FLAG_HISTORY | GI_PROVIDER_FLAG_SCENE_EPOCH | GI_PROVIDER_FLAG_LIGHT_EPOCH | GI_PROVIDER_FLAG_SKY_EPOCH | GI_PROVIDER_FLAG_ORIGIN_EPOCH;
-		const uint32_t n_target = uint32_t(CLAMP(_gi_int("n_target"), 1, 64));
-		r_output.record.sample_count = MIN(state.frames_since_cut, n_target);
-		r_output.record.validity = 1.0f;
-		r_output.record.confidence = gi_provider_confidence_from_samples(r_output.record.sample_count, n_target);
 		r_output.valid = true;
 		if (_gi_text("denoise") == "r2") {
 			RestirGiInputs frozen;
@@ -835,8 +825,6 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	}
 	summary.stats_valid = false;
 	summary.debug_valid = p_inputs.debug_view >= 0 && state.resources.debug.is_valid();
-	float mean_m = float(MIN(state.frames_since_cut, params.n_target));
-	float validity = use_history ? 1.0f : 0.0f;
 	if (options.readback) {
 		summary.stats = RestirGiCore::read_stats(state.resources);
 		summary.stats_valid = true;
@@ -903,19 +891,10 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 		if (options.accumulate_from >= 0 && record_index >= options.accumulate_from && record_index < options.accumulate_to) {
 			_accumulate_pixels(state.resources);
 		}
-		if (summary.stats.geometry > 0.0) {
-			mean_m = float(summary.stats.m_sum / summary.stats.geometry);
-			validity = float(summary.stats.output_pixels / summary.stats.geometry);
-		}
 	}
 
 	r_output.radiance = state.resources.radiance;
 	r_output.coverage = state.resources.coverage;
-	r_output.debug = p_inputs.debug_view >= 0 ? state.resources.debug : RID();
-	r_output.record.flags = GI_PROVIDER_FLAG_SAMPLE_COUNT | GI_PROVIDER_FLAG_CONFIDENCE | GI_PROVIDER_FLAG_HISTORY | GI_PROVIDER_FLAG_SCENE_EPOCH | GI_PROVIDER_FLAG_LIGHT_EPOCH | GI_PROVIDER_FLAG_SKY_EPOCH | GI_PROVIDER_FLAG_ORIGIN_EPOCH;
-	r_output.record.sample_count = uint32_t(Math::round(mean_m));
-	r_output.record.validity = CLAMP(validity, 0.0f, 1.0f);
-	r_output.record.confidence = gi_provider_confidence_from_samples(r_output.record.sample_count, params.n_target);
 	r_output.valid = true;
 	r_output.denoise = denoise;
 	r_output.history_cut = cut;

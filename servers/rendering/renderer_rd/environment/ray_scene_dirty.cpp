@@ -108,6 +108,14 @@ void RayScene::_feed_begin() {
 	}
 }
 
+void RayScene::_feed_push_raw(const AABB &p_box) {
+	if (feed_raw.size() < FEED_RAW_LIMIT) {
+		feed_raw.push_back(p_box);
+	} else {
+		feed_raw_overflow = true;
+	}
+}
+
 void RayScene::_feed_observe(const void *p_key, const Transform3D &p_world, RID p_mesh_rid, const MeshEntry &p_mesh, bool p_usable, uint32_t p_state) {
 	feed_seen++;
 	FeedRecord *record = feed_records.getptr(p_key);
@@ -118,22 +126,14 @@ void RayScene::_feed_observe(const void *p_key, const Transform3D &p_world, RID 
 			return;
 		}
 		feed.changes++;
-		if (feed_raw.size() < FEED_RAW_LIMIT) {
-			feed_raw.push_back(record->bounds);
-		} else {
-			feed_raw_overflow = true;
-		}
+		_feed_push_raw(record->bounds);
 		record->world = p_world;
 		record->mesh = p_mesh_rid;
 		record->build_serial = p_mesh.build_serial;
 		record->usable = uint8_t(p_usable);
 		record->state = p_state;
 		record->bounds = p_world.xform(p_mesh.aabb);
-		if (feed_raw.size() < FEED_RAW_LIMIT) {
-			feed_raw.push_back(record->bounds);
-		} else {
-			feed_raw_overflow = true;
-		}
+		_feed_push_raw(record->bounds);
 		record->history |= 1;
 		if (!record->listed) {
 			record->listed = true;
@@ -151,11 +151,7 @@ void RayScene::_feed_observe(const void *p_key, const Transform3D &p_world, RID 
 	entry.bounds = p_world.xform(p_mesh.aabb);
 	if (!feed_baseline) {
 		feed.changes++;
-		if (feed_raw.size() < FEED_RAW_LIMIT) {
-			feed_raw.push_back(entry.bounds);
-		} else {
-			feed_raw_overflow = true;
-		}
+		_feed_push_raw(entry.bounds);
 		entry.history = 1;
 		entry.listed = true;
 		feed_active.push_back(p_key);
@@ -174,11 +170,7 @@ void RayScene::_feed_end() {
 		for (const void *key : stale) {
 			const FeedRecord *record = feed_records.getptr(key);
 			feed.changes++;
-			if (feed_raw.size() < FEED_RAW_LIMIT) {
-				feed_raw.push_back(record->bounds);
-			} else {
-				feed_raw_overflow = true;
-			}
+			_feed_push_raw(record->bounds);
 			feed_records.erase(key);
 		}
 	}
@@ -236,14 +228,8 @@ void RayScene::_feed_end() {
 	feed.structure_generation = structure_generation;
 	feed.tracked = feed_records.size();
 	feed.mover_count = mover_count;
-	feed.boxes.clear();
-	for (const AABB &box : feed_raw) {
-		feed.boxes.push_back(box);
-	}
-	feed.mover_boxes.clear();
-	for (const AABB &box : movers) {
-		feed.mover_boxes.push_back(box);
-	}
+	feed.boxes = feed_raw;
+	feed.mover_boxes = movers;
 	feed_generation_before = structure_generation;
 	if (feed_frame_needs_epoch(feed.changes, feed_raw_overflow, GIEpochs::get_singleton()->get(GIEpochs::SOURCE_SCENE) != feed_epoch_before)) {
 		GIEpochs::get_singleton()->bump(GIEpochs::SOURCE_SCENE);

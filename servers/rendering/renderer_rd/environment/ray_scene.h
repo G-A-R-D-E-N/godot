@@ -74,10 +74,6 @@ public:
 	static constexpr double ANCHOR_GRID = 64.0;
 
 	enum FeedConsumer : uint32_t {
-		FEED_SURFELS = 1,
-		FEED_DDGI = 2,
-		FEED_REFLECTIONS = 4,
-		FEED_RTGI = 8,
 		FEED_MODULE = 16,
 		FEED_DEBUG = 32,
 	};
@@ -519,6 +515,7 @@ private:
 	uint32_t hw_group_count = 0;
 
 	void _feed_begin();
+	void _feed_push_raw(const AABB &p_box);
 	void _feed_observe(const void *p_key, const Transform3D &p_world, RID p_mesh_rid, const MeshEntry &p_mesh, bool p_usable, uint32_t p_state);
 	void _feed_end();
 	void _feed_stop();

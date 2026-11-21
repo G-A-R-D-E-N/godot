@@ -12,9 +12,8 @@ into the TLAS, so an anchor step (`ANCHOR_GRID`, 64 m) changes nothing in the fe
 
 | Symbol | File | Meaning |
 |---|---|---|
-| `RayScene::acquire_dirty_feed(FeedConsumer)` / `release_dirty_feed` | `ray_scene.h` | bit mask of holders (`FEED_SURFELS`, `FEED_DDGI`, `FEED_REFLECTIONS`, `FEED_RTGI`, `FEED_MODULE`, `FEED_DEBUG`). No holder: `RayScene::update` only tests one bool (`feed_on`) and the map is not kept |
-| `RayScene::get_dirty_feed()` | `ray_scene.h` | `DirtyFeed` of the last update: `boxes` (merged, at most `dirty_box_cap`), `mover_boxes`, `overflow`, `baseline`, `structure_generation`, `serial`, `changes`, `tracked`, `mover_count` |
-| `GIEpochs::get_feed_serial()`, `get_structure_generation()`, `is_feed_live()` | `gi_epochs.h` | the feed serial (one per update while the feed is held, never 0) and the structure generation, copied by `sync_ray_scene` |
+| `RayScene::acquire_dirty_feed(FeedConsumer)` / `release_dirty_feed` | `ray_scene.h` | bit mask of holders (`FEED_MODULE`, `FEED_DEBUG`). No holder: `RayScene::update` only tests one bool (`feed_on`) and the map is not kept |
+| `GIEpochs::get_feed_serial()`, `is_feed_live()` | `gi_epochs.h` | the feed serial (one per update while the feed is held, never 0), copied by `sync_ray_scene` |
 | `GIEpochs::get_dirty_boxes_since_serial(serial, boxes)` | `gi_epochs.cpp` | boxes of the frames after `serial`, merged, at most 64 |
 | `GIEpochs::get_dirty_boxes(since_scene_epoch, boxes)` | `gi_epochs.cpp` | the H-E form: boxes of the frames whose scene epoch is newer than the given one |
 
@@ -60,13 +59,13 @@ box list of an overflow result holds the first 64 merged boxes and is not a comp
 back), and (b) in `_feed_end` when the previous update tracked at least one instance and none of them is still there (reload
 or unload of the whole instance set; not bumped again if (a) happened since the last published update). A single instance
 added or removed never bumps it. (b) needs the feed to be held; (a) counts always. This ray scene has no owner mask and no
-`_invalidate_captures`, so there is no third bump site. `GIEpochs::sync_ray_scene(feed serial, structure generation)` copies
-both at the end of every `update`.
+`_invalidate_captures`, so there is no third bump site. `GIEpochs::sync_ray_scene(feed serial)` copies the serial at the end
+of every `update`. The generation stays in `RayScene`; the feed log line reads it.
 
 ## Ring (`GIEpochs`)
 
-16 frames, at most `DIRTY_RING_BOXES` (32) boxes per frame, tagged with the serial, the scene epoch at the end of the update
-and the structure generation. A read older than 16 frames, a slot that does not carry the expected serial (the feed was off in
+16 frames, at most `DIRTY_RING_BOXES` (32) boxes per frame, tagged with the serial and the scene epoch at the end of the update.
+A read older than 16 frames, a slot that does not carry the expected serial (the feed was off in
 between) or a feed that is not held gives `DIRTY_OVERFLOW`. The ring is cleared when the last consumer releases the feed.
 `GIEpochs::SOURCE_SCENE` is bumped by `RayScene::update` through `GISceneTracker` (`scene_tracker.update`, when the hash of
 the instances' meshes, transforms, layer masks, build serials and material records changes) and by `_feed_end` when the feed

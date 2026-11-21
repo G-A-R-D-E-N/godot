@@ -1956,7 +1956,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	if (feed_on) {
 		_feed_end();
 	}
-	GIEpochs::get_singleton()->sync_ray_scene(feed_was_on ? feed_serial : 0, structure_generation);
+	GIEpochs::get_singleton()->sync_ray_scene(feed_was_on ? feed_serial : 0);
 	if (feed_was_on) {
 		GIEpochs::get_singleton()->publish_dirty_frame(feed.boxes, feed.overflow, real_t(GLOBAL_GET_CACHED(float, "rendering/global_illumination/ray_scene/dirty_merge_distance")));
 		_feed_log_line();
