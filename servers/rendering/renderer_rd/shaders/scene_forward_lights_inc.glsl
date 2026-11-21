@@ -537,6 +537,20 @@ bool direct_has_rest = false;
 bool direct_ratio_loaded = false;
 vec3 direct_ratio = vec3(1.0);
 
+void direct_own_load(ivec2 p_pixel) {
+	if (direct_own >= 0) {
+		return;
+	}
+	direct_own = min(textureSize(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), 0).z - 1, 7);
+	for (int i = 0; i < 7; i++) {
+		direct_own_slots[i] = 0u;
+		if (i < direct_own) {
+			direct_own_slots[i] = uint(round(texelFetch(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), ivec3(p_pixel, i), 0).r * 65535.0));
+		}
+	}
+	direct_has_rest = direct_own > 0 && texelFetch(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), ivec3(p_pixel, direct_own), 0).r > 0.0;
+}
+
 bool direct_shadow_factor(uint p_flags, vec3 p_color, bool p_use_rest, inout half r_shadow) {
 	ivec2 pixel = ivec2(gl_FragCoord.xy);
 	if (sc_use_direct_resampled()) {
@@ -547,16 +561,7 @@ bool direct_shadow_factor(uint p_flags, vec3 p_color, bool p_use_rest, inout hal
 			return true;
 		}
 	}
-	if (direct_own < 0) {
-		direct_own = min(textureSize(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), 0).z - 1, 7);
-		for (int i = 0; i < 7; i++) {
-			direct_own_slots[i] = 0u;
-			if (i < direct_own) {
-				direct_own_slots[i] = uint(round(texelFetch(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), ivec3(pixel, i), 0).r * 65535.0));
-			}
-		}
-		direct_has_rest = direct_own > 0 && texelFetch(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), ivec3(pixel, direct_own), 0).r > 0.0;
-	}
+	direct_own_load(pixel);
 	uint slot = (p_flags >> 1) & 0xFFFFu;
 	half strength = half(float((p_flags >> 17) & 0xFFu) / 255.0);
 	for (int i = 0; i < 7; i++) {
