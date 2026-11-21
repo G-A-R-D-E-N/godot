@@ -24,7 +24,7 @@ box list of an overflow result holds the first 64 merged boxes and is not a comp
 
 ## How the diff works (`ray_scene_dirty.cpp`)
 
-- Key: the geometry instance pointer. State per key: world transform (compared bit for bit), mesh RID, `MeshEntry::generation`
+- Key: the geometry instance pointer. State per key: world transform (compared bit for bit), mesh RID, `MeshEntry::build_serial`
   (changes whenever a mesh is rebuilt), the hardware-usable bit (an instance that the hardware TLAS cannot hold yet counts as
   absent for hardware rays), last world box (mesh AABB transformed by the world transform), 8-bit change history.
 - `_feed_begin` (before the second instance loop of `RayScene::update`), `_feed_observe` (one call per instance that enters the
