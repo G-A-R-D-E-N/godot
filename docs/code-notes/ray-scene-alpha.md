@@ -5,13 +5,15 @@ cut-outs: rays pass through the holes of foliage, grates and fences instead of s
 off by default. With `rendering/global_illumination/ray_scene/alpha_test` false, the ray scene uploads, shader defines
 and bindings are the same as without this code.
 
-The DDGI trace shader reads cut-outs in all four of its modes (probe, surfel, debug rays and the per-pixel ray-traced
-GI trace `TRACE_MODE_RTGI`), and in the shadow rays those modes trace. The ReSTIR GI module's ray shader
-(`modules/gi_restir/shaders/restir_gi.glsl`) reads them too, in every ray variant, so the rays that re-trace and
-re-shade the `TRACE_MODE_RTGI` samples test the same cut-outs. In Stochastic mode they draw the same random value as
-the ray that made the sample only where they pass its seed (see "Bindings and defines"). The ray-traced direct shadow
-pass (`direct_shadows.cpp`) builds its trace shaders without the alpha define, so it does not apply cut-outs. A
-cut-out surface casts a solid shadow there, while DDGI and ReSTIR GI rays pass through its holes.
+The DDGI trace shader reads cut-outs in all four of its modes (probe, surfel, debug rays and the per-pixel ray-traced GI
+trace `TRACE_MODE_RTGI`), and in the shadow rays those modes trace. The ReSTIR GI module's ray shader
+(`modules/gi_restir/shaders/restir_gi.glsl`) gets the alpha define in every mode (the sky epoch pass traces no ray, so
+it is unused there), and so do its fold-dump and lineage shaders, so every ray the module traces tests the same
+cut-outs: the candidate rays of its own sampler (`MODE_SOURCE`), the visibility tests of temporal and spatial reuse and
+their sky re-read forms, and the re-trace and re-shade rays of FINAL and VALIDATE. In Stochastic mode its re-tests draw
+the same random value as the ray that made the sample only where they pass its seed (see "Bindings and defines"). The
+ray-traced direct shadow pass (`direct_shadows.cpp`) builds its trace shaders without the alpha define, so it does not
+apply cut-outs. A cut-out surface casts a solid shadow there, while DDGI and ReSTIR GI rays pass through its holes.
 
 ## Settings (`servers/rendering/rendering_server.cpp`)
 
@@ -263,13 +265,14 @@ cut-out surface casts a solid shadow there, while DDGI and ReSTIR GI rays pass t
   probability about c. A failed re-trace sets `hit_here` false, so the sample counts as blocked (weight 0,
   `INFO_VIS_BLOCKED`) and its Lo is not refreshed. Cut-out edges therefore come out darker by about a further factor
   c, not only noisier, and visibility there changes from pixel to pixel and frame to frame. Coverage 0 and 1, and
-  Threshold mode, give the same answer every time. The BLEND coverage test already behaves this way. Which fix the
-  module takes is open: seeding `rs_visible` and `rs_fresh_lo` from the stored sample, or keeping a sample whose
-  re-trace failed on a cut-out hit. Threshold for the module's variants alone does not fix it with `gi/replay_seed`,
-  because the `TRACE_MODE_RTGI` ray that makes the sample stays stochastic, so stored-seed re-hits would disagree on
-  partly covered texels. The module reads the dirty-box feed (`FEED_MODULE`), whose state word hashes the final
-  material flags, alpha index bits included (`RayScene::feed_surface_state`): a surface that starts or stops being a
-  cut-out publishes a box, a READY layer refilled with new contents does not.
+  Threshold mode, give the same answer every time. The BLEND coverage test already behaves this way. The module keeps
+  the alpha define. A later ReSTIR GI change is planned to make `rs_visible` and `rs_fresh_lo` draw the cut-out with
+  the stored sample's seed in Stochastic mode, rather than keeping a sample whose re-trace failed on a cut-out hit;
+  until then the edge bias above stands. Threshold for the module's variants alone does not fix it with
+  `gi/replay_seed`, because the `TRACE_MODE_RTGI` ray that makes the sample stays stochastic, so stored-seed
+  re-hits would disagree on partly covered texels. The module reads the dirty-box feed (`FEED_MODULE`), whose state
+  word hashes the final material flags, alpha index bits included (`RayScene::feed_surface_state`): a surface that
+  starts or stops being a cut-out publishes a box, a READY layer refilled with new contents does not.
 - `servers/rendering/renderer_rd/environment/direct_shadows.cpp`: its `defines` do not include
   `RayScene::alpha_shader_defines()`. It still binds its ray scene set through `append_uniforms`, so the alpha
   bindings are pushed and its shader does not declare them. To apply cut-outs there, add the call to its defines;
