@@ -1600,6 +1600,14 @@ AABB RendererSceneRenderRD::ray_scene_get_region(const Vector3 &p_camera_positio
 	return AABB(p_camera_position - half, half * 2.0);
 }
 
+AABB RendererSceneRenderRD::ray_scene_get_light_region(const Vector3 &p_camera_position) {
+	const AABB region = ray_scene_get_region(p_camera_position);
+	if (!region.has_volume() || GLOBAL_GET_CACHED(int, "rendering/global_illumination/ray_scene/light_pick_mode") != RendererRD::RayScene::LIGHT_PICK_STABLE) {
+		return region;
+	}
+	return RendererRD::RayScene::get_singleton()->get_light_region(p_camera_position, region.size * 0.5);
+}
+
 void RendererSceneRenderRD::ray_scene_update(const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const Vector<RID> &p_directional_lights, RID p_camera_attributes, const Vector3 &p_camera_position) {
 	RendererRD::RayScene::get_singleton()->update(p_instances, p_lights, p_directional_lights, p_camera_attributes, p_camera_position);
 }
