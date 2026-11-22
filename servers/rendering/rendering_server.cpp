@@ -3966,7 +3966,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/bounce_energy", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/debug_view", PROPERTY_HINT_ENUM, "Disabled,Irradiance,Ray Hits,Normals,Probe State,Probe Visibility"), 0);
 
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/backend", PROPERTY_HINT_ENUM, "Software,Hardware,Auto"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/backend", PROPERTY_HINT_ENUM, "Software,Hardware,Auto"), 2);
 	GLOBAL_DEF("rendering/global_illumination/ray_scene/skip_additive_surfaces", true);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/dirty_box_cap", PROPERTY_HINT_RANGE, "1,256,1"), 32);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ray_scene/dirty_merge_distance", PROPERTY_HINT_RANGE, "0,16,0.01,suffix:m"), 0.5);
