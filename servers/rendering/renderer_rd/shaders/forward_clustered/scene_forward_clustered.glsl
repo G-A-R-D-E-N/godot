@@ -1280,22 +1280,14 @@ void direct_record_begin(in SceneData scene_data, vec3 p_vertex) {
 	direct_record_check = direct_record_ok && (head.y & 0x80000000u) != 0u;
 }
 
-int direct_route(uint p_flags, vec3 p_position, float p_inv_radius, float p_decay, bool p_spot, vec3 p_direction, float p_cos_angle, float p_cone_attenuation) {
+int direct_route(uint p_flags, vec3 p_position, float p_inv_radius) {
 	direct_head_layer = -1;
 	direct_tail_layer = -1;
 	if (!direct_record_ok || (p_flags & 1u) == 0u) {
 		return -1;
 	}
 	vec3 rel = p_position - direct_record_vertex;
-	float d2 = dot(rel, rel);
-	if (d2 >= 1e-8 && d2 < 1e30) {
-		float s = dot(direct_record_normal, rel);
-		if (d2 * p_inv_radius * p_inv_radius >= 1.002 || (s < 0.0 && s * s >= 1e-6 * d2)) {
-			return -1;
-		}
-	}
-	DiGeometry geometry = di_geometry(p_position, p_inv_radius, p_decay, p_spot, p_direction, p_cos_angle, p_cone_attenuation, direct_record_vertex);
-	if (!di_in_set(geometry, direct_record_normal)) {
+	if (dot(rel, rel) * p_inv_radius * p_inv_radius >= 1.0 || dot(direct_record_normal, rel) <= 0.0) {
 		return -1;
 	}
 	ivec2 pixel = ivec2(gl_FragCoord.xy);
@@ -3447,7 +3439,7 @@ void fragment_shader(in SceneData scene_data) {
 
 #ifdef DIRECT_RESAMPLED_ROUTE
 				if (sc_use_direct_resampled()) {
-					int direct_passes = direct_route(omni_lights.data[light_index].flags, omni_lights.data[light_index].position, omni_lights.data[light_index].inv_radius, omni_lights.data[light_index].attenuation, false, vec3(0.0), 0.0, 1.0);
+					int direct_passes = direct_route(omni_lights.data[light_index].flags, omni_lights.data[light_index].position, omni_lights.data[light_index].inv_radius);
 					if (direct_passes == 0) {
 						continue;
 					}
@@ -3511,7 +3503,7 @@ void fragment_shader(in SceneData scene_data) {
 
 #ifdef DIRECT_RESAMPLED_ROUTE
 				if (sc_use_direct_resampled()) {
-					int direct_passes = direct_route(spot_lights.data[light_index].flags, spot_lights.data[light_index].position, spot_lights.data[light_index].inv_radius, spot_lights.data[light_index].attenuation, true, spot_lights.data[light_index].direction, spot_lights.data[light_index].cone_angle, spot_lights.data[light_index].cone_attenuation);
+					int direct_passes = direct_route(spot_lights.data[light_index].flags, spot_lights.data[light_index].position, spot_lights.data[light_index].inv_radius);
 					if (direct_passes == 0) {
 						continue;
 					}

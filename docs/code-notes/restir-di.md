@@ -57,19 +57,14 @@ external-entries mode and the opaque pass shades heads, tail samples or nothing.
   cone, `di_in_set` (term above 0 and the decoded record normal facing the lamp), the octahedral codec, the target, the
   inversion and the race. The entry pass tests and ranks with the normal after it has been packed and unpacked, as the
   opaque pass reads it from the record, so both see the same lamp set.
-- `scene_forward_clustered.glsl:direct_route` rejects a lamp that is clearly not in the set before `di_geometry`, and
-  reads the pixel's picks once. The early test is one-sided: every lamp it rejects is also rejected by `di_in_set`,
-  so frames stay bit-identical. It rejects a lamp when:
-  - it is out of range: d2 times inv_radius squared is at least 1.002, where d2 is the squared distance from the record
-    point. The margin is far above the rounding between d2 and the square of `length`, so the window is 0 times a pow,
-    which is 0 or NaN, and neither is above 0;
-  - it is behind the record normal: the normal's dot with the lamp offset, s, is below 0, and s squared is at least
-    1e-6 times d2. That margin is a thousand times the rounding of the offset over its length.
-
-  The test runs only for d2 from 1e-8 up to 1e30. The bounds are comparisons, so a NaN or an overflowed d2 falls
-  through to the full test; isnan and isinf could be folded away, since glslang emits no SignedZeroInfNanPreserve.
-  Below 1e-8 the 1e-5 clamp of the length matters. Above 1e30, d2 times a tiny inv_radius could round to out while
-  the full test says in.
+- `scene_forward_clustered.glsl:direct_route` decides the set with two comparisons on the record point and normal, with
+  no `di_geometry`: a lamp is in the set when d2 times inv_radius squared is below 1 and the record normal's dot with
+  the lamp offset is above 0, where d2 is the squared distance from the record point. An owned lamp in that set that
+  matches a pick routes to it; one that matches none is skipped. This drops the window, the cone and the length that
+  `di_in_set` uses, so frames are no longer bit-identical to the entry pass's set: a lamp at the very edge of its
+  range, a spot lamp whose cone misses the record point, and a lamp near the horizon of the record normal can land on
+  the other side. Each of those carries almost no light at that point. An overflowed d2 counts as out (plain shading),
+  a NaN as in.
 
   The picks load lazily, on the first lamp that is in the set, so a pixel with none pays no fetch:
   - Head slots go through `scene_forward_lights_inc.glsl:direct_own_load`. That is the cache `direct_shadow_factor`
