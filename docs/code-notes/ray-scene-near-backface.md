@@ -28,6 +28,18 @@ faces at or beyond the window block as before.
 - `ray_scene_trace_blas` tests `t < p_near_backface`, `det > 0.0` and the two flags right after the skip mask, before
   the alpha and band tests. `t` is the world ray parameter, because the object-space direction is not renormalized.
 
+### `servers/rendering/renderer_rd/shaders/environment/ray_scene_inc.glsl:RAY_SCENE_SKIP_MASK`
+
+- `ray_scene_trace_blas`, both `ray_scene_trace_masked_near`, `ray_scene_trace_masked` and `ray_scene_trace` take
+  `p_shadow` after `p_any`. `p_any` means first hit only: it ends the leaf loop and the TLAS walk in software and sets
+  `gl_RayFlagsTerminateOnFirstHitEXT` on hardware. `p_shadow` means a ray toward a light: it alone picks the skip,
+  `RAY_SCENE_MATERIAL_SHADOW_PASS` when true and `RAY_SCENE_MATERIAL_SHADOW_ONLY` when false.
+- `ray_scene_unshadowed` passes true, true; `ray_scene_trace_opaque` passes false, false; the other two forward both.
+- Every other caller passes `p_shadow` equal to its `p_any`: the DDGI and ReSTIR GI rays false, false, and ReSTIR GI's
+  `rs_visible` true, true, so every ray keeps its old skip. Giving `rs_visible` false, so it skips what the ReSTIR GI
+  bounce rays skip, is ReSTIR GI's own change with its own on/off pair.
+- No caller passes `p_any` false with `p_shadow` true.
+
 ### `servers/rendering/renderer_rd/shaders/environment/ray_scene_hw_inc.glsl:ray_scene_trace_masked_near`
 
 - Two queries in one loop. The near pass covers `[0, min(near, t_max)]` with `gl_RayFlagsNoOpaqueEXT`, so opaque
@@ -35,8 +47,9 @@ faces at or beyond the window block as before.
   main pass covers `[near, t_max]` with the usual flags.
 - A back face at exactly `near` is skipped by the near pass and found by the main pass, which matches the software
   `t < near`. With a window of 0 only the main pass runs, from 0, as before.
-- Only `ray_scene_unshadowed` uses a nonzero window, always with `p_any` true. A closest-hit caller would also work,
-  because the near pass covers the closest hits and the blend tie query that follows only looks at blend surfaces.
+- Only `ray_scene_unshadowed` uses a nonzero window, always with `p_any` and `p_shadow` true. A closest-hit caller
+  would also work, because the near pass covers the closest hits and the blend tie query that follows only looks at
+  blend surfaces.
 
 Known limits:
 

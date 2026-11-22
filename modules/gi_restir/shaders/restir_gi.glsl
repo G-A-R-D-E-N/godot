@@ -989,7 +989,7 @@ vec3 rs_fresh_lo(vec3 p_origin, vec3 p_dir, float p_dist, uint p_seed, out bool 
 	RaySceneHit hit;
 	r_hit_here = false;
 	float eps = 0.02 + 0.002 * p_dist;
-	if (!ray_scene_trace(p_origin, p_dir, p_dist + eps, false, ray_scene_hash(p_seed + 0xa54ff53bu), hit)) {
+	if (!ray_scene_trace(p_origin, p_dir, p_dist + eps, false, false, ray_scene_hash(p_seed + 0xa54ff53bu), hit)) {
 		return vec3(0.0);
 	}
 	if (abs(hit.t - p_dist) > eps) {
@@ -1024,7 +1024,7 @@ vec3 rs_fresh_lo_replay(vec3 p_origin, vec3 p_dir, float p_dist, uint p_seed, ou
 	RaySceneHit hit;
 	r_hit_here = false;
 	float eps = 0.02 + 0.002 * p_dist;
-	if (!ray_scene_trace(p_origin, p_dir, p_dist + eps, false, p_seed, hit)) {
+	if (!ray_scene_trace(p_origin, p_dir, p_dist + eps, false, false, p_seed, hit)) {
 		return vec3(0.0);
 	}
 	if (abs(hit.t - p_dist) > eps) {
@@ -1041,7 +1041,7 @@ vec3 rs_fresh_lo_replay(vec3 p_origin, vec3 p_dir, float p_dist, uint p_seed, ou
 
 uint rs_replay_rehit(vec3 p_xs, vec3 p_ns, float p_dist, uint p_seed, out RaySceneHit r_hit) {
 	float eps = 0.02 + 0.002 * p_dist;
-	if (!ray_scene_trace(p_xs + p_ns * eps, -p_ns, 2.0 * eps, false, p_seed, r_hit)) {
+	if (!ray_scene_trace(p_xs + p_ns * eps, -p_ns, 2.0 * eps, false, false, p_seed, r_hit)) {
 		return RS_REHIT_MISS;
 	}
 	vec3 normal = ray_scene_hit_normal(r_hit);
@@ -1315,7 +1315,7 @@ void main() {
 	if (replay) {
 		tag = shade_seed;
 	}
-	if (ray_scene_trace(origin, direction, rf.sky_distance, false, replay ? shade_seed : ray_scene_hash(uint(px.y) * 65537u + uint(px.x) + rf.frame * 6271u + 0x510e527fu), hit)) {
+	if (ray_scene_trace(origin, direction, rf.sky_distance, false, false, replay ? shade_seed : ray_scene_hash(uint(px.y) * 65537u + uint(px.x) + rf.frame * 6271u + 0x510e527fu), hit)) {
 		RaySceneMaterial material = ray_scene_hit_material(hit);
 		point = origin + direction * hit.t;
 		vec3 normal = ray_scene_hit_normal(hit);

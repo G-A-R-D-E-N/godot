@@ -688,7 +688,7 @@ bool rs_visible(vec3 p_origin, Reservoir s) {
 	uvec2 px = gl_GlobalInvocationID.xy;
 	uint seed = px.y * 65537u + px.x + rf.frame * 6271u;
 	if (rs_is_sky(s)) {
-		return !ray_scene_trace(origin, s.xs, rf.sky_distance, true, ray_scene_hash(seed + 0x3c6ef373u), hit);
+		return !ray_scene_trace(origin, s.xs, rf.sky_distance, true, true, ray_scene_hash(seed + 0x3c6ef373u), hit);
 	}
 	vec3 delta = s.xs - origin;
 	float dist = length(delta);
@@ -696,7 +696,7 @@ bool rs_visible(vec3 p_origin, Reservoir s) {
 	if (dist <= eps) {
 		return true;
 	}
-	return !ray_scene_trace(origin, delta / dist, dist - eps, true, ray_scene_hash(seed + 0x1f83d9abu), hit);
+	return !ray_scene_trace(origin, delta / dist, dist - eps, true, true, ray_scene_hash(seed + 0x1f83d9abu), hit);
 }
 #else
 bool rs_visible(vec3 p_origin, Reservoir s) {

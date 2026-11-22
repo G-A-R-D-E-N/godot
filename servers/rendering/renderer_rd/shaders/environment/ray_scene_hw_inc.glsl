@@ -35,7 +35,7 @@ uint ray_scene_hw_cull_mask(uint p_caster_mask) {
 	return RAY_SCENE_HW_ALL_GROUPS;
 }
 
-bool ray_scene_trace_masked_near(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, uint p_skip, uint p_caster_mask, uint p_seed, float p_near_backface, out RaySceneHit r_hit) {
+bool ray_scene_trace_masked_near(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, bool p_shadow, uint p_skip, uint p_caster_mask, uint p_seed, float p_near_backface, out RaySceneHit r_hit) {
 	r_hit.t = p_t_max;
 	r_hit.instance = RAY_SCENE_NO_HIT;
 	r_hit.triangle = 0u;
@@ -47,7 +47,7 @@ bool ray_scene_trace_masked_near(vec3 p_origin, vec3 p_direction, float p_t_max,
 
 	uint seed = RAY_SCENE_COVERAGE_SEED(p_seed);
 	float tie_scale = RAY_SCENE_TIE_SCALE(p_origin);
-	uint skip_mask = RAY_SCENE_SKIP_MASK(p_any, p_skip);
+	uint skip_mask = RAY_SCENE_SKIP_MASK(p_shadow, p_skip);
 	uint cull_mask = ray_scene_hw_cull_mask(p_caster_mask);
 	bool exact = cull_mask != RAY_SCENE_HW_ALL_GROUPS;
 	uint ray_flags = (p_any ? gl_RayFlagsTerminateOnFirstHitEXT : gl_RayFlagsNoneEXT) | (exact ? gl_RayFlagsNoneEXT : gl_RayFlagsNoOpaqueEXT);

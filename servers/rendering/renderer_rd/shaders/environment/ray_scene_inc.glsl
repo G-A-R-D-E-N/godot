@@ -17,7 +17,7 @@
 #define RAY_SCENE_FLOAT_EPSILON 1.1920929e-7
 #define RAY_SCENE_BAND_NODE 0x80000000u
 
-#define RAY_SCENE_SKIP_MASK(m_any, m_skip) (RAY_SCENE_MATERIAL_SKIP | ((m_any) ? RAY_SCENE_MATERIAL_SHADOW_PASS : RAY_SCENE_MATERIAL_SHADOW_ONLY) | (m_skip))
+#define RAY_SCENE_SKIP_MASK(m_shadow, m_skip) (RAY_SCENE_MATERIAL_SKIP | ((m_shadow) ? RAY_SCENE_MATERIAL_SHADOW_PASS : RAY_SCENE_MATERIAL_SHADOW_ONLY) | (m_skip))
 #define RAY_SCENE_CASTER_SKIPS(m_layer_mask, m_caster_mask) ((m_caster_mask) != RAY_SCENE_ALL_CASTERS && ((m_layer_mask) & (m_caster_mask)) == 0u)
 #define RAY_SCENE_TIE_SCALE(m_origin) max(max(abs((m_origin).x), abs((m_origin).y)), abs((m_origin).z))
 #define RAY_SCENE_TIE_ABS(m_t, m_scale) (RAY_SCENE_TIE_ULPS * RAY_SCENE_FLOAT_EPSILON * max((m_scale), (m_t)))
@@ -254,9 +254,9 @@ bool ray_scene_box(vec3 p_origin, vec3 p_inv_direction, vec3 p_min, vec3 p_max, 
 }
 
 #ifndef RAY_SCENE_HW
-void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, vec3 p_origin, vec3 p_direction, bool p_any, uint p_skip, uint p_seed, bool p_band, float p_tie_scale, float p_near_backface, inout RaySceneHit r_hit) {
+void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, vec3 p_origin, vec3 p_direction, bool p_any, bool p_shadow, uint p_skip, uint p_seed, bool p_band, float p_tie_scale, float p_near_backface, inout RaySceneHit r_hit) {
 	vec3 inv_direction = ray_scene_safe_inverse(p_direction);
-	uint skip_mask = RAY_SCENE_SKIP_MASK(p_any, p_skip);
+	uint skip_mask = RAY_SCENE_SKIP_MASK(p_shadow, p_skip);
 	uint stack[RAY_SCENE_BLAS_STACK_SIZE];
 	uint sp = 0;
 
@@ -362,7 +362,7 @@ void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, 
 	}
 }
 
-bool ray_scene_trace_masked_near(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, uint p_skip, uint p_caster_mask, uint p_seed, float p_near_backface, out RaySceneHit r_hit) {
+bool ray_scene_trace_masked_near(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, bool p_shadow, uint p_skip, uint p_caster_mask, uint p_seed, float p_near_backface, out RaySceneHit r_hit) {
 	r_hit.t = p_t_max;
 	r_hit.instance = RAY_SCENE_NO_HIT;
 	r_hit.triangle = 0u;
@@ -395,7 +395,7 @@ bool ray_scene_trace_masked_near(vec3 p_origin, vec3 p_direction, float p_t_max,
 				vec4 origin = vec4(p_origin, 1.0);
 				vec3 local_origin = vec3(dot(instance.world_to_object[0], origin), dot(instance.world_to_object[1], origin), dot(instance.world_to_object[2], origin));
 				vec3 local_direction = vec3(dot(instance.world_to_object[0].xyz, p_direction), dot(instance.world_to_object[1].xyz, p_direction), dot(instance.world_to_object[2].xyz, p_direction));
-				ray_scene_trace_blas(instance.blas_root, instance.material_offset, node.left_first + i, local_origin, local_direction, p_any, p_skip, seed, band, tie_scale, p_near_backface, r_hit);
+				ray_scene_trace_blas(instance.blas_root, instance.material_offset, node.left_first + i, local_origin, local_direction, p_any, p_shadow, p_skip, seed, band, tie_scale, p_near_backface, r_hit);
 				if (p_any && r_hit.instance != RAY_SCENE_NO_HIT) {
 					return true;
 				}
@@ -437,16 +437,16 @@ bool ray_scene_trace_masked_near(vec3 p_origin, vec3 p_direction, float p_t_max,
 #include "ray_scene_hw_inc.glsl"
 #endif
 
-bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, uint p_skip, uint p_caster_mask, uint p_seed, out RaySceneHit r_hit) {
-	return ray_scene_trace_masked_near(p_origin, p_direction, p_t_max, p_any, p_skip, p_caster_mask, p_seed, 0.0, r_hit);
+bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, bool p_shadow, uint p_skip, uint p_caster_mask, uint p_seed, out RaySceneHit r_hit) {
+	return ray_scene_trace_masked_near(p_origin, p_direction, p_t_max, p_any, p_shadow, p_skip, p_caster_mask, p_seed, 0.0, r_hit);
 }
 
-bool ray_scene_trace(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, uint p_seed, out RaySceneHit r_hit) {
-	return ray_scene_trace_masked(p_origin, p_direction, p_t_max, p_any, 0u, RAY_SCENE_ALL_CASTERS, p_seed, r_hit);
+bool ray_scene_trace(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, bool p_shadow, uint p_seed, out RaySceneHit r_hit) {
+	return ray_scene_trace_masked(p_origin, p_direction, p_t_max, p_any, p_shadow, 0u, RAY_SCENE_ALL_CASTERS, p_seed, r_hit);
 }
 
 bool ray_scene_trace_opaque(vec3 p_origin, vec3 p_direction, float p_t_max, uint p_seed, out RaySceneHit r_hit) {
-	return ray_scene_trace_masked(p_origin, p_direction, p_t_max, false, RAY_SCENE_MATERIAL_BLEND, RAY_SCENE_ALL_CASTERS, p_seed, r_hit);
+	return ray_scene_trace_masked(p_origin, p_direction, p_t_max, false, false, RAY_SCENE_MATERIAL_BLEND, RAY_SCENE_ALL_CASTERS, p_seed, r_hit);
 }
 
 vec3 ray_scene_hit_normal(RaySceneHit p_hit) {
@@ -473,7 +473,7 @@ float ray_scene_omni_attenuation(float p_distance, float p_inv_range, float p_de
 
 bool ray_scene_unshadowed(vec3 p_position, vec3 p_normal, float p_bias, vec3 p_to_light, float p_distance, uint p_caster_mask, uint p_seed) {
 	RaySceneHit shadow;
-	return !ray_scene_trace_masked_near(p_position + p_normal * p_bias, p_to_light, max(p_distance - p_bias, 0.0), true, 0u, p_caster_mask, p_seed, 0.25 * p_bias, shadow);
+	return !ray_scene_trace_masked_near(p_position + p_normal * p_bias, p_to_light, max(p_distance - p_bias, 0.0), true, true, 0u, p_caster_mask, p_seed, 0.25 * p_bias, shadow);
 }
 
 vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float p_max_distance, uint p_seed) {
