@@ -350,7 +350,7 @@ void main() {
 
 // Schedule ids must be storage slots, so the left-out masks stay with their cells when the volume scrolls.
 ivec3 schedule_local(uint p_level, ivec3 p_slot) {
-	return (p_slot - ddgi.levels[p_level].slot_offset + ddgi.dims) % ddgi.dims;
+	return ddgi_wrap(p_slot - ddgi.levels[p_level].slot_offset + ddgi.dims);
 }
 
 #endif

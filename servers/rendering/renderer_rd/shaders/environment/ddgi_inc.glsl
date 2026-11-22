@@ -63,8 +63,16 @@ ivec3 ddgi_local_from_index(uint p_index) {
 	return ivec3(int(p_index % uint(ddgi.dims.x)), int((p_index % plane) / uint(ddgi.dims.x)), int(p_index / plane));
 }
 
+ivec3 ddgi_wrap(ivec3 p_value) {
+	return p_value - ddgi.dims * ivec3(greaterThanEqual(p_value, ddgi.dims));
+}
+
 ivec3 ddgi_slot(uint p_level, ivec3 p_local) {
 	return (p_local + ddgi.levels[p_level].slot_offset) % ddgi.dims;
+}
+
+ivec3 ddgi_slot_clamped(uint p_level, ivec3 p_local) {
+	return ddgi_wrap(p_local + ddgi.levels[p_level].slot_offset);
 }
 
 ivec3 ddgi_probe_texel(uint p_level, ivec3 p_slot) {
@@ -114,12 +122,14 @@ vec3 ddgi_sample_level(uint p_level, vec3 p_position, vec3 p_normal, vec3 p_view
 	ivec3 base = ivec3(floor(grid));
 	vec3 alpha = grid - vec3(base);
 
+	vec2 direction_oct = vec3_to_oct(p_direction);
+	vec2 opposite_oct = p_sharpen > 0.0 ? vec3_to_oct(-p_direction) : vec2(0.0);
 	vec3 irradiance = vec3(0.0);
 	float weight_sum = 0.0;
 	for (int i = 0; i < 8; i++) {
 		ivec3 corner = ivec3(i, i >> 1, i >> 2) & ivec3(1);
 		ivec3 local = clamp(base + corner, ivec3(0), ddgi.dims - 1);
-		ivec3 slot = ddgi_slot(p_level, local);
+		ivec3 slot = ddgi_slot_clamped(p_level, local);
 		uvec4 data = texelFetch(ddgi_probe_texture, ddgi_probe_texel(p_level, slot), 0);
 		uint state = ddgi_state(data, p_level, local);
 		if (state == DDGI_STATE_NONE || state == DDGI_STATE_INSIDE) {
@@ -153,10 +163,10 @@ vec3 ddgi_sample_level(uint p_level, vec3 p_position, vec3 p_normal, vec3 p_view
 		weight *= trilinear.x * trilinear.y * trilinear.z;
 
 		vec2 tile = vec2(ddgi_tile_origin(slot, DDGI_IRRADIANCE_SIZE)) + 1.0;
-		vec2 irradiance_uv = (tile + vec3_to_oct(p_direction) * float(DDGI_IRRADIANCE_SIZE)) * ddgi.irradiance_texel_size;
+		vec2 irradiance_uv = (tile + direction_oct * float(DDGI_IRRADIANCE_SIZE)) * ddgi.irradiance_texel_size;
 		vec3 probe_irradiance = textureLod(sampler2DArray(ddgi_irradiance_texture, ddgi_linear_sampler), vec3(irradiance_uv, float(p_level)), 0.0).rgb;
 		if (p_sharpen > 0.0) {
-			vec2 opposite_uv = (tile + vec3_to_oct(-p_direction) * float(DDGI_IRRADIANCE_SIZE)) * ddgi.irradiance_texel_size;
+			vec2 opposite_uv = (tile + opposite_oct * float(DDGI_IRRADIANCE_SIZE)) * ddgi.irradiance_texel_size;
 			probe_irradiance = probe_irradiance * (1.0 + p_sharpen) - textureLod(sampler2DArray(ddgi_irradiance_texture, ddgi_linear_sampler), vec3(opposite_uv, float(p_level)), 0.0).rgb * p_sharpen;
 		}
 		irradiance += weight * probe_irradiance;
@@ -201,7 +211,7 @@ vec3 ddgi_medium_level(uint p_level, vec3 p_position, out float r_weight, out fl
 	for (int i = 0; i < 8; i++) {
 		ivec3 corner = ivec3(i, i >> 1, i >> 2) & ivec3(1);
 		ivec3 local = clamp(base + corner, ivec3(0), ddgi.dims - 1);
-		ivec3 slot = ddgi_slot(p_level, local);
+		ivec3 slot = ddgi_slot_clamped(p_level, local);
 		uvec4 data = texelFetch(ddgi_probe_texture, ddgi_probe_texel(p_level, slot), 0);
 		uint state = ddgi_state(data, p_level, local);
 		if (state == DDGI_STATE_NONE || state == DDGI_STATE_INSIDE) {

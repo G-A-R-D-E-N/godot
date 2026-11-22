@@ -369,7 +369,7 @@ void main() {
 				}
 				vec3 grid = (position - ddgi.levels[level].origin) / ddgi.levels[level].spacing;
 				ivec3 local = clamp(ivec3(round(grid)), ivec3(0), ddgi.dims - 1);
-				uvec4 data = texelFetch(ddgi_probe_texture, ddgi_probe_texel(level, ddgi_slot(level, local)), 0);
+				uvec4 data = texelFetch(ddgi_probe_texture, ddgi_probe_texel(level, ddgi_slot_clamped(level, local)), 0);
 				uint state = ddgi_state(data, level, local);
 				color = state == DDGI_STATE_ACTIVE ? vec3(0.1, 0.8, 0.1) : (state == DDGI_STATE_IDLE ? vec3(0.1, 0.2, 0.9) : (state == DDGI_STATE_INSIDE ? vec3(0.9, 0.1, 0.1) : vec3(0.0)));
 				vec3 edge = mix(abs(fract(grid) - 0.5), vec3(1.0), greaterThan(abs(normal), vec3(0.7)));
