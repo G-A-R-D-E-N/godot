@@ -3666,6 +3666,14 @@
 				Sets the origin offset to be used when this reflection probe is in box project mode. Equivalent to [member ReflectionProbe.origin_offset].
 			</description>
 		</method>
+		<method name="reflection_probe_set_priority">
+			<return type="void" />
+			<param index="0" name="probe" type="RID" />
+			<param index="1" name="priority" type="int" />
+			<description>
+				Sets the blending priority of this probe. Where probe volumes overlap, the probe with the higher priority is applied after the others, so it takes precedence inside its blend region. Probes with equal priority are ordered by size, larger first. A negative value is treated as zero for ordering. With [member ProjectSettings.rendering/reflections/reflection_atlas/priority_fast_filter] enabled, any non-zero priority also makes the probe filter all its roughness levels in the frame after its first capture instead of one level per frame, until the capture is published. The default is [code]0[/code].
+			</description>
+		</method>
 		<method name="reflection_probe_set_reflection_mask">
 			<return type="void" />
 			<param index="0" name="probe" type="RID" />
@@ -3743,6 +3751,15 @@
 			<param index="1" name="environment" type="RID" />
 			<description>
 				Sets the fallback environment to be used by this scenario. The fallback environment is used if no environment is set. Internally, this is used by the editor to provide a default environment.
+			</description>
+		</method>
+		<method name="scenario_set_reflection_atlas_size">
+			<return type="void" />
+			<param index="0" name="scenario" type="RID" />
+			<param index="1" name="reflection_size" type="int" />
+			<param index="2" name="reflection_count" type="int" />
+			<description>
+				Sets the face size and the number of cubemaps of the reflection atlas used by this scenario, overriding [member ProjectSettings.rendering/reflections/reflection_atlas/reflection_size] and [member ProjectSettings.rendering/reflections/reflection_atlas/reflection_count] for it. Changing either value frees the atlas, and every probe in the scenario has to be captured again.
 			</description>
 		</method>
 		<method name="screen_space_roughness_limiter_set_active">
@@ -5962,6 +5979,15 @@
 		</constant>
 		<constant name="VIEWPORT_DEBUG_DRAW_SSGI_CONFIDENCE" value="49" enum="ViewportDebugDraw">
 			Draws the traced screen-space GI confidence: white = the screen-space result is used fully, black = the fallback ambient light (sky, probes) is used.
+		</constant>
+		<constant name="VIEWPORT_DEBUG_DRAW_REFLECTION_PROVIDER_WEIGHTS" value="50" enum="ViewportDebugDraw">
+			Draws the share of each reflection provider in the indirect specular light before screen-space reflections: red = sky environment, green = global illumination rough specular fill, blue = local reflection probe. The three shares add up to 1 wherever at least one provider exists. Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="VIEWPORT_DEBUG_DRAW_SPECULAR_OCCLUSION" value="51" enum="ViewportDebugDraw">
+			Draws the specular occlusion factor alone, the value that scales the indirect specular light (white = unoccluded). Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="VIEWPORT_DEBUG_DRAW_RESOLVED_INDIRECT_SPECULAR" value="52" enum="ViewportDebugDraw">
+			Draws the final weighted indirect specular radiance of each surface, after the sky, GI fill, probes, specular occlusion, screen-space reflections and BRDF weight, without the sky background. Only supported when using the Forward+ rendering method.
 		</constant>
 		<constant name="VIEWPORT_VRS_DISABLED" value="0" enum="ViewportVRSMode">
 			Variable rate shading is disabled.

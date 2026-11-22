@@ -294,6 +294,7 @@ private:
 		RSE::ReflectionProbeUpdateMode update_mode = RSE::REFLECTION_PROBE_UPDATE_ONCE;
 		float intensity = 1.0;
 		float blend_distance = 1.0;
+		int priority = 0;
 		RSE::ReflectionProbeAmbientMode ambient_mode = RSE::REFLECTION_PROBE_AMBIENT_ENVIRONMENT;
 		Color ambient_color;
 		float ambient_color_energy = 1.0;
@@ -388,16 +389,20 @@ private:
 		uint32_t box_project;
 		uint32_t ambient_mode;
 		float exposure_normalization;
-		uint32_t pad0;
+		uint32_t priority;
 		uint32_t pad1;
 		uint32_t pad2;
 		float local_matrix[16]; // up to here for spot and omni, rest is for directional
 	};
 
 	struct ReflectionProbeInstanceSort {
+		int priority;
 		float size;
 		ReflectionProbeInstance *probe_instance;
 		bool operator<(const ReflectionProbeInstanceSort &p_sort) const {
+			if (priority != p_sort.priority) {
+				return priority < p_sort.priority;
+			}
 			return size < p_sort.size;
 		}
 	};
@@ -953,6 +958,7 @@ public:
 	virtual void reflection_probe_set_update_mode(RID p_probe, RSE::ReflectionProbeUpdateMode p_mode) override;
 	virtual void reflection_probe_set_intensity(RID p_probe, float p_intensity) override;
 	virtual void reflection_probe_set_blend_distance(RID p_probe, float p_blend_distance) override;
+	virtual void reflection_probe_set_priority(RID p_probe, int p_priority) override;
 	virtual void reflection_probe_set_ambient_mode(RID p_probe, RSE::ReflectionProbeAmbientMode p_mode) override;
 	virtual void reflection_probe_set_ambient_color(RID p_probe, const Color &p_color) override;
 	virtual void reflection_probe_set_ambient_energy(RID p_probe, float p_energy) override;
@@ -983,6 +989,7 @@ public:
 
 	float reflection_probe_get_intensity(RID p_probe) const;
 	float reflection_probe_get_blend_distance(RID p_probe) const;
+	int reflection_probe_get_priority(RID p_probe) const;
 	bool reflection_probe_is_interior(RID p_probe) const;
 	bool reflection_probe_is_box_projection(RID p_probe) const;
 	RSE::ReflectionProbeAmbientMode reflection_probe_get_ambient_mode(RID p_probe) const;

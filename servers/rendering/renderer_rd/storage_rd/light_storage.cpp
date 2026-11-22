@@ -1628,6 +1628,13 @@ void LightStorage::reflection_probe_set_blend_distance(RID p_probe, float p_blen
 	reflection_probe->blend_distance = p_blend_distance;
 }
 
+void LightStorage::reflection_probe_set_priority(RID p_probe, int p_priority) {
+	ReflectionProbe *reflection_probe = reflection_probe_owner.get_or_null(p_probe);
+	ERR_FAIL_NULL(reflection_probe);
+
+	reflection_probe->priority = p_priority;
+}
+
 void LightStorage::reflection_probe_set_ambient_mode(RID p_probe, RSE::ReflectionProbeAmbientMode p_mode) {
 	ReflectionProbe *reflection_probe = reflection_probe_owner.get_or_null(p_probe);
 	ERR_FAIL_NULL(reflection_probe);
@@ -1815,6 +1822,13 @@ float LightStorage::reflection_probe_get_intensity(RID p_probe) const {
 	ERR_FAIL_NULL_V(reflection_probe, 0);
 
 	return reflection_probe->intensity;
+}
+
+int LightStorage::reflection_probe_get_priority(RID p_probe) const {
+	const ReflectionProbe *reflection_probe = reflection_probe_owner.get_or_null(p_probe);
+	ERR_FAIL_NULL_V(reflection_probe, 0);
+
+	return reflection_probe->priority;
 }
 
 float LightStorage::reflection_probe_get_blend_distance(RID p_probe) const {
@@ -2220,10 +2234,14 @@ bool LightStorage::reflection_probe_instance_postprocess_step(RID p_instance) {
 		data.create_reflection_fast_filter(false);
 	} else {
 		const int mip_count = (int)data.layers[0].mipmaps.size();
-		if (rpi->processing_layer < mip_count) {
-			data.create_reflection_importance_sample(false, rpi->processing_layer, RendererSceneRenderRD::get_singleton()->get_sky()->sky_ggx_samples_quality);
-			rpi->processing_layer++;
-		}
+		const ReflectionProbe *rush_probe = reflection_probe_owner.get_or_null(rpi->probe);
+		const bool rush = rush_probe && rush_probe->priority != 0 && rpi->atlas_index < 0 && GLOBAL_GET("rendering/reflections/reflection_atlas/priority_fast_filter");
+		do {
+			if (rpi->processing_layer < mip_count) {
+				data.create_reflection_importance_sample(false, rpi->processing_layer, RendererSceneRenderRD::get_singleton()->get_sky()->sky_ggx_samples_quality);
+				rpi->processing_layer++;
+			}
+		} while (rush && rpi->processing_layer < mip_count);
 		if (rpi->processing_layer < mip_count) {
 			return false;
 		}
@@ -2333,6 +2351,7 @@ void LightStorage::update_reflection_probe_buffer(RenderDataRD *p_render_data, c
 		float probe_size = extents.length();
 
 		reflection_sort[reflection_count].probe_instance = rpi;
+		reflection_sort[reflection_count].priority = MAX(probe->priority, 0);
 		reflection_sort[reflection_count].size = -probe_size;
 		reflection_count++;
 	}
@@ -2374,6 +2393,7 @@ void LightStorage::update_reflection_probe_buffer(RenderDataRD *p_render_data, c
 
 		reflection_ubo.intensity = probe->intensity;
 		reflection_ubo.blend_distance = probe->blend_distance;
+		reflection_ubo.priority = (uint32_t)MAX(probe->priority, 0);
 		reflection_ubo.ambient_mode = probe->ambient_mode;
 
 		reflection_ubo.exterior = !probe->interior;

@@ -368,6 +368,7 @@ public:
 	virtual void reflection_probe_set_update_mode(RID p_probe, RSE::ReflectionProbeUpdateMode p_mode) = 0;
 	virtual void reflection_probe_set_intensity(RID p_probe, float p_intensity) = 0;
 	virtual void reflection_probe_set_blend_distance(RID p_probe, float p_blend_distance) = 0;
+	virtual void reflection_probe_set_priority(RID p_probe, int p_priority) = 0;
 
 	virtual void reflection_probe_set_ambient_mode(RID p_probe, RSE::ReflectionProbeAmbientMode p_mode) = 0;
 	virtual void reflection_probe_set_ambient_color(RID p_probe, const Color &p_color) = 0;
@@ -753,6 +754,7 @@ public:
 	virtual void scenario_set_fallback_environment(RID p_scenario, RID p_environment) = 0;
 	virtual void scenario_set_camera_attributes(RID p_scenario, RID p_camera_attributes) = 0;
 	virtual void scenario_set_compositor(RID p_scenario, RID p_compositor) = 0;
+	virtual void scenario_set_reflection_atlas_size(RID p_scenario, int p_reflection_size, int p_reflection_count) = 0;
 
 	/* INSTANCING API */
 

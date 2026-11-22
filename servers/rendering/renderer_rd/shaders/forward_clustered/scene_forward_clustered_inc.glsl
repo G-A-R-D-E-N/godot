@@ -159,7 +159,7 @@ bool sc_dithered_instance_fade() {
 }
 
 uint sc_debug_lighting_component() {
-	return (sc_packed_1() >> 9) & 15U;
+	return (sc_packed_1() >> 9) & 31U;
 }
 
 bool sc_use_far_shadow() {
@@ -225,6 +225,16 @@ layout(set = 0, binding = 2) uniform sampler shadow_sampler;
 #define SCREEN_SPACE_EFFECTS_FLAGS_USE_BENT_NORMALS (1 << 5)
 #define SCREEN_SPACE_EFFECTS_FLAGS_STOCHASTIC_SSR (1 << 6)
 #define SCREEN_SPACE_EFFECTS_FLAGS_LIGHTING_SOURCES (1 << 7)
+#define SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SKY (1 << 8)
+#define SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_GI_FILL (1 << 9)
+#define SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_PROBES (1 << 10)
+#define SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SSR (1 << 11)
+#define SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SPECULAR_OCCLUSION (1 << 12)
+#define SCREEN_SPACE_EFFECTS_FLAGS_UNIFIED_LOOKUP (1 << 13)
+#define SCREEN_SPACE_EFFECTS_FLAGS_HORIZON_GEOMETRIC (1 << 14)
+#define SCREEN_SPACE_EFFECTS_FLAGS_COAT_MATCH (1 << 15)
+#define SCREEN_SPACE_EFFECTS_FLAGS_BLEND_FILL_SKIP (1 << 16)
+#define SCREEN_SPACE_EFFECTS_FLAGS_TRANSPARENT_PASS (1 << 17)
 
 layout(set = 0, binding = 3, std430) restrict readonly buffer OmniLights {
 	LightData data[];
