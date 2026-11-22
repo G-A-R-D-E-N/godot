@@ -765,17 +765,24 @@ void process_gi(ivec2 pos, vec3 vertex, inout vec4 ambient_light, inout vec4 ref
 		sdfgi_process(vertex, normal, reflection, roughness, ambient_light, reflection_light);
 #endif
 
-#ifdef USE_DDGI
+#ifdef USE_SURFELS
+		SurfelLookup lookup = surfel_lookup(vertex + surfel_data.camera_to_anchor, normal, SURFEL_INVALID);
+		float blend = surfel_blend(lookup);
+		if (blend < 1.0 || surfel_data.debug_view >= 2u) {
+			vec4 ddgi_light = ddgi_sample(vertex, normal, view);
+			ambient_light = vec4(ddgi_light.rgb * ddgi.energy, ddgi_light.a);
+		} else {
+			ambient_light = vec4(0.0);
+		}
+#elif defined(USE_DDGI)
 		vec4 ddgi_light = ddgi_sample(vertex, normal, view);
 		ambient_light = vec4(ddgi_light.rgb * ddgi.energy, ddgi_light.a);
 #endif
 
 #ifdef USE_SURFELS
 		{
-			SurfelLookup lookup = surfel_lookup(vertex + surfel_data.camera_to_anchor, normal, SURFEL_INVALID);
 			vec3 surfel_light = surfel_eval_irradiance(lookup.sh_r, lookup.sh_g, lookup.sh_b, normal) * ddgi.energy;
 			float debug_scale = max(dot(max(ambient_light.rgb, surfel_light), vec3(0.2126, 0.7152, 0.0722)), 1e-6) * 2.0;
-			float blend = surfel_blend(lookup);
 			float alpha = ambient_light.a + blend - ambient_light.a * blend;
 			ambient_light = alpha > 0.0 ? vec4((ambient_light.rgb * ambient_light.a * (1.0 - blend) + surfel_light * blend) / alpha, alpha) : ambient_light;
 			surfel_coverage = vec2(1.0 - surfel_data.ambient_occlusion_strength, 1.0) * blend;
