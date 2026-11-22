@@ -106,7 +106,9 @@ void main() {
 	}
 
 	vec3 position = surfels.data[index].position + surfel_data.anchor_shift;
-	surfels.data[index].position = position;
+	if (any(notEqual(surfel_data.anchor_shift, vec3(0.0)))) {
+		surfels.data[index].position = position;
+	}
 	float radius = surfels.data[index].radius;
 	float distance = length(position - surfel_data.camera_to_anchor);
 
@@ -272,6 +274,9 @@ void main() {
 				float sample_distance = scene_distance(clamp(ndc + offset, vec2(-1.0), vec2(1.0)), size);
 				farthest = max(farthest, sample_distance);
 				nearest = min(nearest, sample_distance);
+				if (clip.w >= nearest - tolerance * 2.0 && clip.w < farthest + tolerance) {
+					break;
+				}
 			}
 			if (clip.w < nearest - tolerance * 2.0) {
 				surfels.data[index].flags |= SURFEL_FLAG_KILL;
@@ -286,10 +291,11 @@ void main() {
 	if (((gl_WorkGroupID.x + surfel_data.frame) & 3u) != 0u) {
 		return;
 	}
-	SurfelLookup lookup = surfel_lookup(position, normal, index);
-	if (lookup.coverage > 3.0 || lookup.saturated) {
+	bool saturated;
+	float coverage = surfel_density(position, normal, index, 3.0, saturated);
+	if (coverage > 3.0 || saturated) {
 		surfels.data[index].flags |= SURFEL_FLAG_KILL;
-		if (lookup.coverage <= 3.0) {
+		if (coverage <= 3.0) {
 			atomicAdd(counters.data.saturated_kills, 1u);
 		}
 	}

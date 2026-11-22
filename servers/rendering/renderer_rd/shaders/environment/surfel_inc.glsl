@@ -96,7 +96,7 @@ float surfel_spawn_radius(float p_distance) {
 
 uint surfel_bucket(uint p_level, ivec3 p_cell) {
 	uvec3 c = uvec3(p_cell);
-	return surfel_hash((c.x * 73856093u) ^ (c.y * 19349663u) ^ (c.z * 83492791u) ^ (p_level * 2654435761u)) % surfel_data.bucket_count;
+	return surfel_hash((c.x * 73856093u) ^ (c.y * 19349663u) ^ (c.z * 83492791u) ^ (p_level * 2654435761u)) & (surfel_data.bucket_count - 1u);
 }
 
 uint surfel_buckets(vec3 p_position, float p_radius, out uint r_buckets[16]) {
