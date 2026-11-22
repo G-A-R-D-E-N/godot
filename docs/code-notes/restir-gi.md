@@ -243,7 +243,8 @@ MODE_SPATIAL when RESTIR_RAYS and SKY_REREAD are set. MODE_SKY_EPOCH undefines R
 MODE_SURFEL_TRACE and needs neither the surfel includes nor the origin_surfel_* globals.
 
 The import seed (gi/replay_seed) comes from rtgi_anchor_pixel and rtgi_shade_key in `rtgi_inc.glsl`, the helpers
-`ddgi_trace.glsl`'s MODE_RTGI uses, so the imported tag is RTGI's seed at that pixel.
+`ddgi_trace.glsl`'s MODE_RTGI uses, so the imported tag is RTGI's seed at that pixel. Under `RS_ALPHA_SEED` the
+import writes that seed with or without replay (see `restir_gi.glsl:RS_ALPHA_SEED` below).
 
 A module shader that shades hits defines the four macros, includes `restir_core_ray_scene_inc.glsl` and
 `restir_core_ddgi_inc.glsl`, then `restir_core_ray_scene_hit_shade_inc.glsl`. `restir_core_inc.glsl` includes the
@@ -573,7 +574,8 @@ constant `sky` colour when `constant_sky` is set or no DDGI shading inputs exist
 refused when the sampler is on and no ready ray scene exists.
 
 SOURCE draws its direction from `rtgi_rand2(px, frame, RTGI_RNG_DIRECTION, rf.seed)`, with `rf.seed` = `rtgi/seed` +
-`seed_offset`. Without `gi/replay_seed` the candidate tag is `(px.y * trace_w + px.x) ^ frame` and the trace seed is
+`seed_offset`. Without `gi/replay_seed` the candidate tag is `(px.y * trace_w + px.x) ^ frame` (the trace seed
+under `RS_ALPHA_SEED`) and the trace seed is
 `ray_scene_hash(px.y * 65537 + px.x + frame * 6271 + 0x510e527f)`; with replay the tag and the trace seed are both
 `ray_scene_hash(px.y * 65537 + px.x + frame * 6271)`. A receiver that is not valid writes a `NO_CANDIDATE |
 NOT_TRACED` word carrying the tag (`shaders/restir_gi.glsl:1288-1356`).
@@ -972,6 +974,28 @@ leaves sky samples alone. The share selection uses `rs_rand_frame`, which keeps 
 **FINAL with `gi/fresh_lo` in replay mode** traces from the receiver with the stored seed of a non-sky sample and
 shades through the shared shade (`rs_fresh_lo_replay`). `gi/fresh_lo` is ignored, with a warning, unless the own
 sampler or the DDGI shading inputs are present (`restir_gi.cpp:544-547`).
+
+## Stochastic cut-out seed (`modules/gi_restir/shaders/restir_gi.glsl:RS_ALPHA_SEED`)
+
+`restir_gi.glsl` defines `RS_ALPHA_SEED` when a ray variant is compiled with `RAY_SCENE_ALPHA` and without
+`RAY_SCENE_ALPHA_THRESHOLD`, that is with `ray_scene/alpha_test` on and `ray_scene/alpha_mode` Stochastic. The
+stochastic test (`ray_scene_alpha_passes`) compares a texel's coverage with a value hashed from the trace seed, the
+triangle and the instance index, so a re-test agrees with the ray that made the sample only when it passes that ray's
+seed. Under the define every sample carries its trace seed in `tag`, replay or not:
+
+- Import from R2 (`rs_from_candidate`, own sampler off): the tag becomes `ray_scene_hash(rtgi_shade_key(anchor,
+  frame))`, the seed `ddgi_trace.glsl` traces with, the same value the replay import already wrote.
+- SOURCE (own sampler on): the tag is the seed SOURCE traced with (`shade_seed` in replay, else the
+  `+ 0x510e527f` seed).
+- The visibility rays (`restir_gi_inc.glsl:rs_visible`, sky and point) and the non-replay fresh-Lo ray
+  (`rs_fresh_lo`, FINAL and VALIDATE) trace with `tag`. `rs_fresh_lo` keeps the pixel and frame seed for its hit
+  shade (`gi_hit_direct_light`), so the light pick and its shadow rays are still a new estimate. VALIDATE's history
+  reservoir takes the tag from `c.w`, as the replay re-hit already did.
+
+The same seed also fixes the BLEND coverage draw (`RAY_SCENE_COVERAGE_MISSES`) of those rays. Spatial and temporal
+shifts test the neighbour's sample with that sample's own seed, so a texel is open or closed the same way for every
+receiver that reuses it. Without the define (alpha off, or Threshold) the seeds, tags and images are unchanged, so
+there the BLEND coverage draw of a re-test is still a new draw.
 
 **Pass stats.** Layout and rows (`PS_STRIDE` 32, `PS_ROW_VALIDATE` = 3) are under "Statistics"
 (`modules/gi_restir/restir_gi_core.cpp:117-118`).

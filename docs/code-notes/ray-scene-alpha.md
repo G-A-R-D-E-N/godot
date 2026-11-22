@@ -541,21 +541,16 @@ apply cut-outs. A cut-out surface casts a solid shadow there, while DDGI and ReS
 - `modules/gi_restir/restir_gi_core.cpp:RestirGiCore::_defines`: the software and hardware ray variants add
   `RayScene::alpha_shader_defines()` to their defines; `VARIANT_NONE` gets no defines. The module builds its shaders on
   first use, after `RendererCompositorRD` has made the ray scene, and binds its ray scene set through
-  `append_uniforms`. With `gi/replay_seed`, its replayed rays (FINAL, SOURCE, VALIDATE) pass the stored seed, RTGI's
-  seed at that pixel, so on the same triangle and instance index a stochastic cut-out compares its coverage with the
-  same random value as the `TRACE_MODE_RTGI` ray that made the sample. Without `gi/replay_seed` (the default), the
-  fresh-Lo rays (`rs_fresh_lo`, FINAL and VALIDATE) take a seed from the receiving pixel and frame, and the
-  visibility rays (`rs_visible`, in `restir_gi_inc.glsl`) always do, replay or not. On a texel with coverage between
-  0 and 1 each of those rays is a new draw. A sample that stopped on a texel of coverage c is found again only with
-  probability about c. A failed re-trace sets `hit_here` false, so the sample counts as blocked (weight 0,
-  `INFO_VIS_BLOCKED`) and its Lo is not refreshed. Cut-out edges therefore come out darker by about a further factor
-  c, not only noisier, and visibility there changes from pixel to pixel and frame to frame. Coverage 0 and 1, and
-  Threshold mode, give the same answer every time. The BLEND coverage test already behaves this way. The module keeps
-  the alpha define. A later ReSTIR GI change is planned to make `rs_visible` and `rs_fresh_lo` draw the cut-out with
-  the stored sample's seed in Stochastic mode, rather than keeping a sample whose re-trace failed on a cut-out hit;
-  until then the edge bias above stands. Threshold for the module's variants alone does not fix it with
-  `gi/replay_seed`, because the `TRACE_MODE_RTGI` ray that makes the sample stays stochastic, so stored-seed
-  re-hits would disagree on partly covered texels. The module reads the dirty-box feed (`FEED_MODULE`), whose state
+  `append_uniforms`. In Stochastic mode every sample carries the seed of the ray that made it (RTGI's seed at that
+  pixel, or SOURCE's own), and every re-test passes it: the visibility rays (`rs_visible`), the fresh-Lo rays
+  (`rs_fresh_lo`, FINAL and VALIDATE) and, with `gi/replay_seed`, the replayed rays. On the same triangle and instance
+  index a stochastic cut-out then compares its coverage with the same random value as the ray that made the sample,
+  so a sample that stopped on a partly covered texel is found again and edges are not darkened by the re-test
+  (`docs/code-notes/restir-gi.md`, `restir_gi.glsl:RS_ALPHA_SEED`). Threshold mode needs no seed for the cut-out; the BLEND coverage draw (`RAY_SCENE_COVERAGE_MISSES`) still uses
+  the seed in every mode, so with alpha off or in Threshold mode a module re-test of a sample that stopped on a
+  partly covered BLEND surface is still a new draw. Threshold for the
+  module's variants alone would not do it, because the `TRACE_MODE_RTGI` ray that makes the sample stays
+  stochastic, so its re-tests would disagree on partly covered texels. The module reads the dirty-box feed (`FEED_MODULE`), whose state
   word hashes the final material flags, alpha index bits included (`RayScene::feed_surface_state`): a surface that
   starts or stops being a cut-out publishes a box, a READY layer refilled with new contents does not.
 - `servers/rendering/renderer_rd/environment/direct_shadows.cpp`: its `defines` do not include
