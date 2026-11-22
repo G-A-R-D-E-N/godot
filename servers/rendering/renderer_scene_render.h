@@ -77,6 +77,7 @@ public:
 	virtual uint32_t sdfgi_get_pending_region_cascade(const Ref<RenderSceneBuffers> &p_render_buffers, int p_region) const = 0;
 
 	virtual AABB ray_scene_get_region(const Vector3 &p_camera_position) const { return AABB(); }
+	virtual AABB ray_scene_get_light_region(const Vector3 &p_camera_position) { return ray_scene_get_region(p_camera_position); }
 	virtual void ray_scene_update(const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const Vector<RID> &p_directional_lights, RID p_camera_attributes, const Vector3 &p_camera_position) {}
 
 	/* SKY API */

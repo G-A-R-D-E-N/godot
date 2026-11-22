@@ -3359,11 +3359,29 @@
 		<member name="rendering/global_illumination/ray_scene/dirty_merge_distance" type="float" setter="" getter="" default="0.5">
 			Dirty boxes of the ray scene feed that lie closer to each other than this distance, in meters, are merged into one box. Boxes are in world space.
 		</member>
+		<member name="rendering/global_illumination/ray_scene/light_keep_distance" type="float" setter="" getter="" default="-1.0">
+			In [b]Stable[/b] light pick mode ([member rendering/global_illumination/ray_scene/light_pick_mode]), how much nearer a light out of reach of the pick cell must be to take the place of a light the view already packs. The kept light's distance score is lowered by this many meters. A negative value uses the pick cell size ([member rendering/global_illumination/ray_scene/light_pick_cell]). Not used in [b]Camera[/b] mode. Read on every ray scene update.
+		</member>
+		<member name="rendering/global_illumination/ray_scene/light_keep_share" type="float" setter="" getter="" default="0.25">
+			In [b]Stable[/b] light pick mode ([member rendering/global_illumination/ray_scene/light_pick_mode]), how much more important a light must be to take the place of a light the view already packs. [code]0.25[/code] means more than 25% more importance at the pick cell. [code]0.0[/code] removes the margin, so the pick swaps whenever the order changes. Not used in [b]Camera[/b] mode. Read on every ray scene update.
+		</member>
+		<member name="rendering/global_illumination/ray_scene/light_pick_cell" type="int" setter="" getter="" default="16">
+			The size in meters of the pick cell in [b]Stable[/b] light pick mode ([member rendering/global_illumination/ray_scene/light_pick_mode]). The light pick is scored from the cell that holds the camera, not from the camera itself, so it changes only when the camera enters another cell. The ray scene's light region is snapped to the same cells, with half a cell of hysteresis, and grown by one cell on each side. Every value divides the 64 m ray scene anchor grid. Smaller cells follow the camera more closely in small interiors; larger cells pick by power over a wider area. Read on every ray scene update.
+		</member>
+		<member name="rendering/global_illumination/ray_scene/light_pick_mode" type="int" setter="" getter="" default="1">
+			How the ray scene picks the local lights it packs for GI rays when more lights reach it than [member rendering/global_illumination/ray_scene/max_lights]. [b]Camera[/b] keeps the lights nearest to the live camera, with the light region centred on the camera; the pick can change every frame the camera moves and between frames with equal scores. [b]Stable[/b] ranks lights by their importance at the camera's pick cell ([member rendering/global_illumination/ray_scene/light_pick_cell]), then by distance from the cell centre, then by a fixed light order, and keeps lights the view already packs unless a challenger beats them by a margin ([member rendering/global_illumination/ray_scene/light_keep_share], [member rendering/global_illumination/ray_scene/light_keep_distance]). The Stable pick does not depend on where the camera stands inside a cell or on the order the lights arrive in. Raster direct light is not affected by either mode. Read on every ray scene update.
+		</member>
 		<member name="rendering/global_illumination/ray_scene/max_alpha_layers" type="int" setter="" getter="" default="512">
 			Most coverage layers (one per alpha texture and cutoff pair) the cut-out store holds. The whole store is allocated at this size when [member rendering/global_illumination/ray_scene/alpha_test] is on: 64 KiB per layer at the default layer size, so 32 MiB for 512 layers. A surface that needs a layer when the store is full stays solid, and the refusal is counted. Read on every ray scene update; a change clears the store and fills every layer again.
 		</member>
+		<member name="rendering/global_illumination/ray_scene/max_lights" type="int" setter="" getter="" default="1024">
+			The most lights, directional and local, the ray scene packs for GI rays. Every DDGI ray hit loops over every packed light, so the light cost of a GI ray grows linearly with this value; shadow rays per hit do not. When more local lights reach the ray scene, [member rendering/global_illumination/ray_scene/light_pick_mode] decides which are kept. The light buffer takes 96 bytes per light. Read on every ray scene update.
+		</member>
 		<member name="rendering/global_illumination/ray_scene/mover_frames" type="int" setter="" getter="" default="3">
 			An instance counts as a mover for the ray scene dirty-box feed when it changed in at least this many of the last 8 frames. Readers use the mover boxes to avoid placing long-lived samples on surfaces that will not stay.
+		</member>
+		<member name="rendering/global_illumination/ray_scene/reserved_area_lights" type="int" setter="" getter="" default="16">
+			When the ray scene has to cut lights, up to this many area lights are kept first, ahead of omni and spot lights, so that a room full of point lights cannot push out every area light. The remaining area lights compete with the other lights. Clamped to [member rendering/global_illumination/ray_scene/max_lights] less the directional lights. Read on every ray scene update.
 		</member>
 		<member name="rendering/global_illumination/ray_scene/skip_additive_surfaces" type="bool" setter="" getter="" default="true">
 			If [code]true[/code], surfaces whose spatial shader uses [code]blend_add[/code] are left out of the GI ray scene: DDGI, surfel and shadow rays pass through them, and they neither block nor bounce light. Additive surfaces add light to what is behind them and hide nothing, so they stand for light (glows, beams, screens), not matter. Their emission is not traced either. If [code]false[/code], they are opaque hits with their base color as albedo. Read on every ray scene update, so a change applies on the next frame.

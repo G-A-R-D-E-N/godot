@@ -3978,6 +3978,12 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/alpha_fill_texels_per_frame", PROPERTY_HINT_RANGE, "1048576,1073741824,1"), 67108864);
 	GLOBAL_DEF_INTERNAL("rendering/global_illumination/ray_scene/debug_dirty_feed", 0);
 	GLOBAL_DEF_INTERNAL("rendering/global_illumination/ray_scene/debug_dirty_feed_path", "");
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/max_lights", PROPERTY_HINT_RANGE, "16,16384,1"), 1024);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/reserved_area_lights", PROPERTY_HINT_RANGE, "0,16384,1"), 16);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/light_pick_mode", PROPERTY_HINT_ENUM, "Camera,Stable"), 1);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/light_pick_cell", PROPERTY_HINT_ENUM, "8:8,16:16,32:32,64:64"), 16);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ray_scene/light_keep_share", PROPERTY_HINT_RANGE, "0.0,4.0,0.01"), 0.25);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ray_scene/light_keep_distance", PROPERTY_HINT_RANGE, "-1.0,64.0,0.01,suffix:m"), -1.0);
 
 	GLOBAL_DEF("rendering/global_illumination/direct/enabled", false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/entries", PROPERTY_HINT_ENUM, "4:4,6:6,8:8"), 6);
