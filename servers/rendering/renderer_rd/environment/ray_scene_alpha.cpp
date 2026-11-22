@@ -54,13 +54,30 @@ uint64_t _signature(RID p_rd, uint32_t p_width, uint32_t p_height) {
 	return (p_rd.get_id() * 1000003ULL) ^ (uint64_t(p_width) << 40) ^ (uint64_t(p_height) << 20);
 }
 
-uint64_t _entry_hash(uint32_t p_layer, const Vector2 &p_scale, const Vector2 &p_offset) {
-	const float values[4] = { float(p_scale.x), float(p_scale.y), float(p_offset.x), float(p_offset.y) };
-	return hash_murmur3_buffer(values, sizeof(values), hash_murmur3_one_32(p_layer)) | (uint64_t(p_layer) << 32);
+uint64_t _entry_hash(uint32_t p_layer, const RayAlphaStore::EntryKey &p_key) {
+	return hash_murmur3_buffer(&p_key, sizeof(RayAlphaStore::EntryKey), hash_murmur3_one_32(p_layer)) | (uint64_t(p_layer) << 32);
 }
 
-bool _finite_uv(const Vector2 &p_scale, const Vector2 &p_offset) {
-	return Math::is_finite(float(p_scale.x)) && Math::is_finite(float(p_scale.y)) && Math::is_finite(float(p_offset.x)) && Math::is_finite(float(p_offset.y));
+bool _finite_uv(const RayAlphaStore::EntryKey &p_key) {
+	return Math::is_finite(p_key.scale[0]) && Math::is_finite(p_key.scale[1]) && Math::is_finite(p_key.offset[0]) && Math::is_finite(p_key.offset[1]);
+}
+
+bool _same_key(const RayAlphaStore::TableEntry &p_entry, const RayAlphaStore::EntryKey &p_key) {
+	return p_entry.scale[0] == p_key.scale[0] && p_entry.scale[1] == p_key.scale[1] && p_entry.offset[0] == p_key.offset[0] && p_entry.offset[1] == p_key.offset[1] && p_entry.bits == p_key.bits && p_entry.far_gain == p_key.far_gain && p_entry.far_level == p_key.far_level && p_entry.far_veil_alpha == p_key.far_veil_alpha && p_entry.far_affine[0] == p_key.far_affine[0] && p_entry.far_affine[1] == p_key.far_affine[1];
+}
+
+float _positive_zero(float p_value) {
+	if (p_value == 0.0f) {
+		p_value = 0.0f;
+	}
+	return p_value;
+}
+
+float _layer_density(uint32_t p_width, uint32_t p_height) {
+	if (p_width == 0 || p_height == 0) {
+		return 0.0f;
+	}
+	return 0.5f * (Math::log2(float(p_width)) + Math::log2(float(p_height)));
 }
 
 } // namespace
@@ -98,15 +115,16 @@ void RayAlphaStore::release() {
 	if (max_layers > 0) {
 		change_serial++;
 	}
-	if (layer_texture.is_valid()) {
-		RD::get_singleton()->free_rid(layer_texture);
-		layer_texture = RID();
-	}
+	_free_textures();
 	if (table_buffer.is_valid()) {
 		RD::get_singleton()->free_rid(table_buffer);
 		table_buffer = RID();
 	}
 	if (fill_created) {
+		if (mean_mip_pipeline.is_valid()) {
+			RD::get_singleton()->free_rid(mean_mip_pipeline);
+			mean_mip_pipeline = RID();
+		}
 		if (fill_pipeline.is_valid()) {
 			RD::get_singleton()->free_rid(fill_pipeline);
 			fill_pipeline = RID();
@@ -132,25 +150,48 @@ void RayAlphaStore::release() {
 
 bool RayAlphaStore::_ensure_pipeline() {
 	if (fill_created) {
-		return fill_pipeline.is_valid();
+		return fill_pipeline.is_valid() && mean_mip_pipeline.is_valid();
 	}
 	fill_created = true;
 	fill_shader = memnew(RaySceneAlphaFillShaderRD);
 	Vector<String> modes;
 	modes.push_back("\n");
+	modes.push_back("\n#define MODE_MEAN_MIP\n");
 	fill_shader->initialize(modes, "");
 	fill_version = fill_shader->version_create();
 	RID shader = fill_shader->version_get_shader(fill_version, 0);
 	if (shader.is_valid()) {
 		fill_pipeline = RD::get_singleton()->compute_pipeline_create(shader);
 	}
-	return fill_pipeline.is_valid();
+	RID mip_shader = fill_shader->version_get_shader(fill_version, 1);
+	if (mip_shader.is_valid()) {
+		mean_mip_pipeline = RD::get_singleton()->compute_pipeline_create(mip_shader);
+	}
+	return fill_pipeline.is_valid() && mean_mip_pipeline.is_valid();
+}
+
+void RayAlphaStore::_free_textures() {
+	for (RID &view : mean_mip_views) {
+		if (view.is_valid()) {
+			RD::get_singleton()->free_rid(view);
+			view = RID();
+		}
+	}
+	if (mean_texture.is_valid()) {
+		RD::get_singleton()->free_rid(mean_texture);
+		mean_texture = RID();
+	}
+	if (layer_texture.is_valid()) {
+		RD::get_singleton()->free_rid(layer_texture);
+		layer_texture = RID();
+	}
 }
 
 bool RayAlphaStore::_ensure_texture() {
 	if (layer_texture.is_valid()) {
 		return true;
 	}
+	RD *rd = RD::get_singleton();
 	RD::TextureFormat format;
 	format.format = RD::DATA_FORMAT_R8_UNORM;
 	format.texture_type = RD::TEXTURE_TYPE_2D_ARRAY;
@@ -160,11 +201,28 @@ bool RayAlphaStore::_ensure_texture() {
 	format.array_layers = max_layers;
 	format.mipmaps = 1;
 	format.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
-	layer_texture = RD::get_singleton()->texture_create(format, RD::TextureView());
-	if (layer_texture.is_valid()) {
-		RD::get_singleton()->set_resource_name(layer_texture, "Ray Scene Alpha Layers");
+	layer_texture = rd->texture_create(format, RD::TextureView());
+	if (layer_texture.is_null()) {
+		return false;
 	}
-	return layer_texture.is_valid();
+	format.width = MEAN_SIZE;
+	format.height = MEAN_SIZE;
+	format.mipmaps = MEAN_MIP_COUNT;
+	mean_texture = rd->texture_create(format, RD::TextureView());
+	if (mean_texture.is_null()) {
+		_free_textures();
+		return false;
+	}
+	for (uint32_t mip = 0; mip < MEAN_MIP_COUNT; mip++) {
+		mean_mip_views[mip] = rd->texture_create_shared_from_slice(RD::TextureView(), mean_texture, 0, mip, 1, RD::TEXTURE_SLICE_2D_ARRAY, max_layers);
+		if (mean_mip_views[mip].is_null()) {
+			_free_textures();
+			return false;
+		}
+	}
+	rd->set_resource_name(layer_texture, "Ray Scene Alpha Layers");
+	rd->set_resource_name(mean_texture, "Ray Scene Alpha Mean");
+	return true;
 }
 
 void RayAlphaStore::_ensure_table_capacity(uint32_t p_count) {
@@ -217,12 +275,8 @@ void RayAlphaStore::_retire_entry(uint32_t p_entry) {
 	}
 	meta = EntryMeta();
 	TableEntry &entry = entries[p_entry];
+	entry = TableEntry();
 	entry.layer = ENTRY_RETIRED;
-	entry.state = LAYER_EMPTY;
-	entry.scale[0] = 0.0f;
-	entry.scale[1] = 0.0f;
-	entry.offset[0] = 0.0f;
-	entry.offset[1] = 0.0f;
 	free_entries.push_back(p_entry);
 	stats.entries_retired_total++;
 	_mark_changed();
@@ -239,10 +293,22 @@ void RayAlphaStore::_mark_state_changed() {
 	state_change_frame = frame;
 }
 
+bool RayAlphaStore::_publish_far(TableEntry &r_entry, const Layer &p_layer) {
+	const float density = _layer_density(p_layer.width, p_layer.height);
+	const uint32_t far_state = p_layer.state == LAYER_READY && p_layer.far_filled_signature == p_layer.filled_signature ? LAYER_READY : LAYER_EMPTY;
+	if (r_entry.density == density && r_entry.far_state == far_state) {
+		return false;
+	}
+	r_entry.density = density;
+	r_entry.far_state = far_state;
+	return true;
+}
+
 void RayAlphaStore::begin_update(uint64_t p_frame) {
 	frame = p_frame;
 	stats.layers_refused = 0;
 	stats.dead_sources_refused = 0;
+	stats.far_invalid = 0;
 	if (max_layers == 0) {
 		return;
 	}
@@ -250,29 +316,69 @@ void RayAlphaStore::begin_update(uint64_t p_frame) {
 		state_changed = false;
 		change_serial++;
 	}
-	if (liveness != nullptr) {
-		for (uint32_t i = 0; i < layers.size(); i++) {
-			if (layers[i].source.is_valid() && !liveness(layers[i].source)) {
-				_release_layer(i);
-				stats.layers_released_total++;
-			}
+	for (uint32_t i = 0; i < layers.size(); i++) {
+		layers[i].far_wanted = false;
+		if (liveness != nullptr && layers[i].source.is_valid() && !liveness(layers[i].source)) {
+			_release_layer(i);
+			stats.layers_released_total++;
 		}
 	}
 	for (uint32_t i = 1; i < entries.size(); i++) {
-		const TableEntry &entry = entries[i];
+		TableEntry &entry = entries[i];
 		if (entry.layer == ENTRY_RETIRED) {
 			continue;
 		}
 		const EntryMeta &meta = entry_meta[i];
 		if (entry.layer >= layers.size() || layers[entry.layer].source.is_null() || meta.generation != layers[entry.layer].generation || meta.last_used + 1 < frame) {
 			_retire_entry(i);
+		} else if (uses_far(entry.bits) && _publish_far(entry, layers[entry.layer])) {
+			_mark_state_changed();
 		}
 	}
 }
 
-uint32_t RayAlphaStore::acquire(RID p_source, uint32_t p_cutoff, const Vector2 &p_scale, const Vector2 &p_offset) {
-	if (max_layers == 0 || p_source.is_null() || p_cutoff == 0 || p_cutoff > 255 || !_finite_uv(p_scale, p_offset)) {
+RayAlphaStore::EntryKey RayAlphaStore::canonical_key(const EntryKey &p_raw, bool &r_far_invalid) {
+	r_far_invalid = false;
+	EntryKey key = p_raw;
+	uint32_t cull = p_raw.bits & ENTRY_CULL_MASK;
+	if (cull != uint32_t(RSE::CULL_MODE_FRONT) && cull != uint32_t(RSE::CULL_MODE_BACK)) {
+		cull = uint32_t(RSE::CULL_MODE_DISABLED);
+	}
+	uint32_t mode = (p_raw.bits >> ENTRY_FAR_MODE_SHIFT) & ENTRY_FAR_MODE_MASK;
+	if (mode != 1u && mode != 2u) {
+		mode = 0;
+	}
+	if (mode != 0 && !(Math::is_finite(key.far_gain) && Math::is_finite(key.far_level) && Math::is_finite(key.far_veil_alpha) && Math::is_finite(key.far_affine[0]) && Math::is_finite(key.far_affine[1]))) {
+		mode = 0;
+		r_far_invalid = true;
+	}
+	if (mode == 0) {
+		key.far_gain = 0.0f;
+		key.far_level = 0.0f;
+		key.far_veil_alpha = 0.0f;
+		key.far_affine[0] = 0.0f;
+		key.far_affine[1] = 0.0f;
+	} else {
+		key.far_gain = MAX(key.far_gain, 0.0f);
+		key.far_veil_alpha = CLAMP(key.far_veil_alpha, 0.0f, 1.0f);
+	}
+	key.bits = cull | (mode << ENTRY_FAR_MODE_SHIFT);
+	key.far_gain = _positive_zero(key.far_gain);
+	key.far_level = _positive_zero(key.far_level);
+	key.far_veil_alpha = _positive_zero(key.far_veil_alpha);
+	key.far_affine[0] = _positive_zero(key.far_affine[0]);
+	key.far_affine[1] = _positive_zero(key.far_affine[1]);
+	return key;
+}
+
+uint32_t RayAlphaStore::acquire(RID p_source, uint32_t p_cutoff, const EntryKey &p_key) {
+	if (max_layers == 0 || p_source.is_null() || p_cutoff == 0 || p_cutoff > 255 || !_finite_uv(p_key)) {
 		return 0;
+	}
+	bool far_invalid = false;
+	const EntryKey key = canonical_key(p_key, far_invalid);
+	if (far_invalid) {
+		stats.far_invalid++;
 	}
 	const LayerKey layer_key = { p_source.get_id(), p_cutoff };
 	uint32_t layer_index = 0;
@@ -311,24 +417,37 @@ uint32_t RayAlphaStore::acquire(RID p_source, uint32_t p_cutoff, const Vector2 &
 	}
 	Layer &layer = layers[layer_index];
 	layer.last_used = frame;
+	const bool wants_far = uses_far(key.bits);
+	if (wants_far) {
+		layer.far_wanted = true;
+	}
 
-	const uint64_t entry_key = _entry_hash(layer_index, p_scale, p_offset);
+	const uint64_t entry_key = _entry_hash(layer_index, key);
 	const uint32_t *mapped = entry_map.getptr(entry_key);
 	if (mapped != nullptr) {
 		const uint32_t found = *mapped;
 		const TableEntry &existing = entries[found];
-		if (existing.layer == layer_index && entry_meta[found].generation == layer.generation && existing.scale[0] == float(p_scale.x) && existing.scale[1] == float(p_scale.y) && existing.offset[0] == float(p_offset.x) && existing.offset[1] == float(p_offset.y)) {
+		if (existing.layer == layer_index && entry_meta[found].generation == layer.generation && _same_key(existing, key)) {
 			entry_meta[found].last_used = frame;
 			return found;
 		}
 	}
-	TableEntry entry;
+	TableEntry entry = {};
 	entry.layer = layer_index;
 	entry.state = layer.state;
-	entry.scale[0] = float(p_scale.x);
-	entry.scale[1] = float(p_scale.y);
-	entry.offset[0] = float(p_offset.x);
-	entry.offset[1] = float(p_offset.y);
+	entry.scale[0] = key.scale[0];
+	entry.scale[1] = key.scale[1];
+	entry.offset[0] = key.offset[0];
+	entry.offset[1] = key.offset[1];
+	entry.bits = key.bits;
+	entry.far_gain = key.far_gain;
+	entry.far_level = key.far_level;
+	entry.far_veil_alpha = key.far_veil_alpha;
+	entry.far_affine[0] = key.far_affine[0];
+	entry.far_affine[1] = key.far_affine[1];
+	if (wants_far) {
+		_publish_far(entry, layer);
+	}
 	EntryMeta meta;
 	meta.generation = layer.generation;
 	meta.last_used = frame;
@@ -405,7 +524,11 @@ void RayAlphaStore::update() {
 			}
 			RD::Uniform u_source(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ sampler, layer.source_rd }));
 			RD::Uniform u_layers(RD::UNIFORM_TYPE_IMAGE, 1, layer_texture);
-			RID set = UniformSetCacheRD::get_singleton()->get_cache(shader, 0, u_source, u_layers);
+			RD::Uniform u_mean(RD::UNIFORM_TYPE_IMAGE, 2, mean_mip_views[0]);
+			RID set = UniformSetCacheRD::get_singleton()->get_cache(shader, 0, u_source, u_layers, u_mean);
+			if (set.is_null()) {
+				continue;
+			}
 			RD::get_singleton()->compute_list_bind_uniform_set(list, set, 0);
 			FillParams params = {};
 			params.layer = index;
@@ -425,10 +548,72 @@ void RayAlphaStore::update() {
 		RD::get_singleton()->compute_list_end();
 	}
 
+	_update_far_mips();
 	sync_entries();
 	if (table_dirty) {
 		_upload_table();
 	}
+}
+
+bool RayAlphaStore::layer_needs_far(uint32_t p_layer) const {
+	ERR_FAIL_UNSIGNED_INDEX_V(p_layer, layers.size(), false);
+	const Layer &layer = layers[p_layer];
+	return layer.source.is_valid() && layer.state == LAYER_READY && layer.far_wanted && layer.far_filled_signature != layer.filled_signature;
+}
+
+void RayAlphaStore::_update_far_mips() {
+	LocalVector<uint32_t> pending;
+	uint64_t texels = stats.fill_texels_this_frame;
+	for (uint32_t i = 0; i < layers.size(); i++) {
+		if (!layer_needs_far(i)) {
+			continue;
+		}
+		if ((stats.fills_this_frame > 0 || !pending.is_empty()) && texels + MEAN_MIP_READS > texels_per_frame) {
+			break;
+		}
+		pending.push_back(i);
+		texels += MEAN_MIP_READS;
+	}
+	if (pending.is_empty() || !_ensure_pipeline()) {
+		return;
+	}
+
+	const RID shader = fill_shader->version_get_shader(fill_version, 1);
+	RID sets[MEAN_MIP_COUNT - 1];
+	for (uint32_t mip = 1; mip < MEAN_MIP_COUNT; mip++) {
+		RD::Uniform u_source(RD::UNIFORM_TYPE_IMAGE, 0, mean_mip_views[mip - 1]);
+		RD::Uniform u_dest(RD::UNIFORM_TYPE_IMAGE, 1, mean_mip_views[mip]);
+		sets[mip - 1] = UniformSetCacheRD::get_singleton()->get_cache(shader, 0, u_source, u_dest);
+		if (sets[mip - 1].is_null()) {
+			return;
+		}
+	}
+
+	RD *rd = RD::get_singleton();
+	RD::ComputeListID list = rd->compute_list_begin();
+	rd->compute_list_bind_compute_pipeline(list, mean_mip_pipeline);
+	for (uint32_t mip = 1; mip < MEAN_MIP_COUNT; mip++) {
+		if (mip > 1) {
+			rd->compute_list_add_barrier(list);
+		}
+		rd->compute_list_bind_uniform_set(list, sets[mip - 1], 0);
+		FillParams params = {};
+		params.layer_size = MEAN_SIZE >> mip;
+		const uint32_t groups = (params.layer_size + 7u) / 8u;
+		for (uint32_t index : pending) {
+			params.layer = index;
+			rd->compute_list_set_push_constant(list, &params, sizeof(params));
+			rd->compute_list_dispatch(list, groups, groups, 1);
+		}
+	}
+	rd->compute_list_end();
+
+	for (uint32_t index : pending) {
+		commit_far(index, layers[index].filled_signature);
+	}
+	const uint64_t added = uint64_t(pending.size()) * MEAN_MIP_READS;
+	stats.fill_texels_this_frame += added;
+	stats.fill_texels_total += added;
 }
 
 void RayAlphaStore::commit_fill(uint32_t p_layer, uint64_t p_signature) {
@@ -443,6 +628,14 @@ void RayAlphaStore::commit_fill(uint32_t p_layer, uint64_t p_signature) {
 	layer.state = LAYER_READY;
 	if (changed) {
 		_mark_state_changed();
+	}
+}
+
+void RayAlphaStore::commit_far(uint32_t p_layer, uint64_t p_signature) {
+	ERR_FAIL_UNSIGNED_INDEX(p_layer, layers.size());
+	Layer &layer = layers[p_layer];
+	if (layer.source.is_valid() && layer.state == LAYER_READY && layer.filled_signature == p_signature) {
+		layer.far_filled_signature = p_signature;
 	}
 }
 

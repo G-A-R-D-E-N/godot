@@ -47,11 +47,32 @@ public:
 
 	static constexpr uint32_t ENTRY_RETIRED = 0xFFFFFFFF;
 
+	static constexpr uint32_t ENTRY_CULL_MASK = 3u;
+	static constexpr uint32_t ENTRY_FAR_MODE_SHIFT = 2u;
+	static constexpr uint32_t ENTRY_FAR_MODE_MASK = 3u;
+
+	struct EntryKey {
+		float scale[2] = {};
+		float offset[2] = {};
+		uint32_t bits = 0;
+		float far_gain = 0.0f;
+		float far_level = 0.0f;
+		float far_veil_alpha = 0.0f;
+		float far_affine[2] = {};
+	};
+
 	struct TableEntry {
-		uint32_t layer;
-		uint32_t state;
-		float scale[2];
-		float offset[2];
+		uint32_t layer = 0;
+		uint32_t state = 0;
+		float scale[2] = {};
+		float offset[2] = {};
+		uint32_t bits = 0;
+		float far_gain = 0.0f;
+		float far_level = 0.0f;
+		float far_veil_alpha = 0.0f;
+		float far_affine[2] = {};
+		float density = 0.0f;
+		uint32_t far_state = 0;
 	};
 
 	struct Stats {
@@ -71,6 +92,7 @@ public:
 		uint64_t layers_released_total = 0;
 		uint64_t layers_evicted_total = 0;
 		uint64_t entries_retired_total = 0;
+		uint32_t far_invalid = 0;
 	};
 
 	typedef bool (*LivenessFunc)(RID p_texture);
@@ -83,13 +105,29 @@ public:
 
 	void set_liveness(LivenessFunc p_liveness) { liveness = p_liveness; }
 	void begin_update(uint64_t p_frame);
-	uint32_t acquire(RID p_source, uint32_t p_cutoff, const Vector2 &p_scale, const Vector2 &p_offset);
+	static EntryKey canonical_key(const EntryKey &p_raw, bool &r_far_invalid);
+	uint32_t acquire(RID p_source, uint32_t p_cutoff, const EntryKey &p_key);
+	uint32_t acquire(RID p_source, uint32_t p_cutoff, const Vector2 &p_scale, const Vector2 &p_offset) {
+		EntryKey key;
+		key.scale[0] = float(p_scale.x);
+		key.scale[1] = float(p_scale.y);
+		key.offset[0] = float(p_offset.x);
+		key.offset[1] = float(p_offset.y);
+		return acquire(p_source, p_cutoff, key);
+	}
 	void update();
 	void commit_fill(uint32_t p_layer, uint64_t p_signature);
+	bool layer_needs_far(uint32_t p_layer) const;
+	void commit_far(uint32_t p_layer, uint64_t p_signature);
 	void sync_entries();
 
+	static bool uses_far(uint32_t p_bits) {
+		const uint32_t mode = (p_bits >> ENTRY_FAR_MODE_SHIFT) & ENTRY_FAR_MODE_MASK;
+		return mode == 1u || mode == 2u;
+	}
 	bool is_configured() const { return max_layers > 0; }
 	RID get_layer_texture() const { return layer_texture; }
+	RID get_mean_texture() const { return mean_texture; }
 	RID get_table_buffer() const { return table_buffer; }
 	uint32_t get_layer_size() const { return layer_size; }
 	const TableEntry &get_entry(uint32_t p_index) const { return entries[p_index]; }
@@ -116,8 +154,10 @@ private:
 		uint32_t height = 0;
 		uint64_t signature = 0;
 		uint64_t filled_signature = 0;
+		uint64_t far_filled_signature = 0;
 		uint32_t generation = 0;
 		uint64_t last_used = 0;
+		bool far_wanted = false;
 	};
 
 	struct LayerKey {
@@ -138,7 +178,11 @@ private:
 	};
 
 	static constexpr uint32_t NO_LAYER = 0xFFFFFFFF;
+	static constexpr uint32_t MEAN_MIP_COUNT = 8;
+	static constexpr uint32_t MEAN_SIZE = 1u << (MEAN_MIP_COUNT - 1);
+	static constexpr uint32_t MEAN_MIP_READS = 4u * (MEAN_SIZE * MEAN_SIZE - 1u) / 3u;
 
+	static bool _publish_far(TableEntry &r_entry, const Layer &p_layer);
 	uint32_t _find_victim() const;
 	void _release_layer(uint32_t p_layer);
 	void _retire_entry(uint32_t p_entry);
@@ -146,6 +190,8 @@ private:
 	void _mark_state_changed();
 	bool _ensure_pipeline();
 	bool _ensure_texture();
+	void _free_textures();
+	void _update_far_mips();
 	void _ensure_table_capacity(uint32_t p_count);
 	void _upload_table();
 
@@ -153,6 +199,8 @@ private:
 	uint32_t layer_size = 256;
 	uint64_t texels_per_frame = 0;
 	RID layer_texture;
+	RID mean_texture;
+	RID mean_mip_views[MEAN_MIP_COUNT];
 	RID table_buffer;
 	uint32_t table_capacity = 0;
 	LocalVector<Layer> layers;
@@ -171,8 +219,16 @@ private:
 	RaySceneAlphaFillShaderRD *fill_shader = nullptr;
 	RID fill_version;
 	RID fill_pipeline;
+	RID mean_mip_pipeline;
 	bool fill_created = false;
 	Stats stats;
 };
+
+static_assert(sizeof(RayAlphaStore::EntryKey) == 40);
+static_assert(sizeof(RayAlphaStore::TableEntry) == 56);
+static_assert(offsetof(RayAlphaStore::TableEntry, bits) == 24);
+static_assert(offsetof(RayAlphaStore::TableEntry, far_affine) == 40);
+static_assert(offsetof(RayAlphaStore::TableEntry, density) == 48);
+static_assert(offsetof(RayAlphaStore::TableEntry, far_state) == 52);
 
 #endif

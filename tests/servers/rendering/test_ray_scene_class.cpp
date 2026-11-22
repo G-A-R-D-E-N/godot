@@ -48,7 +48,7 @@ constexpr RSE::ShadowCastingSetting SETTINGS[] = {
 	RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY,
 };
 
-constexpr uint32_t FLAG_COMBINATIONS = 32;
+constexpr uint32_t FLAG_COMBINATIONS = 64;
 
 constexpr uint32_t ALPHA_INDICES[] = {
 	0,

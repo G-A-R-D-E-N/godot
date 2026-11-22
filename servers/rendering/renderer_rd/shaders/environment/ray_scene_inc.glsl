@@ -130,17 +130,29 @@ layout(set = RAY_SCENE_SET, binding = 7) uniform accelerationStructureEXT ray_sc
 #ifdef RAY_SCENE_ALPHA
 #define RAY_SCENE_ALPHA_SHIFT 8u
 #define RAY_SCENE_ALPHA_STATE_READY 2u
+#define RAY_SCENE_MATERIAL_SHADOW_TWO_SIDED 32u
+#define RAY_SCENE_ALPHA_CULL_MASK 3u
+#define RAY_SCENE_ALPHA_CULL_BACK 2u
 
 layout(set = RAY_SCENE_SET, binding = 9, std430) restrict readonly buffer RaySceneTriangleUvs {
 	uint data[];
 }
 ray_scene_triangle_uvs;
 
+layout(set = RAY_SCENE_SET, binding = 10) uniform sampler2DArray ray_scene_alpha_mean;
+
 struct RaySceneAlphaEntry {
 	uint layer;
 	uint state;
 	vec2 scale;
 	vec2 offset;
+	uint bits;
+	float far_gain;
+	float far_level;
+	float far_veil_alpha;
+	vec2 far_affine;
+	float density;
+	uint far_state;
 };
 
 layout(set = RAY_SCENE_SET, binding = 13, std430) restrict readonly buffer RaySceneAlphaTable {
@@ -216,6 +228,43 @@ bool ray_scene_race_step(inout float r_key, inout uint r_id, uint p_seed_hash, u
 #endif
 
 #ifdef RAY_SCENE_ALPHA
+bool ray_scene_alpha_culled(uint p_bits, uint p_flags, bool p_backface, bool p_shadow) {
+	uint cull = p_bits & RAY_SCENE_ALPHA_CULL_MASK;
+	if (cull == 0u || (p_shadow && (p_flags & RAY_SCENE_MATERIAL_SHADOW_TWO_SIDED) != 0u)) {
+		return false;
+	}
+	bool seen_back = p_backface != p_shadow;
+	return cull == RAY_SCENE_ALPHA_CULL_BACK ? seen_back : !seen_back;
+}
+
+bool ray_scene_alpha_covered(RaySceneAlphaEntry p_entry, uint p_triangle, uint p_instance, vec2 p_bary, uint p_seed) {
+	uint base = p_triangle * 4u;
+	float w0 = 1.0 - p_bary.x - p_bary.y;
+	vec2 uv = unpackHalf2x16(ray_scene_triangle_uvs.data[base]) * w0 + unpackHalf2x16(ray_scene_triangle_uvs.data[base + 1u]) * p_bary.x + unpackHalf2x16(ray_scene_triangle_uvs.data[base + 2u]) * p_bary.y;
+	uv = uv * p_entry.scale + p_entry.offset;
+	float coverage = textureLod(ray_scene_alpha_layers, vec3(uv, float(p_entry.layer)), 0.0).r;
+#ifdef RAY_SCENE_ALPHA_THRESHOLD
+	return coverage >= 0.5;
+#else
+	return coverage > float(ray_scene_hash(ray_scene_hash(p_seed ^ (p_triangle * 0x9e3779b9u)) + p_instance) >> 8u) / 16777216.0;
+#endif
+}
+
+bool ray_scene_alpha_passes(uint p_flags, uint p_triangle, uint p_instance, vec2 p_bary, uint p_seed, bool p_backface, bool p_shadow) {
+	uint index = p_flags >> RAY_SCENE_ALPHA_SHIFT;
+	if (index == 0u) {
+		return true;
+	}
+	RaySceneAlphaEntry entry = ray_scene_alpha_table.data[index];
+	if (entry.state != RAY_SCENE_ALPHA_STATE_READY) {
+		return true;
+	}
+	if (ray_scene_alpha_culled(entry.bits, p_flags, p_backface, p_shadow)) {
+		return false;
+	}
+	return ray_scene_alpha_covered(entry, p_triangle, p_instance, p_bary, p_seed);
+}
+
 bool ray_scene_alpha_passes(uint p_flags, uint p_triangle, uint p_instance, vec2 p_bary, uint p_seed) {
 	uint index = p_flags >> RAY_SCENE_ALPHA_SHIFT;
 	if (index == 0u) {
@@ -225,16 +274,7 @@ bool ray_scene_alpha_passes(uint p_flags, uint p_triangle, uint p_instance, vec2
 	if (entry.state != RAY_SCENE_ALPHA_STATE_READY) {
 		return true;
 	}
-	uint base = p_triangle * 3u;
-	float w0 = 1.0 - p_bary.x - p_bary.y;
-	vec2 uv = unpackHalf2x16(ray_scene_triangle_uvs.data[base]) * w0 + unpackHalf2x16(ray_scene_triangle_uvs.data[base + 1u]) * p_bary.x + unpackHalf2x16(ray_scene_triangle_uvs.data[base + 2u]) * p_bary.y;
-	uv = uv * entry.scale + entry.offset;
-	float coverage = textureLod(ray_scene_alpha_layers, vec3(uv, float(entry.layer)), 0.0).r;
-#ifdef RAY_SCENE_ALPHA_THRESHOLD
-	return coverage >= 0.5;
-#else
-	return coverage > float(ray_scene_hash(ray_scene_hash(p_seed ^ (p_triangle * 0x9e3779b9u)) + p_instance) >> 8u) / 16777216.0;
-#endif
+	return ray_scene_alpha_covered(entry, p_triangle, p_instance, p_bary, p_seed);
 }
 #endif
 
@@ -304,7 +344,7 @@ void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, 
 						continue;
 					}
 #ifdef RAY_SCENE_ALPHA
-					if (!ray_scene_alpha_passes(flags, triangle_index, p_instance, vec2(u, v), p_seed)) {
+					if (!ray_scene_alpha_passes(flags, triangle_index, p_instance, vec2(u, v), p_seed, det > 0.0, p_shadow)) {
 						continue;
 					}
 #endif
