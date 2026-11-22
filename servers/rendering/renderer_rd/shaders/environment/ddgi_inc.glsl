@@ -151,7 +151,11 @@ vec3 ddgi_sample_level(uint p_level, vec3 p_position, vec3 p_normal, vec3 p_view
 			float delta = distance_to_biased - moments.x;
 			float chebyshev = variance / (variance + delta * delta);
 			weight *= chebyshev * chebyshev * chebyshev;
-			weight *= weight < 0.5 ? pow(weight, 7.0) * 128.0 : 1.0;
+			if (weight < 0.5) {
+				float weight2 = weight * weight;
+				float weight4 = weight2 * weight2;
+				weight = weight4 * weight4 * 128.0;
+			}
 		}
 
 		weight = max(1e-6, weight);
@@ -232,7 +236,11 @@ vec3 ddgi_medium_level(uint p_level, vec3 p_position, out float r_weight, out fl
 			float delta = distance_to_point - moments.x;
 			float chebyshev = variance / (variance + delta * delta);
 			weight *= chebyshev * chebyshev * chebyshev;
-			weight *= weight < 0.5 ? pow(weight, 7.0) * 128.0 : 1.0;
+			if (weight < 0.5) {
+				float weight2 = weight * weight;
+				float weight4 = weight2 * weight2;
+				weight = weight4 * weight4 * 128.0;
+			}
 		}
 
 		weight = max(1e-6, weight);
