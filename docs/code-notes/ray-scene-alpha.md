@@ -607,10 +607,11 @@ apply cut-outs. A cut-out surface casts a solid shadow there, while DDGI and ReS
   material hash) therefore sees exact legacy-off flags while off, and the far-state hash loop remains gated on
   `alpha_enabled`.
 - Store warming while off: `alpha_store.configure`, `alpha_store.begin_update`, `_alpha_entry` (`alpha_store.acquire`),
-  `alpha_store.update()` and `_print_alpha()` run unconditionally on every `RayScene::update`. Layers and mean mips keep
+  and `alpha_store.update()` run unconditionally on every `RayScene::update`. Layers and mean mips keep
   acquiring, stamping and filling while `alpha_test` is off, so turning it on traces already-`READY` layers on the next
-  update instead of waiting for fills. While off, `_alpha_instance` is skipped, so `live_surfaces`, `pending_surfaces`
-  and `solid_unsafe_uv` stay 0 while `_print_alpha()` still reports cut-out materials, layers and table entries.
+  update instead of waiting for fills. `_print_alpha()` runs only while `alpha_enabled` is true, so an off run's log has
+  no `Ray scene alpha:` line, as before the switch (run kits read that line to tell an on leg from an off leg). While
+  off, `_alpha_instance` is skipped, so `live_surfaces`, `pending_surfaces` and `solid_unsafe_uv` stay 0.
 - Hardware split (`ray_scene.h:RayScene::alpha_split_bits`, `hw_split_stale`): `MeshEntry::hw_alpha_on` records the
   `alpha_enabled` state under which the mesh's frozen hardware split was built. When `accel` is active, each instance
   accumulates `alpha_split |= alpha_split_bits(s, cached->entry.flags, cached->alpha_flags)` across its surfaces, where

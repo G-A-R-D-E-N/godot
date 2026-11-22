@@ -1781,7 +1781,9 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	scene_signature = alpha_scene_signature(scene_signature, alpha_enabled);
 	GIEpochs::get_singleton()->apply(scene_tracker.update(scene_signature, scene_members));
 	alpha_store.update();
-	_print_alpha();
+	if (alpha_enabled) {
+		_print_alpha();
+	}
 
 	const bool rebuilt = signature != instance_signature || anchor_moved || need_assembly || tlas_node_buffer.is_null();
 	if (rebuilt) {
