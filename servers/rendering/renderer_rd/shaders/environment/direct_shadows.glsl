@@ -640,7 +640,7 @@ void main() {
 	imageStore(guide_image, at, uvec4((floatBitsToUint(-vertex.z) & ~3u) | phase, packSnorm2x16(direct_oct_encode(normal)), 0u, 0u));
 	for (uint i = 0u; i < own_count; i++) {
 		accum[i] = vec2(0.0);
-		if (direct_lamps.data[own[i].slot].reset_frame > params.last_frame) {
+		if (direct_lamps.data[own[i].slot].reset_frame > params.last_frame || cold_lamp(own[i].slot)) {
 			continue;
 		}
 		for (uint c = 0u; c < candidate_count; c++) {

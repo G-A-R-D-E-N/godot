@@ -125,9 +125,12 @@ DirectShadows::DirectShadows() {
 		quarter_pipeline.create_compute_pipeline(quarter_shader.version_get_shader(quarter_shader_version, 0));
 		for (int i = 0; i < QUARTER_MAX; i++) {
 			quarter_filter_pipeline[i].create_compute_pipeline(quarter_filter_shader.version_get_shader(quarter_filter_shader_version, i));
+			quarter_valid = quarter_valid && quarter_filter_pipeline[i].get_rid().is_valid();
 		}
 		resolve_pipeline.create_compute_pipeline(resolve_shader.version_get_shader(resolve_shader_version, 0));
-	} else {
+		quarter_valid = quarter_valid && quarter_pipeline.get_rid().is_valid() && resolve_pipeline.get_rid().is_valid();
+	}
+	if (!quarter_valid) {
 		WARN_PRINT("Direct shadows: the quarter-resolution shaders could not be made, so trace_resolution Quarter runs at Full.");
 	}
 	params_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(Params));
@@ -274,7 +277,8 @@ Ref<DirectShadows::ViewportData> DirectShadows::_viewport(const Ref<RenderSceneB
 
 void DirectShadows::_ensure_textures(const Ref<RenderSceneBuffersRD> &p_render_buffers, Ref<ViewportData> p_viewport, const Settings &p_settings, bool p_quarter) {
 	const Size2i size = p_render_buffers->get_internal_size();
-	if (p_viewport->entries == p_settings.entries && p_viewport->size == size && p_viewport->precise == p_settings.precise() && p_viewport->quarter == p_quarter && p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SLOTS)) {
+	if (p_viewport->entries == p_settings.entries && p_viewport->size == size && p_viewport->precise == p_settings.precise() && p_viewport->quarter == p_quarter && p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SLOTS)
+			&& (!p_quarter || (p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_FACTORS_BLOCK) && p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SLOTS_RESOLVED)))) {
 		return;
 	}
 	p_render_buffers->clear_context(RB_SCOPE_DIRECT_SHADOWS);
