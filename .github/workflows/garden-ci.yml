@@ -285,3 +285,21 @@ jobs:
               --title "Garden engine 4.8.0-dev double + Mono (${GITHUB_SHA:0:10})" \
               --notes "Built by CI from $GITHUB_SHA. .NET packages: $pkg."
           fi
+
+      - name: Notify Garden-Engine engine-update
+        env:
+          DISPATCH_TOKEN: ${{ secrets.GARDEN_ENGINE_DISPATCH_TOKEN }}
+          TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+        run: |
+          set -euo pipefail
+          TAG=${TAG:-engine-4.8.0-dev-${GITHUB_SHA:0:10}}
+          if [ -z "${DISPATCH_TOKEN:-}" ]; then
+            echo "::warning::GARDEN_ENGINE_DISPATCH_TOKEN is not set; Garden-Engine will rely on its engine-update schedule."
+            exit 0
+          fi
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $DISPATCH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -X POST "https://api.github.com/repos/G-A-R-D-E-N/Garden-Engine/dispatches" \
+            -d "{\"event_type\":\"engine-release-published\",\"client_payload\":{\"tag\":\"$TAG\"}}"
+          echo "Requested Garden-Engine engine-update for $TAG"
