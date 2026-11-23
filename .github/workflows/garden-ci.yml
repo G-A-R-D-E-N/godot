@@ -26,6 +26,7 @@ env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
   SCONS_CACHE_LIMIT: 3072
+  GODOT_TEST_WORKER_THREADS: "8"
 
 jobs:
   editor-build-scope:

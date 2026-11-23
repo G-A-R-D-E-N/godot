@@ -32,6 +32,8 @@
 
 TEST_FORCE_LINK(test_resource_loader_lifetime)
 
+#include "core/math/math_funcs.h"
+
 #include "core/io/resource.h"
 #include "core/io/resource_loader.h"
 #include "core/object/callable_mp.h"
@@ -57,6 +59,45 @@ static void reset_test_gate() {
 
 static void require_test_gate_unchanged() {
 	CHECK_MESSAGE(!test_gate_timed_out.load(std::memory_order_relaxed), "ResourceLoader test gate timed out");
+}
+
+static bool wait_entered(Semaphore &p_entered, uint64_t p_timeout_ms) {
+	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + p_timeout_ms;
+	while (OS::get_singleton()->get_ticks_msec() < deadline) {
+		if (p_entered.try_wait()) {
+			return true;
+		}
+		OS::get_singleton()->delay_usec(100);
+	}
+	return p_entered.try_wait();
+}
+
+static bool wait_task_completed(WorkerThreadPool *p_pool, WorkerThreadPool::TaskID p_task_id, uint64_t p_timeout_ms) {
+	if (p_task_id == WorkerThreadPool::INVALID_TASK_ID || p_pool == nullptr) {
+		return false;
+	}
+	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + p_timeout_ms;
+	while (OS::get_singleton()->get_ticks_msec() < deadline) {
+		if (p_pool->is_task_completed(p_task_id)) {
+			return true;
+		}
+		OS::get_singleton()->delay_usec(100);
+	}
+	return p_pool->is_task_completed(p_task_id);
+}
+
+static int worker_pool_low_priority_capacity(int p_thread_count) {
+	const float ratio = 0.3f;
+	return Math::clamp(int(p_thread_count * ratio), 1, MAX(p_thread_count - 1, 1));
+}
+
+static int min_worker_threads_for_two_low_priority_slots() {
+	for (int count = 1; count <= 64; count++) {
+		if (worker_pool_low_priority_capacity(count) >= 2) {
+			return count;
+		}
+	}
+	return 7;
 }
 
 class GatedLoader : public ResourceFormatLoader {
@@ -235,17 +276,14 @@ TEST_CASE("[ResourceLoader] Last worker reference retires its token") {
 		ResourceLoader::remove_resource_format_loader(loader);
 		return;
 	}
-	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 60000;
-	bool entered = false;
-	while (!(entered = loader->entered.try_wait()) && OS::get_singleton()->get_ticks_msec() < deadline) {
-		OS::get_singleton()->delay_usec(100);
-	}
+	const bool entered = wait_entered(loader->entered, kLoaderSyncTimeoutMs);
 	CHECK_MESSAGE(entered, "Loader worker did not enter before the deadline");
 	if (!entered) {
 		loader->release.post();
 		Error error;
 		ResourceLoader::_load_complete(**token, &error);
 		token.unref();
+		ResourceLoader::clear_thread_load_tasks();
 		ResourceLoader::remove_resource_format_loader(loader);
 		return;
 	}
@@ -253,9 +291,7 @@ TEST_CASE("[ResourceLoader] Last worker reference retires its token") {
 	token.unref();
 	loader->release.post();
 	auto *pool = WorkerThreadPool::get_singleton();
-	while (!pool->is_task_completed(loader->task_id)) {
-		OS::get_singleton()->delay_usec(100);
-	}
+	CHECK_MESSAGE(wait_task_completed(pool, loader->task_id, kLoaderSyncTimeoutMs), "Loader worker did not complete before the deadline");
 	MessageQueue::get_main_singleton()->flush();
 	Object *remaining = ObjectDB::get_instance(id);
 	CHECK_MESSAGE(remaining == nullptr, "Completed loader worker left its zero-reference token alive");
@@ -293,22 +329,19 @@ TEST_CASE("[ResourceLoader] Nested connections survive task retirement") {
 		ResourceLoader::remove_resource_format_loader(loader);
 		return;
 	}
-	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 60000;
-	bool entered = false;
-	while (!(entered = loader->entered.try_wait()) && OS::get_singleton()->get_ticks_msec() < deadline) {
-		OS::get_singleton()->delay_usec(100);
-	}
+	const bool entered = wait_entered(loader->entered, kLoaderSyncTimeoutMs);
 	CHECK_MESSAGE(entered, "Nested child did not enter before the deadline");
 	if (!entered) {
 		loader->release.post();
-		while (!loader->entered.try_wait()) {
-			OS::get_singleton()->delay_usec(100);
-		}
+		CHECK_MESSAGE(wait_entered(loader->entered, kGateReleaseTimeoutMs), "Nested child never released after gate timeout");
+		require_test_gate_unchanged();
+		parent.unref();
+		ResourceLoader::clear_thread_load_tasks();
+		ResourceLoader::remove_resource_format_loader(loader);
+		return;
 	}
 	auto *pool = WorkerThreadPool::get_singleton();
-	while (!pool->is_task_completed(loader->parent_task_id)) {
-		OS::get_singleton()->delay_usec(100);
-	}
+	CHECK_MESSAGE(wait_task_completed(pool, loader->parent_task_id, kLoaderSyncTimeoutMs), "Nested parent did not complete before the deadline");
 	ObjectID parent_id = parent->get_instance_id();
 	if (!child_first) {
 		parent.unref();
@@ -319,9 +352,7 @@ TEST_CASE("[ResourceLoader] Nested connections survive task retirement") {
 	if (loader->child_token.is_valid()) {
 		ObjectID child_id = loader->child_token->get_instance_id();
 		loader->release.post();
-		while (!pool->is_task_completed(loader->task_id)) {
-			OS::get_singleton()->delay_usec(100);
-		}
+		CHECK_MESSAGE(wait_task_completed(pool, loader->task_id, kLoaderSyncTimeoutMs), "Nested child did not complete before the deadline");
 		Error error;
 		Ref<Resource> resource = ResourceLoader::_load_complete(*loader->child_token.ptr(), &error);
 		CHECK(error == OK);
@@ -408,10 +439,12 @@ TEST_CASE("[ResourceLoader] Propagated child connections survive parent retireme
 }
 
 TEST_CASE("[ResourceLoader] Retired child connections follow a live parent") {
-	if (WorkerThreadPool::get_singleton()->get_thread_count() * 3 / 10 < 2) {
-		MESSAGE("Needs two low-priority worker slots; the grandparent load holds one while the parent runs");
-		return;
-	}
+	const int min_threads = min_worker_threads_for_two_low_priority_slots();
+	const int thread_count = WorkerThreadPool::get_singleton()->get_thread_count();
+	REQUIRE_MESSAGE(
+			thread_count >= min_threads,
+			vformat("Need at least %d worker threads for nested grandparent load (have %d, %d low-priority slots)",
+					min_threads, thread_count, worker_pool_low_priority_capacity(thread_count)));
 	reset_test_gate();
 	Ref<AwaitingLoader> loader;
 	loader.instantiate();
@@ -419,13 +452,11 @@ TEST_CASE("[ResourceLoader] Retired child connections follow a live parent") {
 	Ref<ResourceLoader::LoadToken> grandparent = ResourceLoader::_load_start("user://grand.loader_lifetime", "Resource",
 			ResourceLoader::LOAD_THREAD_SPAWN_SINGLE, ResourceLoader::CACHE_MODE_IGNORE);
 	CHECK(grandparent.is_valid());
-	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 60000;
-	bool entered = false;
-	while (!(entered = loader->entered.try_wait()) && OS::get_singleton()->get_ticks_msec() < deadline) {
-		OS::get_singleton()->delay_usec(100);
-	}
+	const bool entered = wait_entered(loader->entered, kLoaderSyncTimeoutMs);
 	CHECK_MESSAGE(entered, "Grandparent did not reach its gate before the deadline");
 	if (!entered) {
+		loader->release.post();
+		CHECK_MESSAGE(wait_entered(loader->entered, kGateReleaseTimeoutMs), "Grandparent never released after gate timeout");
 		require_test_gate_unchanged();
 		MessageQueue::get_main_singleton()->flush();
 		grandparent.unref();
@@ -438,9 +469,7 @@ TEST_CASE("[ResourceLoader] Retired child connections follow a live parent") {
 	MessageQueue::get_main_singleton()->flush();
 	loader->release.post();
 	auto *pool = WorkerThreadPool::get_singleton();
-	while (entered && !pool->is_task_completed(loader->task_id) && OS::get_singleton()->get_ticks_msec() < deadline) {
-		OS::get_singleton()->delay_usec(100);
-	}
+	CHECK_MESSAGE(wait_task_completed(pool, loader->task_id, kLoaderSyncTimeoutMs), "Grandparent worker did not complete before the deadline");
 	CHECK(loader->emitted_while_loading);
 	CHECK_MESSAGE(loader->changed, "Child changed connection was lost when its parent retired during the grandparent load");
 	Error error;
@@ -498,11 +527,7 @@ TEST_CASE("[ResourceLoader] Shutdown drains an active native load") {
 		ResourceLoader::remove_resource_format_loader(loader);
 		return;
 	}
-	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 60000;
-	bool entered = false;
-	while (!(entered = loader->entered.try_wait()) && OS::get_singleton()->get_ticks_msec() < deadline) {
-		OS::get_singleton()->delay_usec(100);
-	}
+	const bool entered = wait_entered(loader->entered, kLoaderSyncTimeoutMs);
 	CHECK_MESSAGE(entered, "Shutdown worker did not enter before the deadline");
 	ObjectID id = token->get_instance_id();
 	if (!entered) {
@@ -576,14 +601,11 @@ TEST_CASE("[ResourceLoader] Full deferred queue preserves native task ownership"
 		ResourceLoader::remove_resource_format_loader(loader);
 		return;
 	}
-	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 60000;
-	bool entered = false;
-	while (!(entered = loader->entered.try_wait()) && OS::get_singleton()->get_ticks_msec() < deadline) {
-		OS::get_singleton()->delay_usec(100);
-	}
-	CHECK(entered);
+	const bool entered = wait_entered(loader->entered, kLoaderSyncTimeoutMs);
+	CHECK_MESSAGE(entered, "Queue worker did not enter before the deadline");
 	if (!entered) {
 		loader->release.post();
+		CHECK_MESSAGE(wait_entered(loader->entered, kGateReleaseTimeoutMs), "Queue worker never released after gate timeout");
 		Error error;
 		ResourceLoader::_load_complete(*token.ptr(), &error);
 		token.unref();
@@ -601,9 +623,7 @@ TEST_CASE("[ResourceLoader] Full deferred queue preserves native task ownership"
 	token.unref();
 	loader->release.post();
 	auto *pool = WorkerThreadPool::get_singleton();
-	while (!pool->is_task_completed(loader->task_id)) {
-		OS::get_singleton()->delay_usec(100);
-	}
+	CHECK_MESSAGE(wait_task_completed(pool, loader->task_id, kLoaderSyncTimeoutMs), "Queue worker did not complete before the deadline");
 	CHECK(ObjectDB::get_instance(id) != nullptr);
 	queue->clear();
 	if (shutdown) {
@@ -614,10 +634,8 @@ TEST_CASE("[ResourceLoader] Full deferred queue preserves native task ownership"
 				ResourceLoader::LOAD_THREAD_SPAWN_SINGLE, ResourceLoader::CACHE_MODE_IGNORE);
 		CHECK(recovery.is_valid());
 		if (recovery.is_valid()) {
-			loader->entered.wait();
-			while (!pool->is_task_completed(loader->task_id)) {
-				OS::get_singleton()->delay_usec(100);
-			}
+			CHECK_MESSAGE(wait_entered(loader->entered, kLoaderSyncTimeoutMs), "Recovery worker did not enter before the deadline");
+			CHECK_MESSAGE(wait_task_completed(pool, loader->task_id, kLoaderSyncTimeoutMs), "Recovery worker did not complete before the deadline");
 			recovery.unref();
 			queue->flush();
 		}

@@ -50,6 +50,8 @@
 #include "tests/test_macros.h"
 #include "tests/test_utils.h"
 
+#include <cstdlib>
+
 #ifdef TOOLS_ENABLED
 #include "editor/file_system/editor_paths.h"
 #include "editor/settings/editor_settings.h"
@@ -91,7 +93,11 @@ int test_main(int argc, char *argv[]) {
 	OS::get_singleton()->set_cmdline("", args, List<String>());
 	DisplayServerMock::register_mock_driver();
 
-	WorkerThreadPool::get_singleton()->init();
+	int worker_threads = -1;
+	if (const char *worker_threads_env = std::getenv("GODOT_TEST_WORKER_THREADS")) {
+		worker_threads = String(worker_threads_env).to_int();
+	}
+	WorkerThreadPool::get_singleton()->init(worker_threads);
 
 	{
 		const String test_path = TestUtils::get_temp_path("");
