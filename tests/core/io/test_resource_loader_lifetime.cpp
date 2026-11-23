@@ -32,8 +32,6 @@
 
 TEST_FORCE_LINK(test_resource_loader_lifetime)
 
-#include "core/math/math_funcs.h"
-
 #include "core/io/resource.h"
 #include "core/io/resource_loader.h"
 #include "core/object/callable_mp.h"
@@ -88,7 +86,7 @@ static bool wait_task_completed(WorkerThreadPool *p_pool, WorkerThreadPool::Task
 
 static int worker_pool_low_priority_capacity(int p_thread_count) {
 	const float ratio = 0.3f;
-	return Math::clamp(int(p_thread_count * ratio), 1, MAX(p_thread_count - 1, 1));
+	return CLAMP(int(p_thread_count * ratio), 1, MAX(p_thread_count - 1, 1));
 }
 
 static int min_worker_threads_for_two_low_priority_slots() {
