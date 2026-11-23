@@ -306,4 +306,3 @@ jobs:
               --title "Garden engine 4.8.0-dev double + Mono (${GITHUB_SHA:0:10})" \
               --notes "Built by CI from $GITHUB_SHA. .NET packages: $pkg."
           fi
-
