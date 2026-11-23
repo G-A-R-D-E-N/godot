@@ -585,10 +585,11 @@ void RayScene::_warn_albedo_fallback(RID p_material, RID p_texture, RID p_mesh, 
 	WARN_PRINT(vformat("Ray scene: a material without gi_albedo takes the texture-mean albedo fallback (mesh \"%s\", surface %d, texture \"%s\").", MeshStorage::get_singleton()->mesh_get_path(p_mesh), p_surface, TextureStorage::get_singleton()->texture_get_path(p_texture)));
 }
 
-void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, Material &r_material, float &r_alpha_threshold) {
+void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, Material &r_material, float &r_alpha_threshold, uint32_t &r_cull) {
 	r_material = {};
 	r_material.albedo[0] = r_material.albedo[1] = r_material.albedo[2] = 0.48f;
 	r_alpha_threshold = -1.0f;
+	r_cull = uint32_t(RSE::CULL_MODE_DISABLED);
 	if (p_material.is_null()) {
 		albedo_sources[ALBEDO_DEFAULT]++;
 		return;
@@ -651,7 +652,9 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 		_store_color(r_material.emission, emission, multiplier);
 	}
 
-	if (material_storage->material_get_cull_mode(p_material) == RSE::CULL_MODE_DISABLED) {
+	const RSE::CullMode cull_mode = material_storage->material_get_cull_mode(p_material);
+	r_cull = uint32_t(cull_mode);
+	if (cull_mode == RSE::CULL_MODE_DISABLED) {
 		r_material.flags |= MATERIAL_FLAG_TWO_SIDED;
 	}
 	if (!material_storage->material_casts_shadows(p_material)) {
@@ -686,8 +689,9 @@ static bool _param_bool(const Variant &p_value) {
 	return p_value.get_type() == Variant::BOOL && bool(p_value);
 }
 
-void RayScene::_alpha_entry(RID p_material, Material &r_material, float p_alpha_threshold) {
+void RayScene::_alpha_entry(RID p_material, Material &r_material, float p_alpha_threshold, uint32_t p_cull) {
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
+	RayAlphaStore::EntryKey key;
 	Variant texture_value;
 	Vector2 scale(1.0f, 1.0f);
 	Vector2 offset(0.0f, 0.0f);
@@ -722,12 +726,15 @@ void RayScene::_alpha_entry(RID p_material, Material &r_material, float p_alpha_
 				return;
 			}
 			cutoff = (p_alpha_threshold - float(range.x)) / span;
+			key.far_affine[0] = span;
+			key.far_affine[1] = float(range.x);
 		} else {
 			if (opacity <= 0.0f) {
 				alpha_counts.solid_degenerate++;
 				return;
 			}
 			cutoff = p_alpha_threshold / opacity;
+			key.far_affine[0] = opacity;
 		}
 	} else if (_param_bool(material_storage->material_get_declared_param(p_material, SNAME("has_albedo")))) {
 		texture_value = material_storage->material_get_declared_param(p_material, SNAME("albedo_tex"));
@@ -737,6 +744,7 @@ void RayScene::_alpha_entry(RID p_material, Material &r_material, float p_alpha_
 			return;
 		}
 		cutoff = p_alpha_threshold / mat_alpha;
+		key.far_affine[0] = mat_alpha;
 	} else {
 		texture_value = material_storage->material_get_declared_param(p_material, SNAME("texture_albedo"));
 		Color albedo;
@@ -745,6 +753,7 @@ void RayScene::_alpha_entry(RID p_material, Material &r_material, float p_alpha_
 			return;
 		}
 		cutoff = p_alpha_threshold / albedo.a;
+		key.far_affine[0] = albedo.a;
 	}
 	if (texture_value.get_type() != Variant::RID || RID(texture_value).is_null()) {
 		alpha_counts.solid_no_texture++;
@@ -756,7 +765,20 @@ void RayScene::_alpha_entry(RID p_material, Material &r_material, float p_alpha_
 		alpha_counts.solid_always++;
 		return;
 	}
-	const uint32_t index = alpha_store.acquire(RID(texture_value), cutoff_k, scale, offset);
+	key.scale[0] = float(scale.x);
+	key.scale[1] = float(scale.y);
+	key.offset[0] = float(offset.x);
+	key.offset[1] = float(offset.y);
+	key.bits = p_cull & RayAlphaStore::ENTRY_CULL_MASK;
+	const Variant far_mode_value = material_storage->material_get_declared_param(p_material, SNAME("alpha_far_mode"));
+	const int64_t far_mode = far_mode_value.get_type() == Variant::INT ? int64_t(far_mode_value) : 0;
+	if (far_mode == 1 || far_mode == 2) {
+		key.bits |= uint32_t(far_mode) << RayAlphaStore::ENTRY_FAR_MODE_SHIFT;
+		key.far_gain = _param_float(material_storage->material_get_declared_param(p_material, SNAME("alpha_far_gain")), 0.0f);
+		key.far_level = _param_float(material_storage->material_get_declared_param(p_material, SNAME("alpha_far_level")), 0.0f);
+		key.far_veil_alpha = _param_float(material_storage->material_get_declared_param(p_material, SNAME("alpha_far_veil_alpha")), 0.0f);
+	}
+	const uint32_t index = alpha_store.acquire(RID(texture_value), cutoff_k, key);
 	if (index == 0) {
 		alpha_counts.solid_refused++;
 		return;
@@ -788,7 +810,7 @@ bool RayScene::_alpha_live(uint32_t p_flags) const {
 }
 
 bool RayScene::_alpha_ready() const {
-	return triangle_uv_buffer.is_valid() && alpha_store.get_table_buffer().is_valid() && alpha_store.get_layer_texture().is_valid();
+	return triangle_uv_buffer.is_valid() && alpha_store.get_table_buffer().is_valid() && alpha_store.get_layer_texture().is_valid() && alpha_store.get_mean_texture().is_valid();
 }
 
 String RayScene::alpha_shader_defines() {
@@ -821,13 +843,15 @@ void RayScene::_print_alpha() {
 	alpha_counts.table_entries = stats.table_entries;
 	alpha_counts.layers_released = uint32_t(stats.layers_released_total);
 	alpha_counts.layers_evicted = uint32_t(stats.layers_evicted_total);
+	alpha_counts.far_invalid = stats.far_invalid;
+	alpha_counts.entries_retired = uint32_t(stats.entries_retired_total);
 	if (memcmp(&alpha_counts, &reported_alpha_counts, sizeof(AlphaCounts)) == 0) {
 		return;
 	}
 	reported_alpha_counts = alpha_counts;
-	print_line(vformat("Ray scene alpha: %d cut-out materials (solid: %d no texture, %d custom0, %d degenerate, %d cutoff 0, %d store full; %d vertex alpha ignored), surfaces %d live, %d pending, %d unsafe UVs, layers %d ready of %d, %d table entries, %d layers released, %d evicted.",
+	print_line(vformat("Ray scene alpha: %d cut-out materials (solid: %d no texture, %d custom0, %d degenerate, %d cutoff 0, %d store full; %d vertex alpha ignored), surfaces %d live, %d pending, %d unsafe UVs, layers %d ready of %d, %d table entries, %d layers released, %d evicted, %d far values invalid, %d entries retired.",
 			alpha_counts.cutout_materials, alpha_counts.solid_no_texture, alpha_counts.solid_custom0, alpha_counts.solid_degenerate, alpha_counts.solid_always, alpha_counts.solid_refused, alpha_counts.vertex_alpha_ignored,
-			alpha_counts.live_surfaces, alpha_counts.pending_surfaces, alpha_counts.solid_unsafe_uv, alpha_counts.layers_ready, alpha_counts.layers, alpha_counts.table_entries, alpha_counts.layers_released, alpha_counts.layers_evicted));
+			alpha_counts.live_surfaces, alpha_counts.pending_surfaces, alpha_counts.solid_unsafe_uv, alpha_counts.layers_ready, alpha_counts.layers, alpha_counts.table_entries, alpha_counts.layers_released, alpha_counts.layers_evicted, alpha_counts.far_invalid, alpha_counts.entries_retired));
 }
 
 void RayScene::_print_tlas_rebuilds(bool p_final) {
@@ -850,6 +874,9 @@ uint32_t RayScene::shadow_cast_flags(RSE::ShadowCastingSetting p_setting, bool p
 	}
 	if (p_setting == RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY) {
 		return MATERIAL_FLAG_SHADOW_ONLY;
+	}
+	if (p_setting == RSE::SHADOW_CASTING_SETTING_DOUBLE_SIDED) {
+		return MATERIAL_FLAG_SHADOW_TWO_SIDED;
 	}
 	return 0;
 }
@@ -1679,9 +1706,10 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			if (!cached) {
 				CachedMaterial entry;
 				float alpha_threshold = -1.0f;
-				_material_entry(material, mesh_rid, s, entry.entry, alpha_threshold);
+				uint32_t cull = 0;
+				_material_entry(material, mesh_rid, s, entry.entry, alpha_threshold, cull);
 				if (alpha_threshold >= 0.0f && (entry.entry.flags & MATERIAL_FLAG_SKIP) == 0) {
-					_alpha_entry(material, entry.entry, alpha_threshold);
+					_alpha_entry(material, entry.entry, alpha_threshold, cull);
 				}
 				_instance_slots(material, entry);
 				cached = &material_cache.insert(material, entry)->value;
@@ -1690,7 +1718,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			if ((cached->entry.flags & MATERIAL_ALPHA_MASK) != 0) {
 				_alpha_instance(*mesh, s, materials[materials.size() - 1]);
 			}
-			materials[materials.size() - 1].flags |= cast_flags;
+			materials[materials.size() - 1].flags |= slot_cast_flags(materials[materials.size() - 1].flags, cast_flags);
 			feed_state = feed_surface_state(feed_state, materials[materials.size() - 1].flags, materials[materials.size() - 1].coverage);
 			if (accel) {
 				material_candidates |= surface_candidates(s, cached->entry.flags);
@@ -1730,6 +1758,18 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		scene_hash = hash_murmur3_one_32(geometry->layer_mask, scene_hash);
 		scene_hash = hash_murmur3_one_32(mesh->build_serial, scene_hash);
 		scene_hash = hash_murmur3_buffer(materials.ptr() + instance.material_offset, sizeof(Material) * mesh->surface_count, scene_hash);
+		if (alpha_enabled) {
+			for (uint32_t s = 0; s < mesh->surface_count; s++) {
+				const uint32_t index = materials[instance.material_offset + s].flags >> MATERIAL_ALPHA_SHIFT;
+				if (index != 0) {
+					const RayAlphaStore::TableEntry &entry = alpha_store.get_entry(index);
+					if (RayAlphaStore::uses_far(entry.bits)) {
+						scene_hash = hash_murmur3_one_32(entry.far_state, scene_hash);
+						scene_hash = hash_murmur3_one_float(entry.density, scene_hash);
+					}
+				}
+			}
+		}
 		scene_signature = GISceneTracker::add_instance(scene_signature, scene_hash);
 		scene_members.push_back(GISceneTracker::member_key(p_instances[i], mesh_rid.get_id()));
 	}

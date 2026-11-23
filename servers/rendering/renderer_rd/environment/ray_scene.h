@@ -109,6 +109,7 @@ public:
 		MATERIAL_FLAG_BLEND = 4,
 		MATERIAL_FLAG_SHADOW_PASS = 8,
 		MATERIAL_FLAG_SHADOW_ONLY = 16,
+		MATERIAL_FLAG_SHADOW_TWO_SIDED = 32,
 	};
 
 	static constexpr uint32_t MATERIAL_ALPHA_SHIFT = 8;
@@ -144,7 +145,7 @@ public:
 	};
 
 	struct TriangleUv {
-		uint32_t uv[3];
+		uint32_t uv[4] = {};
 	};
 
 	struct Instance {
@@ -181,7 +182,7 @@ public:
 
 	static_assert(sizeof(Light) == 96);
 	static_assert(sizeof(Instance) == 64);
-	static_assert(sizeof(TriangleUv) == 12);
+	static_assert(sizeof(TriangleUv) == 16);
 	static_assert((uint64_t(TLAS_LEAF_SIZE) << TLAS_MAX_DEPTH) <= (uint64_t(1) << 24), "A hardware instance custom index is 24 bits.");
 
 	struct LightCensus {
@@ -289,12 +290,22 @@ public:
 	static bool feed_frame_needs_epoch(uint32_t p_changes, bool p_raw_overflow, bool p_epoch_moved) { return (p_changes > 0 || p_raw_overflow) && !p_epoch_moved; }
 	static uint32_t feed_surface_state(uint32_t p_state, uint32_t p_flags, float p_coverage) { return hash_murmur3_one_float(p_coverage, hash_murmur3_one_32(p_flags, p_state)); }
 	static uint32_t shadow_cast_flags(RSE::ShadowCastingSetting p_setting, bool p_occluder = false);
+	static uint32_t slot_cast_flags(uint32_t p_slot_flags, uint32_t p_cast_flags) { return (p_slot_flags & MATERIAL_ALPHA_MASK) != 0 ? p_cast_flags : p_cast_flags & ~uint32_t(MATERIAL_FLAG_SHADOW_TWO_SIDED); }
 	static uint64_t surface_candidates(uint32_t p_surface, uint32_t p_flags);
 	static uint32_t instance_class(uint64_t p_candidates, uint64_t p_split);
 	static uint32_t hw_instance_mask(uint32_t p_layer_mask, const uint32_t *p_groups, uint32_t p_group_count);
 	static uint32_t float_to_half(float p_value);
 	static uint32_t pack_half2(float p_x, float p_y);
 	static bool alpha_uv_unsafe(float p_extent, float p_scale, uint32_t p_layer_size);
+	static bool ray_backface(const Vector3 &p_e1, const Vector3 &p_e2, const Vector3 &p_direction) { return p_e1.dot(p_direction.cross(p_e2)) > real_t(0); }
+	static bool alpha_culled(uint32_t p_bits, uint32_t p_flags, bool p_backface, bool p_shadow) {
+		const uint32_t cull = p_bits & RayAlphaStore::ENTRY_CULL_MASK;
+		if (cull == 0u || (p_shadow && (p_flags & uint32_t(MATERIAL_FLAG_SHADOW_TWO_SIDED)) != 0u)) {
+			return false;
+		}
+		const bool seen_back = p_backface != p_shadow;
+		return cull == uint32_t(RSE::CULL_MODE_BACK) ? seen_back : !seen_back;
+	}
 	static Vector3i pick_cell_key(const Vector3 &p_world, float p_cell);
 	static uint32_t match_slot(PickState &r_state, const Vector3 &p_camera_world, float p_cell, uint64_t p_serial);
 	static AABB light_region(PickSlot &r_slot, const Vector3 &p_camera_world, const Vector3 &p_region_half, float p_cell);
@@ -398,6 +409,8 @@ private:
 		uint32_t table_entries = 0;
 		uint32_t layers_released = 0;
 		uint32_t layers_evicted = 0;
+		uint32_t far_invalid = 0;
+		uint32_t entries_retired = 0;
 	};
 
 	LocalVector<Material> materials;
@@ -505,8 +518,8 @@ private:
 	void _capture_surface(MeshEntry &r_mesh, uint32_t p_surface, const RenderingServerTypes::SurfaceData &p_surface_data);
 	void _build_blas(MeshEntry &p_mesh);
 	void _assemble(const LocalVector<RID> &p_meshes);
-	void _material_entry(RID p_material, RID p_mesh, uint32_t p_surface, Material &r_material, float &r_alpha_threshold);
-	void _alpha_entry(RID p_material, Material &r_material, float p_alpha_threshold);
+	void _material_entry(RID p_material, RID p_mesh, uint32_t p_surface, Material &r_material, float &r_alpha_threshold, uint32_t &r_cull);
+	void _alpha_entry(RID p_material, Material &r_material, float p_alpha_threshold, uint32_t p_cull);
 	bool _surface_uv_unsafe(const MeshEntry &p_mesh, uint32_t p_surface, uint32_t p_entry) const;
 	bool _alpha_live(uint32_t p_flags) const;
 	bool _alpha_ready() const;
