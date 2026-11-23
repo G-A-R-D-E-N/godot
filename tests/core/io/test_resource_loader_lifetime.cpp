@@ -102,11 +102,9 @@ static bool worker_pool_ci_configured() {
 	return !OS::get_singleton()->get_environment("GODOT_TEST_WORKER_THREADS").is_empty();
 }
 
-template <typename LoaderT>
-static void stop_loader_test(Ref<LoaderT> &p_loader) {
-	p_loader->release.post();
-	ResourceLoader::remove_resource_format_loader(p_loader);
-}
+class GatedLoader;
+class NestedLoader;
+class AwaitingLoader;
 
 class GatedLoader : public ResourceFormatLoader {
 public:
@@ -271,6 +269,40 @@ public:
 	}
 };
 
+static bool all_gated_tasks_completed(GatedLoader *p_loader, WorkerThreadPool *p_pool) {
+	if (p_loader->task_id != WorkerThreadPool::INVALID_TASK_ID && !p_pool->is_task_completed(p_loader->task_id)) {
+		return false;
+	}
+	if (NestedLoader *nested = Object::cast_to<NestedLoader>(p_loader)) {
+		if (nested->parent_task_id != WorkerThreadPool::INVALID_TASK_ID && !p_pool->is_task_completed(nested->parent_task_id)) {
+			return false;
+		}
+	}
+	if (AwaitingLoader *awaiting = Object::cast_to<AwaitingLoader>(p_loader)) {
+		if (awaiting->parent_task_id != WorkerThreadPool::INVALID_TASK_ID && !p_pool->is_task_completed(awaiting->parent_task_id)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+static void stop_loader_test(GatedLoader *p_loader) {
+	p_loader->release.post();
+	WorkerThreadPool *pool = WorkerThreadPool::get_singleton();
+	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + kGateReleaseTimeoutMs;
+	while (OS::get_singleton()->get_ticks_msec() < deadline) {
+		if (all_gated_tasks_completed(p_loader, pool)) {
+			break;
+		}
+		OS::get_singleton()->delay_usec(100);
+	}
+	if (!all_gated_tasks_completed(p_loader, pool)) {
+		ERR_PRINT("ResourceLoader lifetime test: loader worker still running; aborting the test run.");
+		CRASH_NOW_MSG("ResourceLoader lifetime test left a loader worker running after timeout.");
+	}
+	ResourceLoader::remove_resource_format_loader(p_loader);
+}
+
 TEST_CASE("[ResourceLoader] Last worker reference retires its token") {
 	reset_test_gate();
 	Ref<GatedLoader> loader;
@@ -287,7 +319,7 @@ TEST_CASE("[ResourceLoader] Last worker reference retires its token") {
 	const bool entered = wait_entered(loader->entered, kLoaderSyncTimeoutMs);
 	CHECK_MESSAGE(entered, "Loader worker did not enter before the deadline");
 	if (!entered) {
-		stop_loader_test(loader);
+		stop_loader_test(loader.ptr());
 		return;
 	}
 	ObjectID id = token->get_instance_id();
@@ -296,7 +328,7 @@ TEST_CASE("[ResourceLoader] Last worker reference retires its token") {
 	auto *pool = WorkerThreadPool::get_singleton();
 	if (!wait_task_completed(pool, loader->task_id, kLoaderSyncTimeoutMs)) {
 		CHECK_MESSAGE(false, "Loader worker did not complete before the deadline");
-		stop_loader_test(loader);
+		stop_loader_test(loader.ptr());
 		return;
 	}
 	MessageQueue::get_main_singleton()->flush();
@@ -340,13 +372,13 @@ TEST_CASE("[ResourceLoader] Nested connections survive task retirement") {
 	CHECK_MESSAGE(entered, "Nested child did not enter before the deadline");
 	if (!entered) {
 		CHECK_MESSAGE(false, "Nested child did not enter before the deadline");
-		stop_loader_test(loader);
+		stop_loader_test(loader.ptr());
 		return;
 	}
 	auto *pool = WorkerThreadPool::get_singleton();
 	if (!wait_task_completed(pool, loader->parent_task_id, kLoaderSyncTimeoutMs)) {
 		CHECK_MESSAGE(false, "Nested parent did not complete before the deadline");
-		stop_loader_test(loader);
+		stop_loader_test(loader.ptr());
 		return;
 	}
 	ObjectID parent_id = parent->get_instance_id();
@@ -361,7 +393,7 @@ TEST_CASE("[ResourceLoader] Nested connections survive task retirement") {
 		loader->release.post();
 		if (!wait_task_completed(pool, loader->task_id, kLoaderSyncTimeoutMs)) {
 			CHECK_MESSAGE(false, "Nested child did not complete before the deadline");
-			stop_loader_test(loader);
+			stop_loader_test(loader.ptr());
 			return;
 		}
 		Error error;
@@ -427,7 +459,7 @@ TEST_CASE("[ResourceLoader] Propagated child connections survive parent retireme
 	finished = finished && pool->is_task_completed(loader->parent_task_id);
 	if (!finished) {
 		CHECK_MESSAGE(false, "Parent load did not finish before the deadline");
-		stop_loader_test(loader);
+		stop_loader_test(loader.ptr());
 		return;
 	}
 	if (loader->child_resource.is_valid()) {
@@ -443,7 +475,7 @@ TEST_CASE("[ResourceLoader] Propagated child connections survive parent retireme
 		CHECK_MESSAGE(loader->changed, "Child changed connection was lost with its retired parent");
 	} else {
 		CHECK_MESSAGE(false, "Parent load did not return the awaited child resource");
-		stop_loader_test(loader);
+		stop_loader_test(loader.ptr());
 		return;
 	}
 	parent.unref();
@@ -477,7 +509,7 @@ TEST_CASE("[ResourceLoader] Retired child connections follow a live parent") {
 	CHECK_MESSAGE(entered, "Grandparent did not reach its gate before the deadline");
 	if (!entered) {
 		CHECK_MESSAGE(false, "Grandparent did not reach its gate before the deadline");
-		stop_loader_test(loader);
+		stop_loader_test(loader.ptr());
 		return;
 	}
 	MessageQueue::get_main_singleton()->flush();
@@ -485,7 +517,7 @@ TEST_CASE("[ResourceLoader] Retired child connections follow a live parent") {
 	auto *pool = WorkerThreadPool::get_singleton();
 	if (!wait_task_completed(pool, loader->task_id, kLoaderSyncTimeoutMs)) {
 		CHECK_MESSAGE(false, "Grandparent worker did not complete before the deadline");
-		stop_loader_test(loader);
+		stop_loader_test(loader.ptr());
 		return;
 	}
 	CHECK(loader->emitted_while_loading);
@@ -522,7 +554,7 @@ TEST_CASE("[ResourceLoader] Child dependencies are handed to the parent once") {
 	finished = finished && pool->is_task_completed(loader->parent_task_id);
 	if (!finished) {
 		CHECK_MESSAGE(false, "Parent load did not finish before the deadline");
-		stop_loader_test(loader);
+		stop_loader_test(loader.ptr());
 		return;
 	}
 	CHECK(loader->child_resource.is_valid());
@@ -559,7 +591,7 @@ TEST_CASE("[ResourceLoader] Shutdown drains an active native load") {
 	CHECK_MESSAGE(entered, "Shutdown worker did not enter before the deadline");
 	ObjectID id = token->get_instance_id();
 	if (!entered) {
-		stop_loader_test(loader);
+		stop_loader_test(loader.ptr());
 		return;
 	}
 	token.unref();
@@ -632,7 +664,7 @@ TEST_CASE("[ResourceLoader] Full deferred queue preserves native task ownership"
 	CHECK_MESSAGE(entered, "Queue worker did not enter before the deadline");
 	if (!entered) {
 		CHECK_MESSAGE(false, "Queue worker did not enter before the deadline");
-		stop_loader_test(loader);
+		stop_loader_test(loader.ptr());
 		return;
 	}
 	Error queued;
@@ -647,7 +679,7 @@ TEST_CASE("[ResourceLoader] Full deferred queue preserves native task ownership"
 	auto *pool = WorkerThreadPool::get_singleton();
 	if (!wait_task_completed(pool, loader->task_id, kLoaderSyncTimeoutMs)) {
 		CHECK_MESSAGE(false, "Queue worker did not complete before the deadline");
-		stop_loader_test(loader);
+		stop_loader_test(loader.ptr());
 		return;
 	}
 	CHECK(ObjectDB::get_instance(id) != nullptr);
@@ -662,12 +694,12 @@ TEST_CASE("[ResourceLoader] Full deferred queue preserves native task ownership"
 		if (recovery.is_valid()) {
 			if (!wait_entered(loader->entered, kLoaderSyncTimeoutMs)) {
 				CHECK_MESSAGE(false, "Recovery worker did not enter before the deadline");
-				stop_loader_test(loader);
+				stop_loader_test(loader.ptr());
 				return;
 			}
 			if (!wait_task_completed(pool, loader->task_id, kLoaderSyncTimeoutMs)) {
 				CHECK_MESSAGE(false, "Recovery worker did not complete before the deadline");
-				stop_loader_test(loader);
+				stop_loader_test(loader.ptr());
 				return;
 			}
 			recovery.unref();
