@@ -3693,6 +3693,24 @@
 			[b]Note:[/b] Enabling occlusion culling has a cost on the CPU. Only enable occlusion culling if you actually plan to use it. Large open scenes with few or no objects blocking the view will generally not benefit much from occlusion culling. Large open scenes generally benefit more from mesh LOD and visibility ranges ([member GeometryInstance3D.visibility_range_begin] and [member GeometryInstance3D.visibility_range_end]) compared to occlusion culling.
 			[b]Note:[/b] Due to memory constraints, occlusion culling is not supported by default in Web export templates. It can be enabled by compiling custom Web export templates with [code]module_raycast_enabled=yes[/code].
 		</member>
+		<member name="rendering/reflections/provider_mask" type="int" setter="" getter="" default="31">
+			Bit mask of the specular reflection providers that the Forward+ renderer combines in the main view. Bit 1 is the sky environment specular, bit 2 the global illumination rough specular fill, bit 4 the local reflection probes, bit 8 screen-space reflections and bit 16 specular occlusion. Clearing bit 2, 4 or 8 removes that provider so the next lower one shows through. Clearing bit 1 makes the environment specular black. Clearing bit 16 disables specular occlusion. The default value of 31 leaves the output unchanged. Reflection probe captures always use every provider.
+		</member>
+		<member name="rendering/reflections/unified_lookup" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], local reflection probes bend the reflection vector with [code]roughness^2[/code] like the sky does (instead of [code]roughness^4[/code]) and take the same horizon fade as the sky term.
+		</member>
+		<member name="rendering/reflections/horizon_geometric" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], the horizon fade of the sky, local probes and clear coat reflections uses the geometric surface normal instead of the shading normal, so normal-mapped surfaces do not reflect from below the surface.
+		</member>
+		<member name="rendering/reflections/ssr_coat_match" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], the clear coat lobe only takes the global illumination rough specular fill and screen-space reflections in proportion to how well the coat roughness matches the base roughness. Where the coat reflects the ground below the horizon, it takes them in full.
+		</member>
+		<member name="rendering/reflections/blend_fill_skip" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], alpha-blended surfaces do not read the global illumination rough specular fill, which holds the opaque surface behind them.
+		</member>
+		<member name="rendering/reflections/reflection_atlas/priority_fast_filter" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], a [ReflectionProbe] whose priority set with [method RenderingServer.reflection_probe_set_priority] is not zero filters all its roughness levels in a single frame the first time it is captured, so it appears about one frame after the capture instead of after one frame per roughness level. This makes that frame more expensive. Probes that are already in the atlas are not affected.
+		</member>
 		<member name="rendering/reflections/reflection_atlas/reflection_count" type="int" setter="" getter="" default="64">
 			Number of cubemaps to store in the reflection atlas. The number of [ReflectionProbe]s in a scene will be limited by this amount. A higher number requires more VRAM.
 		</member>

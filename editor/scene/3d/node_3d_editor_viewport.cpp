@@ -4677,7 +4677,10 @@ void Node3DEditorViewport::_menu_option(int p_option) {
 		case VIEW_DISPLAY_LINEAR_DEPTH:
 		case VIEW_DISPLAY_DEBUG_SSR_HIT_DISTANCE:
 		case VIEW_DISPLAY_DEBUG_SSGI_TERMINATION:
-		case VIEW_DISPLAY_DEBUG_SSGI_CONFIDENCE: {
+		case VIEW_DISPLAY_DEBUG_SSGI_CONFIDENCE:
+		case VIEW_DISPLAY_DEBUG_REFLECTION_PROVIDER_WEIGHTS:
+		case VIEW_DISPLAY_DEBUG_SPECULAR_OCCLUSION:
+		case VIEW_DISPLAY_DEBUG_RESOLVED_INDIRECT_SPECULAR: {
 			static const int display_options[] = {
 				VIEW_DISPLAY_NORMAL,
 				VIEW_DISPLAY_WIREFRAME,
@@ -4729,6 +4732,9 @@ void Node3DEditorViewport::_menu_option(int p_option) {
 				VIEW_DISPLAY_DEBUG_SSR_HIT_DISTANCE,
 				VIEW_DISPLAY_DEBUG_SSGI_TERMINATION,
 				VIEW_DISPLAY_DEBUG_SSGI_CONFIDENCE,
+				VIEW_DISPLAY_DEBUG_REFLECTION_PROVIDER_WEIGHTS,
+				VIEW_DISPLAY_DEBUG_SPECULAR_OCCLUSION,
+				VIEW_DISPLAY_DEBUG_RESOLVED_INDIRECT_SPECULAR,
 				VIEW_MAX
 			};
 			static const Viewport::DebugDraw debug_draw_modes[] = {
@@ -4782,6 +4788,9 @@ void Node3DEditorViewport::_menu_option(int p_option) {
 				Viewport::DEBUG_DRAW_SSR_HIT_DISTANCE,
 				Viewport::DEBUG_DRAW_SSGI_TERMINATION,
 				Viewport::DEBUG_DRAW_SSGI_CONFIDENCE,
+				Viewport::DEBUG_DRAW_REFLECTION_PROVIDER_WEIGHTS,
+				Viewport::DEBUG_DRAW_SPECULAR_OCCLUSION,
+				Viewport::DEBUG_DRAW_RESOLVED_INDIRECT_SPECULAR,
 			};
 
 			for (int idx = 0; display_options[idx] != VIEW_MAX; idx++) {
@@ -7124,6 +7133,12 @@ Node3DEditorViewport::Node3DEditorViewport(Node3DEditor *p_spatial_editor, int p
 			TTRC("Displays how each traced screen-space GI ray ended: green = valid hit, blue = left the screen, gray = no hit within the trace distance, yellow = out of steps, red = rejected. Requires SSIL in Environment with the Traced backend in the project settings."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("SSGI Confidence"), VIEW_DISPLAY_DEBUG_SSGI_CONFIDENCE, SupportedRenderingMethods::FORWARD_PLUS,
 			TTRC("Displays the traced screen-space GI confidence: white = screen-space result used fully, black = fallback ambient light used. Requires SSIL in Environment with the Traced backend in the project settings."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Reflection Provider Weights"), VIEW_DISPLAY_DEBUG_REFLECTION_PROVIDER_WEIGHTS, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays the share of each reflection provider in the indirect specular light before SSR: red = sky, green = GI rough specular fill, blue = reflection probe. The shares add up to 1 where a provider exists."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Specular Occlusion"), VIEW_DISPLAY_DEBUG_SPECULAR_OCCLUSION, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays the specular occlusion factor alone that scales the indirect specular light (white = unoccluded). Requires SSAO or material ambient occlusion to have a visible effect."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Resolved Indirect Specular"), VIEW_DISPLAY_DEBUG_RESOLVED_INDIRECT_SPECULAR, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays the final weighted indirect specular radiance of each surface after the sky, GI fill, probes, specular occlusion, SSR and BRDF weight, without the sky background."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Persistent AO"), VIEW_DISPLAY_DEBUG_PERSISTENT_AO, SupportedRenderingMethods::FORWARD_PLUS,
 			TTRC("Displays the material ambient occlusion each surface writes (the AO built-in, including decals), before screen-space AO."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Fallback Source (Specular)"), VIEW_DISPLAY_DEBUG_FALLBACK_SOURCE_SPECULAR, SupportedRenderingMethods::FORWARD_PLUS,

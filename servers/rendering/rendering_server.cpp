@@ -2628,6 +2628,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("reflection_probe_set_update_mode", "probe", "mode"), &RenderingServer::reflection_probe_set_update_mode);
 	ClassDB::bind_method(D_METHOD("reflection_probe_set_intensity", "probe", "intensity"), &RenderingServer::reflection_probe_set_intensity);
 	ClassDB::bind_method(D_METHOD("reflection_probe_set_blend_distance", "probe", "blend_distance"), &RenderingServer::reflection_probe_set_blend_distance);
+	ClassDB::bind_method(D_METHOD("reflection_probe_set_priority", "probe", "priority"), &RenderingServer::reflection_probe_set_priority);
 	ClassDB::bind_method(D_METHOD("reflection_probe_set_ambient_mode", "probe", "mode"), &RenderingServer::reflection_probe_set_ambient_mode);
 	ClassDB::bind_method(D_METHOD("reflection_probe_set_ambient_color", "probe", "color"), &RenderingServer::reflection_probe_set_ambient_color);
 	ClassDB::bind_method(D_METHOD("reflection_probe_set_ambient_energy", "probe", "energy"), &RenderingServer::reflection_probe_set_ambient_energy);
@@ -3046,6 +3047,9 @@ void RenderingServer::_bind_methods() {
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SSR_HIT_DISTANCE);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SSGI_TERMINATION);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SSGI_CONFIDENCE);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_REFLECTION_PROVIDER_WEIGHTS);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SPECULAR_OCCLUSION);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_RESOLVED_INDIRECT_SPECULAR);
 
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_VRS_DISABLED);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_VRS_TEXTURE);
@@ -3271,6 +3275,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("scenario_set_fallback_environment", "scenario", "environment"), &RenderingServer::scenario_set_fallback_environment);
 	ClassDB::bind_method(D_METHOD("scenario_set_camera_attributes", "scenario", "effects"), &RenderingServer::scenario_set_camera_attributes);
 	ClassDB::bind_method(D_METHOD("scenario_set_compositor", "scenario", "compositor"), &RenderingServer::scenario_set_compositor);
+	ClassDB::bind_method(D_METHOD("scenario_set_reflection_atlas_size", "scenario", "reflection_size", "reflection_count"), &RenderingServer::scenario_set_reflection_atlas_size);
 
 	/* INSTANCE */
 
@@ -3839,6 +3844,12 @@ void RenderingServer::init() {
 
 	GLOBAL_DEF("rendering/environment/screen_space_lighting/legacy_last_frame_source", true);
 	GLOBAL_DEF("rendering/environment/screen_space_lighting/temporal_validation", false);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/reflections/provider_mask", PROPERTY_HINT_RANGE, "0,31,1"), 31);
+	GLOBAL_DEF("rendering/reflections/unified_lookup", false);
+	GLOBAL_DEF("rendering/reflections/horizon_geometric", false);
+	GLOBAL_DEF("rendering/reflections/ssr_coat_match", true);
+	GLOBAL_DEF("rendering/reflections/blend_fill_skip", false);
+	GLOBAL_DEF("rendering/reflections/reflection_atlas/priority_fast_filter", false);
 
 	// Move the project setting definitions here so they are available when we init the rendering internals.
 	GLOBAL_DEF_BASIC("rendering/viewport/hdr_2d", false);

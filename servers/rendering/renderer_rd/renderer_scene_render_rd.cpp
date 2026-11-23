@@ -972,7 +972,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 			tonemap.exposure = environment_get_exposure(p_render_data->environment);
 			tonemap.max_value = max_value;
 		}
-		if (debug_draw >= RSE::VIEWPORT_DEBUG_DRAW_PERSISTENT_AO && debug_draw <= RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE) {
+		if ((debug_draw >= RSE::VIEWPORT_DEBUG_DRAW_PERSISTENT_AO && debug_draw <= RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE) || debug_draw == RSE::VIEWPORT_DEBUG_DRAW_REFLECTION_PROVIDER_WEIGHTS || debug_draw == RSE::VIEWPORT_DEBUG_DRAW_SPECULAR_OCCLUSION) {
 			tonemap.tonemap_mode = RSE::ENV_TONE_MAPPER_LINEAR;
 			tonemap.agx_late_shoulder = false;
 			tonemap.exposure = 1.0;
@@ -1280,6 +1280,8 @@ bool RendererSceneRenderRD::_debug_draw_can_use_effects(RSE::ViewportDebugDraw p
 		case RSE::VIEWPORT_DEBUG_DRAW_PERSISTENT_AO:
 		case RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_SPECULAR:
 		case RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE:
+		case RSE::VIEWPORT_DEBUG_DRAW_REFLECTION_PROVIDER_WEIGHTS:
+		case RSE::VIEWPORT_DEBUG_DRAW_SPECULAR_OCCLUSION:
 			can_use_effects = false;
 			break;
 		// Modes that draws information over part of the viewport needs camera effects because we see partially the normal draw mode.

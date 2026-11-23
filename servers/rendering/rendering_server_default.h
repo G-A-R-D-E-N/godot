@@ -525,6 +525,7 @@ public:
 	FUNC2(reflection_probe_set_update_mode, RID, RSE::ReflectionProbeUpdateMode)
 	FUNC2(reflection_probe_set_intensity, RID, float)
 	FUNC2(reflection_probe_set_blend_distance, RID, float)
+	FUNC2(reflection_probe_set_priority, RID, int)
 	FUNC2(reflection_probe_set_ambient_color, RID, const Color &)
 	FUNC2(reflection_probe_set_ambient_energy, RID, float)
 	FUNC2(reflection_probe_set_ambient_mode, RID, RSE::ReflectionProbeAmbientMode)
@@ -966,6 +967,7 @@ public:
 	FUNC2(scenario_set_camera_attributes, RID, RID)
 	FUNC2(scenario_set_fallback_environment, RID, RID)
 	FUNC2(scenario_set_compositor, RID, RID)
+	FUNC3(scenario_set_reflection_atlas_size, RID, int, int)
 
 	/* INSTANCING API */
 	FUNCRIDSPLIT(instance)

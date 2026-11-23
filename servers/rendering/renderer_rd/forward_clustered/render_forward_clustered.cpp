@@ -888,6 +888,13 @@ uint32_t RenderForwardClustered::_setup_environment(const RenderDataRD *p_render
 	} else {
 		scene_state.ubo.ss_effects_flags = 0;
 	}
+	const uint32_t reflection_provider_mask = p_render_data->reflection_probe.is_null() ? (uint32_t)CLAMP((int)GLOBAL_GET_CACHED(int, "rendering/reflections/provider_mask"), 0, 31) : 31u;
+	scene_state.ubo.ss_effects_flags |= reflection_provider_mask << SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SHIFT;
+	scene_state.ubo.ss_effects_flags |= bool(GLOBAL_GET_CACHED(bool, "rendering/reflections/unified_lookup")) ? SCREEN_SPACE_EFFECTS_FLAGS_UNIFIED_LOOKUP : 0;
+	scene_state.ubo.ss_effects_flags |= bool(GLOBAL_GET_CACHED(bool, "rendering/reflections/horizon_geometric")) ? SCREEN_SPACE_EFFECTS_FLAGS_HORIZON_GEOMETRIC : 0;
+	scene_state.ubo.ss_effects_flags |= bool(GLOBAL_GET_CACHED(bool, "rendering/reflections/ssr_coat_match")) ? SCREEN_SPACE_EFFECTS_FLAGS_COAT_MATCH : 0;
+	scene_state.ubo.ss_effects_flags |= bool(GLOBAL_GET_CACHED(bool, "rendering/reflections/blend_fill_skip")) ? SCREEN_SPACE_EFFECTS_FLAGS_BLEND_FILL_SKIP : 0;
+	scene_state.ubo.ss_effects_flags |= !p_opaque_render_buffers ? SCREEN_SPACE_EFFECTS_FLAGS_TRANSPARENT_PASS : 0;
 	RID ss_exposure_texture;
 	scene_state.ubo.ss_exposure = _get_screen_space_exposure(p_render_data, ss_exposure_texture);
 
@@ -2617,7 +2624,8 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		clear_color = p_default_bg_color.srgb_to_linear();
 	}
 
-	const bool flat_debug_view = !is_reflection_probe && get_debug_draw_mode() >= RSE::VIEWPORT_DEBUG_DRAW_PERSISTENT_AO && get_debug_draw_mode() <= RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE;
+	const bool provider_debug_view = !is_reflection_probe && get_debug_draw_mode() >= RSE::VIEWPORT_DEBUG_DRAW_REFLECTION_PROVIDER_WEIGHTS && get_debug_draw_mode() <= RSE::VIEWPORT_DEBUG_DRAW_RESOLVED_INDIRECT_SPECULAR;
+	const bool flat_debug_view = provider_debug_view || (!is_reflection_probe && get_debug_draw_mode() >= RSE::VIEWPORT_DEBUG_DRAW_PERSISTENT_AO && get_debug_draw_mode() <= RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE);
 	if (flat_debug_view) {
 		draw_sky = false;
 		draw_sky_fog_only = false;
@@ -2720,7 +2728,9 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	if (current_cluster_builder) {
 		base_specialization.cluster_has_area_light = current_cluster_builder->get_cluster_count_by_type(ClusterBuilderRD::ELEMENT_TYPE_AREA_LIGHT) != 0;
 	}
-	if ((!is_reflection_probe && get_debug_draw_mode() >= RSE::VIEWPORT_DEBUG_DRAW_DIRECT_DIFFUSE && get_debug_draw_mode() <= RSE::VIEWPORT_DEBUG_DRAW_SSR_CONFIDENCE) || flat_debug_view) {
+	if (provider_debug_view) {
+		base_specialization.debug_lighting_component = get_debug_draw_mode() - RSE::VIEWPORT_DEBUG_DRAW_REFLECTION_PROVIDER_WEIGHTS + 14;
+	} else if ((!is_reflection_probe && get_debug_draw_mode() >= RSE::VIEWPORT_DEBUG_DRAW_DIRECT_DIFFUSE && get_debug_draw_mode() <= RSE::VIEWPORT_DEBUG_DRAW_SSR_CONFIDENCE) || flat_debug_view) {
 		base_specialization.debug_lighting_component = get_debug_draw_mode() - RSE::VIEWPORT_DEBUG_DRAW_DIRECT_DIFFUSE + 1;
 	}
 

@@ -1086,7 +1086,7 @@ vec3 debug_lighting_source(vec4 p_weights, float p_surfel_share) {
 	return min(p_weights.x * vec3(0.1, 0.3, 1.0) + p_weights.y * mix(gi_color, vec3(0.0, 0.8, 0.8), p_surfel_share) + p_weights.z * vec3(0.0, 1.0, 0.0) + p_weights.w * vec3(1.0, 0.0, 1.0), vec3(1.0));
 }
 
-vec3 debug_lighting_component(uint p_component, vec3 p_direct_diffuse, vec3 p_direct_specular, vec3 p_indirect_diffuse, vec3 p_indirect_specular, vec3 p_emission, vec4 p_fog, float p_ssr_confidence, float p_persistent_ao, vec4 p_specular_source, vec4 p_ambient_source, float p_surfel_share) {
+vec3 debug_lighting_component(uint p_component, vec3 p_direct_diffuse, vec3 p_direct_specular, vec3 p_indirect_diffuse, vec3 p_indirect_specular, vec3 p_emission, vec4 p_fog, float p_ssr_confidence, float p_persistent_ao, vec4 p_specular_source, vec4 p_ambient_source, float p_surfel_share, vec4 p_reflection_debug) {
 	switch (p_component) {
 		case 1u:
 			return p_direct_diffuse;
@@ -1108,6 +1108,12 @@ vec3 debug_lighting_component(uint p_component, vec3 p_direct_diffuse, vec3 p_di
 			return vec3(p_persistent_ao);
 		case 12u:
 			return debug_lighting_source(p_specular_source, 0.0);
+		case 14u:
+			return p_reflection_debug.xyz;
+		case 15u:
+			return vec3(p_reflection_debug.w);
+		case 16u:
+			return p_indirect_specular;
 	}
 	return debug_lighting_source(p_ambient_source, p_surfel_share);
 }
@@ -1437,6 +1443,7 @@ void fragment_shader(in SceneData scene_data) {
 	vec4 fog = vec4(0.0, 0.0, 0.0, 1.0);
 	float ssr_confidence = 0.0;
 	float persistent_ao = 1.0;
+	vec4 reflection_debug = vec4(0.0, 0.0, 0.0, 1.0);
 	vec4 specular_source = vec4(0.0);
 	vec4 ambient_source = vec4(0.0);
 #if defined(CUSTOM_RADIANCE_USED)
@@ -2010,7 +2017,11 @@ void fragment_shader(in SceneData scene_data) {
 	vec3 indirect_normal = normal;
 #endif
 
-	if (bool(scene_data.flags & SCENE_DATA_FLAGS_USE_REFLECTION_CUBEMAP)) {
+	const bool reflect_sky = bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SKY);
+	const bool unified_lookup = bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_UNIFIED_LOOKUP);
+	const bool horizon_geometric = bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_HORIZON_GEOMETRIC);
+	const vec3 horizon_normal = horizon_geometric ? geo_normal : normal;
+	if (reflect_sky && bool(scene_data.flags & SCENE_DATA_FLAGS_USE_REFLECTION_CUBEMAP)) {
 #ifdef LIGHT_ANISOTROPY_USED
 		// https://google.github.io/filament/Filament.html#lighting/imagebasedlights/anisotropy
 		vec3 anisotropic_direction = anisotropy >= 0.0 ? binormal : tangent;
@@ -2024,7 +2035,7 @@ void fragment_shader(in SceneData scene_data) {
 		ref_vec = mix(ref_vec, normal, roughness * roughness);
 #endif
 
-		float horizon = min(1.0 + dot(ref_vec, normal), 1.0);
+		float horizon = min(1.0 + dot(ref_vec, horizon_normal), 1.0);
 		ref_vec = scene_data.radiance_inverse_xform * ref_vec;
 
 #ifdef USE_RADIANCE_OCTMAP_ARRAY
@@ -2048,10 +2059,10 @@ void fragment_shader(in SceneData scene_data) {
 		indirect_specular_light *= scene_data.IBL_exposure_normalization;
 		indirect_specular_light *= horizon * horizon;
 		indirect_specular_light *= scene_data.ambient_light_color_energy.a;
-	} else if (bool(scene_data.flags & SCENE_DATA_FLAGS_USE_REFLECTION_COLOR)) {
+	} else if (reflect_sky && bool(scene_data.flags & SCENE_DATA_FLAGS_USE_REFLECTION_COLOR)) {
 		indirect_specular_light = scene_data.reflection_color.rgb;
 	}
-	specular_source.x = float(bool(scene_data.flags & (SCENE_DATA_FLAGS_USE_REFLECTION_CUBEMAP | SCENE_DATA_FLAGS_USE_REFLECTION_COLOR)));
+	specular_source.x = float(reflect_sky && bool(scene_data.flags & (SCENE_DATA_FLAGS_USE_REFLECTION_CUBEMAP | SCENE_DATA_FLAGS_USE_REFLECTION_COLOR)));
 
 #if defined(CUSTOM_RADIANCE_USED)
 	indirect_specular_light = mix(indirect_specular_light, custom_radiance.rgb, custom_radiance.a);
@@ -2098,11 +2109,20 @@ void fragment_shader(in SceneData scene_data) {
 #endif
 	vec3 cc_specular_light = vec3(0.0);
 	vec3 cc_ref_vec = vec3(0.0);
+	float coat_match_fill = 1.0;
+	float coat_match_ssr = 1.0;
 #ifdef INDIRECT_COAT_USED
+	if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_COAT_MATCH)) {
+		coat_match_fill = min(1.0, smoothstep(0.5, 1.0, CLEARCOAT_IBL_ROUGHNESS) / max(smoothstep(0.5, 1.0, roughness), 1e-3));
+		coat_match_ssr = smoothstep(0.5, 1.0, (CLEARCOAT_IBL_ROUGHNESS * CLEARCOAT_IBL_ROUGHNESS) / max(roughness * roughness, 1e-6));
+		float coat_ground = smoothstep(0.0, 0.5, -dot(scene_data.inv_view_matrix[1].xyz, reflect(-view, CLEARCOAT_NORMAL)));
+		coat_match_fill = mix(coat_match_fill, 1.0, coat_ground);
+		coat_match_ssr = mix(coat_match_ssr, 1.0, coat_ground);
+	}
 	cc_ref_vec = mix(reflect(-view, CLEARCOAT_NORMAL), CLEARCOAT_NORMAL, CLEARCOAT_IBL_BEND);
 #endif
 
-	if (bool(scene_data.flags & SCENE_DATA_FLAGS_USE_REFLECTION_CUBEMAP)) {
+	if (reflect_sky && bool(scene_data.flags & SCENE_DATA_FLAGS_USE_REFLECTION_CUBEMAP)) {
 		cc_ref_vec = reflect(-view, CLEARCOAT_NORMAL);
 		cc_ref_vec = mix(cc_ref_vec, CLEARCOAT_NORMAL, CLEARCOAT_IBL_BEND);
 
@@ -2125,7 +2145,11 @@ void fragment_shader(in SceneData scene_data) {
 
 #endif //USE_RADIANCE_OCTMAP_ARRAY
 		cc_specular_light += clearcoat_light * scene_data.IBL_exposure_normalization * scene_data.ambient_light_color_energy.a;
-	} else if (bool(scene_data.flags & SCENE_DATA_FLAGS_USE_REFLECTION_COLOR)) {
+		if (horizon_geometric) {
+			float cc_horizon = min(1.0 + dot(cc_ref_vec, geo_normal), 1.0);
+			cc_specular_light *= cc_horizon * cc_horizon;
+		}
+	} else if (reflect_sky && bool(scene_data.flags & SCENE_DATA_FLAGS_USE_REFLECTION_COLOR)) {
 		cc_specular_light = scene_data.reflection_color.rgb;
 	}
 #endif // LIGHT_CLEARCOAT_USED
@@ -2495,12 +2519,14 @@ void fragment_shader(in SceneData scene_data) {
 
 		ambient_light = mix(ambient_light, buffer_ambient.rgb, buffer_ambient.a);
 		bounce_gi_light = buffer_ambient.rgb * buffer_ambient.a;
-		indirect_specular_light = mix(indirect_specular_light, buffer_reflection.rgb, buffer_reflection.a);
-		gi_specular_share = buffer_reflection.a;
+		const bool fill_blocked = bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_BLEND_FILL_SKIP) && bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_TRANSPARENT_PASS);
+		const float gi_fill_alpha = bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_GI_FILL) && !fill_blocked ? buffer_reflection.a : 0.0;
+		indirect_specular_light = mix(indirect_specular_light, buffer_reflection.rgb, gi_fill_alpha);
+		gi_specular_share = gi_fill_alpha;
 		ambient_source = mix(ambient_source, vec4(0.0, 1.0, 0.0, 0.0), buffer_ambient.a);
-		specular_source = mix(specular_source, vec4(0.0, 1.0, 0.0, 0.0), buffer_reflection.a);
+		specular_source = mix(specular_source, vec4(0.0, 1.0, 0.0, 0.0), gi_fill_alpha);
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
-		cc_specular_light = mix(cc_specular_light, buffer_reflection.rgb, buffer_reflection.a);
+		cc_specular_light = mix(cc_specular_light, buffer_reflection.rgb, gi_fill_alpha * coat_match_fill);
 #endif
 	}
 #endif // !USE_LIGHTMAP
@@ -2548,7 +2574,7 @@ void fragment_shader(in SceneData scene_data) {
 #endif
 		vec3 ref_vec = normalize(reflect(-view, bent_normal));
 		// Interpolate between mirror and rough reflection by using linear_roughness * linear_roughness.
-		ref_vec = mix(ref_vec, bent_normal, roughness * roughness * roughness * roughness);
+		ref_vec = mix(ref_vec, bent_normal, unified_lookup ? roughness * roughness : roughness * roughness * roughness * roughness);
 
 		for (uint i = item_from; i < item_to; i++) {
 			uint mask = cluster_buffer.data[cluster_reflection_offset + i];
@@ -2586,6 +2612,24 @@ void fragment_shader(in SceneData scene_data) {
 						ambient_accum, reflection_accum);
 			}
 		}
+
+		if (!bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_PROBES)) {
+			reflection_accum = vec4(0.0);
+#ifdef LIGHT_CLEARCOAT_USED
+			cc_reflection_accum = vec4(0.0);
+#endif
+		}
+
+		if (unified_lookup || horizon_geometric) {
+			float probe_horizon = min(1.0 + dot(ref_vec, horizon_normal), 1.0);
+			reflection_accum.rgb *= probe_horizon * probe_horizon;
+		}
+#ifdef LIGHT_CLEARCOAT_USED
+		if (horizon_geometric) {
+			float cc_probe_horizon = min(1.0 + dot(cc_ref_vec, geo_normal), 1.0);
+			cc_reflection_accum.rgb *= cc_probe_horizon * cc_probe_horizon;
+		}
+#endif
 
 		if (ambient_accum.a < 1.0) {
 			ambient_accum.rgb = ambient_light * (1.0 - ambient_accum.a) + ambient_accum.rgb;
@@ -2653,6 +2697,10 @@ void fragment_shader(in SceneData scene_data) {
 		ambient_light *= ambient_ao;
 		policy_ambient_light *= ambient_occlusion;
 #endif // MULTI_BOUNCE_OCCLUSION_ENABLED
+		const vec3 pre_occlusion_specular = indirect_specular_light;
+#if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+		const vec3 pre_occlusion_cc_specular = cc_specular_light;
+#endif
 #if !defined(SPECULAR_OCCLUSION_DISABLED) || defined(SPECULAR_OCCLUSION_COMBINED)
 #ifdef BENT_NORMAL_MAP_USED
 		// Apply cone to cone intersection with cosine weighted assumption:
@@ -2662,6 +2710,7 @@ void fragment_shader(in SceneData scene_data) {
 		// https://advances.realtimerendering.com/s2006/Chapter8-Ambient_Aperture_Lighting.pdf
 		float specular_occlusion = specular_occlusion_cone(specular_ao, roughness, bent_normal_vector, reflect(-view, normal));
 		indirect_specular_light *= specular_occlusion;
+		reflection_debug.w = specular_occlusion;
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
 #ifdef INDIRECT_COAT_NORMAL_ACTIVE
 		cc_specular_light *= cc_custom ? specular_occlusion_cone(specular_ao, indirect_coat_roughness, bent_normal_vector, reflect(-view, cc_normal)) : specular_occlusion;
@@ -2697,6 +2746,7 @@ void fragment_shader(in SceneData scene_data) {
 #endif
 		}
 		indirect_specular_light *= specular_occlusion;
+		reflection_debug.w = specular_occlusion;
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
 #ifdef SPECULAR_OCCLUSION_COMBINED
 		cc_specular_light *= specular_occlusion_lagarde(clamp(dot(CLEARCOAT_NORMAL, view), 0.0, 1.0), specular_ao, indirect_coat_roughness * indirect_coat_roughness);
@@ -2708,6 +2758,13 @@ void fragment_shader(in SceneData scene_data) {
 #endif
 #endif // BENT_NORMAL_MAP_USED
 #endif // SPECULAR_OCCLUSION_DISABLED
+		if (!bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SPECULAR_OCCLUSION)) {
+			indirect_specular_light = pre_occlusion_specular;
+#if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+			cc_specular_light = pre_occlusion_cc_specular;
+#endif
+			reflection_debug.w = 1.0;
+		}
 #ifdef INDIRECT_DIFFUSE_WEIGHT_USED
 		vec3 ambient_weight = indirect_diffuse_weight * (1.0 - decal_coverage) + (albedo.rgb - decal_base_albedo * (1.0 - decal_coverage)) * (1.0 - metallic);
 #else
@@ -2733,8 +2790,10 @@ void fragment_shader(in SceneData scene_data) {
 #endif
 #endif
 
+		reflection_debug.xyz = specular_source.xyz;
+
 		//process ssr
-		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSR)) {
+		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSR) && bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SSR)) {
 			bool resolve_ssr = bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_RESOLVE_SSR);
 
 			float ssr_mip_level = 0.0;
@@ -2770,7 +2829,7 @@ void fragment_shader(in SceneData scene_data) {
 			indirect_specular_light = indirect_specular_light * (1.0 - ssr.a) + ssr.rgb;
 			specular_source = specular_source * (1.0 - ssr.a) + vec4(0.0, 0.0, 0.0, ssr.a);
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
-			cc_specular_light = cc_specular_light * (1.0 - ssr.a) + ssr.rgb;
+			cc_specular_light = cc_specular_light * (1.0 - ssr.a * coat_match_ssr) + ssr.rgb * coat_match_ssr;
 #endif
 		}
 	}
@@ -3791,7 +3850,7 @@ void fragment_shader(in SceneData scene_data) {
 #endif //!FOG_DISABLED
 
 	if (sc_debug_lighting_component() != 0u) {
-		diffuse_buffer.rgb = debug_lighting_component(sc_debug_lighting_component(), diffuse_light, direct_specular_light, ambient_light, indirect_specular_light, output_emission, fog, ssr_confidence, persistent_ao, specular_source, ambient_source, surfel_coverage.y);
+		diffuse_buffer.rgb = debug_lighting_component(sc_debug_lighting_component(), diffuse_light, direct_specular_light, ambient_light, indirect_specular_light, output_emission, fog, ssr_confidence, persistent_ao, specular_source, ambient_source, surfel_coverage.y, reflection_debug);
 		specular_buffer.rgb = vec3(0.0);
 	}
 #ifdef DIRECT_RESAMPLED_ROUTE
@@ -3817,7 +3876,7 @@ void fragment_shader(in SceneData scene_data) {
 #endif //!FOG_DISABLED
 
 	if (sc_debug_lighting_component() != 0u) {
-		frag_color.rgb = debug_lighting_component(sc_debug_lighting_component(), diffuse_light, direct_specular_light, ambient_light, indirect_specular_light, output_emission, fog, ssr_confidence, persistent_ao, specular_source, ambient_source, surfel_coverage.y);
+		frag_color.rgb = debug_lighting_component(sc_debug_lighting_component(), diffuse_light, direct_specular_light, ambient_light, indirect_specular_light, output_emission, fog, ssr_confidence, persistent_ao, specular_source, ambient_source, surfel_coverage.y, reflection_debug);
 	}
 #ifdef DIRECT_RESAMPLED_ROUTE
 	if (sc_use_direct_resampled() && direct_no_layer) {
