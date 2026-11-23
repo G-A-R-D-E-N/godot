@@ -2,8 +2,10 @@
 
 `servers/rendering/renderer_rd/environment/ray_scene.cpp:RayScene` can trace alpha-tested (cut-out) surfaces as
 cut-outs: rays pass through the holes of foliage, grates and fences instead of stopping on the whole triangle. It is
-off by default. With `rendering/global_illumination/ray_scene/alpha_test` false, the ray scene uploads, shader defines
-and bindings are the same as without this code.
+off by default. The UV buffer, alpha store, `RAY_SCENE_ALPHA` shader define and bindings 9, 10, 13 and 14 are always
+built, so the setting can be toggled live; while `rendering/global_illumination/ray_scene/alpha_test` is false, every
+material slot carries alpha index 0, so traces, material bytes, hashes, feed states and the hardware split match the
+off build.
 
 The DDGI trace shader reads cut-outs in all four of its modes (probe, surfel, debug rays and the per-pixel ray-traced GI
 trace `TRACE_MODE_RTGI`), and in the shadow rays those modes trace. The ReSTIR GI module's ray shader
@@ -22,7 +24,7 @@ apply cut-outs. A cut-out surface casts a solid shadow there, while DDGI and ReS
 
 | Setting (`rendering/global_illumination/...`) | Default | Read |
 |---|---|---|
-| `ray_scene/alpha_test` | false | `RayScene` constructor (capture, store, bindings, defines): restart |
+| `ray_scene/alpha_test` | false | every `RayScene::update`, latched once at its start: no restart |
 | `ray_scene/max_alpha_layers` | 512 (16 to 2048, clamped by the store) | every `RayScene::update` (`RayAlphaStore::configure`) |
 | `ray_scene/alpha_mode` | 0 Stochastic, 1 Threshold | `RayScene::alpha_shader_defines`, when the trace shaders are created: restart |
 | `ray_scene/alpha_layer_size` | 256 (256 or 512) | every `RayScene::update` |
@@ -584,6 +586,70 @@ apply cut-outs. A cut-out surface casts a solid shadow there, while DDGI and ReS
   stripped index plus the shader's READY test keep pending layers solid.
 - There is no hardware against software parity harness, so edge texels where the two backends' barycentrics differ
   are not checked by a test.
+
+## Live switch (`ray_scene.cpp:RayScene::update`, `alpha_slot_flags`, `alpha_split_bits`, `hw_split_stale`, `alpha_scene_signature`)
+
+- Latch and generation: `RayScene::RayScene` takes the initial `alpha_enabled` snapshot from
+  `rendering/global_illumination/ray_scene/alpha_test` and registers `_alpha_texture_live` on `alpha_store`
+  unconditionally. At the start of every `RayScene::update`, right after `_backend_tick()`, `alpha_on` is read with
+  `GLOBAL_GET_CACHED` and compared against `alpha_enabled` to set `alpha_edge = alpha_on != alpha_enabled`. On an edge,
+  `alpha_enabled` takes `alpha_on` and `alpha_generation` increments (wrapping 0 to 1; exposed by
+  `RayScene::get_alpha_generation()`). UV capture/build/upload (`_capture_surface`, `_build_blas`, `_assemble`),
+  threshold parsing (`_material_entry`), `RayScene::alpha_shader_defines()` (which now returns empty only when
+  `!singleton`), bindings 9, 10, 13 and 14 (`RayScene::append_uniforms`) and `_alpha_ready()` in `RayScene::is_ready()`
+  all run unconditionally.
+- Masked cache (`ray_scene.h:RayScene::alpha_slot_flags`): `CachedMaterial` keeps `uint32_t alpha_flags = 0` alongside
+  `Material entry`. On a `material_cache` miss, `_alpha_entry` runs unconditionally so cut-out layers are acquired,
+  then `entry.alpha_flags = entry.entry.flags & MATERIAL_ALPHA_MASK` saves the raw index bits and
+  `entry.entry.flags = alpha_slot_flags(entry.entry.flags, alpha_enabled)` clears `MATERIAL_ALPHA_MASK` whenever
+  `alpha_enabled` is false. Everything downstream of the cache (`materials`, `_alpha_instance`, `slot_cast_flags`,
+  `feed_surface_state`, `surface_candidates`, `material_candidates`, `candidates`, the uploaded material bytes and the
+  material hash) therefore sees exact legacy-off flags while off, and the far-state hash loop remains gated on
+  `alpha_enabled`.
+- Store warming while off: `alpha_store.configure`, `alpha_store.begin_update`, `_alpha_entry` (`alpha_store.acquire`),
+  and `alpha_store.update()` run unconditionally on every `RayScene::update`. Layers and mean mips keep
+  acquiring, stamping and filling while `alpha_test` is off, so turning it on traces already-`READY` layers on the next
+  update instead of waiting for fills. `_print_alpha()` runs only while `alpha_enabled` is true, so an off run's log has
+  no `Ray scene alpha:` line, as before the switch (run kits read that line to tell an on leg from an off leg). While
+  off, `_alpha_instance` is skipped, so `live_surfaces`, `pending_surfaces` and `solid_unsafe_uv` stay 0.
+- Hardware split (`ray_scene.h:RayScene::alpha_split_bits`, `hw_split_stale`): `MeshEntry::hw_alpha_on` records the
+  `alpha_enabled` state under which the mesh's frozen hardware split was built. When `accel` is active, each instance
+  accumulates `alpha_split |= alpha_split_bits(s, cached->entry.flags, cached->alpha_flags)` across its surfaces, where
+  `alpha_split_bits` computes `surface_candidates(s, flags | alpha_flags) & ~surface_candidates(s, flags & ~MATERIAL_ALPHA_MASK)`:
+  non-zero only for surfaces that are hardware candidates solely because of their cut-out index (not already `SKIP`,
+  `BLEND`, `SHADOW_PASS` or `SHADOW_ONLY`). Before `_hw_instance`, `hw_split_stale(mesh->hw_generation, mesh->hw_alpha_on,
+  alpha_enabled, alpha_split)` is true only when `hw_generation != 0 && hw_alpha_on != alpha_enabled && alpha_split != 0`;
+  when stale, `mesh->hw_generation` and `mesh->hw_region` are cleared to 0. If `mesh->hw_generation == 0` entering
+  `_hw_instance` (`hw_fresh`), `_hw_instance` assigns a fresh `hw_mesh_generation`, recomputes the split for the current
+  `alpha_enabled` state and triggers `RayAccel::ensure_blas` to rebuild the BLAS, after which `mesh->hw_alpha_on` is
+  recorded as `alpha_enabled`. Only meshes whose candidacy comes solely from a cut-out are rebuilt, once per toggle, and
+  any orphaned remap entries are dropped at the next `_hw_assembled()`. Because `RayAccel::ensure_blas` caps BLAS builds
+  per frame, a large toggle can take several frames during which an unbuilt instance is skipped (`hw_usable == 0`), as
+  for any new mesh.
+- Scene epoch salt (`ray_scene.h:RayScene::alpha_scene_signature`, `ALPHA_ON_SALT`): defined inline in `ray_scene.h`
+  (`ALPHA_ON_SALT = 0x9e3779b9u`, since `ray_scene.h` already includes `gi_epochs.h`). Before
+  `GIEpochs::get_singleton()->apply(scene_tracker.update(scene_signature, scene_members))`, `scene_signature` passes
+  through `alpha_scene_signature(scene_signature, alpha_enabled)`, which returns `p_signature` unchanged when off
+  (legacy identity) and `GISceneTracker::add_instance(p_signature, ALPHA_ON_SALT)` when on. A toggle therefore changes
+  the scene signature once even when no material slot changes, advancing `GIEpochs::SOURCE_SCENE` exactly once (the
+  dirty feed's own bump in `ray_scene_dirty.cpp:_feed_end` is skipped once the epoch has already moved).
+- Dirty-box feed overflow (`ray_scene_dirty.cpp:RayScene::_feed_end`): when the feed is active, `overflow` is computed
+  as `feed_frame_overflow(feed_raw_overflow, feed_baseline) || alpha_edge`. On the toggle frame the feed publishes
+  overflow (without changing anything else in the feed).
+- DDGI and surfel history (`ddgi.h`, `ddgi.cpp:DDGI::update`, `surfel_gi.h`, `surfel_gi.cpp:SurfelGI::update`):
+  `DDGI::Volume` and `SurfelGI::SurfelVolume` each store `uint32_t alpha_generation = 0`. When `RayScene::get_singleton()`
+  exists and `volume->alpha_generation != ray_scene->get_alpha_generation()`, `update` re-instantiates and reallocates
+  the volume and stores the new generation (0 if there is no singleton). Reallocation clears the probe/surfel history
+  buffers and restarts the update schedule.
+- RT GI follow-up (not in this commit): per-pixel RTGI (`rtgi.cpp`) and ReSTIR GI (`modules/gi_restir`) do not read
+  `RayScene::get_alpha_generation()` yet (planned follow-up: a history cut like `CUT_BACKEND` in RTGI, and
+  `clear_history` with no `RESTIR_F_HISTORY` in ReSTIR GI). Until then, ReSTIR GI cuts its history on the edge frame
+  through the feed overflow (`restir_epochs.cpp`, `SCENE_OVERFLOW`), while per-pixel RTGI keeps its history across a
+  toggle. `direct_shadows.cpp` is unchanged (no cut-outs there yet).
+- Resident memory while off: because UVs and the alpha store are always allocated, turning `alpha_test` off keeps the
+  layer array (32 MiB at the default 512 x 256 R8; 128 MiB at 512 x 512), the mean array (about 11 MB: 11,184,640 B at
+  512 layers), 56 B per table entry and 16 B per triangle of UVs (GPU and CPU `bvh_uvs`, plus 4 B per captured vertex)
+  resident.
 
 ## Unit tests (`tests/servers/rendering/test_ray_scene_alpha.cpp`, `test_ray_scene_cast.cpp`, `test_ray_scene_class.cpp`)
 

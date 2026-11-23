@@ -264,18 +264,6 @@ bool ray_scene_alpha_passes(uint p_flags, uint p_triangle, uint p_instance, vec2
 	}
 	return ray_scene_alpha_covered(entry, p_triangle, p_instance, p_bary, p_seed);
 }
-
-bool ray_scene_alpha_passes(uint p_flags, uint p_triangle, uint p_instance, vec2 p_bary, uint p_seed) {
-	uint index = p_flags >> RAY_SCENE_ALPHA_SHIFT;
-	if (index == 0u) {
-		return true;
-	}
-	RaySceneAlphaEntry entry = ray_scene_alpha_table.data[index];
-	if (entry.state != RAY_SCENE_ALPHA_STATE_READY) {
-		return true;
-	}
-	return ray_scene_alpha_covered(entry, p_triangle, p_instance, p_bary, p_seed);
-}
 #endif
 
 vec3 ray_scene_safe_inverse(vec3 p_direction) {

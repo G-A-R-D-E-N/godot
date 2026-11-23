@@ -322,9 +322,12 @@ void DDGI::update(const Ref<RenderSceneBuffersRD> &p_render_buffers, const Vecto
 	}
 
 	const Settings settings = get_project_settings();
-	if (volume.is_null() || volume->ubo.is_null() || !volume->settings.same_storage(settings)) {
+	RayScene *ray_scene = RayScene::get_singleton();
+	const uint32_t alpha_generation = ray_scene ? ray_scene->get_alpha_generation() : 0;
+	if (volume.is_null() || volume->ubo.is_null() || !volume->settings.same_storage(settings) || (ray_scene && volume->alpha_generation != alpha_generation)) {
 		volume.instantiate();
 		volume->allocate(settings);
+		volume->alpha_generation = alpha_generation;
 		p_render_buffers->set_custom_data(RB_SCOPE_DDGI, volume);
 	}
 	volume->settings = settings;

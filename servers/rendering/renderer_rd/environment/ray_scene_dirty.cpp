@@ -213,7 +213,7 @@ void RayScene::_feed_end() {
 	}
 	feed_active.resize(kept);
 
-	bool overflow = feed_frame_overflow(feed_raw_overflow, feed_baseline);
+	bool overflow = feed_frame_overflow(feed_raw_overflow, feed_baseline) || alpha_edge;
 	if (!overflow) {
 		GIEpochs::merge_boxes(feed_raw, distance);
 	}

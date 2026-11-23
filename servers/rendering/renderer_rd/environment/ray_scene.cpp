@@ -78,9 +78,7 @@ static bool _alpha_texture_live(RID p_texture) {
 RayScene::RayScene() {
 	singleton = this;
 	alpha_enabled = GLOBAL_GET("rendering/global_illumination/ray_scene/alpha_test");
-	if (alpha_enabled) {
-		alpha_store.set_liveness(&_alpha_texture_live);
-	}
+	alpha_store.set_liveness(&_alpha_texture_live);
 }
 
 RayScene::~RayScene() {
@@ -367,19 +365,17 @@ void RayScene::_capture_surface(MeshEntry &r_mesh, uint32_t p_surface, const Ren
 	}
 
 	const uint32_t vertex_count = vertices.size();
-	if (alpha_enabled) {
-		const PackedVector2Array uv_array = arrays[RSE::ARRAY_TEX_UV];
-		float uv_extent = 0.0f;
-		for (uint32_t v = 0; v < vertex_count; v++) {
-			const Vector2 uv = v < uint32_t(uv_array.size()) ? uv_array[v] : Vector2();
-			uv_extent = MAX(uv_extent, MAX(Math::abs(float(uv.x)), Math::abs(float(uv.y))));
-			r_mesh.uvs.push_back(pack_half2(float(uv.x), float(uv.y)));
-		}
-		while (r_mesh.surface_uv_extent.size() <= p_surface) {
-			r_mesh.surface_uv_extent.push_back(0.0f);
-		}
-		r_mesh.surface_uv_extent[p_surface] = uv_extent;
+	const PackedVector2Array uv_array = arrays[RSE::ARRAY_TEX_UV];
+	float uv_extent = 0.0f;
+	for (uint32_t v = 0; v < vertex_count; v++) {
+		const Vector2 uv = v < uint32_t(uv_array.size()) ? uv_array[v] : Vector2();
+		uv_extent = MAX(uv_extent, MAX(Math::abs(float(uv.x)), Math::abs(float(uv.y))));
+		r_mesh.uvs.push_back(pack_half2(float(uv.x), float(uv.y)));
 	}
+	while (r_mesh.surface_uv_extent.size() <= p_surface) {
+		r_mesh.surface_uv_extent.push_back(0.0f);
+	}
+	r_mesh.surface_uv_extent[p_surface] = uv_extent;
 	const uint32_t index_count = index_array.is_empty() ? vertex_count : uint32_t(index_array.size());
 	for (uint32_t i = 0; i + 2 < index_count; i += 3) {
 		for (uint32_t k = 0; k < 3; k++) {
@@ -425,9 +421,7 @@ void RayScene::_build_blas(MeshEntry &p_mesh) {
 
 	p_mesh.bvh_triangles.resize(triangle_count);
 	p_mesh.bvh_uvs.clear();
-	if (alpha_enabled) {
-		p_mesh.bvh_uvs.resize(triangle_count);
-	}
+	p_mesh.bvh_uvs.resize(triangle_count);
 	for (uint32_t i = 0; i < triangle_count; i++) {
 		const uint32_t t = primitives[i].index;
 		const Vector3 p0 = p_mesh.positions[p_mesh.indices[t * 3 + 0]];
@@ -442,11 +436,9 @@ void RayScene::_build_blas(MeshEntry &p_mesh) {
 		triangle.e1[3] = 0.0f;
 		triangle.e2[3] = 0.0f;
 		triangle.surface = p_mesh.triangle_surface[t];
-		if (alpha_enabled) {
-			for (uint32_t v = 0; v < 3; v++) {
-				const uint32_t index = p_mesh.indices[t * 3 + v];
-				p_mesh.bvh_uvs[i].uv[v] = index < p_mesh.uvs.size() ? p_mesh.uvs[index] : 0u;
-			}
+		for (uint32_t v = 0; v < 3; v++) {
+			const uint32_t index = p_mesh.indices[t * 3 + v];
+			p_mesh.bvh_uvs[i].uv[v] = index < p_mesh.uvs.size() ? p_mesh.uvs[index] : 0u;
 		}
 	}
 	p_mesh.built = true;
@@ -485,10 +477,8 @@ void RayScene::_assemble(const LocalVector<RID> &p_meshes) {
 		for (const Triangle &triangle : mesh->bvh_triangles) {
 			triangles.push_back(triangle);
 		}
-		if (alpha_enabled) {
-			for (uint32_t i = 0; i < mesh->bvh_triangles.size(); i++) {
-				triangle_uvs.push_back(i < mesh->bvh_uvs.size() ? mesh->bvh_uvs[i] : TriangleUv());
-			}
+		for (uint32_t i = 0; i < mesh->bvh_triangles.size(); i++) {
+			triangle_uvs.push_back(i < mesh->bvh_uvs.size() ? mesh->bvh_uvs[i] : TriangleUv());
 		}
 		assembled_meshes.insert(rid);
 	}
@@ -503,13 +493,11 @@ void RayScene::_assemble(const LocalVector<RID> &p_meshes) {
 	_ensure_buffer(triangle_buffer, triangle_capacity, triangles.size(), sizeof(Triangle), "Ray Scene Triangles");
 	RD::get_singleton()->buffer_update(blas_node_buffer, 0, blas_nodes.size() * sizeof(Node), blas_nodes.ptr());
 	RD::get_singleton()->buffer_update(triangle_buffer, 0, triangles.size() * sizeof(Triangle), triangles.ptr());
-	if (alpha_enabled) {
-		if (triangle_uvs.is_empty()) {
-			triangle_uvs.push_back(TriangleUv());
-		}
-		_ensure_buffer(triangle_uv_buffer, triangle_uv_capacity, triangle_uvs.size(), sizeof(TriangleUv), "Ray Scene Triangle UVs");
-		RD::get_singleton()->buffer_update(triangle_uv_buffer, 0, triangle_uvs.size() * sizeof(TriangleUv), triangle_uvs.ptr());
+	if (triangle_uvs.is_empty()) {
+		triangle_uvs.push_back(TriangleUv());
 	}
+	_ensure_buffer(triangle_uv_buffer, triangle_uv_capacity, triangle_uvs.size(), sizeof(TriangleUv), "Ray Scene Triangle UVs");
+	RD::get_singleton()->buffer_update(triangle_uv_buffer, 0, triangle_uvs.size() * sizeof(TriangleUv), triangle_uvs.ptr());
 	_hw_assembled();
 	assembly_dirty = false;
 }
@@ -674,14 +662,12 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 	if (shadow_pass.get_type() == Variant::BOOL ? bool(shadow_pass) : _param_float(shadow_pass, 0.0f) > 0.5f) {
 		r_material.flags |= MATERIAL_FLAG_SHADOW_PASS;
 	}
-	if (alpha_enabled) {
-		const Variant scissor = material_storage->material_get_declared_param(p_material, SNAME("alpha_scissor_threshold"));
-		const Variant body_alpha_test = material_storage->material_get_declared_param(p_material, SNAME("alpha_test"));
-		if (scissor.get_type() != Variant::NIL) {
-			r_alpha_threshold = _param_float(scissor, 0.5f);
-		} else if (body_alpha_test.get_type() == Variant::BOOL && bool(body_alpha_test)) {
-			r_alpha_threshold = _param_float(material_storage->material_get_declared_param(p_material, SNAME("alpha_threshold")), 0.5f);
-		}
+	const Variant scissor = material_storage->material_get_declared_param(p_material, SNAME("alpha_scissor_threshold"));
+	const Variant body_alpha_test = material_storage->material_get_declared_param(p_material, SNAME("alpha_test"));
+	if (scissor.get_type() != Variant::NIL) {
+		r_alpha_threshold = _param_float(scissor, 0.5f);
+	} else if (body_alpha_test.get_type() == Variant::BOOL && bool(body_alpha_test)) {
+		r_alpha_threshold = _param_float(material_storage->material_get_declared_param(p_material, SNAME("alpha_threshold")), 0.5f);
 	}
 }
 
@@ -814,7 +800,7 @@ bool RayScene::_alpha_ready() const {
 }
 
 String RayScene::alpha_shader_defines() {
-	if (!singleton || !singleton->alpha_enabled) {
+	if (!singleton) {
 		return String();
 	}
 	String defines = "\n#define RAY_SCENE_ALPHA\n";
@@ -1588,6 +1574,15 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		feed_update_start = OS::get_singleton()->get_ticks_usec();
 	}
 	_backend_tick();
+	const bool alpha_on = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ray_scene/alpha_test");
+	alpha_edge = alpha_on != alpha_enabled;
+	if (alpha_edge) {
+		alpha_enabled = alpha_on;
+		alpha_generation++;
+		if (alpha_generation == 0) {
+			alpha_generation = 1;
+		}
+	}
 
 	const Vector3 snapped = (p_camera_position / ANCHOR_GRID).floor() * ANCHOR_GRID;
 	const bool anchor_moved = snapped != anchor;
@@ -1649,10 +1644,8 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		_feed_begin();
 	}
 	alpha_counts = AlphaCounts();
-	if (alpha_enabled) {
-		alpha_store.configure(uint32_t(GLOBAL_GET_CACHED(int, "rendering/global_illumination/ray_scene/max_alpha_layers")), uint32_t(GLOBAL_GET_CACHED(int, "rendering/global_illumination/ray_scene/alpha_layer_size")), uint64_t(GLOBAL_GET_CACHED(int, "rendering/global_illumination/ray_scene/alpha_fill_texels_per_frame")));
-		alpha_store.begin_update(RSG::rasterizer->get_frame_number());
-	}
+	alpha_store.configure(uint32_t(GLOBAL_GET_CACHED(int, "rendering/global_illumination/ray_scene/max_alpha_layers")), uint32_t(GLOBAL_GET_CACHED(int, "rendering/global_illumination/ray_scene/alpha_layer_size")), uint64_t(GLOBAL_GET_CACHED(int, "rendering/global_illumination/ray_scene/alpha_fill_texels_per_frame")));
+	alpha_store.begin_update(RSG::rasterizer->get_frame_number());
 	LocalVector<BuildPrimitive> primitives;
 	uint32_t signature = HASH_MURMUR3_SEED;
 	uint64_t scene_signature = 0;
@@ -1692,6 +1685,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		const uint32_t cast_flags = shadow_cast_flags(geometry->data->cast_shadows, geometry->data->ray_scene_occluder);
 		uint64_t material_candidates = 0;
 		uint64_t candidates = 0;
+		uint64_t alpha_split = 0;
 		uint32_t feed_state = hash_murmur3_one_32(geometry->layer_mask);
 
 		for (uint32_t s = 0; s < mesh->surface_count; s++) {
@@ -1711,6 +1705,8 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 				if (alpha_threshold >= 0.0f && (entry.entry.flags & MATERIAL_FLAG_SKIP) == 0) {
 					_alpha_entry(material, entry.entry, alpha_threshold, cull);
 				}
+				entry.alpha_flags = entry.entry.flags & MATERIAL_ALPHA_MASK;
+				entry.entry.flags = alpha_slot_flags(entry.entry.flags, alpha_enabled);
 				_instance_slots(material, entry);
 				cached = &material_cache.insert(material, entry)->value;
 			}
@@ -1723,6 +1719,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			if (accel) {
 				material_candidates |= surface_candidates(s, cached->entry.flags);
 				candidates |= surface_candidates(s, materials[materials.size() - 1].flags);
+				alpha_split |= alpha_split_bits(s, cached->entry.flags, cached->alpha_flags);
 			}
 			const float factor = MAX(_instance_float(geometry->shader_uniforms_offset, cached->scale_index), 0.0f) * MAX(_instance_float(geometry->shader_uniforms_offset, cached->bounce_index), 0.0f);
 			if (factor != 1.0f) {
@@ -1734,7 +1731,15 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		}
 		bool hw_instance_usable = true;
 		if (accel) {
+			if (hw_split_stale(mesh->hw_generation, mesh->hw_alpha_on, alpha_enabled, alpha_split)) {
+				mesh->hw_generation = 0;
+				mesh->hw_region = 0;
+			}
+			const bool hw_fresh = mesh->hw_generation == 0;
 			_hw_instance(mesh_rid, *mesh, material_candidates, candidates, transform, instance);
+			if (hw_fresh) {
+				mesh->hw_alpha_on = alpha_enabled;
+			}
 			hw_instance_usable = hw_usable[hw_usable.size() - 1] != 0;
 		}
 
@@ -1773,9 +1778,10 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		scene_signature = GISceneTracker::add_instance(scene_signature, scene_hash);
 		scene_members.push_back(GISceneTracker::member_key(p_instances[i], mesh_rid.get_id()));
 	}
+	scene_signature = alpha_scene_signature(scene_signature, alpha_enabled);
 	GIEpochs::get_singleton()->apply(scene_tracker.update(scene_signature, scene_members));
+	alpha_store.update();
 	if (alpha_enabled) {
-		alpha_store.update();
 		_print_alpha();
 	}
 

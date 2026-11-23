@@ -115,6 +115,7 @@ public:
 	static constexpr uint32_t MATERIAL_ALPHA_SHIFT = 8;
 	static constexpr uint32_t MATERIAL_ALPHA_MASK = 0xFFFFFF00;
 	static constexpr uint32_t CANDIDATE_FLAGS = MATERIAL_FLAG_SKIP | MATERIAL_FLAG_BLEND | MATERIAL_FLAG_SHADOW_PASS | MATERIAL_FLAG_SHADOW_ONLY | MATERIAL_ALPHA_MASK;
+	static constexpr uint32_t ALPHA_ON_SALT = 0x9e3779b9u;
 
 	enum InstanceClass {
 		INSTANCE_CLASS_OPAQUE,
@@ -292,6 +293,10 @@ public:
 	static uint32_t shadow_cast_flags(RSE::ShadowCastingSetting p_setting, bool p_occluder = false);
 	static uint32_t slot_cast_flags(uint32_t p_slot_flags, uint32_t p_cast_flags) { return (p_slot_flags & MATERIAL_ALPHA_MASK) != 0 ? p_cast_flags : p_cast_flags & ~uint32_t(MATERIAL_FLAG_SHADOW_TWO_SIDED); }
 	static uint64_t surface_candidates(uint32_t p_surface, uint32_t p_flags);
+	static uint32_t alpha_slot_flags(uint32_t p_flags, bool p_alpha_on) { return p_alpha_on ? p_flags : p_flags & ~MATERIAL_ALPHA_MASK; }
+	static uint64_t alpha_split_bits(uint32_t p_surface, uint32_t p_flags, uint32_t p_alpha_flags) { return surface_candidates(p_surface, p_flags | p_alpha_flags) & ~surface_candidates(p_surface, p_flags & ~MATERIAL_ALPHA_MASK); }
+	static bool hw_split_stale(uint64_t p_hw_generation, bool p_hw_alpha_on, bool p_alpha_on, uint64_t p_alpha_split_bits) { return p_hw_generation != 0 && p_hw_alpha_on != p_alpha_on && p_alpha_split_bits != 0; }
+	static uint64_t alpha_scene_signature(uint64_t p_signature, bool p_alpha_on) { return p_alpha_on ? GISceneTracker::add_instance(p_signature, ALPHA_ON_SALT) : p_signature; }
 	static uint32_t instance_class(uint64_t p_candidates, uint64_t p_split);
 	static uint32_t hw_instance_mask(uint32_t p_layer_mask, const uint32_t *p_groups, uint32_t p_group_count);
 	static uint32_t float_to_half(float p_value);
@@ -339,6 +344,7 @@ private:
 		uint64_t hw_split = 0;
 		uint32_t hw_opaque = 0;
 		uint32_t hw_region = 0;
+		bool hw_alpha_on = false;
 		LocalVector<uint32_t> hw_order;
 	};
 
@@ -389,6 +395,7 @@ private:
 	HashMap<RID, ShellRange> shell_ranges;
 	struct CachedMaterial {
 		Material entry;
+		uint32_t alpha_flags = 0;
 		int32_t scale_index = -1;
 		int32_t bounce_index = -1;
 	};
@@ -485,6 +492,8 @@ private:
 	uint32_t triangle_capacity = 0;
 	uint32_t triangle_uv_capacity = 0;
 	bool alpha_enabled = false;
+	uint32_t alpha_generation = 0;
+	bool alpha_edge = false;
 	uint32_t instance_capacity = 0;
 	uint32_t tlas_node_capacity = 0;
 	uint32_t material_capacity = 0;
@@ -560,7 +569,7 @@ public:
 	uint32_t get_structure_generation() const { return structure_generation; }
 	AABB get_light_region(const Vector3 &p_camera_world, const Vector3 &p_region_half);
 
-	bool is_ready() const { return scene_data_buffer.is_valid() && blas_node_buffer.is_valid() && tlas_node_buffer.is_valid() && (!accel || _hw_ready()) && (!alpha_enabled || _alpha_ready()); }
+	bool is_ready() const { return scene_data_buffer.is_valid() && blas_node_buffer.is_valid() && tlas_node_buffer.is_valid() && (!accel || _hw_ready()) && _alpha_ready(); }
 	bool uses_hardware() const { return accel != nullptr; }
 	void refuse_hardware(const String &p_reason);
 	RID get_tlas() const;
@@ -578,6 +587,7 @@ public:
 	RID get_scene_data_buffer() const { return scene_data_buffer; }
 	RID get_triangle_uv_buffer() const { return triangle_uv_buffer; }
 	bool is_alpha_enabled() const { return alpha_enabled; }
+	uint32_t get_alpha_generation() const { return alpha_generation; }
 	static String alpha_shader_defines();
 	RID get_alpha_table_buffer() const { return alpha_store.get_table_buffer(); }
 	uint64_t get_alpha_change_serial() const { return alpha_store.get_change_serial(); }

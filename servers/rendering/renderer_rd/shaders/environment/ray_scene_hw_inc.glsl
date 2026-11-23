@@ -94,7 +94,7 @@ bool ray_scene_trace_masked_near(vec3 p_origin, vec3 p_direction, float p_t_max,
 				continue;
 			}
 #ifdef RAY_SCENE_ALPHA
-			if (!ray_scene_alpha_passes(material.flags, triangle, index, rayQueryGetIntersectionBarycentricsEXT(query, false).yx, seed)) {
+			if (!ray_scene_alpha_passes(material.flags, triangle, index, rayQueryGetIntersectionBarycentricsEXT(query, false).yx, seed, !rayQueryGetIntersectionFrontFaceEXT(query, false), p_shadow)) {
 				continue;
 			}
 #endif
@@ -137,7 +137,7 @@ bool ray_scene_trace_masked_near(vec3 p_origin, vec3 p_direction, float p_t_max,
 			continue;
 		}
 #ifdef RAY_SCENE_ALPHA
-		if (!ray_scene_alpha_passes(material.flags, triangle, index, rayQueryGetIntersectionBarycentricsEXT(tie_query, false).yx, seed)) {
+		if (!ray_scene_alpha_passes(material.flags, triangle, index, rayQueryGetIntersectionBarycentricsEXT(tie_query, false).yx, seed, !rayQueryGetIntersectionFrontFaceEXT(tie_query, false), p_shadow)) {
 			continue;
 		}
 #endif
