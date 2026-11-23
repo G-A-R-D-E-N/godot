@@ -895,6 +895,7 @@ void RestirGiCore::run_frame(RestirGiResources &r_resources, const RestirFramePa
 		LocalVector<RD::Uniform> set0;
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 3, p_inputs.previous_geo_position));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 4, p_inputs.previous_geo_normal));
+		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 5, p_inputs.candidate_first));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 6, p_inputs.candidate_second));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 8, r_resources.reservoir[hist]));
 		set0.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 23, r_resources.pass_stats));

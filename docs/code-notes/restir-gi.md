@@ -370,7 +370,7 @@ twins), FINAL, SOURCE, CAPTURE, PACK, VALIDATE and SKY_EPOCH.
 - 1 `geo_pos_cur` and 2 `geo_nrm_cur` (texture2D): TEMPORAL, SPATIAL, FINAL, SOURCE and CAPTURE. PACK declares only 1.
 - 3 `geo_pos_prev` and 4 `geo_nrm_prev` (texture2D): TEMPORAL, CAPTURE and VALIDATE.
 - 5 `cand_first` and 6 `cand_second` (utexture2D): TEMPORAL and CAPTURE read both. FINAL and VALIDATE declare both but
-  their code reads only 6, and VALIDATE binds only 6; FINAL still binds 5.
+  their code reads only 6; both still bind 5, since a set must cover every binding its pass declares.
 - 7 `res_in` (utexture2DArray): TEMPORAL (`reservoir[hist]`), SPATIAL (the read set), FINAL and PACK
   (`reservoir[final_index]`). CLEAR, SOURCE, CAPTURE and VALIDATE have no 7.
 - 8 `res_out` (rgba32ui, writeonly): CLEAR (all three sets in turn), TEMPORAL (`reservoir[hist ^ 1]`) and SPATIAL (the
@@ -385,7 +385,7 @@ twins), FINAL, SOURCE, CAPTURE, PACK, VALIDATE and SKY_EPOCH.
 - 17 to 22 `cap_pos`, `cap_nrm`, `cap_ppos`, `cap_pnrm` (rgba32f), `cap_first` and `cap_second` (rgba32ui): CAPTURE.
 - 23 `pass_stats` (writeonly storage buffer): TEMPORAL, SPATIAL and VALIDATE. 24 `RestirDirty` UBO: TEMPORAL only.
 - 25 `sel_image` (rg32ui, writeonly array): the compatibility SPATIAL forms (`PASS_SPATIAL_COMPAT`) only; the host
-  binds `sel_dummy` there unless `F_PROBE_STATS` is set (`restir_gi_core.cpp:983-985`).
+  binds `sel_dummy` there unless `F_PROBE_STATS` is set (`restir_gi_core.cpp:984-986`).
 - 26 `RestirEvents` UBO: TEMPORAL, SPATIAL, VALIDATE and SKY_EPOCH. 27 `rs_tiles` (utexture2D): TEMPORAL, SPATIAL,
   FINAL and PACK; with no tile texture the host binds `dummy_tiles` (1x1 R32_UINT, `RTGI_TILE_TRACE` set).
 - 28 `RestirEventBins` (storage buffer): VALIDATE only.
@@ -423,11 +423,11 @@ SPATIAL is compiled in plain and wide forms. `run_frame` picks the wide form (`S
 `gi/spatial_neighbors` is above `RESTIR_SPATIAL_SMALL_COUNT` (3) and the plain form (`MAX_CAND` 4) otherwise; TEMPORAL
 has `MAX_CAND` 2. A pass draws min(`gi/spatial_neighbors`, `MAX_CAND` - 1) neighbours, so plain serves 0 to 3 and wide
 serves 4 to 8. Compatibility selection caps its picks at `COMPAT_MAX_M` (8). Plain, compatibility, wide and
-compatibility-wide are four pipelines, each with a sky twin (`restir_gi_core.cpp:986-987`, `restir_gi_core.h:84`,
+compatibility-wide are four pipelines, each with a sky twin (`restir_gi_core.cpp:987-988`, `restir_gi_core.h:84`,
 `shaders/restir_gi_inc.glsl:66-72`, `shaders/restir_gi.glsl:893`).
 
 Fold-dump variant: when `RestirGiResources::fold_dump` is valid, `run_frame` replaces the TEMPORAL dispatch with a
-dump or lineage build; see "Fold dump and self-test" (`modules/gi_restir/restir_gi_core.cpp:937-965`).
+dump or lineage build; see "Fold dump and self-test" (`modules/gi_restir/restir_gi_core.cpp:938-966`).
 
 Shade set (`RestirGiCore::_shade_set`, `restir_gi_core.cpp:653-675`): the real DDGI UBO, probe, irradiance and
 distance textures are bound only when all four RIDs are valid; otherwise a 512-byte zero UBO and 1x1 placeholders
@@ -558,7 +558,7 @@ least 3 finite positive W values with M > 0; U1 skips the clamp.
 whose receiver is valid (geometry texture `.w` above 0.5: no sky, no untraced tile), whether or not they hold a
 sample or are ray-thinned; `m_sum` adds the reservoir M of those pixels (0 for an empty one); `output_pixels` counts
 those with coverage above 0, which needs a held sample and, if its final visibility ray failed,
-`gi/blocked_keeps_coverage` (`shaders/restir_gi.glsl:1138-1254`, `restir_gi_core.cpp:1041-1050`).
+`gi/blocked_keeps_coverage` (`shaders/restir_gi.glsl:1138-1254`, `restir_gi_core.cpp:1042-1051`).
 
 ### Own sampler (`modules/gi_restir/shaders/restir_gi.glsl`, `MODE_SOURCE`)
 
@@ -601,11 +601,11 @@ Pass-stats slots 0 to 15 are, in order, `PS_TESTED`, `PS_REJ_DIST`, `PS_REJ_COS`
 (`shaders/restir_gi_inc.glsl:77-92`); the slots from 16 up are named where they are used. `read_stats` adds the
 compatibility slots 12 to 15 over the temporal and both spatial rows into `compat_taps`, `compat_early_stops`,
 `compat_empty` and `compat_h_sum`, which the status `stats` dictionary, `get_records` (columns 31 to 34) and the
-`run_case` stats carry (`restir_gi_core.cpp:1077-1080`).
+`run_case` stats carry (`restir_gi_core.cpp:1078-1081`).
 
 With `gi/neighbor_selection` compatibility and `F_PROBE_STATS`, `run_frame` creates `sel_image` (R32G32_UINT, 2 layers
 for spatial passes 1 and 2, binding 25); with compatibility on and no `F_PROBE_STATS`, a 1x1 `sel_dummy` is bound
-there instead (`restir_gi_core.cpp:869-871,984`). Per pixel, word x holds the listed count and the low bytes of the
+there instead (`restir_gi_core.cpp:869-871,985`). Per pixel, word x holds the listed count and the low bytes of the
 first picks' offsets (pick 0 x and y, pick 1 x), and word y holds pick 1 y, pick 2 x and y and min(scored, 255) in the
 top byte (`shaders/restir_gi.glsl:842-856`). `RestirGiCore::read_selection` returns both layers; `run_case` adds
 `result['selection']` when compatibility is on and sets `F_PROBE_STATS` then (`restir_harness.cpp:326,403`).
@@ -1097,7 +1097,7 @@ frame flags; where the macro is undefined the key is the light index and the pic
   is r2. With `gi/event_reshade` off the event UBO is zero, F_EVENTS is clear and no count dispatch runs,
   so every pass takes its non-event branch.
 - With a fold dump buffer the TEMPORAL dispatch is replaced by the dump or lineage build; see "Fold dump and
-  self-test" (`modules/gi_restir/restir_gi_core.cpp:937-965`).
+  self-test" (`modules/gi_restir/restir_gi_core.cpp:938-966`).
 - Status always (`restir_gi.cpp`): `event_reshade`, `events_read` (delivered this frame, also when events
   are off), `events_lost` (this frame's missed events), `jump_frame`, `event_capping_spheres`,
   `event_validate` and `reshade_budget_pixels`. Backend-lifetime totals: `event_frames_total` (frames with
@@ -1309,7 +1309,7 @@ Source: `modules/gi_restir/restir_gi_core.h`, `restir_gi_core.cpp` (`RestirGiCor
   SOURCE, CAPTURE and SKY_EPOCH neither declare nor read it.
 - The RID arrives through `RtgiFrameInputs::tile_texture` (`gi_module_hooks.h`); `rtgi.cpp` fills it with the RID it
   binds to CLASSIFY (binding 6, storage image) and the trace (binding 3). `restir_gi_core.cpp` binds it at set 0
-  binding 27 for TEMPORAL, SPATIAL, FINAL and PACK (`restir_gi_core.cpp:933,982,1006,1025`). `restir_gi.cpp:704`
+  binding 27 for TEMPORAL, SPATIAL, FINAL and PACK (`restir_gi_core.cpp:934,983,1007,1026`). `restir_gi.cpp:704`
   passes it to the core only when `params.tile_skip` is set.
 - A tile is traced when bit 0 (`RTGI_TILE_TRACE`) of its texel is set. `ddgi_trace.glsl` (RTGI mode) treats a pixel as
   a trace candidate when that bit is set and the pixel has depth.
@@ -1586,7 +1586,7 @@ to 15.
 
 MODE_VALIDATE (`restir_gi.glsl`) re-stores the flags in the high half of layer 1's `y` on every path that keeps the
 sample, and clears them together with M only for a sample whose ray no longer lands, which then reads as a start. With
-spatial feedback off the set routing is under "Pass chain" (`modules/gi_restir/restir_gi_core.cpp:1010`); only the
+spatial feedback off the set routing is under "Pass chain" (`modules/gi_restir/restir_gi_core.cpp:1011`); only the
 Fold write decides those bits there.
 
 ### TEMPORAL order and rule 1 — `modules/gi_restir/shaders/restir_gi.glsl`
@@ -1687,7 +1687,7 @@ counts and start classes"); slot 31 is unused.
 `PS_FOLD_REFUSED`. `temporal_reject[13]` (`REJ_BOUND`) counts only refusals that kept `REJ_NONE`. Counting rules and
 identities for these slots (temporal_reject from INFO_VALID words, renewed equal to refused, carried + renewed +
 started equal to the valid traced receivers) are under "Run counters", Row values
-(`modules/gi_restir/restir_gi_core.cpp:1110-1114`).
+(`modules/gi_restir/restir_gi_core.cpp:1111-1115`).
 
 `RestirGiBackend::get_status` (`modules/gi_restir/restir_gi.cpp`) reports `fold_k` (the rounded K), `fold_k_eff`,
 `fold_clock`, `fold_pre_frame` and `fold_feedback` of the last frame `resample` ran. In
@@ -1700,7 +1700,7 @@ frame, and its stats dict carries `fold_refused`, `fold_carried`, `fold_renewed`
 
 The dump and lineage variants of TEMPORAL (binding 32 and bindings 33 to 35, dispatch order, fallback, status fields,
 the counters in slots 27 to 30, the history scan, the start histogram and the lineage word) are under "Fold dump and
-self-test" and "Fold lineage" (`modules/gi_restir/restir_gi_core.cpp:937-965`,
+self-test" and "Fold lineage" (`modules/gi_restir/restir_gi_core.cpp:938-966`,
 `modules/gi_restir/shaders/restir_gi.glsl:434-535`). Rule 1 and the write are the same code in all three variants.
 
 ### Composition — `modules/gi_restir/shaders/restir_gi.glsl`
@@ -1891,7 +1891,7 @@ swaps the TEMPORAL dispatch (`restir_gi.cpp` `resample`; see "Fold dump and self
   the dump, and the eight start_* fields from `restir_fold_start_sums`, then adds the dump's starts to the start
   totals. When `fold_lineage_ran` and `read_fold_refused_ids` succeed it fills the three lineage fields from
   `restir_fold_families_add`.
-- Fold dump variant: see "Fold dump and self-test" (`modules/gi_restir/restir_gi_core.cpp:937-965`); `fold_dump_ran`
+- Fold dump variant: see "Fold dump and self-test" (`modules/gi_restir/restir_gi_core.cpp:938-966`); `fold_dump_ran`
   and `fold_lineage_ran` gate the dump and lineage record fields above.
 - get_records (`restir_probe.cpp`). It copies the list under `restir_frame_records_mutex()` and builds its array
   outside the lock. It returns a dictionary with `stride`, `count` and `data`; the stride is 35: frame, then
@@ -2032,10 +2032,10 @@ The dump and self-test live in `modules/gi_restir/shaders/restir_gi.glsl`,
 `modules/gi_restir/restir_probe.cpp`. Dump GLSL is compiled only into shader objects that define
 RS_FOLD_DUMP; without a dump buffer the frame runs the plain TEMPORAL pass, which binds and computes nothing
 extra. When `RestirGiResources::fold_dump` exists, the fold-dump variant replaces the TEMPORAL dispatch:
-`RestirGiCore::run_frame` (`restir_gi_core.cpp:937-965`) builds the dump set 0, clears the buffer, calls
+`RestirGiCore::run_frame` (`restir_gi_core.cpp:938-966`) builds the dump set 0, clears the buffer, calls
 `_dispatch_dump` and calls the plain `_dispatch(PASS_TEMPORAL or PASS_TEMPORAL_SKY)` only when `_dispatch_dump`
-returned false (`if (!dumped)`, line 961). It never runs both. When the lineage images also exist the lineage
-variant is tried first (line 951) and the dump variant is the fallback (line 958).
+returned false (`if (!dumped)`, line 962). It never runs both. When the lineage images also exist the lineage
+variant is tried first (line 952) and the dump variant is the fallback (line 959).
 
 - Shared include (`modules/gi_restir/shaders/restir_fold_inc.glsl`): constants, phi, draw, isqrt and the PSI macros
   are described under Fold, "Draw and hashes". It declares no bindings; `restir_gi.glsl` includes it inside the
@@ -2081,7 +2081,7 @@ variant is tried first (line 951) and the dump variant is the fallback (line 958
   phase0_start and refused_off from those slots, s_max, n_over and hist_texels from the header, and adds starts to
   `restir_fold_starts` (a uint64 per start slot, see Buffer, under `restir_fold_starts_mutex`, declared in
   `restir_test.h`). Status: fold_dump_active (this frame's dump pass ran; also true on a lineage frame, because the
-  lineage pass is the dump pass, `restir_gi_core.cpp:964`) and fold_dump_frames_total. The dump exists only while
+  lineage pass is the dump pass, `restir_gi_core.cpp:965`) and fold_dump_frames_total. The dump exists only while
   readback is on; starts accumulate across every view and dump frame in the process.
 - Self-test (`restir_fold_test.glsl`, `RestirGiCore::run_fold_test`). Its own `RestirFoldTestShaderRD` with
   one variant, built on the first run. Push constant FoldTestParams { sub, k, count, v0, grid_w, grid_h,
@@ -2184,7 +2184,7 @@ RS_FOLD_LINEAGE together. No other variant or dump object defines RS_FOLD_LINEAG
     `fold_lineage_failed` is set, lineage stays off (code 3) and one warning is printed (WARN_PRINT_ONCE). While the
     flag is set nothing is created again. The flag clears in `free_all` and when lineage is no longer wanted.
   - Every `ensure_fold_lineage` call sets `fold_lineage_refusal`; `run_frame` sets 3 after a failed lineage dispatch
-    (`modules/gi_restir/restir_gi_core.cpp:248-264, 954`); the backend copies it to
+    (`modules/gi_restir/restir_gi_core.cpp:248-264, 955`); the backend copies it to
     `RestirGiSummary::fold_lineage_refusal`.
 - Stale words. `fold_lineage_written` holds the index of the image the last lineage dispatch wrote
   (hist ^ 1), or -1. Before a lineage dispatch, if it is not hist, `run_frame` clears lineage[hist] to 0 with
