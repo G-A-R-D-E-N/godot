@@ -3278,7 +3278,7 @@
 		<member name="rendering/global_illumination/direct/filter_range_sigmas" type="float" setter="" getter="" default="1.5">
 			How far a neighbour's shadow factor may sit from the pixel's own before the spatial filter stops using it, in standard errors of the two pixels' sample counts. Keeps hard shadow edges from bleeding. [code]0[/code] turns the test off.
 		</member>
-		<member name="rendering/global_illumination/direct/filter_second_pass" type="bool" setter="" getter="" default="true">
+		<member name="rendering/global_illumination/direct/filter_second_pass" type="bool" setter="" getter="" default="false">
 			If [code]false[/code], the spatial filter runs only its first pass, which then writes the final shadow factors. Only used when [member rendering/global_illumination/direct/trace_resolution] is Quarter.
 		</member>
 		<member name="rendering/global_illumination/direct/force_factor_one" type="bool" setter="" getter="" default="false">

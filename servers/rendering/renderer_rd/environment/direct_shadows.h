@@ -90,7 +90,7 @@ public:
 		float kernel_floor = 0.6f;
 		float range_sigmas = 1.5f;
 		bool quarter = false;
-		bool second_pass = true;
+		bool second_pass = false;
 
 		bool precise() const { return reference || history_cap == 0; }
 		bool filtered() const { return filter && !precise(); }
