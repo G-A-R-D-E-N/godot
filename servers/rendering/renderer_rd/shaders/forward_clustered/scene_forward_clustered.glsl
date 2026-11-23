@@ -2731,7 +2731,7 @@ void fragment_shader(in SceneData scene_data) {
 		specular_occlusion = max(min(reflective_f * specular_occlusion * 10.0, 1.0), specular_occlusion);
 		specular_occlusion = bool(scene_data.flags & SCENE_DATA_FLAGS_USE_PHYSICAL_LIGHT_UNITS) && bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_LIGHTING_SOURCES) ? 1.0 : specular_occlusion;
 #endif
-#ifdef INDIRECT_COAT_NORMAL_ACTIVE
+#if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
 		float cc_specular_occlusion = specular_occlusion;
 #endif
 		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_BENT_NORMALS)) {
@@ -2741,15 +2741,18 @@ void fragment_shader(in SceneData scene_data) {
 			vec3 occlusion_bent_normal = normalize(textureLod(sampler2D(gtao_bent_normal_buffer, SAMPLER_LINEAR_CLAMP), screen_uv, 0.0).xyz * 2.0 - 1.0);
 #endif
 			specular_occlusion = specular_occlusion_cone(specular_ao, roughness, occlusion_bent_normal, reflect(-view, normal));
+#if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+			cc_specular_occlusion = specular_occlusion;
 #ifdef INDIRECT_COAT_NORMAL_ACTIVE
-			cc_specular_occlusion = cc_custom ? specular_occlusion_cone(specular_ao, indirect_coat_roughness, occlusion_bent_normal, reflect(-view, cc_normal)) : specular_occlusion;
+			if (cc_custom) cc_specular_occlusion = specular_occlusion_cone(specular_ao, indirect_coat_roughness, occlusion_bent_normal, reflect(-view, cc_normal));
+#endif
 #endif
 		}
 		indirect_specular_light -= ibl_specular_light * ibl_probe_share * (1.0 - specular_occlusion);
 		reflection_debug.w = specular_occlusion;
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
 #ifdef SPECULAR_OCCLUSION_COMBINED
-		cc_specular_light -= cc_ibl_specular_light * cc_ibl_probe_share * (1.0 - specular_occlusion_lagarde(clamp(dot(CLEARCOAT_NORMAL, view), 0.0, 1.0), specular_ao, indirect_coat_roughness * indirect_coat_roughness));
+		cc_specular_light -= cc_ibl_specular_light * cc_ibl_probe_share * (1.0 - cc_specular_occlusion);
 #elif defined(INDIRECT_COAT_NORMAL_ACTIVE)
 		cc_specular_light -= cc_ibl_specular_light * cc_ibl_probe_share * (1.0 - cc_specular_occlusion);
 #else
