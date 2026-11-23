@@ -22,9 +22,11 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 #define RTGI_COUNTER_RESTARTED 8
 #define RTGI_COUNTER_TILES_WRONG_EVENTS 9
 #define RTGI_COUNTER_TILES_WRONG_MEMORY 10
+#define RTGI_COUNTER_NONFINITE_ORIGIN 11
+#define RTGI_COUNTER_NONFINITE_NORMAL 12
 
 layout(set = 0, binding = 15, std430) restrict buffer RtgiCounters {
-	uint words[11];
+	uint words[13];
 }
 rtgi_counters;
 
@@ -93,10 +95,6 @@ vec3 rtgi_view_position(ivec2 p_pixel, float p_depth) {
 	vec2 uv = (vec2(p_pixel) + 0.5) / vec2(rtgi.screen_size);
 	vec4 clip = rtgi.inv_projection * vec4(uv * 2.0 - 1.0, p_depth, 1.0);
 	return clip.xyz / clip.w;
-}
-
-bool rtgi_is_finite(vec3 p_value) {
-	return !(any(isnan(p_value)) || any(isinf(p_value)));
 }
 
 #ifdef MODE_CLASSIFY
@@ -356,6 +354,12 @@ void main() {
 		if ((candidate_flags & RTGI_FLAG_BACKFACE) != 0u) {
 			RTGI_COUNT(RTGI_COUNTER_BACKFACE, 1u);
 		}
+	}
+	if ((candidate_flags & RTGI_FLAG_NONFINITE_ORIGIN) != 0u) {
+		RTGI_COUNT(RTGI_COUNTER_NONFINITE_ORIGIN, 1u);
+	}
+	if ((candidate_flags & RTGI_FLAG_NONFINITE_NORMAL) != 0u) {
+		RTGI_COUNT(RTGI_COUNTER_NONFINITE_NORMAL, 1u);
 	}
 #endif
 	vec3 radiance = rtgi_candidate_radiance(second);

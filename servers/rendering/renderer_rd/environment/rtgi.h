@@ -82,6 +82,7 @@ public:
 		FRAME_FLAG_RESTART_SPHERES = 128,
 		FRAME_FLAG_MODULE_OUTPUT = 256,
 		FRAME_FLAG_REPLAY = 512,
+		FRAME_FLAG_DEBUG_NONFINITE_NORMAL = 1024,
 	};
 
 	enum DdgiWrongBits {
@@ -116,6 +117,8 @@ public:
 		COUNTER_RESTARTED,
 		COUNTER_TILES_WRONG_EVENTS,
 		COUNTER_TILES_WRONG_MEMORY,
+		COUNTER_NONFINITE_ORIGIN,
+		COUNTER_NONFINITE_NORMAL,
 		COUNTER_MAX
 	};
 
@@ -152,6 +155,7 @@ public:
 		float ddgi_wrong_noise = 0.25f;
 		float ddgi_wrong_floor = 0.05f;
 		float ddgi_wrong_rho = 1.0f;
+		bool debug_nonfinite_normal = false;
 	};
 
 	struct FrameUBO {
@@ -267,6 +271,8 @@ public:
 		uint32_t last_trace_pixel_capacity = 0;
 		uint32_t last_atrous_iterations = 0;
 		uint32_t last_counters[COUNTER_MAX] = {};
+		uint64_t counted_frames = 0;
+		uint64_t counter_totals[COUNTER_MAX] = {};
 		Dictionary last_inputs;
 		uint64_t event_serial = 0;
 		LocalVector<RtgiRestarts::DirectionalRecord> directionals;

@@ -3945,6 +3945,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/ddgi_wrong_floor", 0.05);
 	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/ddgi_wrong_rho", 1.0);
 	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/gpu_counters", false);
+	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/debug_nonfinite_normal", false);
 	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/debug_status_path", "");
 	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/debug_view", 0);
 	GLOBAL_DEF_INTERNAL("rendering/global_illumination/rtgi/debug_dump_path", "");
