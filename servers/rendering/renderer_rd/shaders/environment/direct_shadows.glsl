@@ -63,6 +63,11 @@ layout(set = 0, binding = 12, std430) restrict buffer Counters {
 	uint walked_lights;
 	uint most_walked;
 	uint passed_lights;
+	uint history_accepted;
+	uint resolve_tier1;
+	uint resolve_tier2;
+	uint resolve_tier3;
+	uint resolve_cut;
 }
 counters;
 
@@ -397,6 +402,130 @@ bool cold_lamp(uint p_slot) {
 	return params.cold_frames != 0u && params.frame - direct_lamps.data[p_slot].reset_frame < params.cold_frames;
 }
 
+#ifdef TRACE_QUARTER
+#define QUARTER_CANDIDATES 9
+
+ivec2 candidate_block[QUARTER_CANDIDATES];
+float candidate_weight[QUARTER_CANDIDATES];
+uint candidate_count = 0u;
+float candidate_total = 0.0;
+
+bool pick_representative(ivec2 p_block, out ivec2 r_pixel, out uint r_phase) {
+	float depth_of[4];
+	vec3 normal_of[4];
+	vec3 position_of[4];
+	int nearest = -1;
+	for (uint k = 0u; k < 4u; k++) {
+		depth_of[k] = 0.0;
+		normal_of[k] = vec3(0.0);
+		position_of[k] = vec3(0.0);
+		ivec2 at = direct_block_pixel(p_block, k);
+		if (any(greaterThanEqual(at, params.full_size))) {
+			continue;
+		}
+		float raw = texelFetch(depth_buffer, at, 0).r;
+		if (raw <= 0.0) {
+			continue;
+		}
+		vec4 view_h = params.inv_projection * vec4(((vec2(at) + 0.5) * params.pixel_size) * 2.0 - 1.0, raw, 1.0);
+		float linear_depth = -(view_h.z / view_h.w);
+		if (linear_depth <= 0.0) {
+			continue;
+		}
+		depth_of[k] = linear_depth;
+		normal_of[k] = normalize(texelFetch(normal_roughness_buffer, at, 0).xyz * 2.0 - 1.0);
+		position_of[k] = direct_rebuild_position(at, linear_depth);
+		if (nearest < 0 || linear_depth < depth_of[nearest]) {
+			nearest = int(k);
+		}
+	}
+	if (nearest < 0) {
+		return false;
+	}
+	bool on_surface[4];
+	bool smooth_block = true;
+	for (uint k = 0u; k < 4u; k++) {
+		on_surface[k] = depth_of[k] > 0.0 && direct_surface_weight(position_of[nearest], normal_of[nearest], depth_of[nearest], position_of[k], normal_of[k]) >= 0.25;
+		smooth_block = smooth_block && (depth_of[k] <= 0.0 || on_surface[k]);
+	}
+	bool want_surface = ((p_block.x + p_block.y + (p_block.y >> 1)) & 1) == 0;
+	r_phase = 4u;
+	for (uint k = 0u; k < 4u && r_phase == 4u; k++) {
+		if (depth_of[k] <= 0.0) {
+			continue;
+		}
+		if (smooth_block || on_surface[k] == want_surface) {
+			r_phase = k;
+		}
+	}
+	if (r_phase == 4u) {
+		r_phase = uint(nearest);
+	}
+	r_pixel = direct_block_pixel(p_block, r_phase);
+	return true;
+}
+
+bool candidate_passes(uvec2 p_guide, float p_expected, float p_tolerance, vec3 p_prev_normal) {
+	if ((p_guide.x & ~3u) == 0u) {
+		return false;
+	}
+	if (abs(direct_guide_depth(p_guide.x) - p_expected) > p_tolerance) {
+		return false;
+	}
+	return dot(p_prev_normal, direct_oct_decode(unpackSnorm2x16(p_guide.y))) >= 0.9;
+}
+
+void gather_history(ivec2 p_block, ivec2 p_pixel, vec3 p_vertex, vec3 p_normal, vec3 p_view) {
+	candidate_count = 0u;
+	candidate_total = 0.0;
+	if (params.history_valid == 0u) {
+		return;
+	}
+	vec4 prev_view = params.prev_view_from_view * vec4(p_vertex, 1.0);
+	vec4 prev_clip = params.prev_projection * prev_view;
+	if (prev_clip.w <= 0.0) {
+		return;
+	}
+	vec2 x = (prev_clip.xy / prev_clip.w * 0.5 + 0.5) * vec2(params.full_size) - params.jitter_delta;
+	if (!all(greaterThanEqual(x, vec2(-4.0))) || !all(lessThanEqual(x, vec2(params.full_size) + 4.0))) {
+		return;
+	}
+	float expected = -prev_view.z;
+	float tolerance = expected * (0.01 + 0.02 / max(dot(p_normal, p_view), 0.05));
+	vec3 prev_normal = mat3(params.prev_view_from_view) * p_normal;
+	if (all(lessThanEqual(abs(x - (vec2(p_pixel) + 0.5)), vec2(0.01))) && candidate_passes(imageLoad(history_guide, p_block).xy, expected, tolerance, prev_normal)) {
+		candidate_block[0] = p_block;
+		candidate_weight[0] = 1.0;
+		candidate_count = 1u;
+		candidate_total = 1.0;
+		return;
+	}
+	ivec2 k_min = ivec2(floor((x - 3.5) * 0.5)) + 1;
+	ivec2 k_max = ivec2(ceil((x + 1.5) * 0.5)) - 1;
+	for (int ky = k_min.y; ky <= k_max.y; ky++) {
+		for (int kx = k_min.x; kx <= k_max.x; kx++) {
+			ivec2 k = ivec2(kx, ky);
+			if (candidate_count >= uint(QUARTER_CANDIDATES) || any(lessThan(k, ivec2(0))) || any(greaterThanEqual(k, params.size))) {
+				continue;
+			}
+			uvec2 guide = imageLoad(history_guide, k).xy;
+			if ((guide.x & ~3u) == 0u) {
+				continue;
+			}
+			vec2 gap = abs(vec2(direct_block_pixel(k, guide.x & 3u)) + 0.5 - x);
+			float weight = max(0.0, 1.0 - 0.5 * gap.x) * max(0.0, 1.0 - 0.5 * gap.y);
+			if (weight <= 0.0 || !candidate_passes(guide, expected, tolerance, prev_normal)) {
+				continue;
+			}
+			candidate_block[candidate_count] = k;
+			candidate_weight[candidate_count] = weight;
+			candidate_total += weight;
+			candidate_count++;
+		}
+	}
+}
+#endif
+
 float history_limit(bool p_dynamic) {
 	if (params.history_cap <= 0.0 || params.reference != 0u) {
 		return 1e30;
@@ -423,17 +552,27 @@ void write_empty(ivec2 p_pixel, uint p_factor_layers) {
 }
 
 void main() {
-	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-	if (any(greaterThanEqual(pixel, params.size))) {
+	ivec2 at = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(at, params.size))) {
 		return;
 	}
 	own_limit = params.head_entries;
 	rest_layer = params.entries - 1u;
 	uint factor_layers = rest_layer + 3u;
 
+#ifdef TRACE_QUARTER
+	ivec2 pixel;
+	uint phase;
+	if (!pick_representative(at, pixel, phase)) {
+		write_empty(at, factor_layers);
+		return;
+	}
+#else
+	ivec2 pixel = at;
+#endif
 	float depth = texelFetch(depth_buffer, pixel, 0).r;
 	if (depth <= 0.0) {
-		write_empty(pixel, factor_layers);
+		write_empty(at, factor_layers);
 		return;
 	}
 	vec2 uv = (vec2(pixel) + 0.5) * params.pixel_size;
@@ -441,7 +580,7 @@ void main() {
 	vec3 vertex = view_h.xyz / view_h.w;
 	vec3 relative = to_world(vertex);
 	if (any(greaterThan(abs(relative), params.region_half))) {
-		write_empty(pixel, factor_layers);
+		write_empty(at, factor_layers);
 		if (params.count != 0u) {
 			atomicAdd(counters.past_region_pixels, 1u);
 		}
@@ -482,7 +621,7 @@ void main() {
 #else
 	if (own_count + rest_count == 0u) {
 #endif
-		write_empty(pixel, factor_layers);
+		write_empty(at, factor_layers);
 		return;
 	}
 	if (params.count != 0u) {
@@ -491,6 +630,45 @@ void main() {
 		atomicAdd(counters.passed_lights, own_count + rest_count);
 	}
 
+	vec2 accum[MAX_ENTRIES];
+	vec4 rest_accum = vec4(0.0);
+	bool has_rest = rest_count > 0u;
+	uint rest_key_value = max(rest_key & 0xFFFFu, 1u);
+#ifdef TRACE_QUARTER
+	gather_history(at, pixel, vertex, normal, view);
+	bool has_history = candidate_count > 0u;
+	imageStore(guide_image, at, uvec4((floatBitsToUint(-vertex.z) & ~3u) | phase, packSnorm2x16(direct_oct_encode(normal)), 0u, 0u));
+	for (uint i = 0u; i < own_count; i++) {
+		accum[i] = vec2(0.0);
+		if (direct_lamps.data[own[i].slot].reset_frame > params.last_frame) {
+			continue;
+		}
+		for (uint c = 0u; c < candidate_count; c++) {
+			for (uint j = 0u; j < own_limit; j++) {
+				if (uint(round(imageLoad(history_slots, ivec3(candidate_block[c], int(j))).r * 65535.0)) == own[i].slot) {
+					accum[i] += candidate_weight[c] * imageLoad(history_accum, ivec3(candidate_block[c], int(j))).rg;
+					break;
+				}
+			}
+		}
+		if (has_history) {
+			accum[i] /= candidate_total;
+		}
+	}
+	if (has_rest) {
+		if (params.count != 0u) {
+			atomicAdd(counters.rest_pixels, 1u);
+		}
+		if (has_history && !rest_reset) {
+			for (uint c = 0u; c < candidate_count; c++) {
+				if (uint(round(imageLoad(history_slots, ivec3(candidate_block[c], int(rest_layer))).r * 65535.0)) == rest_key_value) {
+					rest_accum += candidate_weight[c] * imageLoad(history_rest, candidate_block[c]);
+				}
+			}
+			rest_accum /= candidate_total;
+		}
+	}
+#else
 	ivec2 history_pixel;
 	bool has_history = find_history(pixel, vertex, normal, view, history_pixel);
 	imageStore(guide_image, pixel, uvec4(floatBitsToUint(-vertex.z), packSnorm2x16(direct_oct_encode(normal)), 0u, 0u));
@@ -500,7 +678,6 @@ void main() {
 		old_slots[i] = has_history ? uint(round(imageLoad(history_slots, ivec3(history_pixel, int(i))).r * 65535.0)) : 0u;
 		old_accum[i] = has_history ? imageLoad(history_accum, ivec3(history_pixel, int(i))).rg : vec2(0.0);
 	}
-	vec2 accum[MAX_ENTRIES];
 	for (uint i = 0u; i < own_count; i++) {
 		accum[i] = vec2(0.0);
 		if (direct_lamps.data[own[i].slot].reset_frame > params.last_frame || cold_lamp(own[i].slot)) {
@@ -514,9 +691,6 @@ void main() {
 		}
 	}
 
-	vec4 rest_accum = vec4(0.0);
-	bool has_rest = rest_count > 0u;
-	uint rest_key_value = max(rest_key & 0xFFFFu, 1u);
 	if (has_rest) {
 		if (params.count != 0u) {
 			atomicAdd(counters.rest_pixels, 1u);
@@ -524,6 +698,10 @@ void main() {
 		if (has_history && !rest_reset && uint(round(imageLoad(history_slots, ivec3(history_pixel, int(rest_layer))).r * 65535.0)) == rest_key_value) {
 			rest_accum = imageLoad(history_rest, history_pixel);
 		}
+	}
+#endif
+	if (params.count != 0u && has_history) {
+		atomicAdd(counters.history_accepted, 1u);
 	}
 
 	vec3 anchored = relative + ray_scene.camera_to_anchor;
@@ -666,7 +844,7 @@ void main() {
 		rest_accum.rgb = min(rest_accum.rgb, vec3(4.0 * rest_accum.a));
 #endif
 	}
-	imageStore(ray_image, pixel, uvec4(ray_record));
+	imageStore(ray_image, at, uvec4(ray_record));
 	if (params.count != 0u) {
 		atomicAdd(counters.rays, traced_rays);
 	}
@@ -676,10 +854,10 @@ void main() {
 	for (uint i = 0u; i < own_limit; i++) {
 		bool used = i < own_count;
 		float mean = used && accum[i].y > 0.0 ? accum[i].x / accum[i].y : 1.0;
-		imageStore(slot_image, ivec3(pixel, int(i)), vec4(used ? float(own[i].slot) / 65535.0 : 0.0));
-		imageStore(accum_image, ivec3(pixel, int(i)), vec4(used ? accum[i] : vec2(0.0), 0.0, 0.0));
+		imageStore(slot_image, ivec3(at, int(i)), vec4(used ? float(own[i].slot) / 65535.0 : 0.0));
+		imageStore(accum_image, ivec3(at, int(i)), vec4(used ? accum[i] : vec2(0.0), 0.0, 0.0));
 		if (params.filter_on == 0u) {
-			imageStore(factor_image, ivec3(pixel, int(i)), vec4(params.force_one != 0u ? 1.0 : mean));
+			imageStore(factor_image, ivec3(at, int(i)), vec4(params.force_one != 0u ? 1.0 : mean));
 		}
 		if (used) {
 			shown += own[i].target * mean;
@@ -697,21 +875,21 @@ void main() {
 			vec3 mean_color = vec3(lamp.mean_r, lamp.mean_g, lamp.mean_b);
 			visible = dot(rest_mean, mean_color) / max(mean_color.r + mean_color.g + mean_color.b, 1e-6);
 		}
-		imageStore(slot_image, ivec3(pixel, int(own_limit + k)), vec4(0.0));
-		imageStore(accum_image, ivec3(pixel, int(own_limit + k)), vec4(visible, 1.0, 0.0, 0.0));
+		imageStore(slot_image, ivec3(at, int(own_limit + k)), vec4(0.0));
+		imageStore(accum_image, ivec3(at, int(own_limit + k)), vec4(visible, 1.0, 0.0, 0.0));
 		if (params.filter_on == 0u) {
-			imageStore(factor_image, ivec3(pixel, int(own_limit + k)), vec4(params.force_one != 0u && params.tail_visibility != 2u ? 1.0 : visible));
+			imageStore(factor_image, ivec3(at, int(own_limit + k)), vec4(params.force_one != 0u && params.tail_visibility != 2u ? 1.0 : visible));
 		}
 	}
 #endif
-	imageStore(slot_image, ivec3(pixel, int(rest_layer)), vec4(has_rest ? float(rest_key_value) / 65535.0 : 0.0));
+	imageStore(slot_image, ivec3(at, int(rest_layer)), vec4(has_rest ? float(rest_key_value) / 65535.0 : 0.0));
 #ifdef PRECISE_HISTORY
-	imageStore(accum_image, ivec3(pixel, int(rest_layer)), vec4(0.0, float(rest_count), 0.0, 0.0));
+	imageStore(accum_image, ivec3(at, int(rest_layer)), vec4(0.0, float(rest_count), 0.0, 0.0));
 #endif
-	imageStore(rest_image, pixel, has_rest ? rest_accum : vec4(0.0));
+	imageStore(rest_image, at, has_rest ? rest_accum : vec4(0.0));
 	if (params.filter_on == 0u) {
 		for (uint c = 0u; c < 3u; c++) {
-			imageStore(factor_image, ivec3(pixel, int(rest_layer + c)), vec4(params.force_one != 0u ? 1.0 : rest_mean[c]));
+			imageStore(factor_image, ivec3(at, int(rest_layer + c)), vec4(params.force_one != 0u ? 1.0 : rest_mean[c]));
 		}
 	}
 
@@ -732,6 +910,6 @@ void main() {
 		} else if (params.debug_view == 5u) {
 			color = vec3(min(accum[0].y / 256.0, 1.0));
 		}
-		imageStore(debug_image, pixel, vec4(color, 1.0));
+		imageStore(debug_image, at, vec4(color, 1.0));
 	}
 }

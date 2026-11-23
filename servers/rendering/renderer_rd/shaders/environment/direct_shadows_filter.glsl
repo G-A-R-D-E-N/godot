@@ -38,6 +38,10 @@ layout(r16, set = 0, binding = 8) uniform restrict writeonly image2DArray out_im
 layout(rgba16f, set = 0, binding = 11) uniform restrict writeonly image2D debug_image;
 #endif
 
+#ifdef FIRST_FINAL
+layout(rgba16f, set = 0, binding = 11) uniform restrict writeonly image2D debug_image;
+#endif
+
 uint read_slot(ivec2 p_pixel, uint p_layer) {
 	return uint(round(imageLoad(slot_image, ivec3(p_pixel, int(p_layer))).r * 65535.0));
 }
@@ -48,6 +52,15 @@ struct Guide {
 	vec3 position;
 };
 
+#ifdef QUARTER
+Guide guide_from(uvec2 raw, ivec2 p_pixel) {
+	Guide guide;
+	guide.depth = direct_guide_depth(raw.x);
+	guide.normal = direct_oct_decode(unpackSnorm2x16(raw.y));
+	guide.position = direct_rebuild_position(direct_block_pixel(p_pixel, raw.x & 3u), guide.depth);
+	return guide;
+}
+#else
 Guide guide_from(uvec2 raw, ivec2 p_pixel) {
 	Guide guide;
 	guide.depth = uintBitsToFloat(raw.x);
@@ -57,6 +70,7 @@ Guide guide_from(uvec2 raw, ivec2 p_pixel) {
 	guide.position = params.inv_projection[2][3] == 0.0 ? vec3(at_unit + params.inv_projection[3].xy, -guide.depth) : vec3(at_unit * guide.depth, -guide.depth);
 	return guide;
 }
+#endif
 
 Guide read_guide(ivec2 p_pixel) {
 	return guide_from(imageLoad(guide_image, p_pixel).xy, p_pixel);
@@ -80,9 +94,15 @@ float geometry_weight(Guide p_center, Guide p_other) {
 #ifdef MODE_CLAMP
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+#ifdef QUARTER
+	if (any(greaterThanEqual(pixel, params.size)) || (imageLoad(guide_image, pixel).x & ~3u) == 0u) {
+		return;
+	}
+#else
 	if (any(greaterThanEqual(pixel, params.size)) || imageLoad(guide_image, pixel).x == 0u) {
 		return;
 	}
+#endif
 	uint own_limit = params.head_entries;
 	uint slots[MAX_ENTRIES];
 	float rays[MAX_ENTRIES];
@@ -171,9 +191,15 @@ void load_tile(ivec2 p_origin, uint p_layers) {
 		}
 		uvec2 raw = imageLoad(guide_image, at).xy;
 		tile_guide[k] = raw;
+#ifdef QUARTER
+		if ((raw.x & ~3u) == 0u) {
+			continue;
+		}
+#else
 		if (uintBitsToFloat(raw.x) <= 0.0) {
 			continue;
 		}
+#endif
 		for (uint j = 0u; j < p_layers; j += 2u) {
 			uint low = read_slot(at, j);
 			uint high = j + 1u < p_layers ? read_slot(at, j + 1u) : 0u;
@@ -334,10 +360,10 @@ void main() {
 	}
 	for (uint i = 0u; i < layers; i++) {
 		float value = total[i] > 0.0 ? sum[i] / total[i] : 1.0;
-#ifdef MODE_FIRST
+#if defined(MODE_FIRST) && !defined(FIRST_FINAL)
 		value = total[i] > 0.0 ? NO_EVIDENCE_GAP + (1.0 - NO_EVIDENCE_GAP) * value : 0.0;
 #endif
-#ifdef MODE_SECOND
+#if defined(MODE_SECOND) || defined(FIRST_FINAL)
 #ifdef EXTERNAL_ENTRIES
 		if (i >= own_limit && i < rest_layer) {
 			vec2 tail = imageLoad(accum_image, ivec3(pixel, int(i))).rg;
@@ -354,10 +380,11 @@ void main() {
 #endif
 		imageStore(out_image, ivec3(pixel, int(i)), vec4(value));
 	}
-#ifdef MODE_SECOND
+#if defined(MODE_SECOND) || defined(FIRST_FINAL)
 	if (params.debug_view == 6u) {
 		imageStore(debug_image, pixel, vec4(vec3(total[0] > 0.0 ? sum[0] / total[0] : 1.0), 1.0));
 	}
 #endif
+
 }
 #endif
