@@ -35,6 +35,7 @@
 #include "core/math/basis.h"
 #include "core/math/transform_3d.h"
 #include "core/math/vector2.h"
+#include "core/math/vector3i.h"
 #include "core/os/mutex.h"
 #include "core/templates/hash_map.h"
 #include "core/templates/hash_set.h"
@@ -68,6 +69,8 @@ public:
 	static constexpr uint32_t MAX_LIGHTS = 256;
 	static constexpr uint32_t RESERVED_AREA_LIGHTS = 16;
 	static constexpr uint32_t MAX_CANDIDATE_LIGHTS = 16384;
+	static constexpr uint32_t MIN_LIGHTS = 16;
+	static constexpr uint32_t PICK_CELL_SLOTS = 4;
 	static constexpr double ANCHOR_GRID = 64.0;
 
 	enum FeedConsumer : uint32_t {
@@ -93,6 +96,11 @@ public:
 		uint32_t changes = 0;
 		uint32_t tracked = 0;
 		uint32_t mover_count = 0;
+	};
+
+	enum LightPickMode {
+		LIGHT_PICK_CAMERA,
+		LIGHT_PICK_STABLE,
 	};
 
 	enum MaterialFlags {
@@ -187,9 +195,76 @@ public:
 		uint32_t masked_instances = 0;
 		double masked_packed_energy = 0.0;
 		double masked_cut_energy = 0.0;
+		uint32_t cut_area = 0;
+		uint32_t cut_nonarea = 0;
+		double cut_area_power = 0.0;
+		double cut_nonarea_power = 0.0;
+		double packed_area_power = 0.0;
+		double packed_nonarea_power = 0.0;
+		uint32_t held = 0;
+		Vector3i pick_cell;
+		Vector3i region_cell;
+		bool has_region = false;
+		uint32_t pick_mode = LIGHT_PICK_CAMERA;
+		uint32_t max_lights = 0;
 		bool operator!=(const LightCensus &p_other) const {
-			return candidates != p_other.candidates || area_candidates != p_other.area_candidates || area_packed != p_other.area_packed || area_reserved != p_other.area_reserved || area_projected != p_other.area_projected || masked_candidates != p_other.masked_candidates || masked_cut != p_other.masked_cut || masked_instances != p_other.masked_instances || masked_packed_energy != p_other.masked_packed_energy || masked_cut_energy != p_other.masked_cut_energy;
+			return candidates != p_other.candidates || area_candidates != p_other.area_candidates || area_packed != p_other.area_packed || area_reserved != p_other.area_reserved || area_projected != p_other.area_projected || masked_candidates != p_other.masked_candidates || masked_cut != p_other.masked_cut || masked_instances != p_other.masked_instances || masked_packed_energy != p_other.masked_packed_energy || masked_cut_energy != p_other.masked_cut_energy || cut_area != p_other.cut_area || cut_nonarea != p_other.cut_nonarea || cut_area_power != p_other.cut_area_power || cut_nonarea_power != p_other.cut_nonarea_power || packed_area_power != p_other.packed_area_power || packed_nonarea_power != p_other.packed_nonarea_power || held != p_other.held || pick_cell != p_other.pick_cell || region_cell != p_other.region_cell || has_region != p_other.has_region || pick_mode != p_other.pick_mode || max_lights != p_other.max_lights;
 		}
+	};
+
+	struct PickKey {
+		double importance = 0.0;
+		float distance = 0.0f;
+		uint32_t kept = 0;
+		uint64_t rid = 0;
+		uint32_t index = 0;
+	};
+
+	struct PickSlot {
+		bool used = false;
+		bool fresh = false;
+		Vector3i key;
+		Vector3i region_key;
+		Vector3 camera;
+		uint64_t last_used = 0;
+		HashSet<RID> kept;
+	};
+
+	struct PickState {
+		PickSlot slots[PICK_CELL_SLOTS];
+		LocalVector<uint32_t> last_packed;
+	};
+
+	struct PickParams {
+		Vector3 cell_origin;
+		float cell_size = 16.0f;
+		uint32_t slot = 0;
+		uint32_t keep = 0;
+		uint32_t reserved_area = RESERVED_AREA_LIGHTS;
+		float keep_share = 0.25f;
+		float keep_distance = 16.0f;
+		double inv_exposure = 1.0;
+		bool want_held = false;
+	};
+
+	struct PickCensus {
+		uint32_t area_reserved = 0;
+		uint32_t area_packed = 0;
+		uint32_t masked_cut = 0;
+		double masked_cut_energy = 0.0;
+		double masked_packed_energy = 0.0;
+		uint32_t cut_area = 0;
+		uint32_t cut_nonarea = 0;
+		double cut_area_power = 0.0;
+		double cut_nonarea_power = 0.0;
+		double packed_area_power = 0.0;
+		double packed_nonarea_power = 0.0;
+		uint32_t held = 0;
+		bool slot_new = false;
+		uint32_t slot_in = 0;
+		uint32_t slot_out = 0;
+		uint32_t packed_in = 0;
+		uint32_t packed_out = 0;
 	};
 
 	struct SceneData {
@@ -220,6 +295,14 @@ public:
 	static uint32_t float_to_half(float p_value);
 	static uint32_t pack_half2(float p_x, float p_y);
 	static bool alpha_uv_unsafe(float p_extent, float p_scale, uint32_t p_layer_size);
+	static Vector3i pick_cell_key(const Vector3 &p_world, float p_cell);
+	static uint32_t match_slot(PickState &r_state, const Vector3 &p_camera_world, float p_cell, uint64_t p_serial);
+	static AABB light_region(PickSlot &r_slot, const Vector3 &p_camera_world, const Vector3 &p_region_half, float p_cell);
+	static AABB tracker_region_for(bool p_stable, const Vector3 &p_camera, const Vector3 &p_region_half) { return p_stable && p_region_half != Vector3() ? AABB(p_camera - p_region_half, p_region_half * 2.0) : AABB(); }
+	static bool tracker_observes(RSE::LightType p_type, const AABB &p_region, const AABB &p_light_box) { return p_type == RSE::LIGHT_DIRECTIONAL || !p_region.has_volume() || p_region.intersects(p_light_box); }
+	static void pick_lights(const LocalVector<Light> &p_candidates, const LocalVector<RID> &p_ids, const PickParams &p_params, PickState &r_state, LocalVector<uint32_t> &r_selected, PickCensus &r_census);
+	static void select_nearest(LocalVector<Light> &r_lights, LocalVector<Light> &r_local_lights, const Vector3 &p_camera, uint32_t p_max_lights, uint32_t p_reserved_area, double p_inv_exposure, LightCensus &r_census);
+	static void count_swaps(LocalVector<uint32_t> &r_last, LocalVector<uint32_t> &p_now, uint32_t &r_in, uint32_t &r_out);
 
 private:
 	static RayScene *singleton;
@@ -353,6 +436,29 @@ private:
 	uint32_t next_build_serial = 0;
 	LocalVector<uint64_t> scene_members;
 	Vector3 anchor;
+	uint32_t max_lights = MAX_LIGHTS;
+	uint32_t reserved_area_lights = RESERVED_AREA_LIGHTS;
+	PickState pick_state;
+	float pick_cell_size = 0.0f;
+	bool pick_stable = false;
+	uint64_t update_serial = 0;
+	Vector3 region_camera;
+	uint32_t region_slot = 0;
+	bool region_recorded = false;
+	Vector3 region_half;
+	AABB tracker_region;
+	LocalVector<RID> local_ids;
+	struct CandidateMark {
+		uint32_t index = 0;
+		uint64_t hash = 0;
+		double energy = 0.0;
+		bool operator<(const CandidateMark &p_other) const { return index < p_other.index; }
+	};
+	LocalVector<CandidateMark> last_candidates;
+	Vector3i last_pick_cell;
+	Vector3i last_pick_region;
+	int64_t last_pick_slot = -1;
+	bool pick_logged = false;
 
 	RID blas_node_buffer;
 	RID triangle_buffer;
@@ -409,9 +515,11 @@ private:
 	void _print_tlas_rebuilds(bool p_final);
 	void _warn_albedo_fallback(RID p_material, RID p_texture, RID p_mesh, uint32_t p_surface);
 	void _instance_slots(RID p_material, CachedMaterial &r_cached) const;
-	void _pack_light(RID p_light_instance, bool p_physical_units, float p_exposure, uint32_t p_limit, LocalVector<Light> &r_lights);
-	void _select_lights(const Vector3 &p_camera);
+	void _pack_light(RID p_light_instance, bool p_physical_units, float p_exposure, uint32_t p_limit, LocalVector<Light> &r_lights, LocalVector<RID> *r_ids = nullptr);
+	void _select_lights(const Vector3 &p_camera, double p_inv_exposure);
 	void _print_census();
+	void _candidate_changes(double p_inv_exposure, uint32_t &r_in, uint32_t &r_out, uint32_t &r_changed);
+	void _pick_settings(float p_cell, bool p_stable);
 	static void _ensure_buffer(RID &r_buffer, uint32_t &r_capacity, uint32_t p_count, uint32_t p_stride, const char *p_name);
 	void _backend_tick();
 	void _hw_begin();
@@ -437,6 +545,7 @@ public:
 	bool is_dirty_feed_held() const { return feed_consumers.get() != 0; }
 	const DirtyFeed &get_dirty_feed() const { return feed; }
 	uint32_t get_structure_generation() const { return structure_generation; }
+	AABB get_light_region(const Vector3 &p_camera_world, const Vector3 &p_region_half);
 
 	bool is_ready() const { return scene_data_buffer.is_valid() && blas_node_buffer.is_valid() && tlas_node_buffer.is_valid() && (!accel || _hw_ready()) && (!alpha_enabled || _alpha_ready()); }
 	bool uses_hardware() const { return accel != nullptr; }

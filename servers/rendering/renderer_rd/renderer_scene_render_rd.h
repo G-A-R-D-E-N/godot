@@ -190,6 +190,7 @@ public:
 	RendererRD::GI *get_gi() { return &gi; }
 
 	virtual AABB ray_scene_get_region(const Vector3 &p_camera_position) const override;
+	virtual AABB ray_scene_get_light_region(const Vector3 &p_camera_position) override;
 	virtual void ray_scene_update(const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const Vector<RID> &p_directional_lights, RID p_camera_attributes, const Vector3 &p_camera_position) override;
 
 	/* SKY */

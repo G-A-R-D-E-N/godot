@@ -1143,6 +1143,7 @@ public:
 		} sdfgi;
 
 		AABB ray_scene_region;
+		AABB ray_scene_light_region;
 
 		SpinLock lock;
 

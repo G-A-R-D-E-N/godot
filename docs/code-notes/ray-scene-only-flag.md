@@ -41,8 +41,10 @@ stands for.
 - `servers/rendering/renderer_scene_cull.cpp:RendererSceneCull::instance_geometry_set_flag`: mesh instances only, set
   on the instance, and on its InstanceData when it is in a scenario. `RendererSceneCull::_update_instance` copies it
   only for a mesh base, as for the ray-scene-only flag.
-- `servers/rendering/renderer_scene_cull.cpp:RendererSceneCull::_scene_cull`: tested in the ray scene admit branch
-  together with the region, layer and visibility checks. The camera draw branch and the shadow culls do not test it.
+- `servers/rendering/renderer_scene_cull.cpp:RendererSceneCull::_scene_cull`: tested in the outer condition of the ray
+  scene admit branch, with the region-has-volume and layer checks; the region and visibility checks follow per base
+  type (a mesh against `ray_scene_region`, a light against `ray_scene_light_region`). The camera draw branch and the
+  shadow culls do not test it.
   With the ray-scene-only flag also set, the instance is in neither list: exclude wins.
 - No unit test reaches `RendererSceneCull::_scene_cull`, so the admit test has no unit test.
 
@@ -81,7 +83,8 @@ scene's hit points and gets its ray-traced shadow. Zero-size area lights and lig
   `rs_fresh_lo`, `rs_replay_shade`) and `DDGILightTracker::observe`, which `_pack_light` calls for each packed light.
   Their changes therefore fire light events, which reach ReSTIR GI's event re-shade and history caps like those of
   any other packed light. Light ids (`Light::pad`) do not change.
-- They also take slots under `MAX_LIGHTS` and `MAX_CANDIDATE_LIGHTS` like every other light.
+- They also take slots like every other light: directional lights under the `max_lights` setting, local lights as
+  candidates for the cut described in `ray-scene-light-pick.md`.
 - Not aligned: `servers/rendering/renderer_rd/environment/rtgi.cpp`, the directional samples for `RtgiRestarts`,
   still skips bake-disabled directional lights. A bake-disabled sun now shades GI hit points, but a jump of its
   direction starts no RTGI restart. The raster's own baked GI is unchanged.
