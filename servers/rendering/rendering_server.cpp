@@ -4011,7 +4011,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/history_cap", PROPERTY_HINT_RANGE, "0,256,1"), 32);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/dynamic_history_cap", PROPERTY_HINT_RANGE, "1,256,1"), 2);
 	GLOBAL_DEF("rendering/global_illumination/direct/filter", true);
-	GLOBAL_DEF("rendering/global_illumination/direct/filter_second_pass", true);
+	GLOBAL_DEF("rendering/global_illumination/direct/filter_second_pass", false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/direct/filter_kernel_scale", PROPERTY_HINT_RANGE, "0,4,0.01"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/direct/filter_range_sigmas", PROPERTY_HINT_RANGE, "0,8,0.1"), 1.5);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/direct/clamp_sigmas", PROPERTY_HINT_RANGE, "0,8,0.1"), 3.0);
