@@ -57,6 +57,32 @@ external-entries mode and the opaque pass shades heads, tail samples or nothing.
   cone, `di_in_set` (term above 0 and the decoded record normal facing the lamp), the octahedral codec, the target, the
   inversion and the race. The entry pass tests and ranks with the normal after it has been packed and unpacked, as the
   opaque pass reads it from the record, so both see the same lamp set.
+- `scene_forward_clustered.glsl:direct_route` rejects a lamp that is clearly not in the set before `di_geometry`, and
+  reads the pixel's picks once. The early test is one-sided: every lamp it rejects is also rejected by `di_in_set`,
+  so frames stay bit-identical. It rejects a lamp when:
+  - it is out of range: d2 times inv_radius squared is at least 1.002, where d2 is the squared distance from the record
+    point. The margin is far above the rounding between d2 and the square of `length`, so the window is 0 times a pow,
+    which is 0 or NaN, and neither is above 0;
+  - it is behind the record normal: the normal's dot with the lamp offset, s, is below 0, and s squared is at least
+    1e-6 times d2. That margin is a thousand times the rounding of the offset over its length.
+
+  The test runs only for d2 from 1e-8 up to 1e30. The bounds are comparisons, so a NaN or an overflowed d2 falls
+  through to the full test; isnan and isinf could be folded away, since glslang emits no SignedZeroInfNanPreserve.
+  Below 1e-8 the 1e-5 clamp of the length matters. Above 1e30, d2 times a tiny inv_radius could round to out while
+  the full test says in.
+
+  The picks load lazily, on the first lamp that is in the set, so a pixel with none pays no fetch:
+  - Head slots go through `scene_forward_lights_inc.glsl:direct_own_load`. That is the cache `direct_shadow_factor`
+    already fills, moved unchanged into a helper. R16_UNORM gives an integer c over 65535, and `round(x * 65535.0)`
+    returns c, so the uint compare matches the float compare it replaces.
+  - Tail slots go into `direct_tail_slots`: every k below K, empty entries included. A real slot is at least 1, so an
+    empty entry never matches. `direct_tail_pass` still fetches the weight at layer k + 1 on a match.
+
+  The head loop is bounded by `direct_record_heads`, never by `direct_own`, which counts heads and tails. Loops run to
+  the constant 7 with a count guard, so the arrays stay in registers once unrolled. `direct_record_ok` also requires
+  heads and K to be at most 7. process() rejects more than 8 entries, so that guard never changes a frame.
+  The route block also excludes `MODE_UNSHADED`: `direct_own_load` lives in `scene_forward_lights_inc.glsl`, which an
+  unshaded pass does not include. The lamp loops, and so every call of the route, are already outside unshaded passes.
 - `di_sampler_inc.glsl:di_candidate` drops a target below `DI_MIN_TARGET`, 2^-64 (5.421011e-20 rounds to it exactly),
   like a zero target: it is never added to a total and never picked, by the inversion, the race or the exact tail.
   The exact tail still records such a lamp, with no share and so no ray of its own; the opaque pass lights it at

@@ -1229,7 +1229,7 @@ uint cluster_get_range_clip_mask(uint i, uint z_min, uint z_max) {
 	return bitfieldInsert(uint(0), uint(0xFFFFFFFF), local_min, mask_width);
 }
 
-#if !defined(USE_SHADOW_TO_OPACITY) && !defined(USE_VERTEX_LIGHTING) && !defined(USE_MULTIVIEW) && !defined(MODE_RENDER_DEPTH)
+#if !defined(USE_SHADOW_TO_OPACITY) && !defined(USE_VERTEX_LIGHTING) && !defined(USE_MULTIVIEW) && !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED)
 #define DIRECT_RESAMPLED_ROUTE
 #include "../environment/di_sampler_inc.glsl"
 
@@ -1240,10 +1240,13 @@ int direct_record_tails = 0;
 int direct_record_heads = 0;
 bool direct_record_check = false;
 bool direct_no_layer = false;
+bool direct_route_loaded = false;
+uint direct_tail_slots[7];
 
 void direct_record_begin(in SceneData scene_data, vec3 p_vertex) {
 	direct_record_ok = false;
 	direct_record_check = false;
+	direct_route_loaded = false;
 	if (!sc_use_direct_resampled()) {
 		return;
 	}
@@ -1267,7 +1270,7 @@ void direct_record_begin(in SceneData scene_data, vec3 p_vertex) {
 	direct_record_normal = di_oct_decode(unpackSnorm2x16(head.x));
 	direct_record_tails = layers - 1;
 	direct_record_heads = textureSize(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), 0).z - 1 - direct_record_tails;
-	direct_record_ok = direct_record_heads >= 0;
+	direct_record_ok = direct_record_heads >= 0 && direct_record_heads <= 7 && direct_record_tails <= 7;
 	direct_record_check = direct_record_ok && (head.y & 0x80000000u) != 0u;
 }
 
@@ -1277,21 +1280,39 @@ int direct_route(uint p_flags, vec3 p_position, float p_inv_radius, float p_deca
 	if (!direct_record_ok || (p_flags & 1u) == 0u) {
 		return -1;
 	}
+	vec3 rel = p_position - direct_record_vertex;
+	float d2 = dot(rel, rel);
+	if (d2 >= 1e-8 && d2 < 1e30) {
+		float s = dot(direct_record_normal, rel);
+		if (d2 * p_inv_radius * p_inv_radius >= 1.002 || (s < 0.0 && s * s >= 1e-6 * d2)) {
+			return -1;
+		}
+	}
 	DiGeometry geometry = di_geometry(p_position, p_inv_radius, p_decay, p_spot, p_direction, p_cos_angle, p_cone_attenuation, direct_record_vertex);
 	if (!di_in_set(geometry, direct_record_normal)) {
 		return -1;
 	}
-	uint slot = (p_flags >> 1) & 0xFFFFu;
 	ivec2 pixel = ivec2(gl_FragCoord.xy);
-	for (int i = 0; i < direct_record_heads; i++) {
-		if (round(texelFetch(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), ivec3(pixel, i), 0).r * 65535.0) == float(slot)) {
+	if (!direct_route_loaded) {
+		direct_own_load(pixel);
+		for (int k = 0; k < 7; k++) {
+			direct_tail_slots[k] = 0xFFFFFFFFu;
+			if (k < direct_record_tails) {
+				direct_tail_slots[k] = texelFetch(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), ivec3(pixel, k + 1), 0).x;
+			}
+		}
+		direct_route_loaded = true;
+	}
+	uint slot = (p_flags >> 1) & 0xFFFFu;
+	for (int i = 0; i < 7; i++) {
+		if (i < direct_record_heads && direct_own_slots[i] == slot) {
 			direct_head_layer = i;
 			return -1;
 		}
 	}
 	int passes = 0;
-	for (int k = 0; k < direct_record_tails; k++) {
-		if (texelFetch(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), ivec3(pixel, k + 1), 0).x == slot) {
+	for (int k = 0; k < 7; k++) {
+		if (k < direct_record_tails && direct_tail_slots[k] == slot) {
 			passes++;
 		}
 	}
@@ -1303,12 +1324,12 @@ float direct_tail_pass(uint p_flags, vec3 p_live_color, int p_pass) {
 	uint slot = (p_flags >> 1) & 0xFFFFu;
 	ivec2 pixel = ivec2(gl_FragCoord.xy);
 	int seen = 0;
-	for (int k = 0; k < direct_record_tails; k++) {
-		uvec2 entry = texelFetch(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), ivec3(pixel, k + 1), 0).xy;
-		if (entry.x != slot) {
+	for (int k = 0; k < 7; k++) {
+		if (k >= direct_record_tails || direct_tail_slots[k] != slot) {
 			continue;
 		}
 		if (seen == p_pass) {
+			uvec2 entry = texelFetch(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), ivec3(pixel, k + 1), 0).xy;
 			direct_tail_layer = direct_record_heads + k;
 			float weight = uintBitsToFloat(entry.y);
 			DirectSlotData data = direct_slots.data[slot];
