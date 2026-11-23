@@ -40,6 +40,12 @@ public partial class ShutdownTrackerProbe : Node
             var args = OS.GetCmdlineUserArgs();
             var running = args.Contains("--running-finalizer");
             GD.Print("ASSEMBLY " + typeof(GodotObject).Assembly.Location);
+            if (args.Contains("--warmup"))
+            {
+                GD.Print("WARMUP started and quit.");
+                tree.Quit();
+                return;
+            }
             if (args.Contains("--throw-recover-shutdown") || args.Contains("--throw-recover-finalizer"))
             {
                 DisposeFailure.StartThrow(args.Contains("--throw-recover-finalizer"));
