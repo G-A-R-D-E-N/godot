@@ -1,8 +1,6 @@
 #define RF_SKY 1u
 #define RF_VALID 2u
-#define RF_VIS_FAILED 4u
 #define RF_SPATIAL 8u
-#define RF_CLAMPED 16u
 #define RF_BACKFACE 32u
 #define RF_EMISSIVE 64u
 #define RF_TEMPORAL 128u
@@ -17,9 +15,7 @@
 #define F_DETERMINISTIC 8u
 #define F_HISTORY 16u
 #define F_VIS 32u
-#define F_BLOCK_SKY 64u
 #define F_PROBE_STATS 128u
-#define F_PROBE_CAMERA_FIXED 256u
 #define F_PROBE_PIXELS 512u
 #define F_COMPAT 1024u
 #define F_COMPAT_NONE 2048u
@@ -75,7 +71,7 @@
 #define MAX_CAND 4
 #endif
 #define RS_PI 3.14159265359
-#define RS_LO_CLAMP 60000.0
+#define RS_LO_CLAMP rf.radiance_clamp
 #define STATS_STRIDE 16
 #define PS_STRIDE 32
 #define PS_TESTED 0
@@ -207,6 +203,15 @@ layout(set = 0, binding = 0, std140) uniform RestirFrame {
 
 	vec4 jitter_shift;
 	vec4 prev_jitter_shift;
+
+	float radiance_clamp;
+	float reval_growth;
+	float reval_floor;
+	float compat_scale;
+	float sky_epoch_low;
+	float sky_epoch_high;
+	float compat_stop_score;
+	float sky_blur_lod;
 }
 rf;
 
@@ -288,7 +293,7 @@ layout(set = 0, binding = 26, std140) uniform RestirEvents {
 ev;
 
 bool rs_event_first_fire(uint p_index) {
-	return p_index >= ev.counts.y || ev.since_last[p_index >> 2u][p_index & 3u] >= ev.gates.x;
+	return p_index >= ev.counts.x || ev.since_last[p_index >> 2u][p_index & 3u] >= ev.gates.x;
 }
 
 float rs_event_solid_angle(float p_reach, float p_distance) {
@@ -300,18 +305,18 @@ float rs_event_solid_angle(float p_reach, float p_distance) {
 	return 2.0 * RS_PI * k2 / (1.0 + sqrt(1.0 - k2));
 }
 
+bool rs_sphere_caps(vec4 p_sphere, vec3 p_position) {
+	float dist = length(p_position - p_sphere.xyz);
+	return dist < ev.params.x * p_sphere.w || rs_event_solid_angle(p_sphere.w, dist) > ev.params.y;
+}
+
 bool rs_event_caps(vec3 p_position) {
 	uint count = min(ev.counts.x, 64u);
 	for (uint i = 0u; i < count; i++) {
 		if (!rs_event_first_fire(i)) {
 			continue;
 		}
-		vec4 s = ev.sphere[i];
-		float dist = length(p_position - s.xyz);
-		if (dist < ev.params.x * s.w) {
-			return true;
-		}
-		if (rs_event_solid_angle(s.w, dist) > ev.params.y) {
+		if (rs_sphere_caps(ev.sphere[i], p_position)) {
 			return true;
 		}
 	}
@@ -321,12 +326,7 @@ bool rs_event_caps(vec3 p_position) {
 bool rs_hold_caps(vec3 p_position) {
 	uint count = min(ev.hold.x, 64u);
 	for (uint i = 0u; i < count; i++) {
-		vec4 s = ev.held[i];
-		float dist = length(p_position - s.xyz);
-		if (dist < ev.params.x * s.w) {
-			return true;
-		}
-		if (rs_event_solid_angle(s.w, dist) > ev.params.y) {
+		if (rs_sphere_caps(ev.held[i], p_position)) {
 			return true;
 		}
 	}
@@ -334,7 +334,7 @@ bool rs_hold_caps(vec3 p_position) {
 }
 
 bool rs_event_holds(vec3 p_sample) {
-	uint count = min(ev.counts.y, 64u);
+	uint count = min(ev.counts.x, 64u);
 	for (uint i = 0u; i < count; i++) {
 		vec4 s = ev.sphere[i];
 		vec3 delta = p_sample - s.xyz;
@@ -344,20 +344,6 @@ bool rs_event_holds(vec3 p_sample) {
 	}
 	return false;
 }
-#endif
-
-#if defined(MODE_TEMPORAL) && defined(RS_SKY_REREAD)
-layout(set = 0, binding = 29, std430) restrict readonly buffer RestirSkyEpoch {
-	float luma;
-	uint epochs;
-	uint jump;
-	uint jumps;
-	uint capped;
-	uint spare0;
-	uint spare1;
-	uint spare2;
-}
-sky_epoch;
 #endif
 
 #if defined(MODE_TEMPORAL) && defined(RS_FOLD_DUMP)
@@ -377,8 +363,13 @@ layout(rg32ui, set = 0, binding = 34) uniform restrict writeonly uimage2D rs_fol
 layout(r32ui, set = 0, binding = 35) uniform restrict writeonly uimage2D rs_fold_refused_id;
 #endif
 
+#if (defined(MODE_TEMPORAL) && defined(RS_SKY_REREAD)) || defined(MODE_SKY_EPOCH)
 #ifdef MODE_SKY_EPOCH
-layout(set = 0, binding = 29, std430) restrict buffer RestirSkyEpoch {
+#define RS_SKY_EPOCH_ACCESS
+#else
+#define RS_SKY_EPOCH_ACCESS readonly
+#endif
+layout(set = 0, binding = 29, std430) restrict RS_SKY_EPOCH_ACCESS buffer RestirSkyEpoch {
 	float luma;
 	uint epochs;
 	uint jump;
@@ -389,6 +380,9 @@ layout(set = 0, binding = 29, std430) restrict buffer RestirSkyEpoch {
 	uint spare2;
 }
 sky_epoch;
+#endif
+
+#ifdef MODE_SKY_EPOCH
 #ifdef USE_RADIANCE_OCTMAP_ARRAY
 layout(set = 0, binding = 30) uniform texture2DArray epoch_sky;
 #else
@@ -538,50 +532,35 @@ vec3 rs_origin_offset_vector(vec3 p_view, vec3 p_anchor_position, vec3 p_view_no
 	return direction * max(rf.origin_scale * error, rf.origin_floor * view_distance);
 }
 
-#if defined(MODE_TEMPORAL) || defined(MODE_SPATIAL) || defined(MODE_FINAL) || defined(MODE_SOURCE)
-Receiver rs_receiver_cur(ivec2 p_pixel) {
-	vec4 g = texelFetch(geo_pos_cur, p_pixel, 0);
-	vec4 n = texelFetch(geo_nrm_cur, p_pixel, 0);
+#if defined(MODE_TEMPORAL) || defined(MODE_SPATIAL) || defined(MODE_FINAL) || defined(MODE_SOURCE) || defined(MODE_VALIDATE)
+Receiver rs_receiver(texture2D p_pos, texture2D p_nrm, mat3 p_rot, vec3 p_anchor, vec4 p_shift, ivec2 p_pixel) {
+	vec4 g = texelFetch(p_pos, p_pixel, 0);
+	vec4 n = texelFetch(p_nrm, p_pixel, 0);
 	Receiver r;
 	r.valid = g.w > 0.5;
 	r.view = g.xyz;
-	r.true_view = rs_true_view(g.xyz, rf.jitter_shift);
-	r.pos = rs_rot(rf.cam_rot0, rf.cam_rot1, rf.cam_rot2) * r.true_view + rf.cam_to_anchor.xyz;
-	r.nrm = normalize(rs_rot(rf.cam_rot0, rf.cam_rot1, rf.cam_rot2) * normalize(n.xyz * 2.0 - 1.0));
-	ivec2 limit = textureSize(geo_pos_cur, 0) - 1;
+	r.true_view = rs_true_view(g.xyz, p_shift);
+	r.pos = p_rot * r.true_view + p_anchor;
+	r.nrm = normalize(p_rot * normalize(n.xyz * 2.0 - 1.0));
+	ivec2 limit = textureSize(p_pos, 0) - 1;
 	vec3 shading_view = normalize(n.xyz * 2.0 - 1.0);
-	vec4 left = texelFetch(geo_pos_cur, clamp(p_pixel + ivec2(-1, 0), ivec2(0), limit), 0);
-	vec4 right = texelFetch(geo_pos_cur, clamp(p_pixel + ivec2(1, 0), ivec2(0), limit), 0);
-	vec4 up = texelFetch(geo_pos_cur, clamp(p_pixel + ivec2(0, -1), ivec2(0), limit), 0);
-	vec4 down = texelFetch(geo_pos_cur, clamp(p_pixel + ivec2(0, 1), ivec2(0), limit), 0);
-	r.origin = r.pos + rs_origin_offset_vector(r.true_view, r.pos, shading_view, r.nrm, vec4(rs_true_view(left.xyz, rf.jitter_shift), left.w), vec4(rs_true_view(right.xyz, rf.jitter_shift), right.w), vec4(rs_true_view(up.xyz, rf.jitter_shift), up.w), vec4(rs_true_view(down.xyz, rf.jitter_shift), down.w));
+	vec4 left = texelFetch(p_pos, clamp(p_pixel + ivec2(-1, 0), ivec2(0), limit), 0);
+	vec4 right = texelFetch(p_pos, clamp(p_pixel + ivec2(1, 0), ivec2(0), limit), 0);
+	vec4 up = texelFetch(p_pos, clamp(p_pixel + ivec2(0, -1), ivec2(0), limit), 0);
+	vec4 down = texelFetch(p_pos, clamp(p_pixel + ivec2(0, 1), ivec2(0), limit), 0);
+	r.origin = r.pos + rs_origin_offset_vector(r.true_view, r.pos, shading_view, r.nrm, vec4(rs_true_view(left.xyz, p_shift), left.w), vec4(rs_true_view(right.xyz, p_shift), right.w), vec4(rs_true_view(up.xyz, p_shift), up.w), vec4(rs_true_view(down.xyz, p_shift), down.w));
 	r.rough = n.w;
 	r.depth = max(-g.z, 0.01);
 	return r;
 }
 #endif
 
+#if defined(MODE_TEMPORAL) || defined(MODE_SPATIAL) || defined(MODE_FINAL) || defined(MODE_SOURCE)
+#define rs_receiver_cur(m_pixel) rs_receiver(geo_pos_cur, geo_nrm_cur, rs_rot(rf.cam_rot0, rf.cam_rot1, rf.cam_rot2), rf.cam_to_anchor.xyz, rf.jitter_shift, m_pixel)
+#endif
+
 #if defined(MODE_TEMPORAL) || defined(MODE_VALIDATE)
-Receiver rs_receiver_prev(ivec2 p_pixel) {
-	vec4 g = texelFetch(geo_pos_prev, p_pixel, 0);
-	vec4 n = texelFetch(geo_nrm_prev, p_pixel, 0);
-	Receiver r;
-	r.valid = g.w > 0.5;
-	r.view = g.xyz;
-	r.true_view = rs_true_view(g.xyz, rf.prev_jitter_shift);
-	r.pos = rs_rot(rf.prev_rot0, rf.prev_rot1, rf.prev_rot2) * r.true_view + rf.prev_to_anchor.xyz;
-	r.nrm = normalize(rs_rot(rf.prev_rot0, rf.prev_rot1, rf.prev_rot2) * normalize(n.xyz * 2.0 - 1.0));
-	ivec2 limit = textureSize(geo_pos_prev, 0) - 1;
-	vec3 shading_view = normalize(n.xyz * 2.0 - 1.0);
-	vec4 left = texelFetch(geo_pos_prev, clamp(p_pixel + ivec2(-1, 0), ivec2(0), limit), 0);
-	vec4 right = texelFetch(geo_pos_prev, clamp(p_pixel + ivec2(1, 0), ivec2(0), limit), 0);
-	vec4 up = texelFetch(geo_pos_prev, clamp(p_pixel + ivec2(0, -1), ivec2(0), limit), 0);
-	vec4 down = texelFetch(geo_pos_prev, clamp(p_pixel + ivec2(0, 1), ivec2(0), limit), 0);
-	r.origin = r.pos + rs_origin_offset_vector(r.true_view, r.pos, shading_view, r.nrm, vec4(rs_true_view(left.xyz, rf.prev_jitter_shift), left.w), vec4(rs_true_view(right.xyz, rf.prev_jitter_shift), right.w), vec4(rs_true_view(up.xyz, rf.prev_jitter_shift), up.w), vec4(rs_true_view(down.xyz, rf.prev_jitter_shift), down.w));
-	r.rough = n.w;
-	r.depth = max(-g.z, 0.01);
-	return r;
-}
+#define rs_receiver_prev(m_pixel) rs_receiver(geo_pos_prev, geo_nrm_prev, rs_rot(rf.prev_rot0, rf.prev_rot1, rf.prev_rot2), rf.prev_to_anchor.xyz, rf.prev_jitter_shift, m_pixel)
 #endif
 
 #if defined(MODE_TEMPORAL) || defined(MODE_SPATIAL) || defined(MODE_FINAL)
@@ -675,10 +654,6 @@ float rs_jacobian_raw(Reservoir s, vec3 p_xq, vec3 p_xr) {
 	float cq = max(abs(dot(s.ns, dq)) / lq, 1e-3);
 	float cr = abs(dot(s.ns, dr)) / lr;
 	return clamp((cr / cq) * (lq * lq) / (lr * lr), 0.0, 1000.0);
-}
-
-uint rs_pack_normal(vec3 p_normal) {
-	return rtgi_pack_normal(p_normal);
 }
 
 #ifdef RESTIR_RAYS

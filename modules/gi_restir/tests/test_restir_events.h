@@ -192,7 +192,6 @@ TEST_CASE("[RestirEvents] Packing and selection") {
 	CHECK(plan.validate == RESTIR_EVENT_VALIDATE_EVENT);
 	CHECK(plan.budget == 512u);
 	CHECK(plan.ubo.counts[0] == 2u);
-	CHECK(plan.ubo.counts[1] == 2u);
 	CHECK(plan.ubo.counts[2] == 0u);
 	CHECK(plan.ubo.counts[3] == 0u);
 	CHECK(plan.ubo.params[0] == 3.0f);
@@ -420,7 +419,6 @@ TEST_CASE("[RestirEvents] Hold caps by reach and solid angle like the event test
 	CHECK_FALSE(restir_hold_caps(ubo, Vector3(41, 0, 0)));
 	RestirEventsUBO as_event = ubo;
 	as_event.counts[0] = 1;
-	as_event.counts[1] = 1;
 	as_event.since_last[0] = UINT32_MAX;
 	for (int i = 0; i < 4; i++) {
 		as_event.sphere[0][i] = ubo.held[0][i];

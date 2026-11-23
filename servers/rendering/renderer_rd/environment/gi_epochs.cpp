@@ -96,10 +96,9 @@ GISceneTracker::Change GISceneTracker::update(uint64_t p_signature, const LocalV
 	return change;
 }
 
-void GIEpochs::sync_ray_scene(uint64_t p_feed_serial, uint32_t p_structure_generation) {
+void GIEpochs::sync_ray_scene(uint64_t p_feed_serial) {
 	feed_live = p_feed_serial != 0;
 	feed_serial = feed_live ? _wrap(p_feed_serial) : 0;
-	structure_generation = p_structure_generation;
 }
 
 void GIEpochs::bump(Source p_source) {
@@ -200,7 +199,6 @@ void GIEpochs::publish_dirty_frame(const LocalVector<AABB> &p_boxes, bool p_over
 	DirtyFrame &frame = ring[feed_serial % DIRTY_RING_FRAMES];
 	frame.serial = feed_serial;
 	frame.scene_epoch = epochs[SOURCE_SCENE];
-	frame.structure_generation = structure_generation;
 	frame.overflow = p_overflow || p_boxes.size() > DIRTY_RING_BOXES;
 	frame.boxes.clear();
 	for (uint32_t i = 0; i < p_boxes.size() && i < DIRTY_RING_BOXES; i++) {

@@ -220,7 +220,7 @@ TEST_CASE("[GIEpochs] Confidence is the sample share, full at the target and pas
 }
 
 static void _publish(GIEpochs &r_epochs, uint32_t p_serial, const LocalVector<AABB> &p_boxes, bool p_overflow = false) {
-	r_epochs.sync_ray_scene(p_serial, 0);
+	r_epochs.sync_ray_scene(p_serial);
 	r_epochs.publish_dirty_frame(p_boxes, p_overflow, 0.5);
 }
 
@@ -302,11 +302,10 @@ TEST_CASE("[GIEpochs] A frame overflow, a released feed and an oversized frame r
 	CHECK(epochs.get_dirty_boxes_since_serial(2, result) == GIEpochs::DIRTY_OVERFLOW);
 	CHECK(result.size() == GIEpochs::DIRTY_RING_BOXES);
 
-	epochs.sync_ray_scene(0, 0);
+	epochs.sync_ray_scene(0);
 	CHECK_FALSE(epochs.is_feed_live());
 	CHECK(epochs.get_dirty_boxes_since_serial(2, result) == GIEpochs::DIRTY_OVERFLOW);
-	epochs.sync_ray_scene(3, 7);
-	CHECK(epochs.get_structure_generation() == 7);
+	epochs.sync_ray_scene(3);
 	epochs.clear_dirty_feed();
 	CHECK(epochs.get_dirty_boxes_since_serial(2, result) == GIEpochs::DIRTY_OVERFLOW);
 }
@@ -326,7 +325,7 @@ TEST_CASE("[GIEpochs] A reader holding a serial from before a release reads over
 	CHECK(epochs.get_dirty_boxes_since_serial(2, result) == GIEpochs::DIRTY_NONE);
 	CHECK(epochs.get_dirty_boxes_since_serial(1, result) == GIEpochs::DIRTY_BOXES);
 
-	epochs.sync_ray_scene(0, 0);
+	epochs.sync_ray_scene(0);
 	epochs.clear_dirty_feed();
 	_publish(epochs, 3, LocalVector<AABB>(), RayScene::feed_frame_overflow(false, true));
 	CHECK(epochs.get_dirty_boxes_since_serial(2, result) == GIEpochs::DIRTY_OVERFLOW);

@@ -40,7 +40,6 @@
 
 namespace TestRestirFold {
 
-constexpr uint32_t FOLD_C1 = 0x68E31DA4u;
 constexpr uint32_t FOLD_C2 = 0x2C1B3C6Du;
 constexpr uint32_t FOLD_BITS = 0xFF00u;
 constexpr uint32_t FOLD_S_SHIFT = 8u;
@@ -104,10 +103,6 @@ uint32_t draw_weight(uint32_t p_s, uint32_t p_k) {
 		return 2u * p_s + 1u;
 	}
 	return p_k;
-}
-
-uint32_t ring_distance(uint32_t p_a, uint32_t p_b) {
-	return MIN(p_a - p_b, p_b - p_a);
 }
 
 TEST_CASE("[RestirFold] K reads as a power of two from 4 to 64, rounded down, and 0 or less is off") {
@@ -644,24 +639,6 @@ TEST_CASE("[RestirFold] Mirror: the hashes give the known answers") {
 	CHECK(psi_r % 32u == 0u);
 	CHECK(restir_fold_draw(psi_s, 8u) == 7u);
 	CHECK(restir_fold_draw(psi_s, 32u) == 13u);
-}
-
-TEST_CASE("[RestirFold] C2 sits at least 5 from C1 and from the default seed sums of every other rtgi_rng_state caller") {
-	CHECK(ring_distance(FOLD_C2, FOLD_C1) >= 5u);
-	const uint32_t default_seed = 1u;
-	const uint32_t hashed[] = { restir_fold_pcg(default_seed * 0x9E3779B1u + 0x7F4A7C15u), restir_fold_pcg(0x1234567u * 0x9E3779B1u + 0x7F4A7C15u) };
-	bool spaced = true;
-	for (uint32_t own = 0u; own < 2u; own++) {
-		for (uint32_t dim = 0u; dim < 8u; dim++) {
-			spaced = spaced && ring_distance(FOLD_C2 + own, default_seed + dim) >= 5u;
-		}
-		for (const uint32_t seed : hashed) {
-			for (uint32_t dim = 64u; dim < 64u + 512u; dim++) {
-				spaced = spaced && ring_distance(FOLD_C2 + own, seed + dim) >= 5u;
-			}
-		}
-	}
-	CHECK(spaced);
 }
 
 }

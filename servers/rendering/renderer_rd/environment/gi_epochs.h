@@ -91,14 +91,12 @@ private:
 	struct DirtyFrame {
 		uint32_t serial = 0;
 		uint32_t scene_epoch = 0;
-		uint32_t structure_generation = 0;
 		bool overflow = false;
 		LocalVector<AABB> boxes;
 	};
 
 	uint32_t epochs[SOURCE_COUNT] = {};
 	uint32_t feed_serial = 0;
-	uint32_t structure_generation = 0;
 	bool feed_live = false;
 	real_t merge_distance = 0.5;
 	DirtyFrame ring[DIRTY_RING_FRAMES];
@@ -110,7 +108,7 @@ public:
 	static GIEpochs *get_singleton();
 	static uint32_t next(uint32_t p_value);
 
-	void sync_ray_scene(uint64_t p_feed_serial, uint32_t p_structure_generation);
+	void sync_ray_scene(uint64_t p_feed_serial);
 	void bump(Source p_source);
 	void apply(const GISceneTracker::Change &p_change);
 
@@ -119,7 +117,6 @@ public:
 	void fill_record(GIProviderRecord &r_record) const;
 
 	uint32_t get_feed_serial() const { return feed_serial; }
-	uint32_t get_structure_generation() const { return structure_generation; }
 	bool is_feed_live() const { return feed_live; }
 
 	static void merge_boxes(LocalVector<AABB> &r_boxes, real_t p_distance);

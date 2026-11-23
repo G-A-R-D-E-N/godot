@@ -32,7 +32,6 @@
 
 #include "ddgi_light_tracker.h"
 #include "gi_epochs.h"
-#include "gi_provider.h"
 
 #include "core/math/projection.h"
 #include "core/math/transform_3d.h"
@@ -45,8 +44,6 @@ class RenderSceneBuffersRD;
 namespace RendererRD {
 
 class RayScene;
-
-static constexpr uint32_t RTGI_CANDIDATE_LAYOUT_VERSION = 1;
 
 struct RtgiShadeInputs {
 	RID ddgi_ubo;
@@ -79,7 +76,6 @@ struct RtgiFrameInputs {
 	RID candidate_first;
 	RID candidate_second;
 	RID tile_texture;
-	uint32_t candidate_layout_version = RTGI_CANDIDATE_LAYOUT_VERSION;
 	Projection projection;
 	Projection previous_projection;
 	Projection drawn_projection;
@@ -92,9 +88,6 @@ struct RtgiFrameInputs {
 	const GIEpochs *dirty_source = nullptr;
 	bool history_cut = false;
 	bool hardware = false;
-	bool deterministic = false;
-	bool physical_units = false;
-	float exposure = 1.0f;
 	int32_t debug_view = -1;
 	RayScene *ray_scene = nullptr;
 	RtgiShadeInputs shade;
@@ -113,8 +106,6 @@ enum RtgiOutputMode : uint32_t {
 struct RtgiResampleOutput {
 	RID radiance;
 	RID coverage;
-	RID debug;
-	GIProviderRecord record = {};
 	bool valid = false;
 	bool denoise = false;
 	bool history_cut = false;

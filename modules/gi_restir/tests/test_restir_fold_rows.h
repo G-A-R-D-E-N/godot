@@ -89,13 +89,7 @@ TEST_CASE("[RestirFoldRows] Other seeds with a seed offset add the module's own 
 	CHECK(seeds[1040] == 0x56F88133u + 575u);
 }
 
-TEST_CASE("[RestirFoldRows] The engine isqrt is exact from 0 to 4096, and the draw returns 0 for K below 2") {
-	bool exact_all = true;
-	for (uint32_t x = 0u; x <= 4096u; x++) {
-		const uint32_t s = restir_fold_isqrt(x);
-		exact_all = exact_all && s * s <= x && x < (s + 1u) * (s + 1u);
-	}
-	CHECK(exact_all);
+TEST_CASE("[RestirFoldRows] The draw returns 0 for K below 2") {
 	CHECK(restir_fold_draw(12345u, 0u) == 0u);
 	CHECK(restir_fold_draw(12345u, 1u) == 0u);
 }

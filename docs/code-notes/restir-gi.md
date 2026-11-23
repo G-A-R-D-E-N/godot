@@ -24,7 +24,7 @@ rendering/global_illumination/restir/gi/enabled is set; the other settings then 
 - An active backend may refuse a frame in `begin_frame`; `rtgi.cpp` then runs the plain RTGI path. RTGI counts every
   frame whose output does not feed its denoiser (refusal, or `gi/denoise` off) in its backend `refusals`.
 - `begin_frame` refusals, their check order, the cleared reason and the status keys `refuses`, `refusals` and
-  `refusal_reason` are under "Backend gates" (`modules/gi_restir/restir_gi.cpp:362-429`, `:990-993`).
+  `refusal_reason` are under "Backend gates" (`modules/gi_restir/restir_gi.cpp:353-399`, `:935-938`).
 
 ## Settings (`modules/gi_restir/restir_settings.cpp`)
 
@@ -32,9 +32,9 @@ rendering/global_illumination/restir/gi/enabled is set; the other settings then 
 rendering/global_illumination/restir/; the range is the `PROPERTY_HINT_RANGE` hint. Settings other than
 `gi/enabled` have no effect while it is off.
 
-`gi/enabled` is the only setting read with `GLOBAL_GET_CACHED` (`restir_settings.cpp:272`). Every other `gi/*`
+`gi/enabled` is the only setting read with `GLOBAL_GET_CACHED` (`restir_settings.cpp:304`). Every other `gi/*`
 setting, and `wants_all_tiles` and `wants_replay`, is read with a plain `GLOBAL_GET` each frame (`_gi_bool`,
-`_gi_int`, `_gi_text` and `_gi_float`, `restir_gi.cpp:248-280`), so a change takes effect on the next frame with no
+`_gi_int`, `_gi_text` and `_gi_float`, `restir_gi.cpp:233-265`), so a change takes effect on the next frame with no
 restart, except where these notes state a cut or a timing caveat. The backend also reads
 `rendering/global_illumination/rtgi/seed`, `origin_scale` and `origin_floor` (`GLOBAL_GET`; the last two clamped to
 non-negative) and, at a variant's first compile, `rendering/reflections/sky_reflections/texture_array_reflections`
@@ -95,10 +95,18 @@ non-negative) and, at a variant's first compile, `rendering/reflections/sky_refl
 | gi/weight_clamp | float 1..1000 | 20 | Final-pass weight limit as a multiple of the 3x3 median (biased modes). |
 | gi/sky_distance | float 10..100000 | 1000 | Distance given to a sky sample. |
 | gi/dirty_margin | float 0..1 | 0.01 | Padding of each changed-scene box. |
+| gi/radiance_clamp | float 1..65504 | 60000 | Most radiance per channel a sample, sky read or shaded hit carries. |
+| gi/revalidate_growth | float 1..1000 | 10 | Most a re-validated radiance grows per update, as a factor of its floored luminance. |
+| gi/revalidate_floor | float 0.001..10 | 0.1 | Luminance floor of the growth limit and the change test. |
+| gi/compat_score_scale | float 0.001..10 | 0.12615662 | Position falloff length of a compatibility tap score, as a share of the view distance. |
+| gi/compat_stop_score | float 0..1 | 0.5 | Internal; score above which a tap counts for the early stop. |
+| gi/sky_epoch_low | float 0.01..1 | 0.8 | Sky epoch starts when the mean sky falls below this share of the epoch value. |
+| gi/sky_epoch_high | float 1..100 | 1.25 | Sky epoch starts when the mean sky rises above this multiple of the epoch value. |
+| gi/sky_blur_lod | float 0..8 | 2 | Mip level a sky sample reads from the radiance sky texture. |
 
 - All description strings start with "Experimental."; they live only in `restir_settings.cpp`, reach the probe
   status, and `doc/classes/ProjectSettings.xml` has no restir entries. `gi/compat_gate`, `gi/compat_early_stop`,
-  `gi/deterministic` and `gi/dump_path` are registered internal (`_GLOBAL_DEF` `p_internal`), so the editor does not
+  `gi/compat_stop_score`, `gi/deterministic` and `gi/dump_path` are registered internal (`_GLOBAL_DEF` `p_internal`), so the editor does not
   show them.
 - `gi/mode`: B1 biased reuse; B2 biased reuse with per-reuse visibility (default); B2k as B2 but keeps the count of
   some failed samples at zero weight (see "B2k, keep M (gi/mode B2k)",
@@ -107,12 +115,12 @@ non-negative) and, at a variant's first compile, `rendering/reflections/sky_refl
   closeness in position and normal and picks `gi/spatial_neighbors` of them by weighted sampling without replacement
   (`rs_select_neighbours` in `shaders/restir_gi.glsl`; see Combine modes, "Compatibility selection"). `gi/compat_gate`
   similar keeps the plane, normal and class test, none keeps only the class test, binary weights every similar tap
-  equally. `gi/compat_early_stop` stops scoring once more than `gi/spatial_neighbors` taps score above 0.5.
+  equally. `gi/compat_early_stop` stops scoring once more than `gi/spatial_neighbors` taps score above `gi/compat_stop_score`.
 - `gi/m_cap_follows_rate` (frame params in `modules/gi_restir/restir_gi.cpp`): while the RTGI ray fraction (the
   share of pixels that receive a candidate each frame) is below 1, `gi/m_temporal_cap` becomes
   max(1, ceil(cap * fraction)) and `gi/m_max` becomes min(`gi/m_max`, that cap + 1). Off keeps the caps as set.
 - `gi/m_light`, `gi/m_light_frames`: see "Invalidation and R2 integration", Light epoch
-  (`modules/gi_restir/restir_gi.cpp:567-573`).
+  (`modules/gi_restir/restir_gi.cpp:526-532`).
 - `gi/confidence_ramp` grows the reservoir M cap, and `gi/denoise_history_cap` when `gi/denoise` is on, from
   `gi/ramp_m_min` (at most the cap) to its set value over `gi/ramp_frames` frames since the last history cut.
 - `gi/fresh_lo` is ignored (warns once) when neither `gi/own_sampler` nor the DDGI shading inputs with the ray scene
@@ -120,13 +128,14 @@ non-negative) and, at a variant's first compile, `rendering/reflections/sky_refl
 - `gi/revalidate`: budget makes every `gi/revalidate_period`-th frame ignore the incoming candidates and re-trace and
   re-shade the stored sample of every pixel that had a candidate; share re-traces one in `gi/revalidate_share` pixels
   every frame. Without `gi/replay_seed` (`shaders/restir_gi.glsl`): where the ray lands on the same point the stored
-  radiance is updated (its luminance is limited to 10 times max(stored luminance, 0.1)); a luminance change relative
-  to max(old, new, 0.1) above `gi/revalidate_threshold` cuts the count to `gi/revalidate_cut_m`; a lost sample resets
-  the reservoir. With `gi/replay_seed` the re-hit path replaces this (see Replay, "VALIDATE in replay mode"): no 10x
-  limit and no change cut, and a miss or mismatch writes Lo = 0 but keeps M.
+  radiance is updated (its luminance is limited to `gi/revalidate_growth` times max(stored luminance,
+  `gi/revalidate_floor`)); a luminance change relative to max(old, new, `gi/revalidate_floor`) above
+  `gi/revalidate_threshold` cuts the count to `gi/revalidate_cut_m`; a lost sample resets the reservoir. With
+  `gi/replay_seed` the re-hit path replaces this (see Replay, "VALIDATE in replay mode"): no growth limit and no
+  change cut, and a miss or mismatch writes Lo = 0 but keeps M.
 - `gi/trace_all_tiles` (default on): on asks RTGI to trace every tile; off needs RTGI's tile texture and the module
   keeps reservoirs only in traced tiles; see "Traced tiles only and M in PACK"
-  (`modules/gi_restir/restir_events.cpp:264-277`).
+  (`modules/gi_restir/restir_events.cpp:263-276`).
 - `gi/confidence`: frames leaves the packed candidate's pdf word at 0, so coverage follows the RTGI history count
   alone; frames_and_m writes each packed pixel's reservoir sample count there, with `gi/trace_all_tiles` on or off,
   and hands RTGI `gi/n_target` and its history cap (`gi/denoise_history_cap`, or the ramped cap under
@@ -140,25 +149,40 @@ non-negative) and, at a variant's first compile, `rendering/reflections/sky_refl
   described under "Events (gi/event_reshade, default off)"; `gi/spatial_hold` and `gi/spatial_hold_frames` under
   "SPATIAL hold (gi/spatial_hold, default uncapped)" (`modules/gi_restir/restir_events.cpp`).
 - `gi/sky_reread`: sky samples read the live sky each pass; conditions, the sky epoch, status values and cuts are
-  under "Sky re-read (gi/sky_reread, default off)" (`modules/gi_restir/restir_gi.cpp:486-488`).
+  under "Sky re-read (gi/sky_reread, default off)" (`modules/gi_restir/restir_gi.cpp:448-450`).
 - `gi/fold_k`: stored-age bound (no stored candidate older than K view frames; each pixel restarts on a staggered
   frame), 0 off; rounding, the effective bound and the cut on change are under "Fold, the stored-age bound (gi/fold_k,
-  default 0)" (`modules/gi_restir/restir_fold.cpp:30-75`).
-- The nine reuse limits (`gi/plane_tolerance` to `gi/dirty_margin`) are read once a frame by `restir_reuse_read`
-  and written into `RestirFrameParams` by `restir_reuse_apply` (`restir_settings.cpp`), which holds each to its
-  hinted range; `gi/normal_angle` is stored as float(cos(angle)) in `cos_normal`. `restir_reuse_defaults` reads the
-  same nine from the table without `ProjectSettings`. At the defaults the nine fields equal the `RestirFrameParams`
+  default 0)" (`modules/gi_restir/restir_fold.cpp:30-72`).
+- The nine reuse limits (`gi/plane_tolerance` to `gi/dirty_margin`) and the eight shader tuning values
+  (`gi/radiance_clamp` to `gi/sky_blur_lod`, next bullet) are read once a frame by `restir_reuse_read` and written
+  into `RestirFrameParams` by `restir_reuse_apply` (`restir_settings.cpp`), which holds each to its hinted range;
+  `gi/normal_angle` is stored as float(cos(angle)) in `cos_normal`. `restir_reuse_defaults` reads the same 17 from
+  the table without `ProjectSettings`. At the defaults the 17 fields equal the `RestirFrameParams`
   member defaults bit for bit (`modules/gi_restir/tests/test_restir_settings.h`). `vis_fail_limit` (2) is not a
   setting: in a rendered frame the final pass sets state bit 0x100 with every failed visibility test and clears the
   state on a pass, so the temporal pass refuses on the bit whatever the count limit is; the limit only acts on a
   state injected by the harness (`vis_l0`).
+- The eight shader tuning values were literals in the shaders. Each default is the old literal, so the picture at the
+  defaults is unchanged. All eight are the last eight floats of `RestirFrame` (`RestirFrameUBO`, bytes 432 to 463),
+  written by `_upload` on every pass. They are not in `RestirEvents`, because `run_frame` writes zeros there when
+  `F_EVENTS` is clear and VALIDATE and SPATIAL run without events. `gi/radiance_clamp` (byte 432) is the
+  `RS_LO_CLAMP` macro, read in TEMPORAL, FINAL, SOURCE, VALIDATE and SKY_EPOCH and in the sky twins of TEMPORAL and
+  SPATIAL; its top is the largest half, because stored radiance is a half. `gi/revalidate_growth` (436) and
+  `gi/revalidate_floor` (440) are read in VALIDATE only. `gi/compat_score_scale` (444) and `gi/compat_stop_score`
+  (456) are read in the compatibility variants of SPATIAL only. `gi/sky_epoch_low` (448) and `gi/sky_epoch_high`
+  (452) are read in SKY_EPOCH only. `gi/sky_blur_lod` (460) is read by `rs_sky_radiance`: FINAL, SOURCE, VALIDATE
+  and the sky twins of TEMPORAL and SPATIAL. The CPU statement of the sky epoch rule (`restir_sky_epoch_step`)
+  keeps the default thresholds `RESTIR_SKY_EPOCH_LOW` and `RESTIR_SKY_EPOCH_HIGH`, which are also the member
+  defaults. The two literals left are the round-to-nearest 0.5 of the spatial offset (`rs_round_away` and the
+  `floor(offset + 0.5)` of the offset path), which is rounding and not a tuning value, and the 60000 in the
+  debug luminance of `RESTIR_F_PROBE_PIXELS`, which is a half-range guard.
 - A choice setting (`PROPERTY_HINT_ENUM`) accepts any string. `RestirGiBackend::_check_choices`, called first in
   `begin_frame`, re-reads the seven choices when `ProjectSettings::get_version` has changed, prints one error naming
   the first value outside its list (`restir_settings_invalid_choice`) when that differs from the last one reported,
   and the status key `invalid_choice` holds it (empty when every choice is listed). The readers then treat an
   unlisted value as: `gi/mode` B2, `gi/neighbor_selection` offsets, `gi/compat_gate` similar, `gi/revalidate` off,
   `gi/confidence` frames, `gi/spatial_hold` off, `gi/denoise` off.
-- Tests in `modules/gi_restir/tests/test_restir_settings.h` cover: the nine defaults against the member defaults;
+- Tests in `modules/gi_restir/tests/test_restir_settings.h` cover: the 17 defaults against the member defaults;
   each limit at its hinted bounds, at the middle and outside both ends; the angle to cosine conversion; a listed and
   an unlisted choice value, a range setting and an unknown name.
 - `gi/denoise`: r2 packs the module radiance into the RTGI candidate stream so the RTGI temporal, variance and
@@ -171,28 +195,21 @@ non-negative) and, at a variant's first compile, `rendering/reflections/sky_refl
 `modules/gi_restir/SCsub` loads `modules/gi_restir/restir_shim.py` by file path with `importlib`. When `"RD_GLSL"` is
 in `env["BUILDERS"]` it calls `write_shim(core_dir, shader_dir, build_dir)` before adding sources, with `core_dir`
 set to servers/rendering/renderer_rd/shaders/environment, and compiles the three module shaders with `RD_GLSL`.
-`write_shim` also takes `force_fallback`.
 
 - `CORE_INCLUDES` is `ray_scene_inc.glsl`, `rtgi_inc.glsl`, `ray_scene_hit_shade_inc.glsl`; `EXTRA_INCLUDES` is
   `ddgi_inc.glsl`.
-- Primary path (`_shim`): `shaders/restir_core_inc.glsl` (generated, git-ignored) holds one `#include` per
-  `CORE_INCLUDES` file, each path computed with `os.path.relpath` from the module shader folder. Before writing,
-  each path is joined to the shim's folder and compared with the source; a path that does not resolve, a missing
-  core include or an OS error switches to the fallback. The run also writes `shaders/restir_core_<name>.glsl`
-  wrappers for all four files (`CORE_INCLUDES` and `EXTRA_INCLUDES`).
+- `_shim`: `shaders/restir_core_inc.glsl` (generated, git-ignored) holds one `#include` per `CORE_INCLUDES`
+  file, each path computed with `os.path.relpath` from the module shader folder. A missing core include or an OS
+  error raises and stops the build. The run also writes `shaders/restir_core_<name>.glsl` wrappers for all four
+  files (`CORE_INCLUDES` and `EXTRA_INCLUDES`).
 - Drives: `glsl_builders.py` resolves includes with `os.path.relpath` from the engine build folder, and `relpath`
   cannot cross drives on Windows. `check_same_drive` (drive letter compared case-blind) raises `ShimError` naming
-  both folders; `SCsub` prints it and exits 255. The fallback is not tried there because its copies live in the
-  module folder and have the same problem.
-- Fallback (`_fallback`): copies the core files and their nested includes into `shaders/restir_core/` (git-ignored)
-  and writes the shim and the `CORE_INCLUDES` wrappers against the copies; it does not write
-  `restir_core_ddgi_inc.glsl`. Each SCons run reads every source and rewrites a copy only when its bytes differ. An
-  include outside the core folder raises an error.
+  both folders; `SCsub` prints it and exits 255.
 - `include_closure` walks nested `#include`s from `CORE_INCLUDES + EXTRA_INCLUDES`, skips `thirdparty/` includes,
   and raises when a core include is missing.
 - Dependencies: `SCsub` makes the gen headers of `restir_shim_check.glsl`, `restir_gi.glsl` and
   `restir_fold_test.glsl` depend on the shim, `glsl_builders.py`, `restir_gi_inc.glsl`, `restir_fold_inc.glsl`,
-  the per-file wrappers, and the closure files returned by `write_shim`, in both modes.
+  the per-file wrappers, and the closure files returned by `write_shim`.
 - Placeholder shader: `shaders/restir_shim_check.glsl` includes `restir_core_inc.glsl` so the build proves the
   includes resolve. It is never instantiated at run time. `modules/gi_restir/restir_probe.cpp` includes its
   generated header and uses it in a `static_assert`, so the header is built whenever the module is.
@@ -315,8 +332,8 @@ A reservoir is 48 bytes per pixel in a 3-layer RGBA32UI 2D array (`rs_load` and 
 the low 16 bits of .y as halfs, flags in the high 16 bits of .y, W as a float in .z, M in the low 16 bits and age in
 the high 16 bits of .w. Layer 2: receiver depth, packed receiver normal, epoch tag, sample tag. Three reservoir arrays
 are allocated: the temporal pass ping-pongs two and the third holds a spatial result when feedback is off.
-`RestirFrameUBO` is 432 bytes and `RestirDirtyUBO` 2048 bytes, both enforced by `static_assert`
-(`restir_gi_core.cpp:105-106`).
+`RestirFrameUBO` is 464 bytes and `RestirDirtyUBO` 2048 bytes, both enforced by `static_assert`
+(`restir_gi_core.cpp:113-114`).
 
 Per view, `RestirGiResources` (`restir_gi_core.h`, built by `RestirGiResources::allocate`, which first frees
 everything) holds:
@@ -333,19 +350,17 @@ everything) holds:
   `ubo[4]` for SOURCE, `ubo[5]` for CLEAR, and `count_ubo` for the VALIDATE count dispatch (`pass_index` 4).
 
 Each is logged in `alloc_log` with expected and measured bytes (the uniform buffers are one entry, "uniform buffers").
-Source: `modules/gi_restir/restir_gi_core.cpp:162-205`.
+Source: `modules/gi_restir/restir_gi_core.cpp:188-217`.
 
-Reservoir flags (the high half of layer 1 `.y`; `shaders/restir_gi_inc.glsl:1-12`): `RF_SKY` 1, `RF_VALID` 2,
-`RF_VIS_FAILED` 4, `RF_SPATIAL` 8, `RF_CLAMPED` 16, `RF_BACKFACE` 32, `RF_EMISSIVE` 64, `RF_TEMPORAL` 128, bits 8 to
-13 the Fold `s` and bit 14 `RF_MV` (see Fold). `rs_finish` sets `RF_TEMPORAL` or `RF_SPATIAL` when the selected
-technique is not the canonical and adds 1 to the age only for the temporal pass (`restir_gi.glsl:280-289`).
-`RF_VIS_FAILED` and `RF_CLAMPED` are defined but no shader reads or writes them. The frame flags `F_BLOCK_SKY` (64)
-and `F_PROBE_CAMERA_FIXED` (256) exist in the GLSL include with no C++ `RESTIR_F_*` entry and are never read
-(`shaders/restir_gi_inc.glsl:20,22`).
+Reservoir flags (the high half of layer 1 `.y`; `shaders/restir_gi_inc.glsl:1-10`): `RF_SKY` 1, `RF_VALID` 2,
+`RF_SPATIAL` 8, `RF_BACKFACE` 32, `RF_EMISSIVE` 64, `RF_TEMPORAL` 128, bits 8 to 13 the Fold `s` and bit 14
+`RF_MV` (see Fold). Bits 4 and 16 of the reservoir flags are unused. `rs_finish` sets `RF_TEMPORAL` or
+`RF_SPATIAL` when the selected technique is not the canonical and adds 1 to the age only for the temporal pass
+(`restir_gi.glsl:280-289`). The frame flag bits 64 and 256 have no GLSL name and no C++ `RESTIR_F_*` entry.
 
-Set 0 bindings (declared in `shaders/restir_gi_inc.glsl:142-437`, each under its own MODE_* guard; the host side is
+Set 0 bindings (declared in `shaders/restir_gi_inc.glsl:138-431`, each under its own MODE_* guard; the host side is
 `run_frame`, `run_source`, `run_capture`, `run_pack` and `clear_history` in `restir_gi_core.cpp`, which add the
-entries after binding 0 in `_dispatch`, `restir_gi_core.cpp:719-744`). A shader declares only the bindings of its own
+entries after binding 0 in `_dispatch`, `restir_gi_core.cpp:677-702`). A shader declares only the bindings of its own
 mode. Passes: CLEAR, TEMPORAL (plain, sky twin, Fold dump and lineage forms), SPATIAL (four forms and their sky
 twins), FINAL, SOURCE, CAPTURE, PACK, VALIDATE and SKY_EPOCH.
 
@@ -370,7 +385,7 @@ twins), FINAL, SOURCE, CAPTURE, PACK, VALIDATE and SKY_EPOCH.
 - 17 to 22 `cap_pos`, `cap_nrm`, `cap_ppos`, `cap_pnrm` (rgba32f), `cap_first` and `cap_second` (rgba32ui): CAPTURE.
 - 23 `pass_stats` (writeonly storage buffer): TEMPORAL, SPATIAL and VALIDATE. 24 `RestirDirty` UBO: TEMPORAL only.
 - 25 `sel_image` (rg32ui, writeonly array): the compatibility SPATIAL forms (`PASS_SPATIAL_COMPAT`) only; the host
-  binds `sel_dummy` there unless `F_PROBE_STATS` is set (`restir_gi_core.cpp:1028-1030`).
+  binds `sel_dummy` there unless `F_PROBE_STATS` is set (`restir_gi_core.cpp:983-985`).
 - 26 `RestirEvents` UBO: TEMPORAL, SPATIAL, VALIDATE and SKY_EPOCH. 27 `rs_tiles` (utexture2D): TEMPORAL, SPATIAL,
   FINAL and PACK; with no tile texture the host binds `dummy_tiles` (1x1 R32_UINT, `RTGI_TILE_TRACE` set).
 - 28 `RestirEventBins` (storage buffer): VALIDATE only.
@@ -383,7 +398,7 @@ twins), FINAL, SOURCE, CAPTURE, PACK, VALIDATE and SKY_EPOCH.
 - Set 1 is the ray scene (`RayScene::append_uniforms`). `_dispatch` binds it only for a ray variant and never for
   SKY_EPOCH; CLEAR, CAPTURE and PACK always run on VARIANT_NONE, so it reaches TEMPORAL, SPATIAL, FINAL, SOURCE
   and VALIDATE.
-- Set 2 is the shade set (`_shade_set`, `restir_gi_core.cpp:695-717`), bound for FINAL, SOURCE, VALIDATE and the sky
+- Set 2 is the shade set (`_shade_set`, `restir_gi_core.cpp:653-675`), bound for FINAL, SOURCE, VALIDATE and the sky
   twins of TEMPORAL and SPATIAL. FINAL, SOURCE and VALIDATE use the DDGI UBO at 0, probe 3, irradiance 4, distance 5,
   linear sampler 6, sky radiance 7 and its sampler 8; the sky twins declare only 0, 7 and 8. Without all four DDGI
   RIDs the host binds a 512-byte zero UBO (`dummy_ubo`) and 1x1 `dummy_probe` and `dummy_float` textures.
@@ -400,7 +415,7 @@ output set -> history set, then back); with it off, the first spatial pass write
 it and writes the previous history set. FINAL reads the last spatial output, or the temporal output when there is no
 spatial pass. `history_index` becomes the final output's set when feedback is on, otherwise the temporal output's set;
 no copy occurs. `spatial_feedback` defaults on in U1 and off in B1, B2 and B2k, and a probe option can override it
-(`restir_gi.cpp:491`). The spatial pass count is `spatial_passes` clamped to 1..2, or 0 when `gi/spatial_neighbors` is
+(`restir_gi.cpp:453`). The spatial pass count is `spatial_passes` clamped to 1..2, or 0 when `gi/spatial_neighbors` is
 0 (range 0..8, default 3), so no spatial pass runs and spatial_combines is 0. CLEAR runs when a state is allocated or
 reallocated (`RestirGiCore::clear_history`).
 
@@ -408,19 +423,19 @@ SPATIAL is compiled in plain and wide forms. `run_frame` picks the wide form (`S
 `gi/spatial_neighbors` is above `RESTIR_SPATIAL_SMALL_COUNT` (3) and the plain form (`MAX_CAND` 4) otherwise; TEMPORAL
 has `MAX_CAND` 2. A pass draws min(`gi/spatial_neighbors`, `MAX_CAND` - 1) neighbours, so plain serves 0 to 3 and wide
 serves 4 to 8. Compatibility selection caps its picks at `COMPAT_MAX_M` (8). Plain, compatibility, wide and
-compatibility-wide are four pipelines, each with a sky twin (`restir_gi_core.cpp:1031-1032`, `restir_gi_core.h:84`,
-`shaders/restir_gi_inc.glsl:70-76`, `shaders/restir_gi.glsl:894`).
+compatibility-wide are four pipelines, each with a sky twin (`restir_gi_core.cpp:986-987`, `restir_gi_core.h:84`,
+`shaders/restir_gi_inc.glsl:66-72`, `shaders/restir_gi.glsl:893`).
 
 Fold-dump variant: when `RestirGiResources::fold_dump` is valid, `run_frame` replaces the TEMPORAL dispatch with a
-dump or lineage build; see "Fold dump and self-test" (`modules/gi_restir/restir_gi_core.cpp:982-1010`).
+dump or lineage build; see "Fold dump and self-test" (`modules/gi_restir/restir_gi_core.cpp:937-965`).
 
-Shade set (`RestirGiCore::_shade_set`, `restir_gi_core.cpp:695-717`): the real DDGI UBO, probe, irradiance and
+Shade set (`RestirGiCore::_shade_set`, `restir_gi_core.cpp:653-675`): the real DDGI UBO, probe, irradiance and
 distance textures are bound only when all four RIDs are valid; otherwise a 512-byte zero UBO and 1x1 placeholders
 (`dummy_probe` RGBA32UI, `dummy_float` RGBA16F) are bound. The sky binding (set 2, binding 7) takes the sky texture
 from the inputs and falls back to the white default whenever none is given, whatever the DDGI state.
-`run_frame` also clears `F_REAL_SKY` and `F_SHADE_DDGI` when no DDGI UBO is given (`restir_gi_core.cpp:898-900`).
+`run_frame` also clears `F_REAL_SKY` and `F_SHADE_DDGI` when no DDGI UBO is given (`restir_gi_core.cpp:856-858`).
 
-GPU timestamp names (`marker_names`, `restir_gi_core.cpp:728-729`): "ReSTIR Clear", "ReSTIR Temporal" (also the sky
+GPU timestamp names (`marker_names`, `restir_gi_core.cpp:686-687`): "ReSTIR Clear", "ReSTIR Temporal" (also the sky
 twin), "ReSTIR Spatial" (all eight spatial pipelines), "ReSTIR Final", "ReSTIR Source", "ReSTIR Capture", "ReSTIR
 Pack", "ReSTIR Validate" and "ReSTIR Sky Epoch"; the dump and lineage variants use their own names (see "Fold dump and
 self-test" and "Fold lineage").
@@ -439,7 +454,7 @@ Directions, cosines, Jacobians and visibility rays use this origin.
 
 `origin_scale` and `origin_floor` are the RTGI settings `rendering/global_illumination/rtgi/origin_scale` and
 `.../origin_floor` (internal, defaults 2.0 and 0.0, `servers/rendering/rendering_server.cpp:3929-3930`), both
-clamped non-negative (`restir_gi.cpp:710-711`). Core's trace (`rtgi_geometric_normal` and
+clamped non-negative (`restir_gi.cpp:669-670`). Core's trace (`rtgi_geometric_normal` and
 `rtgi_origin_offset` in `servers/rendering/renderer_rd/shaders/environment/ddgi_trace.glsl`) uses the same rule with
 the screen-resolution depth buffer (a tap with depth 0 is skipped; the footprint falls back to the right-neighbour
 distance when an axis has no tap); the module samples the geometry textures at trace resolution, so the footprint
@@ -448,8 +463,8 @@ term differs.
 ### Fresh candidates (`modules/gi_restir/shaders/restir_gi.glsl`, `rs_from_candidate`)
 
 TEMPORAL builds the canonical technique from the RTGI candidate record: W = 1 / pdf, with pdf the float in the
-record's second word .z, M = 1 and age 0; Lo is clamped to [0, `RS_LO_CLAMP` = 60000]. An empty reservoir (M 0) comes
-from a record flagged no-candidate and from a re-validation frame. A candidate whose Lo is not finite counts
+record's second word .z, M = 1 and age 0; Lo is clamped to [0, `RS_LO_CLAMP`] (`gi/radiance_clamp`, default 60000). An empty reservoir (M 0)
+comes from a record flagged no-candidate and from a re-validation frame. A candidate whose Lo is not finite counts
 `lo_refused`, and one whose pdf is not finite and positive counts `pdf_refused`; both give M = 1 with the valid flag
 clear, so the canonical is not on. A canonical that is not on contributes no M in B1, B2 and B2k, and contributes its
 M in U1; `no_canonical` counts temporal pixels whose canonical is not on.
@@ -460,8 +475,8 @@ M in U1; `no_canonical` counts temporal pixels whose canonical is not on.
 `RESTIR_F_UNBIASED`, B2 and B2k to `RESTIR_F_VIS_REUSE`, and B2k to `RESTIR_F_KEEP_M`; `gi/visibility_reuse` (default
 off) also sets `RESTIR_F_VIS_REUSE`, which is how B1 gets the reuse test. The reuse test applies only when
 `RESTIR_F_VIS` is set. The temporal history M entering a combine is min(M, `gi/m_temporal_cap`) (default 20,
-`restir_gi.glsl:598`); a spatial neighbour's M is min(M, `m_max`) (`restir_gi.glsl:935`). The backend lowers the caps
-in `modules/gi_restir/restir_gi.cpp:555-573`: see Settings (`gi/m_cap_follows_rate`, `gi/confidence_ramp`) and Light
+`restir_gi.glsl:598`); a spatial neighbour's M is min(M, `m_max`) (`restir_gi.glsl:934`). The backend lowers the caps
+in `modules/gi_restir/restir_gi.cpp:514-532`: see Settings (`gi/m_cap_follows_rate`, `gi/confidence_ramp`) and Light
 epoch.
 
 - B1: biased MIS. Each technique's MIS weight is its M over the sum of M of the techniques that count. A technique
@@ -477,7 +492,7 @@ Selection weight is mis * phat_r * W * Jacobian; the result's W is the weight su
 neighbour whose sample fails the shift test (distance, cosine, |J| range) stays in the technique set with weight 0;
 removing it would change the canonical share per sample.
 
-**Similarity and shift limits** (`shaders/restir_gi.glsl:259-277`, `shaders/restir_gi_inc.glsl:637-662`,
+**Similarity and shift limits** (`shaders/restir_gi.glsl:259-277`, `shaders/restir_gi_inc.glsl:616-641`,
 `restir_gi_core.h:121,134-143`). `rs_similar` passes a neighbour when it is valid, `|dot(n_r, p_n - p_r)| / depth` is
 below `tol_plane` (0.02), `dot(n_r, n_n)` is above `cos_normal` (0.9063078, 25 degrees) and `|rough_r - rough_n|` is
 at most `class_tol` (0.35). The class is the roughness, read from the geometry normal texture's `.w`
@@ -491,16 +506,17 @@ and r, and `lq` and `lr` the distances. The numbers in brackets are the defaults
 (see Settings, the nine reuse limits), and `vis_fail_limit` keeps its member default 2. The probe options `d_min`,
 `cos_min`, `jac_max`, `vis_fail_limit` and `w_clamp` are applied after the settings and override them.
 
-**Compatibility selection** (`rs_select_neighbours`, `shaders/restir_gi.glsl:705-850`) is weighted sampling without
+**Compatibility selection** (`rs_select_neighbours`, `shaders/restir_gi.glsl:705-849`) is weighted sampling without
 replacement, not a probability table. Per pixel, a start index from `rs_rand(COMPAT_START_DIM + pass_index)`
 (`COMPAT_START_DIM` 160) feeds up to min(`gi/compat_candidates`, `COMPAT_MAX_K` 64) taps; tap t is the concentric-disk
 offset of radius `spatial_radius` at index start + t (`rs_compat_offset`), and out-of-frame, untraced, duplicate and
-zero-offset taps are skipped. The score is `h = exp(-|true_view_r - true_view_q| / (|true_view_r| * 0.12615662)) *
-clamp(dot(n_r, n_q), 0, 1)^8`, flushed to 0 below `FLT_MIN`. The tap weight w is h when `gi/compat_gate` is similar
+zero-offset taps are skipped. The score is `h = exp(-|true_view_r - true_view_q| / (|true_view_r| * s)) * clamp(dot(n_r, n_q), 0, 1)^8`, with
+s = `gi/compat_score_scale` (default 0.12615662), flushed to 0 below `FLT_MIN`. The tap weight w is h when `gi/compat_gate` is similar
 and the tap passes `rs_similar`, 1 for binary on a similar tap, and h for none, which tests only the class. Each tap
 with w above 0 gets the key `log(u) / w`, u from `rs_rand(COMPAT_KEY_DIM + t)` (`COMPAT_KEY_DIM` 96), and the top m =
 clamp(wanted, 1, `COMPAT_MAX_M`) keys are kept, where wanted = min(`gi/spatial_neighbors`, `MAX_CAND` - 1). The early
-stop counts taps with h above 0.5 that were inserted or rejected by key and stops when the count exceeds m.
+stop counts taps with h above `gi/compat_stop_score` (default 0.5) that were inserted or rejected by key and stops
+when the count exceeds m.
 
 ### Stored M (`modules/gi_restir/shaders/restir_gi_inc.glsl`, `rs_combine`; `restir_gi.glsl`, `rs_finish`)
 
@@ -517,9 +533,9 @@ A technique is present when `rs_fill_neighbour` runs (`restir_gi.glsl:183`).
   inside the frame, and passing the similar test (`rs_similar`, `restir_gi.glsl:259`: previous receiver valid, plane,
   normal, class), then M > 0 and an equal epoch tag. A history sample whose path hits a dirty box is handled per mode
   as under "Dirty test" (`modules/gi_restir/shaders/restir_gi.glsl:593-611`).
-- Spatial, offset selection (`rs_spatial_pixel`, `restir_gi.glsl:863`): the neighbour must be inside the frame and
+- Spatial, offset selection (`rs_spatial_pixel`, `restir_gi.glsl:862`): the neighbour must be inside the frame and
   not the pixel itself, traced, similar and have M > 0.
-- Spatial, compatibility selection (`rs_select_neighbours`, `restir_gi.glsl:765`): tap scoring skips out-of-frame,
+- Spatial, compatibility selection (`rs_select_neighbours`, `restir_gi.glsl:764`): tap scoring skips out-of-frame,
   untraced, duplicate and zero-offset taps. The gate sets the tap weight: `similar` keeps taps that pass the similar
   test with the score as weight, `binary` the same with weight 1, `none` tests only the class. The neighbour then
   needs M > 0.
@@ -537,20 +553,12 @@ failed final visibility ray unless `gi/blocked_keeps_coverage` (default on) sets
 biased modes W is clamped to w_clamp * median (`gi/weight_clamp`, default 20) when the 3x3 neighbourhood holds at
 least 3 finite positive W values with M > 0; U1 skips the clamp.
 
-**Published record** (`RtgiResampleOutput::record`; `modules/gi_restir/restir_gi.cpp:461-465,941-952`). The flags are
-`SAMPLE_COUNT`, `CONFIDENCE`, `HISTORY`, `SCENE_EPOCH`, `LIGHT_EPOCH`, `SKY_EPOCH` and `ORIGIN_EPOCH`. Without
-readback `sample_count` = min(`frames_since_cut`, `n_target`), with `frames_since_cut` read after this frame's
-increment (a cut frame gives 1) and `n_target` the clamped `gi/n_target` (1 to 64), and validity is 1 when history is
-used (`!cut && options.history`), else 0. With readback and `geometry` above 0, `sample_count` = round(`m_sum` /
-`geometry`) and validity = `output_pixels` / `geometry`, clamped to 0..1. `geometry` counts the pixels of traced tiles
+**Readback counts** (`modules/gi_restir/restir_gi.cpp`). The backend publishes no provider record:
+`RtgiResampleOutput` carries no record and no debug texture. With readback, `geometry` counts the pixels of traced tiles
 whose receiver is valid (geometry texture `.w` above 0.5: no sky, no untraced tile), whether or not they hold a
 sample or are ray-thinned; `m_sum` adds the reservoir M of those pixels (0 for an empty one); `output_pixels` counts
 those with coverage above 0, which needs a held sample and, if its final visibility ray failed,
-`gi/blocked_keeps_coverage` (`shaders/restir_gi.glsl:1139-1255`, `restir_gi_core.cpp:1086-1095`). With `geometry` 0
-the no-readback values stay.
-`confidence` = `gi_provider_confidence_from_samples(sample_count, n_target)` = min(1, sample_count / n_target), 1 when
-`n_target` is 0. The freeze path reports min(`frames_since_cut`, `gi/n_target`) (clamped 1 to 64, no increment) and
-validity 1. `output.debug` is the module debug texture only when `debug_view` is 0 or more.
+`gi/blocked_keeps_coverage` (`shaders/restir_gi.glsl:1138-1254`, `restir_gi_core.cpp:1041-1050`).
 
 ### Own sampler (`modules/gi_restir/shaders/restir_gi.glsl`, `MODE_SOURCE`)
 
@@ -568,7 +576,7 @@ SOURCE draws its direction from `rtgi_rand2(px, frame, RTGI_RNG_DIRECTION, rf.se
 `seed_offset`. Without `gi/replay_seed` the candidate tag is `(px.y * trace_w + px.x) ^ frame` and the trace seed is
 `ray_scene_hash(px.y * 65537 + px.x + frame * 6271 + 0x510e527f)`; with replay the tag and the trace seed are both
 `ray_scene_hash(px.y * 65537 + px.x + frame * 6271)`. A receiver that is not valid writes a `NO_CANDIDATE |
-NOT_TRACED` word carrying the tag (`shaders/restir_gi.glsl:1289-1357`).
+NOT_TRACED` word carrying the tag (`shaders/restir_gi.glsl:1288-1356`).
 
 ### Statistics (`modules/gi_restir/shaders/restir_gi.glsl`, `modules/gi_restir/restir_gi_core.cpp`)
 
@@ -577,11 +585,11 @@ The final pass writes 16 floats (`STATS_STRIDE`) per 8x8 group through shared-me
 group into a 4-row pass-stats buffer (temporal, spatial 1, spatial 2, validate), cleared every frame. TEMPORAL and
 SPATIAL write row `pass_index` (0, 1, 2) through `rs_stats_store(row)`; VALIDATE always writes the fixed row
 `PS_ROW_VALIDATE` = 3, whatever its `pass_index`, and the `pass_index` 4 count dispatch writes no row
-(`restir_gi.glsl:681,980,1720`). Entries include tested techniques (a valid sample reaching the shift test), rejects
+(`restir_gi.glsl:681,979,1716`). Entries include tested techniques (a valid sample reaching the shift test), rejects
 by d_min, cos_min and |J| range (by kind), the energy of the tested candidates plus the canonical (M * p-hat * W *
 Jacobian), the energy of the rejected ones, pdf refusals, techniques present, present techniques whose sample is
 unusable (kept at weight 0), spatial combines (pixels that combined at least one neighbour), lo refusals and pixels
-with no canonical. `jac_raw` (`rs_jacobian_raw`, `restir_gi_inc.glsl:667`) is the Jacobian without the range test (1
+with no canonical. `jac_raw` (`rs_jacobian_raw`, `restir_gi_inc.glsl:646`) is the Jacobian without the range test (1
 for sky samples), clamped to [0, 1000], with both distances floored at 1e-4 and the cosine at the sample's source
 receiver floored at 1e-3. Energy sums skip NaN and Inf. Pass stats are written only when `RESTIR_F_PROBE_STATS` (value
 128, bit 7) is set, which the probe option `readback` sets (`run_case` also sets it for compatibility selection and
@@ -590,17 +598,17 @@ receiver floored at 1e-3. Energy sums skip NaN and Inf. Pass stats are written o
 Pass-stats slots 0 to 15 are, in order, `PS_TESTED`, `PS_REJ_DIST`, `PS_REJ_COS`, `PS_REJ_JAC`, `PS_ENERGY_ALL`,
 `PS_ENERGY_TRUNC`, `PS_PDF_REFUSED`, `PS_PRESENT`, `PS_ZERO_WEIGHT`, `PS_SPATIAL_COMBINES`, `PS_LO_REFUSED`,
 `PS_NO_CANON`, `PS_COMPAT_TAPS`, `PS_COMPAT_STOPS`, `PS_COMPAT_EMPTY` and `PS_COMPAT_HSUM`
-(`shaders/restir_gi_inc.glsl:81-96`); the slots from 16 up are named where they are used. `read_stats` adds the
+(`shaders/restir_gi_inc.glsl:77-92`); the slots from 16 up are named where they are used. `read_stats` adds the
 compatibility slots 12 to 15 over the temporal and both spatial rows into `compat_taps`, `compat_early_stops`,
 `compat_empty` and `compat_h_sum`, which the status `stats` dictionary, `get_records` (columns 31 to 34) and the
-`run_case` stats carry (`restir_gi_core.cpp:1122-1125`).
+`run_case` stats carry (`restir_gi_core.cpp:1077-1080`).
 
 With `gi/neighbor_selection` compatibility and `F_PROBE_STATS`, `run_frame` creates `sel_image` (R32G32_UINT, 2 layers
 for spatial passes 1 and 2, binding 25); with compatibility on and no `F_PROBE_STATS`, a 1x1 `sel_dummy` is bound
-there instead (`restir_gi_core.cpp:914-916,1029`). Per pixel, word x holds the listed count and the low bytes of the
+there instead (`restir_gi_core.cpp:869-871,984`). Per pixel, word x holds the listed count and the low bytes of the
 first picks' offsets (pick 0 x and y, pick 1 x), and word y holds pick 1 y, pick 2 x and y and min(scored, 255) in the
-top byte (`shaders/restir_gi.glsl:843-857`). `RestirGiCore::read_selection` returns both layers; `run_case` adds
-`result['selection']` when compatibility is on and sets `F_PROBE_STATS` then (`restir_harness.cpp:343,420`).
+top byte (`shaders/restir_gi.glsl:842-856`). `RestirGiCore::read_selection` returns both layers; `run_case` adds
+`result['selection']` when compatibility is on and sets `F_PROBE_STATS` then (`restir_harness.cpp:326,403`).
 
 The `stats` status dictionary (present when `stats_valid`, i.e. with `readback`) includes truncated_candidate_share
 (distance, cosine and Jacobian rejects over tested), truncated_energy_share, clamp_share (clamped pixels over geometry
@@ -613,9 +621,9 @@ override the frame limits (values under Combine modes, "Similarity and shift lim
 The info texture holds the temporal reject reason in bits 0..3 and the spatial reject reason in bits 4..7, plus flags
 in bit 8 temporal selected, 9 spatial selected, 10 visibility blocked, 11 visibility tested, 12 clamped, 13 had
 history, 14 valid. Reason values: 0 none, 1 frame, 2 plane, 3 normal, 4 class, 5 epoch, 6 dirty, 7 jacobian,
-8 distance, 9 cut, 10 no sample, 11 visibility, 12 no compat, 13 bound, 14 untraced (`restir_gi_inc.glsl:44-71`).
-With `RESTIR_F_PROBE_PIXELS` the final pass also sets bit 15 and stores the candidate's luminance (at most 60000) as
-a half in bits 16..31 (`restir_gi.glsl:1262`).
+8 distance, 9 cut, 10 no sample, 11 visibility, 12 no compat, 13 bound, 14 untraced (`restir_gi_inc.glsl:40-67`).
+With `RESTIR_F_PROBE_PIXELS` the final pass also sets bit 15 and stores the candidate's luminance (at most a fixed 60000, not
+the clamp setting) as a half in bits 16..31 (`restir_gi.glsl:1261`).
 
 Reject reasons are written per pixel. Temporal (`rs_temporal_pixel`): 9 cut when history is not in use, 1 frame for
 a previous position outside the frame, then the similar-test reason, 10 no sample for M = 0, 5 epoch, 6 dirty (B1 and
@@ -628,10 +636,10 @@ reason except 11; 12 no compat when compatibility selection picks nothing.
 
 ### Debug views (`modules/gi_restir/restir_gi.cpp`)
 
-The backend maps a non-negative `RtgiFrameInputs::debug_view` d to module view 57 + d and returns the module debug
-texture. `MODE_FINAL` implements views 57..63: 57 M/m_max, 58 age/32, 59 temporal/spatial selection, 60 temporal
+The backend maps a non-negative `RtgiFrameInputs::debug_view` d to module view 57 + d and renders it into the module debug
+texture, which stays in the backend's resources (`debug_valid` in the status). `MODE_FINAL` implements views 57..63: 57 M/m_max, 58 age/32, 59 temporal/spatial selection, 60 temporal
 reject reason, 61 log2 W, 62 sample visibility, 63 mode code (the mode, plus 4 with fresh Lo).
-`servers/rendering/renderer_rd/environment/rtgi.cpp` passes `debug_view = -1`, so the engine path never requests one;
+`servers/rendering/renderer_rd/environment/rtgi.cpp` leaves `debug_view` at its default -1, so the engine path never requests one;
 harness case parameters carry the module view number (57..63) in `debug_view` directly.
 
 ### History cut from visibility (`modules/gi_restir/shaders/restir_gi.glsl`)
@@ -645,22 +653,22 @@ counted only in B2k.
 ### Lazy compilation (`modules/gi_restir/restir_gi_core.cpp`)
 
 Shaders and pipelines compile on first use in `RestirGiCore::_ensure`. The NONE, SW and HW variants compile
-separately, and the SW and HW variants also compile the sky-reread twins and SKY_EPOCH; `hw_variant_compiled()` and
-`get_hw_compiles()` expose the HW state. The fold-dump and lineage variants (`RS_FOLD_DUMP`, `RS_FOLD_LINEAGE`;
-TEMPORAL, plus its sky-reread twin when the variant is not NONE) compile separately on first use in
-`RestirGiCore::_ensure_dump` (`restir_gi_core.cpp:511`).
+separately, and the SW and HW variants also compile the sky-reread twins and SKY_EPOCH; `hw_variant_compiled()`
+exposes the HW state. The fold-dump and lineage variants (`RS_FOLD_DUMP`, `RS_FOLD_LINEAGE`; TEMPORAL, plus its
+sky-reread twin when the variant is not NONE) compile separately on first use in `RestirGiCore::_ensure_dump`
+(`restir_gi_core.cpp:485`).
 
 The first compile of a variant (`RestirGiCore::_ensure`) reads
-`rendering/reflections/sky_reflections/texture_array_reflections` into `octmap_array` (`restir_gi_core.cpp:377`), so a
+`rendering/reflections/sky_reflections/texture_array_reflections` into `octmap_array` (`restir_gi_core.cpp:354`), so a
 later change does not reach a variant already compiled. When it is true every ray variant adds
 `USE_RADIANCE_OCTMAP_ARRAY` (`sky_radiance` becomes a `texture2DArray` read at layer 0) and the default sky texture is
 `DEFAULT_RD_TEXTURE_2D_ARRAY_WHITE`; otherwise `sky_radiance` is a `texture2D` and the default is
-`DEFAULT_RD_TEXTURE_WHITE` (`_sky_texture`, `restir_gi_core.cpp:662-666`). Ray variants also define
+`DEFAULT_RD_TEXTURE_WHITE` (`_sky_texture`, `restir_gi_core.cpp:624-628`). Ray variants also define
 `RAY_SCENE_BLAS_STACK_SIZE` and `RAY_SCENE_TLAS_STACK_SIZE` from `RayScene::BLAS_MAX_DEPTH` and `TLAS_MAX_DEPTH`, and
 `RESTIR_RAYS`, followed by `RayScene::alpha_shader_defines()` (`RAY_SCENE_ALPHA` while
 `rendering/global_illumination/ray_scene/alpha_test` is on, see `docs/code-notes/ray-scene-alpha.md`); the HW variant
 adds `SHADER_GLSL_VERSION_460`, `GL_EXT_ray_query` and `RAY_SCENE_HW`; `VARIANT_NONE` gets no defines (`_defines`,
-`restir_gi_core.cpp:358-369`).
+`restir_gi_core.cpp:335-347`).
 
 ### Harness and probe (`modules/gi_restir/restir_harness.cpp`)
 
@@ -682,26 +690,29 @@ cand_second, the history reservoir (3 layers) and vis, each texture as `<key>_fo
 arrays. A MODE_CAPTURE pass copies the six input textures into module-owned textures created with copy-from usage,
 and those are read back; geo_nrm and prev_nrm are stored as RGBA8 UNORM.
 
-`params_to_dict` and `params_from_dict` (`modules/gi_restir/restir_harness.cpp:69-232`) carry `size`, `frame_index`,
+`params_to_dict` and `params_from_dict` (`modules/gi_restir/restir_harness.cpp:51-215`) carry `size`, `frame_index`,
 `seed`, `flags`, `mode`, `spatial_count`, `spatial_radius`, `spatial_passes`, `m_temporal_cap`, `m_max`, `n_target`,
 `epoch_tag`, `prev_epoch_tag`, `debug_view`, `vis_fail_limit`, `spatial_feedback`, `compat`, `compat_k`,
 `compat_gate`, `compat_early_stop`, `camera_basis`, `previous_camera_basis`, `camera_to_anchor`,
 `previous_camera_to_anchor`, `view_to_previous_clip`, `jitter_shift` and `previous_jitter_shift` (four floats each),
 `test_sky`, `tol_plane`, `cos_normal`, `jac_max`, `d_min`, `cos_min`, `w_clamp`, `origin_scale`, `origin_floor`,
-`sky_distance`, `class_tol`, `emission_exposure`, `dirty_count`, `dirty_margin`, `dirty_boxes`, `clock`, `k_eff`,
-`pre_frame`, and `events` (only when `F_EVENTS` is set). `from_dict` reads `size` as `trace_size` (`run_case` then
+`sky_distance`, `class_tol`, `emission_exposure`, `dirty_count`, `dirty_margin`, `radiance_clamp`, `reval_growth`,
+`reval_floor`, `compat_scale`, `compat_stop_score`, `sky_epoch_low`, `sky_epoch_high`, `sky_blur_lod`, `dirty_boxes`,
+`clock`, `k_eff`, `pre_frame`, and `events` (only when `F_EVENTS` is set). `from_dict` reads `size` as `trace_size` (`run_case` then
 sets it again from the case's own `size`), clamps `dirty_count` to 64, reads `dirty_boxes` as a `PackedFloat64Array`
 of six values per box (min xyz, max xyz) and accepts `events` only as a byte array of exactly
 `sizeof(RestirEventsUBO)`. Defaults when a key is absent (`RestirFrameParams`,
-`modules/gi_restir/restir_gi_core.h:100-163`): `frame_index`, `seed`, `flags`, `epoch_tag`, `debug_view`,
+`modules/gi_restir/restir_gi_core.h:100-171`): `frame_index`, `seed`, `flags`, `epoch_tag`, `debug_view`,
 `dirty_count`, `clock` and `k_eff` 0; `mode` 0 (B1); `spatial_count` 3;
 `spatial_radius` 24; `spatial_passes` 1; `spatial_feedback` true; `compat` false; `compat_k` 16;
 `compat_gate` 0 (similar); `compat_early_stop` true; `m_temporal_cap` 20; `m_max` 32; `n_target` 8;
 `vis_fail_limit` 2; `test_sky` white; `tol_plane` 0.02; `cos_normal` 0.9063078 (25 degrees); `jac_max` 8; `d_min`
 0.03; `cos_min` 0.05; `w_clamp` 20; `origin_scale` 2; `origin_floor` 0; `sky_distance` 1000; `class_tol` 0.35;
-`emission_exposure` 1; `prev_epoch_tag` 0xFFFFFFFF; `dirty_margin` 0.01; `pre_frame` false; the bases and
+`emission_exposure` 1; `prev_epoch_tag` 0xFFFFFFFF; `dirty_margin` 0.01; `radiance_clamp` 60000; `reval_growth` 10;
+`reval_floor` 0.1; `compat_scale` 0.12615662; `compat_stop_score` 0.5; `sky_epoch_low` 0.8; `sky_epoch_high` 1.25;
+`sky_blur_lod` 2; `pre_frame` false; the bases and
 `view_to_previous_clip` identity, the anchor offsets zero and the jitter shifts zero. They do not
-carry `screen_size`, `trace_scale`, the `reval_*` fields, the `shade_*` fields, `sky_reread`, `tile_skip` or `pack_m`,
+carry `screen_size`, `trace_scale`, `reval_cut_m`, `reval_threshold`, `reval_share_denom`, the `shade_*` fields, `sky_reread`, `tile_skip` or `pack_m`,
 so a replayed case runs with their defaults (and `run_case` has no rays anyway). A key absent from the dictionary
 keeps the `RestirFrameParams` default, whose mode is B1, not the setting default B2.
 
@@ -717,7 +728,7 @@ test option on); a failed allocation returns only `error` ("allocation failed").
 `clock`, `n_valid`, `cut_rej`, `had_history`, `hp_eq_px`, `expected_phase0`, `phase0_start`, `refused_off`, `s_max`,
 `n_over`, `texels` and `starts` (the last four are -1 and empty when the dump did not run). `run_case` applies the
 `neighbor_selection`, `compat_k` (1 to 64), `compat_gate` (0 to 2) and `compat_early_stop` test options over the
-case's params (`modules/gi_restir/restir_harness.cpp:329-348`). `capture_final` copies the final
+case's params (`modules/gi_restir/restir_harness.cpp:312-331`). `capture_final` copies the final
 reservoir layers, geo_pos, geo_nrm, radiance, coverage, debug and info after the next frame's final pass.
 
 `gi/deterministic` makes `rs_rand` use frame 0 and seed 0x1234567 (`rs_rand_frame` keeps the real frame) and turns
@@ -739,43 +750,43 @@ pass_index 1 for the first spatial pass.
 - `pixel_detail` (false): sets `F_PROBE_PIXELS`.
 - `sky` (a colour, default white; also sets `constant_sky`, default false) and `real_sky` (`constant_sky` = not
   `real_sky`); `sky` always feeds `test_sky`. `constant_sky` stops the shade set's exposure from replacing
-  `emission_exposure` and, with the own sampler, turns the real sky off (`restir_gi.cpp:590,695-708`).
+  `emission_exposure` and, with the own sampler, turns the real sky off (`restir_gi.cpp:549,654-667`).
 - `d_min`, `cos_min`, `jac_max`, `w_clamp` and `vis_fail_limit` (all -1, unset): `d_min` and `cos_min` apply from 0,
-  `vis_fail_limit` from 0, `jac_max` and `w_clamp` only when above 0 (`restir_gi.cpp:714-728`); `w_clamp` overrides
+  `vis_fail_limit` from 0, `jac_max` and `w_clamp` only when above 0 (`restir_gi.cpp:673-687`); `w_clamp` overrides
   the W clamp factor.
 - `accumulate_from` and `accumulate_to`: the record-index window for `get_pixel_sums`.
 - `seed_offset`: added to `rtgi/seed`. `rearm_dump`: sets `dumped` false so `gi/dump_path` writes again.
 - `fold_tag` (0), `release_once` (false), `fold_dump` (false; true also sets `readback`; false clears
   `fold_lineage`) and `fold_lineage` (false; true without `fold_dump` stays false and records the refusal
   `RESTIR_FOLD_LINEAGE_REFUSAL_NO_DUMP`).
-- `freeze`: with a state that has history, `resample` returns the stored radiance and coverage (and debug when a debug
-  view is active) and a record with `sample_count` = min(`frames_since_cut`, clamped `gi/n_target`) and validity 1,
+- `freeze`: with a state that has history, `resample` returns the stored radiance and coverage
   before it builds `RestirFrameParams` and before `frames++`. Only when `gi/denoise` is r2 does it run `run_pack`,
   against the flag word last uploaded (`resources.ubo[3]`, from the last real frame) with this frame's tile texture, so
   a tile setting changed during a freeze takes effect after it ends. Its `history_cap` is the clamped
   `gi/denoise_history_cap` without the ramp, and `gi/fold_k` is not read, so a Fold change takes effect and cuts on the
-  first frame after the freeze (`modules/gi_restir/restir_gi.cpp:457-493`).
+  first frame after the freeze (`modules/gi_restir/restir_gi.cpp:425-455`).
 
 `capture`, `capture_final`, `dumped` and `dump_after` (24) are set by other calls or by the backend; `capture_final`
-is set by `request_final_capture`. `force_software` is declared in `restir_test.h` and never set or read.
+is set by `request_final_capture`.
 
 ### Backend gates (`modules/gi_restir/restir_gi.cpp`, `RestirGiBackend::begin_frame`)
 
 `begin_frame` refuses a frame (returns false, raises the backend's own `refusals`, sets `refusal_reason`; the status
-reports them as `refuses`, `refusals` and `refusal_reason`, `restir_gi.cpp:990-993`) at the first failing check, in
-this order: no buffers; the candidate layout version differs; missing inputs (the trace size is not positive, or a
+reports them as `refuses`, `refusals` and `refusal_reason`, `restir_gi.cpp:935-938`) at the first failing check, in
+this order: no buffers; missing inputs (the trace size is not positive, or a
 candidate or geometry texture is null); the selected shader variant did not compile (the hardware variant has its own
 wording and also marks the ray scene's hardware path refused, `RayScene::refuse_hardware`); `gi/own_sampler` is on
 without a ready ray scene ("own sampler needs the ray scene"); with `gi/event_reshade` on, the four event refusals in
-the order under "Events (gi/event_reshade, default off)" (`restir_gi.cpp:395-413`); allocation failed. The
+the order under "Events (gi/event_reshade, default off)" (`restir_gi.cpp:373-384`); allocation failed. The
 `release_once` test option is consumed after the event checks and before the state is allocated (see "Run counters",
 release_once). `refusal_reason` is cleared at the start of each `begin_frame`, which then calls `_check_choices`
-(see Settings) before the first check (`restir_gi.cpp:362-429`).
+(see Settings) before the first check (`restir_gi.cpp:353-399`).
 
 ### Status dictionary (`modules/gi_restir/restir_gi.cpp`, `RestirGiBackend::get_status`)
 
 Top-level keys not named elsewhere in these notes: `ready` (a frame has run), `states` (the count of per-view states),
-`hw_variant_compiled`, `invalid_choice` (see Settings), `lo_clamp` (60000), `mode` (int), `denoise`, `frame`,
+`hw_variant_compiled`, `invalid_choice` (see Settings), `lo_clamp` (`gi/radiance_clamp` as applied, default 60000),
+`mode` (int), `denoise`, `frame`,
 `history_used`, `own_sampler`, `rays`, `hardware`, `spatial_neighbors`, `spatial_passes`, `m_temporal_cap` and `m_max`
 (as applied after the rate, ramp and light caps), `cut` (bool), `history_cap`, `reval_active`, `reval_frames` (the
 state's re-validation frame count), `trace_size`, `stats_valid`, `debug_valid`, and `allocations` (an array of name,
@@ -787,7 +798,7 @@ the raw counts `geometry`, `output_pixels`, `m_sum`, `clamped`, `blocked`, `had_
 `shift_tested`, `truncated_distance`, `truncated_cos`, `truncated_jacobian`, `energy_all`, `energy_truncated`,
 `rehit_miss`, `rehit_mismatch`, `reshaded`, `reshade_overflow`, `reshade_edge_stale`, `event_capped`, the `fold_*`
 counts, the `compat_*` counts, and `temporal_reject` and `spatial_reject` (16-entry arrays counted from info words
-with `INFO_VALID`) (`restir_gi.cpp:989-1177`).
+with `INFO_VALID`) (`restir_gi.cpp:934-1124`).
 
 ## Invalidation and R2 integration (`modules/gi_restir/restir_epochs.cpp`)
 
@@ -829,7 +840,7 @@ module calls `GIEpochs::get_dirty_boxes(stored scene epoch)` through `dirty_sour
 `RESTIR_CUT_MAX` is 10, so `cut_counts` holds one slot per reason value, including `RESTIR_CUT_NONE`. A
 `RESTIR_CUT_BACKEND` cut with an unchanged hardware flag also increments `sky_reread_cuts`.
 
-**Probe planner** (`RestirProbe::plan_epochs`, `modules/gi_restir/restir_probe.cpp:479-528`). `plan_epochs(case)` runs
+**Probe planner** (`RestirProbe::plan_epochs`, `modules/gi_restir/restir_probe.cpp:473-522`). `plan_epochs(case)` runs
 `restir_plan_epochs` on the CPU with no rendering device. Case keys (defaults): `current` and `previous` snapshots
 (`scene`, `light`, `sky`, `origin`, `world`, each 1), `have_history` (true), `have_epochs` (true), `history_cut`,
 `hardware_changed` and `fold_changed` (false), `anchor`, `light_soft_frames` (0), `m_light_frames` (4), `have_feed`
@@ -846,9 +857,8 @@ moves the scene epoch. A hardware-usability flip is a change the feed sees and t
 with changes needs an epoch step of its own.
 
 **State and status** (`restir_gi.h`, `RestirGiBackend::get_status`). Per state: `cut_counts[reason]`,
-`dirty_frames` (uncut frames that had boxes), `history_cuts`, `sky_reread_cuts`, `frames_since_cut`. `get_status`
-sums `cut_counts` over all states and reports `cut_counts`, `cut_reason`, `dirty_boxes` (0 when the frame did not
-use history), `dirty_feed`, `scene_changed`, `light_changed`, `sky_changed`, `origin_changed`, `world_changed`,
+`sky_reread_cuts`, `frames_since_cut`. `get_status` sums `cut_counts` over all states and reports `cut_counts`,
+`cut_reason`, `dirty_boxes` (0 when the frame did not use history), `dirty_feed`, `scene_changed`, `light_changed`, `sky_changed`, `origin_changed`, `world_changed`,
 `light_cap` and `light_frames_left`.
 
 **What moves a box** (`RayScene::_feed_observe`, `RayScene::feed_surface_state` in `ray_scene.h`). Per instance the
@@ -870,7 +880,7 @@ sample (`xs` holds the direction); with no valid stored sample it is a single po
   receiver, zeroes the history candidate's `a_at_c`. The pixel keeps `INFO_HAD_HISTORY`.
 - The spatial pass has no dirty test: `rs_dirty_hit` returns false outside `MODE_TEMPORAL`.
 - Fold-dump variants: the fold-dump and lineage shaders (`RS_FOLD_DUMP`, with `RS_FOLD_LINEAGE`) are also built
-  with `MODE_TEMPORAL` (`restir_gi_core.cpp:520-528`) and carry the same test; when they replace the temporal
+  with `MODE_TEMPORAL` (`restir_gi_core.cpp:494-502`) and carry the same test; when they replace the temporal
   dispatch is under "Fold dump and self-test".
 - Epoch tag: a stored sample whose epoch tag differs from `prev_epoch_tag` is rejected with code 5 (`REJ_EPOCH`).
   `epoch_tag` (`restir_gi.cpp`) packs the low byte of the scene, light and origin epochs (bits 0, 8, 16), and
@@ -940,15 +950,15 @@ tag with `ray_scene_hash(pixel.y * 65537 + pixel.x + frame * 6271)`, where `pixe
 trace_scale / 2, screen_size - 1)` (`rtgi_anchor_pixel`, `rtgi_shade_key`) and `frame` is R2's `frame_index` (both
 UBOs take it from the same `FrameInputs`). With replay and `gi/own_sampler` on, SOURCE writes its own seed
 `ray_scene_hash(px.y * 65537 + px.x + frame * 6271)` into the candidate tag, traces with that same seed, and the
-import keeps the tag. `RestirFrameUBO` (size under "Storage and frame buffers", `restir_gi_core.cpp:106`) has its
+import keeps the tag. `RestirFrameUBO` (size under "Storage and frame buffers", `restir_gi_core.cpp:114`) has its
 `screen_size` (ivec2), `trace_scale` and `replay_pad` words in one `uvec4` row that `restir_gi_inc.glsl` must mirror.
 
 **Shared shade.** `restir_gi.glsl` includes `restir_core_ray_scene_hit_shade_inc.glsl`, which includes
 `ray_scene_hit_shade_inc.glsl`, with four macros: three are bound to globals that `rs_shade_setup()` fills. Max
 distance, bounce energy and emission exposure take the DDGI values (`ddgi.max_distance`, `rf.shade_bounce_energy`,
 `rf.shade_exposure`) when DDGI shading is on and the own sampler is off, else `rf.sky_distance`, 0 and
-`rf.emission_exposure`. Max radiance is `RS_LO_CLAMP` (60000, the same value as `DDGI_MAX_RADIANCE`). The
-non-replay paths keep their own shading (`rs_fresh_lo` and SOURCE's inline shade).
+`rf.emission_exposure`. Max radiance is `RS_LO_CLAMP` (`rf.radiance_clamp`, default 60000, the value of `DDGI_MAX_RADIANCE`).
+The non-replay paths keep their own shading (`rs_fresh_lo` and SOURCE's inline shade).
 
 **VALIDATE in replay mode** (`rs_validate_replay`, `rs_replay_rehit`, `rs_replay_shade`). A short re-hit runs from
 `x_s + n_s * eps` along `-n_s` for `2 * eps`, with `eps = 0.02 + 0.002 * d` (`d` from the previous receiver) and the
@@ -956,15 +966,15 @@ stored seed. The hit counts only when `|t - eps| < 0.5 * eps` and its facing nor
 sample is then shaded from the previous receiver with `t = |x_s - o_prev|` and the stored seed, and the re-shaded
 Lo, the re-hit's facing normal and the backface bit (shade alpha below 0) are written. A miss or a mismatch writes
 Lo = 0, keeps M and the flags, and counts as `PS_REHIT_MISS` or `PS_REHIT_MISMATCH` (pass stats row 3, slots 16 and
-17). A non-finite re-shade writes Lo = 0 uncounted. This path has no 10x brightness limit and no change cut, and it
+17). A non-finite re-shade writes Lo = 0 uncounted. This path has no growth limit and no change cut, and it
 leaves sky samples alone. The share selection uses `rs_rand_frame`, which keeps the frame in deterministic mode.
 
 **FINAL with `gi/fresh_lo` in replay mode** traces from the receiver with the stored seed of a non-sky sample and
 shades through the shared shade (`rs_fresh_lo_replay`). `gi/fresh_lo` is ignored, with a warning, unless the own
-sampler or the DDGI shading inputs are present (`restir_gi.cpp:585-588`).
+sampler or the DDGI shading inputs are present (`restir_gi.cpp:544-547`).
 
 **Pass stats.** Layout and rows (`PS_STRIDE` 32, `PS_ROW_VALIDATE` = 3) are under "Statistics"
-(`modules/gi_restir/restir_gi_core.cpp:109-110`).
+(`modules/gi_restir/restir_gi_core.cpp:117-118`).
 
 **Setting timing.** Set `gi/replay_seed` before a run. Changing it mid-run cuts no history: samples stored before
 the change carry R2's pixel-and-frame tag, which a replay re-shade reads as a seed, so they use other draws until
@@ -1022,14 +1032,14 @@ frame flags; where the macro is undefined the key is the light index and the pic
   its soft cut and restart spheres in its temporal pass (`rtgi.glsl:437-446`) only while
   `RTGI_FRAME_FLAG_MODULE_OUTPUT` is clear. When RTGI skips its restarts and which module output is requested are
   under "R2 side: module output, route coverage, tile memory", Hook fields
-  (`modules/gi_restir/restir_events.cpp:313-323`).
+  (`modules/gi_restir/restir_events.cpp:312-322`).
 - `RestirEventsUBO` (`modules/gi_restir/restir_events.h`) matches the std140 block `RestirEvents` in
   `modules/gi_restir/shaders/restir_gi_inc.glsl`: set 0 binding 26, 2368 bytes. The shader declares it for
   TEMPORAL, SPATIAL, VALIDATE and SKY_EPOCH. TEMPORAL and SPATIAL bind it every frame, VALIDATE when it
   dispatches, SKY_EPOCH when it runs. `RestirGiCore::run_frame` (`restir_gi_core.cpp`) writes zeros when
   F_EVENTS is clear.
-- `counts` = (cap-test loop bound, event count, `event_m_cap`, `jump_m_cap`). `restir_plan_events` writes the
-  event count into both counts[0] and counts[1]; the first-fire count is `RestirEventPlan::capping` (status
+- `counts` = (event count, unused and always 0, `event_m_cap`, `jump_m_cap`). `restir_plan_events` writes the
+  event count into counts[0]; the first-fire count is `RestirEventPlan::capping` (status
   `event_capping_spheres`). Only events are packed, so slots past the count are unread.
 - `params` = (`gi/event_reach_scale`, `gi/event_solid_angle`, 0, 0): ranges 0..64 (default 2.0) and
   0..12.566371 (default 0.05). `gates` = (quiet frames, budget B, jump frame 0 or 1, VALIDATE selection:
@@ -1038,7 +1048,7 @@ frame flags; where the macro is undefined the key is the light index and the pic
   `[i >> 2][i & 3]`. Slots after the events are unused: the planner's dirty boxes go to the dirty UBO and
   the shader's own `rs_dirty_hit`, not here. `held[64]` and `hold[0]` belong to the SPATIAL hold below.
 - The frame UBO (`RestirFrameUBO`, block `RestirFrame`; size under "Storage and frame buffers",
-  `restir_gi_core.cpp:106`). F_EVENTS is flags bit 24. Bit 19 is Fold's F_PRE_FRAME and bit 22 is B2k's F_KEEP_M. The
+  `restir_gi_core.cpp:114`). F_EVENTS is flags bit 24. Bit 19 is Fold's F_PRE_FRAME and bit 22 is B2k's F_KEEP_M. The
   jump frame is `gates[2]`, not a flag.
 - A captured case carries the UBO as "events" when F_EVENTS is set (`modules/gi_restir/restir_harness.cpp`).
   The loader accepts only a blob of exactly `sizeof(RestirEventsUBO)`.
@@ -1087,7 +1097,7 @@ frame flags; where the macro is undefined the key is the light index and the pic
   is r2. With `gi/event_reshade` off the event UBO is zero, F_EVENTS is clear and no count dispatch runs,
   so every pass takes its non-event branch.
 - With a fold dump buffer the TEMPORAL dispatch is replaced by the dump or lineage build; see "Fold dump and
-  self-test" (`modules/gi_restir/restir_gi_core.cpp:982-1010`).
+  self-test" (`modules/gi_restir/restir_gi_core.cpp:937-965`).
 - Status always (`restir_gi.cpp`): `event_reshade`, `events_read` (delivered this frame, also when events
   are off), `events_lost` (this frame's missed events), `jump_frame`, `event_capping_spheres`,
   `event_validate` and `reshade_budget_pixels`. Backend-lifetime totals: `event_frames_total` (frames with
@@ -1124,7 +1134,7 @@ packs it.
   reach, the second event refreshes the first.
 - The ring is cleared when the hold is off, the event path is off, the frame has no history (a cut, no
   ready ray scene, or the history test option off), or the frame is a jump frame; with the hold on, the
-  frame's own first fires are then added (`restir_gi.cpp:662-671`). `restir_hold_update` with `hold_frames` 0
+  frame's own first fires are then added (`restir_gi.cpp:621-630`). `restir_hold_update` with `hold_frames` 0
   also clears it, but the setting cannot be 0.
 - `restir_hold_pack` writes `held[i]` = (centre - anchor, reach) and `hold[0]` = count. F_SPATIAL_HOLD
   (bit 25) is set when the hold is on and the ring is not empty. `rs_hold_caps`
@@ -1152,7 +1162,7 @@ keep-M.
 - `gi/mode` is B1, B2, B2k or U1 (default B2). B2k is `RESTIR_MODE_B2K` (3). `_upload` writes
   `mode_code = mode | (F_FRESH_LO set ? 4 : 0)`, so B2k reads 3 or 7; only debug view 63 reads it.
 - B2k is B2's flags, F_VIS_REUSE included, plus F_KEEP_M (bit 22). `_upload` sets it from the mode (see Fold,
-  `_upload`, `modules/gi_restir/restir_gi_core.cpp:609`).
+  `_upload`, `modules/gi_restir/restir_gi_core.cpp:563`).
 - A `Cand` has a `keep` bit. `rs_combine` adds M to the total when a candidate is on or kept; the weight
   loop skips anything not on, so a kept candidate contributes M with zero weight. This biases the result
   low, never bright.
@@ -1175,7 +1185,7 @@ keep-M.
 does the re-read and `modules/gi_restir/shaders/restir_gi_inc.glsl` declares its bindings.
 
 - F_SKY_REREAD is flags bit 26. `_upload` (`restir_gi_core.cpp`) sets it from `RestirFrameParams::sky_reread` alone
-  (see Fold, `_upload`, `modules/gi_restir/restir_gi_core.cpp:609`). `resample` sets the parameter only when
+  (see Fold, `_upload`, `modules/gi_restir/restir_gi_core.cpp:563`). `resample` sets the parameter only when
   `gi/sky_reread` (default false) is on, a ray scene is ready, the shading inputs and DDGI UBO are valid, and the ray
   variant built its sky modes (`RestirGiCore::is_sky_valid`). `run_frame` repeats the test (VARIANT_NONE, no DDGI UBO,
   `sky_valid` false), so a run without rays never runs the sky path. With the own sampler and the constant test sky
@@ -1191,13 +1201,13 @@ does the re-read and `modules/gi_restir/shaders/restir_gi_inc.glsl` declares its
   with the flag set, a sky sample whose visibility ray lands keeps its stored Lo (zero) and M with no
   change cut; a blocked sky sample loses M as before. The replay and event VALIDATE paths already reject
   sky samples.
-- `rs_sky_radiance` (`shaders/restir_gi.glsl:73-98`) returns min(`test_sky`, 60000) when `F_REAL_SKY` is clear.
+- `rs_sky_radiance` (`shaders/restir_gi.glsl:73-98`) returns min(`test_sky`, `RS_LO_CLAMP`) when `F_REAL_SKY` is clear.
   Otherwise `rf.shade_sky_flags` decides: `RS_SKY_SKY` (2) rotates the direction by the quaternion (`shade_sky.xyz`, w
   = plus or minus sqrt(1 - |xyz|^2), the sign from `RS_SKY_SIGN` 4) and reads `sky_radiance` with `textureLod` at lod
-  2 and `vec3_to_oct_with_border`, times `shade_sky_energy`; `RS_SKY_COLOR` (1) returns `shade_sky *
-  shade_sky_energy`; neither gives 0; the result is clamped to 60000. The fields come from `RtgiShadeInputs`
+  `rf.sky_blur_lod` (default 2) and `vec3_to_oct_with_border`, times `shade_sky_energy`; `RS_SKY_COLOR` (1) returns `shade_sky *
+  shade_sky_energy`; neither gives 0; the result is clamped to `RS_LO_CLAMP`. The fields come from `RtgiShadeInputs`
   (`sky_color_or_orientation`, `sky_flags`, `sky_border_size`, `sky_energy`), copied in `resample` only when `shade`
-  is valid (`modules/gi_restir/restir_gi.cpp:695-706`).
+  is valid (`modules/gi_restir/restir_gi.cpp:654-665`).
 - Six sky modes exist in `restir_gi.glsl`: PASS_TEMPORAL_SKY, PASS_SPATIAL_SKY, PASS_SPATIAL_COMPAT_SKY,
   PASS_SPATIAL_WIDE_SKY and PASS_SPATIAL_COMPAT_WIDE_SKY (the plain mode's defines plus SKY_REREAD), and
   PASS_SKY_EPOCH (MODE_SKY_EPOCH). PassMode values are 11 to 16. With RESTIR_RAYS and SKY_REREAD, the
@@ -1213,7 +1223,7 @@ does the re-read and `modules/gi_restir/shaders/restir_gi_inc.glsl` declares its
   binding 7 `sky_radiance` (texture2DArray under USE_RADIANCE_OCTMAP_ARRAY, texture2D otherwise) and
   binding 8 `sky_sampler`, and includes `restir_core_ddgi_inc.glsl` exactly once. The sky modes need that
   include for the DDGI UBO at set 2 binding 0 and for `vec3_to_oct_with_border`. `_dispatch` binds set 2
-  for the sky modes through `_bind_shade`, as for FINAL, so TEMPORAL, SPATIAL and FINAL of one frame use
+  for the sky modes through `_shade_set`, as for FINAL, so TEMPORAL, SPATIAL and FINAL of one frame use
   the same sky texture and sampler. `run_frame` chooses the sky twin of TEMPORAL and of the SPATIAL mode it
   would run (`_sky_twin`).
 - The sky epoch is a 32-byte storage buffer (`RestirSkyEpoch` in `restir_events.h`: luma, epochs, jump,
@@ -1224,22 +1234,22 @@ does the re-read and `modules/gi_restir/shaders/restir_gi_inc.glsl` declares its
   TEMPORAL. It binds set 0 only: binding 0 the frame UBO, 26 the event UBO, 29 the epoch buffer, 30 the sky
   texture and 31 a linear mipmapped sampler. MODE_SKY_EPOCH undefines RESTIR_RAYS, so it declares no set 1
   or 2 and `_dispatch` binds neither.
-- The mean luma (`restir_gi.glsl`, MODE_SKY_EPOCH): with F_REAL_SKY clear, `luma(min(test_sky, 60000))`
-  (`RS_LO_CLAMP`). With a sky texture, the mean over the lowest mip (`textureQueryLevels - 1`, layer 0 in
-  the array form) of `luma(min(texel * sky_energy, 60000))`; a mip larger than 64 texels on either axis is
+- The mean luma (`restir_gi.glsl`, MODE_SKY_EPOCH): with F_REAL_SKY clear, `luma(min(test_sky, RS_LO_CLAMP))`. With a sky texture, the mean over the lowest mip (`textureQueryLevels - 1`, layer 0 in
+  the array form) of `luma(min(texel * sky_energy, RS_LO_CLAMP))`; a mip larger than 64 texels on either axis is
   strided to at most 64 rows of at most 64 texels. Invocation i sums row i into a shared slot with its
   texel count, then a fixed tree (halves 32 down to 1, a barrier after each) adds slot i + half into slot
   i; invocation 0 divides. The order of every addition is fixed. The texels are read directly, so the
-  sky's rotation does not change the mean. With a constant colour, `luma(min(colour * energy, 60000))`;
-  otherwise 0. This mip is not the one `rs_sky_radiance` samples (`textureLod` at lod 2), so the two differ
+  sky's rotation does not change the mean. With a constant colour, `luma(min(colour * energy, RS_LO_CLAMP))`;
+  otherwise 0. This mip is not the one `rs_sky_radiance` samples (`textureLod` at `rf.sky_blur_lod`), so the two differ
   in absolute luma; the epoch rule compares ratios only.
 - `restir_sky_epoch_step` (`restir_events.cpp`) is the CPU statement of the rule that invocation 0 of
   MODE_SKY_EPOCH mirrors. It clears the jump word, ignores a NaN or infinite luma, and when there is no
   epoch yet or no history this frame (F_HISTORY clear: first frame, a cut, or the history test off) stores
   the luma and increments epochs without a jump. Otherwise it jumps when the luma is below 0.8 or above
-  1.25 times the stored epoch luma (`RESTIR_SKY_EPOCH_LOW`, `RESTIR_SKY_EPOCH_HIGH`), stores the luma, and
+  1.25 times the stored epoch luma (`RESTIR_SKY_EPOCH_LOW`, `RESTIR_SKY_EPOCH_HIGH`, the defaults of
+  `gi/sky_epoch_low` and `gi/sky_epoch_high`, which the shader reads from `rf`), stores the luma, and
   increments epochs and jumps; it also increments capped when the jump caps. The comparisons multiply, so
-  0.8 and 1.25 are inside and an epoch at luma 0 jumps on any positive luma. epochs counts the first frame,
+  a luma exactly at either threshold is inside and an epoch at luma 0 jumps on any positive luma. epochs counts the first frame,
   every frame with F_HISTORY clear and every jump. The epoch anchor is the luma of the last epoch, not a
   running mean; it moves only at a jump or a cut.
 - TEMPORAL's sky mode reads binding 29 (readonly) and treats the jump word like the CPU jump: in
@@ -1254,13 +1264,13 @@ does the re-read and `modules/gi_restir/shaders/restir_gi_inc.glsl` declares its
 - One sky per frame: `run_frame` never re-reads the sky. The epoch pass, TEMPORAL, SPATIAL and FINAL all
   bind the RID from `RestirGiInputs`, or the white default.
 - Switching is a history cut. `resample` sets the epoch planner's `hardware_changed` when the hardware flag
-  or the effective flag differs from the last frame's (`RestirGiState::sky_reread`, `restir_gi.cpp:502`);
+  or the effective flag differs from the last frame's (`RestirGiState::sky_reread`, `restir_gi.cpp:464`);
   the cut is filed under RESTIR_CUT_BACKEND (a first frame or a requested cut takes precedence,
   `restir_epochs.cpp`), and `sky_reread_cuts` counts the backend cuts that had the hardware unchanged. The
   cut clears F_HISTORY for the frame, so the epoch pass starts a new epoch at the current luma when the
   flag returns. Without the cut, a sky sample stored under the flag has Lo 0, and its M would still enter
   the combine and darken the result.
-- Cost: one `textureLod` at lod 2 per sky technique evaluated in TEMPORAL and SPATIAL and one per sky pixel
+- Cost: one `textureLod` at `rf.sky_blur_lod` per sky technique evaluated in TEMPORAL and SPATIAL and one per sky pixel
   with W > 0 in FINAL; one 64-invocation epoch pass; 32 bytes of buffer.
 - While the setting stays off, status is "off", bit 26 is clear, no epoch pass runs, no epoch buffer is made
   (one made earlier stays allocated) and the effective flag causes no cut; TEMPORAL and SPATIAL run the
@@ -1291,7 +1301,7 @@ Source: `modules/gi_restir/restir_gi_core.h`, `restir_gi_core.cpp` (`RestirGiCor
 - `RESTIR_F_TILE_SKIP` is bit 27 (134217728) and `RESTIR_F_PACK_M` bit 28 (268435456); the include repeats them as
   `F_TILE_SKIP` and `F_PACK_M`. Bit 19 (524288, `RESTIR_F_PRE_FRAME`) is Fold's pre-frame flag.
 - `_upload` rebuilds bits 22, 26, 27 and 28 from the frame params and masks them out of the caller's flags (see Fold,
-  `restir_fold_words`; `modules/gi_restir/restir_gi_core.cpp:609`), so a harness capture cannot set them.
+  `restir_fold_words`; `modules/gi_restir/restir_gi_core.cpp:563`), so a harness capture cannot set them.
 - The tile texture is R2's `RB_RTGI_TILES` (scope `RB_SCOPE_RTGI`, `rtgi.cpp`): R32_UINT, sampling and storage usage,
   one texel per 8x8 tile (`tile_count = ceil(trace_size / TILE_SIZE)`). CLASSIFY writes it as a storage image.
 - The module declares it as `layout(set = 0, binding = 27) uniform utexture2D rs_tiles`, only for `MODE_TEMPORAL`,
@@ -1299,7 +1309,7 @@ Source: `modules/gi_restir/restir_gi_core.h`, `restir_gi_core.cpp` (`RestirGiCor
   SOURCE, CAPTURE and SKY_EPOCH neither declare nor read it.
 - The RID arrives through `RtgiFrameInputs::tile_texture` (`gi_module_hooks.h`); `rtgi.cpp` fills it with the RID it
   binds to CLASSIFY (binding 6, storage image) and the trace (binding 3). `restir_gi_core.cpp` binds it at set 0
-  binding 27 for TEMPORAL, SPATIAL, FINAL and PACK (`restir_gi_core.cpp:978,1027,1051,1070`). `restir_gi.cpp:745`
+  binding 27 for TEMPORAL, SPATIAL, FINAL and PACK (`restir_gi_core.cpp:933,982,1006,1025`). `restir_gi.cpp:704`
   passes it to the core only when `params.tile_skip` is set.
 - A tile is traced when bit 0 (`RTGI_TILE_TRACE`) of its texel is set. `ddgi_trace.glsl` (RTGI mode) treats a pixel as
   a trace candidate when that bit is set and the pixel has depth.
@@ -1319,7 +1329,7 @@ Source: `modules/gi_restir/shaders/restir_gi_inc.glsl` (`rs_tile_traced`), `rest
 - With no texture in the inputs, `_tile_texture` lazily creates a 1x1 R32_UINT holding `RESTIR_TILE_TRACE` (sampling
   and update usage); `free()` releases it. The clamp makes a read of it mean "traced" everywhere, so bit 27 with no
   texture runs as if every tile were traced.
-- The frozen-frame PACK is described under "Test options" (`modules/gi_restir/restir_gi.cpp:457-487`).
+- The frozen-frame PACK is described under "Test options" (`modules/gi_restir/restir_gi.cpp:425-449`).
 
 ### The tile plan
 Source: `modules/gi_restir/restir_events.cpp` (`restir_plan_tiles`, `restir_tile_state_name`), `restir_gi.cpp`,
@@ -1328,8 +1338,8 @@ Source: `modules/gi_restir/restir_events.cpp` (`restir_plan_tiles`, `restir_tile
 - false, with a texture of `ceil(trace/8)` texels in both axes: `RESTIR_TILES_SKIP` ("skip").
 - false, with no texture, a zero trace axis, or any other texture size: `RESTIR_TILES_UNAVAILABLE` ("unavailable").
   The module then covers every tile while R2 traces only its own tiles.
-- `restir_gi.cpp:606` sets `params.tile_skip` only for SKIP; `run_frame` (`restir_gi_core.cpp:903`) clears it if the
-  inputs carry no texture. The harness (`restir_harness.cpp:375`) passes none.
+- `restir_gi.cpp:565` sets `params.tile_skip` only for SKIP; `run_frame` (`restir_gi_core.cpp:861`) clears it if the
+  inputs carry no texture. The harness (`restir_harness.cpp:358`) passes none.
 
 ### What an untraced group does
 Source: `modules/gi_restir/shaders/restir_gi.glsl`.
@@ -1369,8 +1379,8 @@ Source: `modules/gi_restir/restir_gi.cpp`, `restir_gi_core.cpp`.
 - Neither `gi/trace_all_tiles` nor `gi/confidence` takes part in the history-cut plan, so changing either does not cut
   history. Turning the skip on empties the untraced tiles that same frame; turning it off lets them fill from the
   candidates.
-- FINAL rows of untraced groups are 0, so with readback on, `geometry`, `output_pixels`, `m_sum` and the record's
-  `sample_count` (mean M) and validity cover traced pixels only.
+- FINAL rows of untraced groups are 0, so with readback on, `geometry`, `output_pixels`, `m_sum` cover traced
+  pixels only.
 
 ### M in PACK and `gi/confidence`
 Source: `modules/gi_restir/restir_gi.cpp`, `shaders/restir_gi.glsl` (`MODE_PACK`), `restir_events.cpp`
@@ -1385,7 +1395,7 @@ Source: `modules/gi_restir/restir_gi.cpp`, `shaders/restir_gi.glsl` (`MODE_PACK`
   THINNED and NO_CANDIDATE pixels keep 0.
 - R2 consumes the word: TEMPORAL mixes `min(M / n_target, 1)` into `moments.w` and COMPOSE uses it for route coverage
   (next section).
-- PACK runs only when `gi/denoise` is `r2` (`restir_gi.cpp:778-781`; the frozen path at 452-457 as well).
+- PACK runs only when `gi/denoise` is `r2` (`restir_gi.cpp:737-740`; the frozen path at 429-434 as well).
 - `restir_pack_word` mirrors PACK's decisions on the CPU. Test cases "[RestirEvents] Tile plan ..." and
   "[RestirEvents] Pack word ..." in `modules/gi_restir/tests/test_restir_events.h` cover the plan and the word.
 
@@ -1419,7 +1429,7 @@ Source: `servers/rendering/renderer_rd/environment/gi_module_hooks.h` (`RtgiResa
   count to `soft_cut_count`. With events off a light change acts through the Light epoch cap (see "Invalidation and R2
   integration"), which lowers M and so the M term of coverage.
 - The frozen-frame test option reuses the last real frame's route; see "Test options"
-  (`modules/gi_restir/restir_gi.cpp:474`).
+  (`modules/gi_restir/restir_gi.cpp:436`).
 
 ### Flag 256 in core and TEMPORAL
 Source: `rtgi.h` (`FRAME_FLAG_MODULE_OUTPUT`), `rtgi.cpp` (`RtgiPass`), `rtgi.glsl` (`MODE_TEMPORAL`).
@@ -1441,7 +1451,7 @@ Source: `rtgi.h` (`FRAME_FLAG_MODULE_OUTPUT`), `rtgi.cpp` (`RtgiPass`), `rtgi.gl
 ### Route form and marked tiles
 Source: `rtgi.cpp` (`RtgiPass`), `rtgi.glsl` (`MODE_COMPOSE`, `rtgi_route_confidence`).
 - `RtgiPass` writes T_r (`settings.history_cap`; see "Backend contracts",
-  `servers/rendering/renderer_rd/environment/rtgi.cpp:680-682`) into `FrameUBO.target_samples` and `n_target` into the
+  `servers/rendering/renderer_rd/environment/rtgi.cpp:676-678`) into `FrameUBO.target_samples` and `n_target` into the
   UBO word, only when flag 256 is set and `n_target` is above 0. Plain R2 keeps `target_samples`. The published R2
   record's confidence still divides by `rtgi/target_samples`, and its sample count is `min(frames_since_cut,
   history_cap)`.
@@ -1576,7 +1586,7 @@ to 15.
 
 MODE_VALIDATE (`restir_gi.glsl`) re-stores the flags in the high half of layer 1's `y` on every path that keeps the
 sample, and clears them together with M only for a sample whose ray no longer lands, which then reads as a start. With
-spatial feedback off the set routing is under "Pass chain" (`modules/gi_restir/restir_gi_core.cpp:1055`); only the
+spatial feedback off the set routing is under "Pass chain" (`modules/gi_restir/restir_gi_core.cpp:1010`); only the
 Fold write decides those bits there.
 
 ### TEMPORAL order and rule 1 — `modules/gi_restir/shaders/restir_gi.glsl`
@@ -1628,7 +1638,7 @@ streams are C2 and C2 + 1.
 
 Other `rtgi_rng_state` callers and the doctest that keeps C2 and C2 + 1 at least 5 from their seed sums (default seed
 1 and the `F_DETERMINISTIC` seed only) are under "Run counters", Seeds and CPU mirrors
-(`modules/gi_restir/restir_fold_mirror.cpp:83-102`, `modules/gi_restir/tests/test_restir_fold.h:649`); `resample` sets
+(`modules/gi_restir/restir_fold_mirror.cpp:83-102`, `modules/gi_restir/tests/test_restir_fold_rows.h:59`); `resample` sets
 `rf.seed` from `rendering/global_illumination/rtgi/seed` (default 1) plus the test seed offset.
 
 ### Clock, pre-frame and cuts — `modules/gi_restir/restir_gi.cpp`
@@ -1660,7 +1670,7 @@ budget revalidation and a ready ray scene; `gi/revalidate_period` is clamped to 
 `restir_fold_cut(previous, current)` cuts when `k_eff` differs, and when either frame has a nonzero K and the mode or
 feedback differs; with K 0 on both frames it does not cut. `resample` applies it only when the state has history, so
 turning Fold on or off or changing its mode cuts. The Fold cut is rule 4 of "Invalidation and R2 integration", Cut
-order (`modules/gi_restir/restir_epochs.cpp:61-65`). `resample` reports every cut through
+order (`modules/gi_restir/restir_epochs.cpp:57`). `resample` reports every cut through
 `RtgiResampleOutput::history_cut`, and `rtgi.cpp` turns it into `CUT_MODULE` when the backend output is denoised and
 no other cut applies. A cut clears `F_HISTORY`, so every valid pixel starts under `REJ_CUT` and the bound holds from
 that frame.
@@ -1677,7 +1687,7 @@ counts and start classes"); slot 31 is unused.
 `PS_FOLD_REFUSED`. `temporal_reject[13]` (`REJ_BOUND`) counts only refusals that kept `REJ_NONE`. Counting rules and
 identities for these slots (temporal_reject from INFO_VALID words, renewed equal to refused, carried + renewed +
 started equal to the valid traced receivers) are under "Run counters", Row values
-(`modules/gi_restir/restir_gi_core.cpp:1155-1159`).
+(`modules/gi_restir/restir_gi_core.cpp:1110-1114`).
 
 `RestirGiBackend::get_status` (`modules/gi_restir/restir_gi.cpp`) reports `fold_k` (the rounded K), `fold_k_eff`,
 `fold_clock`, `fold_pre_frame` and `fold_feedback` of the last frame `resample` ran. In
@@ -1690,7 +1700,7 @@ frame, and its stats dict carries `fold_refused`, `fold_carried`, `fold_renewed`
 
 The dump and lineage variants of TEMPORAL (binding 32 and bindings 33 to 35, dispatch order, fallback, status fields,
 the counters in slots 27 to 30, the history scan, the start histogram and the lineage word) are under "Fold dump and
-self-test" and "Fold lineage" (`modules/gi_restir/restir_gi_core.cpp:982-1010`,
+self-test" and "Fold lineage" (`modules/gi_restir/restir_gi_core.cpp:937-965`,
 `modules/gi_restir/shaders/restir_gi.glsl:434-535`). Rule 1 and the write are the same code in all three variants.
 
 ### Composition — `modules/gi_restir/shaders/restir_gi.glsl`
@@ -1720,7 +1730,7 @@ hash and draw helpers in `restir_fold_inc.glsl` are also included by `restir_fol
 
 The bound uses flags bit 19, reservoir flags bits 8 to 14 (bit 15 free), reject code 13, the `shade_pad1`/`shade_pad2`
 words, pass-stats slots 22 to 26, cut reason 8, and the seeds C1 and C2. `RestirFrameUBO`'s size is under "Storage
-and frame buffers" (`modules/gi_restir/restir_gi_core.cpp:106`). The bound adds no binding, texture or buffer: the
+and frame buffers" (`modules/gi_restir/restir_gi_core.cpp:114`). The bound adds no binding, texture or buffer: the
 plain TEMPORAL set 0 is the frame UBO at 0, bindings 1 to 10, 23 (pass stats), 24 (dirty UBO), 26 (events UBO) and 27
 (tiles), plus 29 in the `SKY_REREAD` twin, as `run_frame` binds them. The optional Fold dump variant adds
 storage-buffer binding 32 (`RESTIR_FOLD_DUMP_BINDING`, `modules/gi_restir/restir_fold_mirror.h`), and the lineage
@@ -1735,15 +1745,14 @@ clock and K 0 at K 0; 7 reads 4; U1 and feedback force 0), the harness dict roun
 survive; a dict without them reads 0, 0 and false), the cut rule (a `k_eff` change, or a mode or feedback change
 while K is set), the planner order (a Fold change is its own cut, after the request and backend cuts and before the
 origin and scene cuts), dirty-box localisation (the planner cuts only inside the dirty boxes when the feed localises
-a scene change), a world change (cuts everything, after the origin cut and before the scene check), and the hash
-spacing (`C2 sits at least 5 from C1 ...`, default and `F_DETERMINISTIC` seeds).
+a scene change), and a world change (cuts everything, after the origin cut and before the scene check).
 
 The `Mirror:` tests compare a C++ copy of the shader arithmetic with known answers: the isqrt from a seed one off
 either way, the draw at every allowed K (`KB9`: each s gets exactly its weight), rule 1 over every `h_s`, the stored
 bound and renewal cap, the bit layout (the write replaces bits 8 to 15 and keeps bits 0 to 7), carry, renewal and
 start, the static relock within 3K frames at K 8 and 32, and the hash values (`pcg(0)` 0x07BB2FE2, `pcg(1)`
 0xA8BEEA3C, `phi(3, 5)` 0x2D397518, psi_r 0x5072A4E0, psi_s 0xB99D54B9, `draw(psi_s, 8)` 7 and `draw(psi_s, 32)` 13;
-`test_restir_fold.h:635-646`). The hash, draw and isqrt copies are in
+`test_restir_fold.h:630-641`). The hash, draw and isqrt copies are in
 `modules/gi_restir/restir_fold_mirror.cpp`; the rule 1 and write copies are in the test header. They do not run the
 shader. `RestirGiCore::run_fold_test` (`restir_gi_core.cpp`) dispatches
 `modules/gi_restir/shaders/restir_fold_test.glsl` over the same draw, phi, psi and isqrt routines and returns its
@@ -1754,12 +1763,12 @@ not `rs_temporal_pixel`.
 
 - phi is a hash of the pixel taken mod K; nothing balances the start phases.
 - A Fold change during a freeze takes effect and cuts on the first frame after it (see "Test options",
-  `modules/gi_restir/restir_gi.cpp:457-493`).
+  `modules/gi_restir/restir_gi.cpp:425-455`).
 - Ray thinning: a refused thinned pixel keeps coverage 0 until a candidate arrives (see "The write"); the pre-frame
   does not remove the refusal.
-- The hash spacing test covers two seeds only (the default and `F_DETERMINISTIC`), so another seed must not assume it;
+- The hash spacing test (`test_restir_fold_rows.h`) covers two seeds only (the default and `F_DETERMINISTIC`), so another seed must not assume it;
   see Run counters, `get_fold_seeds` (`modules/gi_restir/restir_probe.cpp:392`).
-- Debug code 60 (`rf.debug_view`, `restir_gi.glsl:1210`) divides the temporal reject code by 11 before `rs_heat`
+- Debug code 60 (`rf.debug_view`, `restir_gi.glsl:1209`) divides the temporal reject code by 11 before `rs_heat`
   clamps it, so `REJ_BOUND` (13) shows saturated.
 
 ## TAA jitter in the receivers (`modules/gi_restir/restir_jitter.cpp`)
@@ -1802,16 +1811,17 @@ that R2 stores in `geo_position`, so the module decodes receivers at the true (u
   `RestirFrameParams` has `jitter_shift[4]` and `previous_jitter_shift[4]`, each `(ax, ay, bx, by)` as floats.
   `resample` fills them from the current and previous projection pairs. `params_to_dict` and `params_from_dict` carry
   both as `PackedFloat32Array`; a dict without either key reads zeros. `jitter_shift` and `previous_jitter_shift` are
-  the last two `vec4` of `RestirFrameUBO` (size under "Storage and frame buffers"), matching `jitter_shift` and
+  the two `vec4` before the eight tuning floats at the end of `RestirFrameUBO` (size under "Storage and frame buffers"), matching `jitter_shift` and
   `prev_jitter_shift` in `RestirFrame`. `_upload` writes both on every pass. `get_status` reports `jitter_shift` (four
   numbers), `jitter_ndc` (the recovered jitter), `jitter_unmatched` (this pair or the previous pair) and
   `jitter_unmatched_frames_total`.
 - Shader (`shaders/restir_gi_inc.glsl`). `rs_true_view(view, shift) =
   vec3(view.xy + view.z * shift.xy + shift.zw, view.z)`. `Receiver` keeps `view` (the stored position) and has
-  `true_view` besides it. `rs_receiver_cur` (TEMPORAL, SPATIAL, FINAL, SOURCE) shifts with `rf.jitter_shift`;
-  `rs_receiver_prev` (TEMPORAL, VALIDATE) shifts with `rf.prev_jitter_shift`. Each sets `true_view`, builds
-  `pos` from it, and builds `origin` with `rs_origin_offset_vector` from the true centre; each of the four
-  neighbour taps is shifted with its own z, and its w is kept.
+  `true_view` besides it. `rs_receiver_cur` (a macro over `rs_receiver`; TEMPORAL, SPATIAL, FINAL, SOURCE) shifts
+  with `rf.jitter_shift`; `rs_receiver_prev` (a macro over `rs_receiver`; TEMPORAL, VALIDATE) shifts with
+  `rf.prev_jitter_shift`. `rs_receiver` takes the position and normal textures, the rotation, the anchor and the
+  shift. Each sets `true_view`, builds `pos` from it, and builds `origin` with `rs_origin_offset_vector` from the true
+  centre; each of the four neighbour taps is shifted with its own z, and its w is kept.
 - Readers (`shaders/restir_gi.glsl`, `restir_gi_inc.glsl`). Everything that reads `pos` or `origin` reads the
   true point: the plane test in `rs_similar`; `rs_shift_jacobian` and `rs_jacobian_raw`; `rs_phat`; `rs_dir_to`;
   every `rs_visible` ray in TEMPORAL, SPATIAL, FINAL and VALIDATE; the fresh-Lo and replay rays in FINAL; the
@@ -1830,7 +1840,7 @@ that R2 stores in `geo_position`, so the module decodes receivers at the true (u
   R2 writes a zero position with w 0 for a pixel without geometry; the shift maps any stored position to a
   finite point, and the TEMPORAL, SPATIAL, FINAL, SOURCE and VALIDATE passes test `valid` (`g.w > 0.5`) on the
   receivers they build.
-- Freeze: PACK sees the last real frame's shifts; see "Test options" (`modules/gi_restir/restir_gi.cpp:457-487`).
+- Freeze: PACK sees the last real frame's shifts; see "Test options" (`modules/gi_restir/restir_gi.cpp:425-449`).
 - Doctests (`modules/gi_restir/tests/test_restir_jitter.h`, "[RestirJitter] ..."). A perspective camera
   (60 degrees, 16:9, 0.05 to 2000), an off-axis frustum, and two orthogonal cameras, each with the jitter
   `(0.3 / 640, -0.45 / 360) * 2` and its three sign flips, and with D built as `get_cam_projection` builds it
@@ -1875,13 +1885,13 @@ swaps the TEMPORAL dispatch (`restir_gi.cpp` `resample`; see "Fold dump and self
   `params.fold_clock` (the state's `frames` before the increment), k/k_eff/mode/feedback from this frame's
   `RestirFoldFrame`, cut and cut_reason from the epoch plan (reason 0 when there is no cut), pre_frame =
   `params.fold_pre_frame`, reval = `RESTIR_F_REVAL_FRAME` in `params.flags` (set as under Fold, "Clock, pre-frame and
-  cuts", `modules/gi_restir/restir_gi.cpp:624-627`; `RESTIR_F_REVAL_SHARE` is a different bit), history_used =
+  cuts", `modules/gi_restir/restir_gi.cpp:583-586`; `RESTIR_F_REVAL_SHARE` is a different bit), history_used =
   `use_history`, and trace_w and trace_h from the trace size. When `fold_dump_ran` and `read_fold_dump` succeed it
   also fills hp_eq_px, expected_phase0, phase0_start and refused_off from `stats`, s_max, n_over and hist_texels from
   the dump, and the eight start_* fields from `restir_fold_start_sums`, then adds the dump's starts to the start
   totals. When `fold_lineage_ran` and `read_fold_refused_ids` succeed it fills the three lineage fields from
   `restir_fold_families_add`.
-- Fold dump variant: see "Fold dump and self-test" (`modules/gi_restir/restir_gi_core.cpp:982-1010`); `fold_dump_ran`
+- Fold dump variant: see "Fold dump and self-test" (`modules/gi_restir/restir_gi_core.cpp:937-965`); `fold_dump_ran`
   and `fold_lineage_ran` gate the dump and lineage record fields above.
 - get_records (`restir_probe.cpp`). It copies the list under `restir_frame_records_mutex()` and builds its array
   outside the lock. It returns a dictionary with `stride`, `count` and `data`; the stride is 35: frame, then
@@ -1932,7 +1942,7 @@ swaps the TEMPORAL dispatch (`restir_gi.cpp` `resample`; see "Fold dump and self
 - Mode and cut reason (`restir_gi_core.h` `RestirMode`, `restir_epochs.h` `RestirCutReason`). mode: 0 B1, 1 B2, 2 U1,
   3 B2k. cut_reason is the `RestirCutReason` value (0 none, 1 first, 2 request, 3 origin, 4 backend, 5 scene without
   feed, 6 scene overflow, 7 scene unlocalised, 8 Fold, 9 world; `modules/gi_restir/restir_epochs.h:40-49`); the test
-  order is under "Invalidation and R2 integration", Cut order (`modules/gi_restir/restir_epochs.cpp:37-100`). R2's own
+  order is under "Invalidation and R2 integration", Cut order (`modules/gi_restir/restir_epochs.cpp:37-92`). R2's own
   cuts (a resize, a camera move over 25 m in `rtgi.cpp`, a backend that did not run the frame before) reach the module
   as `history_cut` and read 2, as does a forced history reset.
 - Mutex (`restir_test.h`, defined in `restir_gi.cpp`). `restir_frame_records_mutex()` guards the push in
@@ -1949,8 +1959,8 @@ swaps the TEMPORAL dispatch (`restir_gi.cpp` `resample`; see "Fold dump and self
   view has no state, so its next frame is a create. Every state starts at frames 0 with a RESTIR_CUT_FIRST
   frame, so the serial changes exactly where the clock restarts.
 - release_once (`restir_gi.cpp` `begin_frame` and `release`). `configure({"release_once": true})` sets a one-shot
-  option. The next `begin_frame` that passes the refusals before the state allocation (no buffers, candidate layout
-  version, missing inputs, shader variant, own sampler, the event_reshade checks) clears it, calls
+  option. The next `begin_frame` that passes the refusals before the state allocation (no buffers,
+  missing inputs, shader variant, own sampler, the event_reshade checks) clears it, calls
   `release(p_inputs.buffers)`, adds 1 to `release_tests_total`, then makes the state again in the same call with
   another serial. It sits after those refusals but before the allocation, so a frame refused for `allocation failed`
   has already spent it and a frame refused earlier has not. It sits after the no-buffers test because
@@ -2002,7 +2012,7 @@ swaps the TEMPORAL dispatch (`restir_gi.cpp` `resample`; see "Fold dump and self
     `restir_fold_rand_seed(1)` 0xF5F17964 and `(0x1234567)` 0x56F88133; other_seeds at (1, 0) gives 1033 values
     with C1 first, 1..8 next and the two hashed blocks at their ends, and every value at ring distance 5 or
     more from C2 and C2 + 1; at (1, 3) it gives 1041 values with the module's 4..11 and the offset seed hashed;
-    isqrt exact from 0 to 4096; draw at K 0 and 1 gives 0; n_valid and cut_rej over a planted histogram (1..16
+    draw at K 0 and 1 gives 0; n_valid and cut_rej over a planted histogram (1..16
     gives 136 and 10); the 42 names in order; a planted record packs to the known row; a default record packs
     -1 in every Fold field and 0 in every count; and the split and start-class fields pack after
     lineage_families with the earlier fields in place.
@@ -2022,10 +2032,10 @@ The dump and self-test live in `modules/gi_restir/shaders/restir_gi.glsl`,
 `modules/gi_restir/restir_probe.cpp`. Dump GLSL is compiled only into shader objects that define
 RS_FOLD_DUMP; without a dump buffer the frame runs the plain TEMPORAL pass, which binds and computes nothing
 extra. When `RestirGiResources::fold_dump` exists, the fold-dump variant replaces the TEMPORAL dispatch:
-`RestirGiCore::run_frame` (`restir_gi_core.cpp:982-1010`) builds the dump set 0, clears the buffer, calls
+`RestirGiCore::run_frame` (`restir_gi_core.cpp:937-965`) builds the dump set 0, clears the buffer, calls
 `_dispatch_dump` and calls the plain `_dispatch(PASS_TEMPORAL or PASS_TEMPORAL_SKY)` only when `_dispatch_dump`
-returned false (`if (!dumped)`, line 1006). It never runs both. When the lineage images also exist the lineage
-variant is tried first (line 996) and the dump variant is the fallback (line 1003).
+returned false (`if (!dumped)`, line 961). It never runs both. When the lineage images also exist the lineage
+variant is tried first (line 951) and the dump variant is the fallback (line 958).
 
 - Shared include (`modules/gi_restir/shaders/restir_fold_inc.glsl`): constants, phi, draw, isqrt and the PSI macros
   are described under Fold, "Draw and hashes". It declares no bindings; `restir_gi.glsl` includes it inside the
@@ -2034,7 +2044,7 @@ variant is tried first (line 996) and the dump variant is the fallback (line 100
 - Binding 32, declared only for MODE_TEMPORAL with RS_FOLD_DUMP (`restir_gi_inc.glsl`): std430
   `RestirFoldDump { uint s_max; uint n_over; uint texels; uint pad; uint starts[]; }`.
 - Slots 27 to 30 of the pass-stats rows (row 0 is TEMPORAL) are defined under "Phase-0 counts and start classes"
-  (`modules/gi_restir/shaders/restir_gi_inc.glsl:109-112`).
+  (`modules/gi_restir/shaders/restir_gi_inc.glsl:105-108`).
 - History scan. `rs_fold_dump_scan(px)` runs at the top of TEMPORAL `main`, before the traced-tile test. At
   K 0 it returns, so s_max, n_over and texels stay 0. Otherwise every in-grid thread reads
   `hs = (rs_load(px).flags >> 8) & 0x3F` from the history reservoir (binding 7) and accumulates into shared
@@ -2063,7 +2073,7 @@ variant is tried first (line 996) and the dump variant is the fallback (line 100
 - Buffer. `RestirGiResources::fold_dump` is RESTIR_FOLD_DUMP_BYTES = 262,160 bytes: a 16-byte header plus
   16 * 64 * 64 words. `ensure_fold_dump(true)` creates it and logs "fold_dump" in alloc_log, which
   `get_status` reads; `ensure_fold_dump(false)` frees it and removes the entry; `free_all` frees the buffer
-  only, and the entry goes when `allocate` clears alloc_log (`restir_gi_core.cpp:152`). `run_frame`
+  only, and the entry goes when `allocate` clears alloc_log (`restir_gi_core.cpp:185`). `run_frame`
   clears it with `buffer_clear` just before the dump dispatch and sets `fold_dump_ran` only when the dump
   pipeline was bound and dispatched. `read_fold_dump` reads the header and starts with `buffer_get_data`.
 - Backend (`restir_gi.cpp`). `resample` calls `ensure_fold_dump(options.fold_dump && options.readback)`. In the
@@ -2071,7 +2081,7 @@ variant is tried first (line 996) and the dump variant is the fallback (line 100
   phase0_start and refused_off from those slots, s_max, n_over and hist_texels from the header, and adds starts to
   `restir_fold_starts` (a uint64 per start slot, see Buffer, under `restir_fold_starts_mutex`, declared in
   `restir_test.h`). Status: fold_dump_active (this frame's dump pass ran; also true on a lineage frame, because the
-  lineage pass is the dump pass, `restir_gi_core.cpp:1009`) and fold_dump_frames_total. The dump exists only while
+  lineage pass is the dump pass, `restir_gi_core.cpp:964`) and fold_dump_frames_total. The dump exists only while
   readback is on; starts accumulate across every view and dump frame in the process.
 - Self-test (`restir_fold_test.glsl`, `RestirGiCore::run_fold_test`). Its own `RestirFoldTestShaderRD` with
   one variant, built on the first run. Push constant FoldTestParams { sub, k, count, v0, grid_w, grid_h,
@@ -2174,7 +2184,7 @@ RS_FOLD_LINEAGE together. No other variant or dump object defines RS_FOLD_LINEAG
     `fold_lineage_failed` is set, lineage stays off (code 3) and one warning is printed (WARN_PRINT_ONCE). While the
     flag is set nothing is created again. The flag clears in `free_all` and when lineage is no longer wanted.
   - Every `ensure_fold_lineage` call sets `fold_lineage_refusal`; `run_frame` sets 3 after a failed lineage dispatch
-    (`modules/gi_restir/restir_gi_core.cpp:246-262, 999`); the backend copies it to
+    (`modules/gi_restir/restir_gi_core.cpp:248-264, 954`); the backend copies it to
     `RestirGiSummary::fold_lineage_refusal`.
 - Stale words. `fold_lineage_written` holds the index of the image the last lineage dispatch wrote
   (hist ^ 1), or -1. Before a lineage dispatch, if it is not hist, `run_frame` clears lineage[hist] to 0 with
@@ -2245,7 +2255,7 @@ when the dump ran, so plain TEMPORAL variants are unaffected.
 
 Phase 0 is the frame on which a pixel's staggered restart clock reaches 0, that is `(RS_FOLD_CLOCK + phi(px)) mod K`
 is 0; the slots below count receivers at that phase (`PS_FOLD_PHASE0`,
-`modules/gi_restir/shaders/restir_gi_inc.glsl:109-112`).
+`modules/gi_restir/shaders/restir_gi_inc.glsl:105-108`).
 
 - Slots (pass-stats row 0, stride 32):
   - 27 PS_FOLD_HP_EQ_PX: every hp == px receiver when K is not 0.

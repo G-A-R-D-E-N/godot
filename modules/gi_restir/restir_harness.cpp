@@ -38,24 +38,6 @@
 
 namespace RestirHarness {
 
-static PackedByteArray _to_packed(const Vector<uint8_t> &p_data) {
-	PackedByteArray out;
-	out.resize(p_data.size());
-	if (p_data.size() > 0) {
-		memcpy(out.ptrw(), p_data.ptr(), p_data.size());
-	}
-	return out;
-}
-
-static Vector<uint8_t> _from_packed(const PackedByteArray &p_data) {
-	Vector<uint8_t> out;
-	out.resize(p_data.size());
-	if (p_data.size() > 0) {
-		memcpy(out.ptrw(), p_data.ptr(), p_data.size());
-	}
-	return out;
-}
-
 static String _hash(const Vector<uint8_t> &p_data) {
 	unsigned char digest[32];
 	CryptoCore::sha256(p_data.ptr(), p_data.size(), digest);
@@ -109,6 +91,14 @@ Dictionary params_to_dict(const RestirFrameParams &p) {
 	d["prev_epoch_tag"] = int64_t(p.prev_epoch_tag);
 	d["dirty_count"] = int64_t(p.dirty_count);
 	d["dirty_margin"] = p.dirty_margin;
+	d["radiance_clamp"] = p.radiance_clamp;
+	d["reval_growth"] = p.reval_growth;
+	d["reval_floor"] = p.reval_floor;
+	d["compat_scale"] = p.compat_scale;
+	d["sky_epoch_low"] = p.sky_epoch_low;
+	d["sky_epoch_high"] = p.sky_epoch_high;
+	d["compat_stop_score"] = p.compat_stop_score;
+	d["sky_blur_lod"] = p.sky_blur_lod;
 	PackedFloat64Array boxes;
 	for (uint32_t i = 0; i < MIN(p.dirty_count, 64u); i++) {
 		boxes.push_back(p.dirty_min[i].x);
@@ -136,6 +126,11 @@ Dictionary params_to_dict(const RestirFrameParams &p) {
 		p.m_field = (m_type)p_dict[m_key];    \
 	}
 
+#define RESTIR_GET_V(m_key, m_field)          \
+	if (p_dict.has(m_key)) {                  \
+		p.m_field = p_dict[m_key];            \
+	}
+
 RestirFrameParams params_from_dict(const Dictionary &p_dict) {
 	RestirFrameParams p;
 	if (p_dict.has("size")) {
@@ -154,32 +149,16 @@ RestirFrameParams params_from_dict(const Dictionary &p_dict) {
 	RESTIR_GET("epoch_tag", epoch_tag, uint32_t)
 	RESTIR_GET("debug_view", debug_view, uint32_t)
 	RESTIR_GET("vis_fail_limit", vis_fail_limit, uint32_t)
-	if (p_dict.has("spatial_feedback")) {
-		p.spatial_feedback = p_dict["spatial_feedback"];
-	}
-	if (p_dict.has("compat")) {
-		p.compat = p_dict["compat"];
-	}
-	if (p_dict.has("compat_early_stop")) {
-		p.compat_early_stop = p_dict["compat_early_stop"];
-	}
+	RESTIR_GET("spatial_feedback", spatial_feedback, bool)
+	RESTIR_GET("compat", compat, bool)
+	RESTIR_GET("compat_early_stop", compat_early_stop, bool)
 	RESTIR_GET("compat_k", compat_k, uint32_t)
 	RESTIR_GET("compat_gate", compat_gate, uint32_t)
-	if (p_dict.has("camera_basis")) {
-		p.camera_basis = p_dict["camera_basis"];
-	}
-	if (p_dict.has("previous_camera_basis")) {
-		p.previous_camera_basis = p_dict["previous_camera_basis"];
-	}
-	if (p_dict.has("camera_to_anchor")) {
-		p.camera_to_anchor = p_dict["camera_to_anchor"];
-	}
-	if (p_dict.has("previous_camera_to_anchor")) {
-		p.previous_camera_to_anchor = p_dict["previous_camera_to_anchor"];
-	}
-	if (p_dict.has("view_to_previous_clip")) {
-		p.view_to_previous_clip = p_dict["view_to_previous_clip"];
-	}
+	RESTIR_GET_V("camera_basis", camera_basis)
+	RESTIR_GET_V("previous_camera_basis", previous_camera_basis)
+	RESTIR_GET_V("camera_to_anchor", camera_to_anchor)
+	RESTIR_GET_V("previous_camera_to_anchor", previous_camera_to_anchor)
+	RESTIR_GET_V("view_to_previous_clip", view_to_previous_clip)
 	if (p_dict.has("jitter_shift")) {
 		const PackedFloat32Array shift = p_dict["jitter_shift"];
 		for (int i = 0; i < 4 && i < shift.size(); i++) {
@@ -192,9 +171,7 @@ RestirFrameParams params_from_dict(const Dictionary &p_dict) {
 			p.previous_jitter_shift[i] = shift[i];
 		}
 	}
-	if (p_dict.has("test_sky")) {
-		p.test_sky = p_dict["test_sky"];
-	}
+	RESTIR_GET_V("test_sky", test_sky)
 	RESTIR_GET("tol_plane", tol_plane, float)
 	RESTIR_GET("cos_normal", cos_normal, float)
 	RESTIR_GET("jac_max", jac_max, float)
@@ -209,11 +186,17 @@ RestirFrameParams params_from_dict(const Dictionary &p_dict) {
 	RESTIR_GET("prev_epoch_tag", prev_epoch_tag, uint32_t)
 	RESTIR_GET("dirty_count", dirty_count, uint32_t)
 	RESTIR_GET("dirty_margin", dirty_margin, float)
+	RESTIR_GET("radiance_clamp", radiance_clamp, float)
+	RESTIR_GET("reval_growth", reval_growth, float)
+	RESTIR_GET("reval_floor", reval_floor, float)
+	RESTIR_GET("compat_scale", compat_scale, float)
+	RESTIR_GET("sky_epoch_low", sky_epoch_low, float)
+	RESTIR_GET("sky_epoch_high", sky_epoch_high, float)
+	RESTIR_GET("compat_stop_score", compat_stop_score, float)
+	RESTIR_GET("sky_blur_lod", sky_blur_lod, float)
 	RESTIR_GET("clock", fold_clock, uint32_t)
 	RESTIR_GET("k_eff", fold_k_eff, uint32_t)
-	if (p_dict.has("pre_frame")) {
-		p.fold_pre_frame = p_dict["pre_frame"];
-	}
+	RESTIR_GET("pre_frame", fold_pre_frame, bool)
 	p.dirty_count = MIN(p.dirty_count, 64u);
 	if (p_dict.has("dirty_boxes")) {
 		const PackedFloat64Array boxes = p_dict["dirty_boxes"];
@@ -236,7 +219,7 @@ static void _store_texture(Dictionary &r_case, const String &p_key, RID p_rid, u
 	RD::TextureFormat format = rd->texture_get_format(p_rid);
 	r_case[p_key + "_format"] = int64_t(format.format);
 	for (uint32_t l = 0; l < p_layers; l++) {
-		r_case[p_key + "_l" + itos(l)] = _to_packed(rd->texture_get_data(p_rid, l));
+		r_case[p_key + "_l" + itos(l)] = rd->texture_get_data(p_rid, l);
 	}
 }
 
@@ -266,12 +249,12 @@ Dictionary capture_case(RestirGiCore &p_core, const RestirFrameParams &p_params,
 		return Dictionary();
 	}
 	RD *rd = RD::get_singleton();
-	_store_bytes(c, "geo_pos", RD::DATA_FORMAT_R32G32B32A32_SFLOAT, _to_packed(rd->texture_get_data(copies[0], 0)));
+	_store_bytes(c, "geo_pos", RD::DATA_FORMAT_R32G32B32A32_SFLOAT, rd->texture_get_data(copies[0], 0));
 	_store_bytes(c, "geo_nrm", RD::DATA_FORMAT_R8G8B8A8_UNORM, _floats_to_unorm8(rd->texture_get_data(copies[1], 0)));
-	_store_bytes(c, "prev_pos", RD::DATA_FORMAT_R32G32B32A32_SFLOAT, _to_packed(rd->texture_get_data(copies[2], 0)));
+	_store_bytes(c, "prev_pos", RD::DATA_FORMAT_R32G32B32A32_SFLOAT, rd->texture_get_data(copies[2], 0));
 	_store_bytes(c, "prev_nrm", RD::DATA_FORMAT_R8G8B8A8_UNORM, _floats_to_unorm8(rd->texture_get_data(copies[3], 0)));
-	_store_bytes(c, "cand_first", RD::DATA_FORMAT_R32G32B32A32_UINT, _to_packed(rd->texture_get_data(copies[4], 0)));
-	_store_bytes(c, "cand_second", RD::DATA_FORMAT_R32G32B32A32_UINT, _to_packed(rd->texture_get_data(copies[5], 0)));
+	_store_bytes(c, "cand_first", RD::DATA_FORMAT_R32G32B32A32_UINT, rd->texture_get_data(copies[4], 0));
+	_store_bytes(c, "cand_second", RD::DATA_FORMAT_R32G32B32A32_UINT, rd->texture_get_data(copies[5], 0));
 	for (int i = 0; i < 6; i++) {
 		rd->free_rid(copies[i]);
 	}
@@ -289,7 +272,7 @@ Dictionary capture_final(RestirGiCore &p_core, const RestirFrameParams &p_params
 		return Dictionary();
 	}
 	RD *rd = RD::get_singleton();
-	_store_bytes(c, "geo_pos", RD::DATA_FORMAT_R32G32B32A32_SFLOAT, _to_packed(rd->texture_get_data(copies[0], 0)));
+	_store_bytes(c, "geo_pos", RD::DATA_FORMAT_R32G32B32A32_SFLOAT, rd->texture_get_data(copies[0], 0));
 	_store_bytes(c, "geo_nrm", RD::DATA_FORMAT_R8G8B8A8_UNORM, _floats_to_unorm8(rd->texture_get_data(copies[1], 0)));
 	for (int i = 0; i < 6; i++) {
 		rd->free_rid(copies[i]);
@@ -315,7 +298,7 @@ static RID _upload(const Dictionary &p_case, const String &p_key, const Size2i &
 	format.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_CAN_UPDATE_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
 	Vector<Vector<uint8_t>> data;
 	for (uint32_t l = 0; l < p_layers; l++) {
-		data.push_back(_from_packed(p_case[p_key + "_l" + itos(l)]));
+		data.push_back(p_case[p_key + "_l" + itos(l)]);
 	}
 	return RD::get_singleton()->texture_create(format, RD::TextureView(), data);
 }
@@ -364,9 +347,9 @@ Dictionary run_case(RestirGiCore &p_core, const Dictionary &p_case) {
 	RestirGiInputs clear_inputs;
 	p_core.clear_history(res, clear_inputs);
 	for (uint32_t l = 0; l < 3; l++) {
-		rd->texture_update(res.reservoir[0], l, _from_packed(p_case["history_l" + itos(l)]));
+		rd->texture_update(res.reservoir[0], l, p_case["history_l" + itos(l)]);
 	}
-	rd->texture_update(res.vis_state, 0, _from_packed(p_case["vis_l0"]));
+	rd->texture_update(res.vis_state, 0, p_case["vis_l0"]);
 	res.history_index = 0;
 	if (fold_dump) {
 		res.ensure_fold_dump(true);
@@ -384,12 +367,12 @@ Dictionary run_case(RestirGiCore &p_core, const Dictionary &p_case) {
 		reservoir[l] = rd->texture_get_data(res.reservoir[res.final_index], l);
 		reservoir_all.append_array(reservoir[l]);
 	}
-	result["radiance"] = _to_packed(radiance);
-	result["coverage"] = _to_packed(coverage);
-	result["debug"] = _to_packed(debug);
-	result["info"] = _to_packed(info);
+	result["radiance"] = radiance;
+	result["coverage"] = coverage;
+	result["debug"] = debug;
+	result["info"] = info;
 	for (uint32_t l = 0; l < 3; l++) {
-		result["reservoir_l" + itos(l)] = _to_packed(reservoir[l]);
+		result["reservoir_l" + itos(l)] = reservoir[l];
 	}
 	result["hash_radiance"] = _hash(radiance);
 	result["hash_coverage"] = _hash(coverage);
@@ -417,7 +400,7 @@ Dictionary run_case(RestirGiCore &p_core, const Dictionary &p_case) {
 	s["fold_refused_empty"] = stats.fold_refused_empty;
 	result["stats"] = s;
 	if (params.compat) {
-		result["selection"] = _to_packed(RestirGiCore::read_selection(res));
+		result["selection"] = RestirGiCore::read_selection(res);
 	}
 	if (fold_dump) {
 		Dictionary d;

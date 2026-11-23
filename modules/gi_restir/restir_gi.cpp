@@ -35,7 +35,6 @@
 
 #include "core/config/project_settings.h"
 #include "core/variant/variant.h"
-#include "servers/rendering/renderer_rd/environment/gi_provider.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/environment/rtgi.h"
 
@@ -81,10 +80,8 @@ void restir_fold_starts_add(const Vector<uint32_t> &p_starts) {
 	MutexLock lock(restir_fold_starts_mutex());
 	LocalVector<uint64_t> &starts = restir_fold_starts();
 	if (starts.size() != RESTIR_FOLD_START_COUNT) {
-		starts.resize(RESTIR_FOLD_START_COUNT);
-		for (uint32_t i = 0; i < RESTIR_FOLD_START_COUNT; i++) {
-			starts[i] = 0;
-		}
+		starts.clear();
+		starts.resize_initialized(RESTIR_FOLD_START_COUNT);
 	}
 	const uint32_t *counts = p_starts.ptr();
 	for (uint32_t i = 0; i < RESTIR_FOLD_START_COUNT; i++) {
@@ -179,28 +176,16 @@ static void _accumulate_pixels(const RestirGiResources &p_resources) {
 	if (sums.size != p_resources.size) {
 		sums = RestirPixelSums();
 		sums.size = p_resources.size;
-		sums.output_luma.resize(count);
-		sums.covered.resize(count);
-		sums.valid.resize(count);
-		for (uint32_t i = 0; i < count; i++) {
-			sums.output_luma[i] = 0.0;
-			sums.covered[i] = 0.0;
-			sums.valid[i] = 0.0;
-		}
+		sums.output_luma.resize_initialized(count);
+		sums.covered.resize_initialized(count);
+		sums.valid.resize_initialized(count);
 		if (restir_test_options().pixel_detail) {
 			for (uint32_t d = 0; d < RESTIR_DETAIL_COUNT; d++) {
-				sums.detail[d].resize(count);
-				for (uint32_t i = 0; i < count; i++) {
-					sums.detail[d][i] = 0.0;
-				}
+				sums.detail[d].resize_initialized(count);
 			}
 			const uint32_t blocks = uint32_t(Math::division_round_up(p_resources.size.x, 8)) * uint32_t(Math::division_round_up(p_resources.size.y, 8));
-			sums.reject_temporal.resize(blocks * 16u);
-			sums.reject_spatial.resize(blocks * 16u);
-			for (uint32_t i = 0; i < blocks * 16u; i++) {
-				sums.reject_temporal[i] = 0.0;
-				sums.reject_spatial[i] = 0.0;
-			}
+			sums.reject_temporal.resize_initialized(blocks * 16u);
+			sums.reject_spatial.resize_initialized(blocks * 16u);
 		}
 	}
 	const bool detail = restir_test_options().pixel_detail && sums.detail[0].size() == count;
@@ -358,23 +343,20 @@ void RestirGiBackend::_check_choices() {
 	invalid_choice = bad;
 }
 
+bool RestirGiBackend::_refuse(const char *p_reason) {
+	refusal_reason = p_reason;
+	refusals++;
+	return false;
+}
+
 bool RestirGiBackend::begin_frame(const RtgiFrameInputs &p_inputs) {
 	refusal_reason = String();
 	_check_choices();
 	if (!p_inputs.buffers) {
-		refusal_reason = "no buffers";
-		refusals++;
-		return false;
-	}
-	if (p_inputs.candidate_layout_version != RTGI_CANDIDATE_LAYOUT_VERSION) {
-		refusal_reason = "candidate layout version";
-		refusals++;
-		return false;
+		return _refuse("no buffers");
 	}
 	if (p_inputs.trace_size.x <= 0 || p_inputs.trace_size.y <= 0 || p_inputs.candidate_first.is_null() || p_inputs.candidate_second.is_null() || p_inputs.geo_position.is_null() || p_inputs.geo_normal.is_null() || p_inputs.previous_geo_position.is_null() || p_inputs.previous_geo_normal.is_null()) {
-		refusal_reason = "missing inputs";
-		refusals++;
-		return false;
+		return _refuse("missing inputs");
 	}
 	const bool rays = p_inputs.ray_scene && p_inputs.ray_scene->is_ready();
 	const bool hardware = rays && p_inputs.ray_scene->uses_hardware();
@@ -383,35 +365,23 @@ bool RestirGiBackend::begin_frame(const RtgiFrameInputs &p_inputs) {
 		if (hardware) {
 			p_inputs.ray_scene->refuse_hardware("the ReSTIR GI hardware shader or its pipelines could not be made");
 		}
-		refusal_reason = hardware ? "hardware shader variant did not compile" : "shader variant did not compile";
-		refusals++;
-		return false;
+		return _refuse(hardware ? "hardware shader variant did not compile" : "shader variant did not compile");
 	}
 	if (_gi_bool("own_sampler") && !rays) {
-		refusal_reason = "own sampler needs the ray scene";
-		refusals++;
-		return false;
+		return _refuse("own sampler needs the ray scene");
 	}
 	if (_gi_bool("event_reshade")) {
 		if (!_gi_bool("replay_seed")) {
-			refusal_reason = "event_reshade needs replay_seed";
-			refusals++;
-			return false;
+			return _refuse("event_reshade needs replay_seed");
 		}
 		if (!rays) {
-			refusal_reason = "event_reshade needs the ray scene";
-			refusals++;
-			return false;
+			return _refuse("event_reshade needs the ray scene");
 		}
 		if (!p_inputs.shade.valid) {
-			refusal_reason = "event_reshade needs the DDGI shading inputs";
-			refusals++;
-			return false;
+			return _refuse("event_reshade needs the DDGI shading inputs");
 		}
 		if (_gi_text("revalidate") == "budget") {
-			refusal_reason = "event_reshade does not run with revalidate budget";
-			refusals++;
-			return false;
+			return _refuse("event_reshade does not run with revalidate budget");
 		}
 	}
 	if (restir_test_options().release_once) {
@@ -426,9 +396,7 @@ bool RestirGiBackend::begin_frame(const RtgiFrameInputs &p_inputs) {
 		_free_state(state);
 		state = RestirGiState();
 		if (!state.resources.allocate(p_inputs.trace_size, p_inputs.debug_view >= 0 || restir_test_options().readback)) {
-			refusal_reason = "allocation failed";
-			refusals++;
-			return false;
+			return _refuse("allocation failed");
 		}
 		state.size = p_inputs.trace_size;
 		state_serial_next++;
@@ -457,12 +425,6 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	if (options.freeze && state.have_history) {
 		r_output.radiance = state.resources.radiance;
 		r_output.coverage = state.resources.coverage;
-		r_output.debug = p_inputs.debug_view >= 0 ? state.resources.debug : RID();
-		r_output.record.flags = GI_PROVIDER_FLAG_SAMPLE_COUNT | GI_PROVIDER_FLAG_CONFIDENCE | GI_PROVIDER_FLAG_HISTORY | GI_PROVIDER_FLAG_SCENE_EPOCH | GI_PROVIDER_FLAG_LIGHT_EPOCH | GI_PROVIDER_FLAG_SKY_EPOCH | GI_PROVIDER_FLAG_ORIGIN_EPOCH;
-		const uint32_t n_target = uint32_t(CLAMP(_gi_int("n_target"), 1, 64));
-		r_output.record.sample_count = MIN(state.frames_since_cut, n_target);
-		r_output.record.validity = 1.0f;
-		r_output.record.confidence = gi_provider_confidence_from_samples(r_output.record.sample_count, n_target);
 		r_output.valid = true;
 		if (_gi_text("denoise") == "r2") {
 			RestirGiInputs frozen;
@@ -522,14 +484,11 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	state.light_soft_frames = plan.light_soft_frames;
 	const bool cut = plan.cut;
 	if (cut) {
-		state.history_cuts++;
 		state.cut_counts[plan.reason]++;
 		state.frames_since_cut = 0;
 		if (plan.reason == RESTIR_CUT_BACKEND && state.hardware == p_inputs.hardware) {
 			state.sky_reread_cuts++;
 		}
-	} else if (plan.dirty_count > 0) {
-		state.dirty_frames++;
 	}
 	const bool use_history = !cut && options.history;
 	const bool dump_wanted = !String(GLOBAL_GET(String(RESTIR_GI) + "dump_path")).is_empty();
@@ -791,9 +750,6 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	state.fold = fold;
 	state.frames++;
 	state.frames_since_cut++;
-	if (use_history) {
-		state.history_uses++;
-	}
 	if (params.reval_pass) {
 		state.reval_frames++;
 	}
@@ -869,8 +825,6 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 	}
 	summary.stats_valid = false;
 	summary.debug_valid = p_inputs.debug_view >= 0 && state.resources.debug.is_valid();
-	float mean_m = float(MIN(state.frames_since_cut, params.n_target));
-	float validity = use_history ? 1.0f : 0.0f;
 	if (options.readback) {
 		summary.stats = RestirGiCore::read_stats(state.resources);
 		summary.stats_valid = true;
@@ -937,19 +891,10 @@ void RestirGiBackend::resample(const RtgiFrameInputs &p_inputs, RtgiResampleOutp
 		if (options.accumulate_from >= 0 && record_index >= options.accumulate_from && record_index < options.accumulate_to) {
 			_accumulate_pixels(state.resources);
 		}
-		if (summary.stats.geometry > 0.0) {
-			mean_m = float(summary.stats.m_sum / summary.stats.geometry);
-			validity = float(summary.stats.output_pixels / summary.stats.geometry);
-		}
 	}
 
 	r_output.radiance = state.resources.radiance;
 	r_output.coverage = state.resources.coverage;
-	r_output.debug = p_inputs.debug_view >= 0 ? state.resources.debug : RID();
-	r_output.record.flags = GI_PROVIDER_FLAG_SAMPLE_COUNT | GI_PROVIDER_FLAG_CONFIDENCE | GI_PROVIDER_FLAG_HISTORY | GI_PROVIDER_FLAG_SCENE_EPOCH | GI_PROVIDER_FLAG_LIGHT_EPOCH | GI_PROVIDER_FLAG_SKY_EPOCH | GI_PROVIDER_FLAG_ORIGIN_EPOCH;
-	r_output.record.sample_count = uint32_t(Math::round(mean_m));
-	r_output.record.validity = CLAMP(validity, 0.0f, 1.0f);
-	r_output.record.confidence = gi_provider_confidence_from_samples(r_output.record.sample_count, params.n_target);
 	r_output.valid = true;
 	r_output.denoise = denoise;
 	r_output.history_cut = cut;
@@ -994,7 +939,9 @@ void RestirGiBackend::get_status(Dictionary &r_status) const {
 	r_status["invalid_choice"] = invalid_choice;
 	r_status["states"] = int64_t(states.size());
 	r_status["hw_variant_compiled"] = (core && core->hw_variant_compiled());
-	r_status["lo_clamp"] = 60000.0;
+	RestirFrameParams tuning;
+	restir_reuse_apply(restir_reuse_read(), tuning);
+	r_status["lo_clamp"] = double(tuning.radiance_clamp);
 	r_status["mode"] = int64_t(summary.mode);
 	r_status["denoise"] = _gi_text("denoise");
 	r_status["frame"] = int64_t(summary.frame);

@@ -30,16 +30,13 @@
 
 #include "restir_fold.h"
 
+#include "core/math/math_funcs_binary.h"
+
 uint32_t restir_fold_k(int64_t p_setting) {
 	if (p_setting <= 0) {
 		return 0;
 	}
-	const int64_t wanted = MIN(p_setting, int64_t(RESTIR_FOLD_K_MAX));
-	uint32_t k = RESTIR_FOLD_K_MIN;
-	while (int64_t(k) * 2 <= wanted) {
-		k *= 2;
-	}
-	return k;
+	return MAX(RESTIR_FOLD_K_MIN, Math::previous_power_of_2(uint32_t(MIN(p_setting, int64_t(RESTIR_FOLD_K_MAX)))));
 }
 
 uint32_t restir_fold_k_eff(uint32_t p_k, bool p_b_mode, bool p_feedback) {

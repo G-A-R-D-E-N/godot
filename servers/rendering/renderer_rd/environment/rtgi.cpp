@@ -649,10 +649,6 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 		backend_inputs.dirty_source = GIEpochs::get_singleton();
 		backend_inputs.history_cut = !backend_ran_before || (flags & (FRAME_FLAG_HISTORY_CUT | FRAME_FLAG_CAMERA_CUT)) != 0u;
 		backend_inputs.hardware = ray_scene->uses_hardware();
-		backend_inputs.deterministic = false;
-		backend_inputs.physical_units = inputs.physical_units;
-		backend_inputs.exposure = 1.0f;
-		backend_inputs.debug_view = -1;
 		backend_inputs.ray_scene = ray_scene;
 		backend_inputs.shade.ddgi_ubo = volume->ubo;
 		backend_inputs.shade.probe_data = volume->probe_data;
