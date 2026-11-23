@@ -30,9 +30,9 @@
 
 #pragma once
 
-#include "core/object/object.h"
 #include "restir_gi_core.h"
 
+#include "core/object/object.h"
 #include "core/os/mutex.h"
 #include "core/variant/dictionary.h"
 #include "core/variant/variant.h"

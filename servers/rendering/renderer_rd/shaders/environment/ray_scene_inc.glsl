@@ -22,7 +22,11 @@
 #define RAY_SCENE_TIE_SCALE(m_origin) max(max(abs((m_origin).x), abs((m_origin).y)), abs((m_origin).z))
 #define RAY_SCENE_TIE_ABS(m_t, m_scale) (RAY_SCENE_TIE_ULPS * RAY_SCENE_FLOAT_EPSILON * max((m_scale), (m_t)))
 #define RAY_SCENE_TIE_REACH(m_t, m_scale) ((m_t) * (1.0 + RAY_SCENE_BLEND_TIE) + RAY_SCENE_TIE_ABS(m_t, m_scale))
-#define RAY_SCENE_TIE_LIMIT(m_limit, m_hit, m_blend, m_scale) float m_limit = (m_hit).t; if ((m_hit).instance != RAY_SCENE_NO_HIT && (m_blend) != (m_hit).blend) { m_limit = (m_blend) ? RAY_SCENE_TIE_REACH(m_limit, m_scale) : m_limit * (1.0 - RAY_SCENE_BLEND_TIE) - RAY_SCENE_TIE_ABS(m_limit, m_scale); }
+#define RAY_SCENE_TIE_LIMIT(m_limit, m_hit, m_blend, m_scale) \
+	float m_limit = (m_hit).t; \
+	if ((m_hit).instance != RAY_SCENE_NO_HIT && (m_blend) != (m_hit).blend) { \
+		m_limit = (m_blend) ? RAY_SCENE_TIE_REACH(m_limit, m_scale) : m_limit * (1.0 - RAY_SCENE_BLEND_TIE) - RAY_SCENE_TIE_ABS(m_limit, m_scale); \
+	}
 #define RAY_SCENE_COVERAGE_SEED(m_seed) ray_scene_hash((m_seed) ^ 0x6a09e667u)
 #define RAY_SCENE_COVERAGE_MISSES(m_seed, m_triangle, m_instance, m_coverage) (float(ray_scene_hash(ray_scene_hash((m_seed) + (m_triangle)) + (m_instance)) >> 8u) >= (m_coverage) * 16777216.0)
 

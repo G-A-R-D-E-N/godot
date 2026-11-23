@@ -647,4 +647,4 @@ TEST_CASE("[RestirEvents] Route output marks module output under events or frame
 	CHECK(restir_route_output(true, false, true, 1000u).n_target == 255u);
 }
 
-}
+} //namespace TestRestirEvents

@@ -359,4 +359,4 @@ TEST_CASE("[RestirFoldDump] Start counts accumulate across frames") {
 	}
 }
 
-}
+} //namespace TestRestirFoldDump

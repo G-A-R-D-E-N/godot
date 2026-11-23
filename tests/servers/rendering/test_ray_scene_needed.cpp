@@ -28,7 +28,6 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-
 #include "tests/test_macros.h"
 
 TEST_FORCE_LINK(test_ray_scene_needed)

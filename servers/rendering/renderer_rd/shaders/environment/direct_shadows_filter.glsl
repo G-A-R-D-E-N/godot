@@ -385,6 +385,5 @@ void main() {
 		imageStore(debug_image, pixel, vec4(vec3(total[0] > 0.0 ? sum[0] / total[0] : 1.0), 1.0));
 	}
 #endif
-
 }
 #endif

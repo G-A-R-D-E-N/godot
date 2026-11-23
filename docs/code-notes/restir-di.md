@@ -23,7 +23,7 @@ external-entries mode and the opaque pass shades heads, tail samples or nothing.
 - `direct_lights.h:GpuSlot` is 48 bytes. It gains the anchor offset (reset position minus live position, world, so the
   entry pass ranks a flickering lamp where it was last reset) and the mean colour: linear colour times render energy at
   the lamp's mean energy, with fade and exposure, as `LightData.color` is built. A colour rather than a mean-to-live
-  ratio, because live energy is 0 at a flicker minimum. `RenderingServer.light_set_direct_mean_energy` sets the mean
+  ratio, because live energy is 0 at a flicker trough. `RenderingServer.light_set_direct_mean_energy` sets the mean
   energy; -1 (the default) means the live energy.
 - `Params.head_entries` is DI-1's own entry count. Outside external mode it is entries - 1, so DI-1 is unchanged. In
   external mode the slot layers are heads, then tails, then the rest layer at entries - 1. Tail layers hold slot 0, so a
@@ -50,7 +50,7 @@ external-entries mode and the opaque pass shades heads, tail samples or nothing.
   that weight by K. A negative weight means the live energy arm: the tail sample is shaded with the live colour instead
   of the mean. A tail of K lamps or fewer is shaded exactly, each lamp weight K.
 - DI-1's external mode: `consider` reports every lamp it walks to `add_external`, with zero-weight lamps too, so a tail
-  sample at a flicker minimum still finds its position and gets a ray; only lamps with weight count toward the rest. A
+  sample at a flicker trough still finds its position and gets a ray; only lamps with weight count toward the rest. A
   pixel is empty only when no own entry, no rest lamp and no tail sample were seen. The share-out skips its ray loop
   when there is nothing to pick.
 - `di_sampler_inc.glsl` holds what the entry pass and the opaque loop must compute the same way: the lamp window and

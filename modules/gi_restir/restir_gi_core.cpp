@@ -331,7 +331,6 @@ RestirGiCore::~RestirGiCore() {
 	free();
 }
 
-
 String RestirGiCore::_defines(Variant p_variant) const {
 	if (p_variant == VARIANT_NONE) {
 		return String();

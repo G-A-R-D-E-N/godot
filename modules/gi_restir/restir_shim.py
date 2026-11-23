@@ -37,10 +37,9 @@ def check_same_drive(shader_dir, build_dir):
     build_drive = os.path.splitdrive(os.path.abspath(build_dir))[0].lower()
     if shader_drive != build_drive:
         raise ShimError(
-            "gi_restir: the module shader folder (%s) and the engine build folder (%s) are on different drives. "
+            f"gi_restir: the module shader folder ({shader_dir}) and the engine build folder ({build_dir}) are on different drives. "
             "glsl_builders.py resolves includes with os.path.relpath from the build folder, which cannot cross drives. "
             "Put the module folder on the engine drive."
-            % (shader_dir, build_dir)
         )
 
 
@@ -71,13 +70,13 @@ def _shim(core_dir, shader_dir):
         if not os.path.isfile(source):
             raise RuntimeError("core include missing: " + source)
         rel = os.path.relpath(source, shader_dir).replace(os.sep, "/")
-        lines.append('#include "%s"' % rel)
+        lines.append(f'#include "{rel}"')
     deps = include_closure(core_dir)
     _write_if_changed(shim_path, ("\n".join(lines) + "\n").encode("utf-8"))
     for name in CORE_INCLUDES + EXTRA_INCLUDES:
         source = os.path.join(core_dir, name)
         rel = os.path.relpath(source, shader_dir).replace(os.sep, "/")
-        _write_if_changed(os.path.join(shader_dir, PER_FILE_PREFIX + name), ('#include "%s"\n' % rel).encode("utf-8"))
+        _write_if_changed(os.path.join(shader_dir, PER_FILE_PREFIX + name), (f'#include "{rel}"\n').encode())
     return deps
 
 

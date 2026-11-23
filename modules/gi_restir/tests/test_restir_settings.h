@@ -154,4 +154,4 @@ TEST_CASE("[RestirSettings] A choice setting names a value outside its list") {
 	CHECK(restir_setting_invalid_choice("gi/no_such_setting", "anything").is_empty());
 }
 
-}
+} //namespace TestRestirSettings
