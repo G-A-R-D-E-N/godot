@@ -105,7 +105,7 @@ In order:
 
 1. `set_immediate` is true when the camera attributes `auto_exposure_version` differs from the one stored in the render
    buffers, or when `RenderSceneBuffersRD::get_history_reset` is true. The history reset is true on a history cut (a
-   change of `rendering/anti_aliasing/quality/history_reset_serial`) or when the exposure normalization changed.
+   change of `rendering/anti_aliasing/quality/history_reset_serial`) or when the exposure normalisation changed.
 2. `auto_exposure_hold = !set_immediate && camera_attributes_get_auto_exposure_hold(...)`.
 3. `auto_exposure_light_limit = AutoExposureGuard::light_factor(limit, time_step, set_immediate)`. `time_step` is the
    raw frame step given to `RendererSceneRenderRD::set_time`. It does not depend on
@@ -234,7 +234,7 @@ The mean meter's `auto_exposure_highlight_limit` caps each sampled pixel at the 
 ### Edges
 
 - Reset or cut: when `set_immediate` is true (first use of the camera attributes by a render buffer set, auto exposure
-  turned on, history cut, exposure normalization change), the limit factor is `0.0` and the hold is off. The meter
+  turned on, history cut, exposure normalisation change), the limit factor is `0.0` and the hold is off. The meter
   sets its value from the target at once. A hold that is still raised applies again from the next frame, using the
   freshly set value.
 - First frame: `prev` is zero, so neither the limit nor the hold applies. Every guard in the shaders tests

@@ -28,12 +28,11 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "ray_scene.h"
-
 #include "core/config/project_settings.h"
 #include "core/io/json.h"
 #include "core/os/os.h"
 #include "servers/rendering/renderer_rd/environment/gi_epochs.h"
+#include "servers/rendering/renderer_rd/environment/ray_scene.h"
 
 #include <string.h>
 
@@ -122,7 +121,7 @@ void RayScene::_feed_observe(const void *p_key, const Transform3D &p_world, RID 
 	if (record) {
 		feed_survivors++;
 		record->stamp = feed_stamp;
-		if (record->mesh == p_mesh_rid && record->build_serial == p_mesh.build_serial &&record->usable == uint8_t(p_usable) && record->state == p_state && memcmp(&record->world, &p_world, sizeof(Transform3D)) == 0) {
+		if (record->mesh == p_mesh_rid && record->build_serial == p_mesh.build_serial && record->usable == uint8_t(p_usable) && record->state == p_state && memcmp(&record->world, &p_world, sizeof(Transform3D)) == 0) {
 			return;
 		}
 		feed.changes++;

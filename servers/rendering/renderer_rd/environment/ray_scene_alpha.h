@@ -6,7 +6,7 @@
 /*                        https://godotengine.org                         */
 /**************************************************************************/
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
-/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
 /*                                                                        */
 /* Permission is hereby granted, free of charge, to any person obtaining  */
 /* a copy of this software and associated documentation files (the        */
@@ -28,8 +28,7 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#ifndef RAY_SCENE_ALPHA_H
-#define RAY_SCENE_ALPHA_H
+#pragma once
 
 #include "core/math/vector2.h"
 #include "core/templates/hash_map.h"
@@ -230,5 +229,3 @@ static_assert(offsetof(RayAlphaStore::TableEntry, bits) == 24);
 static_assert(offsetof(RayAlphaStore::TableEntry, far_affine) == 40);
 static_assert(offsetof(RayAlphaStore::TableEntry, density) == 48);
 static_assert(offsetof(RayAlphaStore::TableEntry, far_state) == 52);
-
-#endif

@@ -30,9 +30,8 @@
 
 #pragma once
 
-#include "gi_provider.h"
-
 #include "core/object/ref_counted.h"
+#include "servers/rendering/renderer_rd/environment/gi_provider.h"
 #include "servers/rendering/renderer_rd/pipeline_deferred_rd.h"
 #include "servers/rendering/renderer_rd/shaders/environment/gi_extra_compose.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/environment/gi_extra_synthetic.glsl.gen.h"

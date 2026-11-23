@@ -30,11 +30,10 @@
 
 #include "gi_compositor.h"
 
-#include "gi.h"
-#include "rtgi.h"
-
 #include "core/config/project_settings.h"
 #include "core/io/file_access.h"
+#include "servers/rendering/renderer_rd/environment/gi.h"
+#include "servers/rendering/renderer_rd/environment/rtgi.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_scene_buffers_rd.h"
 #include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"

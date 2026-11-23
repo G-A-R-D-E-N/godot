@@ -330,7 +330,7 @@ selected by the ray scene.
 
 A reservoir is 48 bytes per pixel in a 3-layer RGBA32UI 2D array (`rs_load` and `rs_store` in
 `shaders/restir_gi_inc.glsl`). Layer 0: xs.xyz as float bits, packed normal in .w. Layer 1: Lo.rg in .x and Lo.b in
-the low 16 bits of .y as halfs, flags in the high 16 bits of .y, W as a float in .z, M in the low 16 bits and age in
+the low 16 bits of .y as halves, flags in the high 16 bits of .y, W as a float in .z, M in the low 16 bits and age in
 the high 16 bits of .w. Layer 2: receiver depth, packed receiver normal, epoch tag, sample tag. Three reservoir arrays
 are allocated: the temporal pass ping-pongs two and the third holds a spatial result when feedback is off.
 `RestirFrameUBO` is 464 bytes and `RestirDirtyUBO` 2048 bytes, both enforced by `static_assert`

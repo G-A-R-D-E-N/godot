@@ -220,4 +220,4 @@ TEST_CASE("[RestirJitter] Harness: the shifts survive the dict round trip and de
 	CHECK(zero);
 }
 
-}
+} //namespace TestRestirJitter

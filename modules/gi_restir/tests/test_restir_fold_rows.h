@@ -196,4 +196,4 @@ TEST_CASE("[RestirFoldRows] The split and start-class fields pack after lineage_
 	}
 }
 
-}
+} //namespace TestRestirFoldRows

@@ -30,6 +30,10 @@
 
 #pragma once
 
+#include "restir_events.h"
+#include "restir_fold_mirror.h"
+#include "shaders/restir_gi.glsl.gen.h"
+
 #include "core/math/basis.h"
 #include "core/math/color.h"
 #include "core/math/projection.h"
@@ -39,10 +43,6 @@
 #include "core/variant/dictionary.h"
 #include "servers/rendering/renderer_rd/pipeline_deferred_rd.h"
 #include "servers/rendering/rendering_device.h"
-
-#include "restir_events.h"
-#include "restir_fold_mirror.h"
-#include "shaders/restir_gi.glsl.gen.h"
 
 namespace RendererRD {
 class RayScene;

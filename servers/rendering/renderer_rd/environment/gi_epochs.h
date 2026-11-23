@@ -30,11 +30,10 @@
 
 #pragma once
 
-#include "gi_provider.h"
-
 #include "core/math/aabb.h"
 #include "core/templates/hash_set.h"
 #include "core/templates/local_vector.h"
+#include "servers/rendering/renderer_rd/environment/gi_provider.h"
 
 #include <stdint.h>
 

@@ -30,14 +30,13 @@
 
 #pragma once
 
-#include "ddgi_light_tracker.h"
-#include "gi_epochs.h"
-
 #include "core/math/projection.h"
 #include "core/math/transform_3d.h"
 #include "core/math/vector2i.h"
 #include "core/templates/rid.h"
 #include "core/variant/dictionary.h"
+#include "servers/rendering/renderer_rd/environment/ddgi_light_tracker.h"
+#include "servers/rendering/renderer_rd/environment/gi_epochs.h"
 
 class RenderSceneBuffersRD;
 

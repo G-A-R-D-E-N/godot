@@ -277,8 +277,7 @@ Ref<DirectShadows::ViewportData> DirectShadows::_viewport(const Ref<RenderSceneB
 
 void DirectShadows::_ensure_textures(const Ref<RenderSceneBuffersRD> &p_render_buffers, Ref<ViewportData> p_viewport, const Settings &p_settings, bool p_quarter) {
 	const Size2i size = p_render_buffers->get_internal_size();
-	if (p_viewport->entries == p_settings.entries && p_viewport->size == size && p_viewport->precise == p_settings.precise() && p_viewport->quarter == p_quarter && p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SLOTS)
-			&& (!p_quarter || (p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_FACTORS_BLOCK) && p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SLOTS_RESOLVED)))) {
+	if (p_viewport->entries == p_settings.entries && p_viewport->size == size && p_viewport->precise == p_settings.precise() && p_viewport->quarter == p_quarter && p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SLOTS) && (!p_quarter || (p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_FACTORS_BLOCK) && p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SLOTS_RESOLVED)))) {
 		return;
 	}
 	p_render_buffers->clear_context(RB_SCOPE_DIRECT_SHADOWS);
@@ -686,8 +685,7 @@ RID DirectShadows::get_slots(const Ref<RenderSceneBuffersRD> &p_render_buffers) 
 	if (viewport->quarter) {
 		return p_render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SLOTS_RESOLVED);
 	}
-	return
- p_render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, viewport->flip ? RB_DIRECT_SLOTS_OTHER : RB_DIRECT_SLOTS);
+	return p_render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, viewport->flip ? RB_DIRECT_SLOTS_OTHER : RB_DIRECT_SLOTS);
 }
 
 RID DirectShadows::get_factors(const Ref<RenderSceneBuffersRD> &p_render_buffers) const {

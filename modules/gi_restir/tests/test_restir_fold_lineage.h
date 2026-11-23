@@ -187,4 +187,4 @@ TEST_CASE("[RestirFoldLineage] Family counts are kept per fold tag") {
 	CHECK(restir_fold_family_pairs(2).is_empty());
 }
 
-}
+} //namespace TestRestirFoldLineage

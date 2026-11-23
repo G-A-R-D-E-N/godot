@@ -198,7 +198,6 @@ void main() {
 			}
 			if (used_count > 0u) {
 				tier = wide == 0u ? TIER_NEAR : TIER_WIDE;
-
 			}
 		}
 

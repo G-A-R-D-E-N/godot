@@ -641,4 +641,4 @@ TEST_CASE("[RestirFold] Mirror: the hashes give the known answers") {
 	CHECK(restir_fold_draw(psi_s, 32u) == 13u);
 }
 
-}
+} //namespace TestRestirFold

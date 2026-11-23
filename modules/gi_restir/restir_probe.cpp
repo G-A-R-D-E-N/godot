@@ -30,20 +30,18 @@
 
 #include "restir_probe.h"
 
-#include "core/variant/variant.h"
-
 #include "restir_epochs.h"
 #include "restir_fold_mirror.h"
-#include "restir_settings.h"
 #include "restir_harness.h"
+#include "restir_settings.h"
 #include "restir_test.h"
-
 #include "shaders/restir_shim_check.glsl.gen.h"
 
 #include "core/config/project_settings.h"
-#include "core/object/class_db.h"
-#include "servers/rendering/renderer_rd/environment/gi_module_hooks.h"
 #include "core/object/callable_mp.h"
+#include "core/object/class_db.h"
+#include "core/variant/variant.h"
+#include "servers/rendering/renderer_rd/environment/gi_module_hooks.h"
 #include "servers/rendering/rendering_server.h"
 
 void RestirProbe::_bind_methods() {

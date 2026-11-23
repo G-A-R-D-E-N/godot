@@ -38,8 +38,6 @@ TEST_FORCE_LINK(test_direct_quarter)
 #include "core/templates/local_vector.h"
 #include "servers/rendering/renderer_rd/environment/direct_quarter.h"
 
-
-
 namespace TestDirectQuarter {
 
 using namespace RendererRD::DirectQuarter;

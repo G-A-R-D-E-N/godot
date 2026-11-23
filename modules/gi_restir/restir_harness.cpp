@@ -121,14 +121,14 @@ Dictionary params_to_dict(const RestirFrameParams &p) {
 	return d;
 }
 
-#define RESTIR_GET(m_key, m_field, m_type)    \
-	if (p_dict.has(m_key)) {                  \
-		p.m_field = (m_type)p_dict[m_key];    \
+#define RESTIR_GET(m_key, m_field, m_type) \
+	if (p_dict.has(m_key)) { \
+		p.m_field = (m_type)p_dict[m_key]; \
 	}
 
-#define RESTIR_GET_V(m_key, m_field)          \
-	if (p_dict.has(m_key)) {                  \
-		p.m_field = p_dict[m_key];            \
+#define RESTIR_GET_V(m_key, m_field) \
+	if (p_dict.has(m_key)) { \
+		p.m_field = p_dict[m_key]; \
 	}
 
 RestirFrameParams params_from_dict(const Dictionary &p_dict) {
