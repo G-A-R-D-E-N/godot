@@ -29,6 +29,10 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 #define RS_SKY_REREAD
 #endif
 
+#if defined(RESTIR_RAYS) && defined(RAY_SCENE_ALPHA) && !defined(RAY_SCENE_ALPHA_THRESHOLD)
+#define RS_ALPHA_SEED
+#endif
+
 #if defined(RESTIR_SHADE) || defined(RS_SKY_REREAD)
 #define DDGI_SET 2
 #define DDGI_UBO_BINDING 0
@@ -358,7 +362,12 @@ Reservoir rs_from_candidate(ivec2 p_pixel, Receiver p_r) {
 	res.epoch = rf.epoch_tag;
 	res.tag = second.w;
 #ifdef RESTIR_RAYS
-	if ((rf.flags & (F_REPLAY | F_OWN_SAMPLER)) == F_REPLAY) {
+#ifdef RS_ALPHA_SEED
+	bool rtgi_seed = (rf.flags & F_OWN_SAMPLER) == 0u;
+#else
+	bool rtgi_seed = (rf.flags & (F_REPLAY | F_OWN_SAMPLER)) == F_REPLAY;
+#endif
+	if (rtgi_seed) {
 		res.tag = ray_scene_hash(rtgi_shade_key(rtgi_anchor_pixel(p_pixel, rf.trace_scale, rf.screen_size), rf.frame));
 	}
 #endif
@@ -984,11 +993,16 @@ void main() {
 #if defined(MODE_FINAL) || defined(MODE_VALIDATE)
 
 #ifdef RESTIR_RAYS
-vec3 rs_fresh_lo(vec3 p_origin, vec3 p_dir, float p_dist, uint p_seed, out bool r_hit_here) {
+vec3 rs_fresh_lo(vec3 p_origin, vec3 p_dir, float p_dist, uint p_seed, uint p_tag, out bool r_hit_here) {
 	RaySceneHit hit;
 	r_hit_here = false;
 	float eps = 0.02 + 0.002 * p_dist;
-	if (!ray_scene_trace(p_origin, p_dir, p_dist + eps, false, false, ray_scene_hash(p_seed + 0xa54ff53bu), hit)) {
+#ifdef RS_ALPHA_SEED
+	uint trace_seed = p_tag;
+#else
+	uint trace_seed = ray_scene_hash(p_seed + 0xa54ff53bu);
+#endif
+	if (!ray_scene_trace(p_origin, p_dir, p_dist + eps, false, false, trace_seed, hit)) {
 		return vec3(0.0);
 	}
 	if (abs(hit.t - p_dist) > eps) {
@@ -1157,7 +1171,7 @@ void main() {
 					if ((rf.flags & F_REPLAY) != 0u) {
 						fresh = rs_fresh_lo_replay(origin, delta / max(dist, 1e-6), dist, s.tag, hit_here);
 					} else {
-						fresh = rs_fresh_lo(origin, delta / max(dist, 1e-6), dist, uint(px.y) * 65537u + uint(px.x) + rf.frame * 6271u, hit_here);
+						fresh = rs_fresh_lo(origin, delta / max(dist, 1e-6), dist, uint(px.y) * 65537u + uint(px.x) + rf.frame * 6271u, s.tag, hit_here);
 					}
 					visible = hit_here;
 					if (hit_here) {
@@ -1311,10 +1325,15 @@ void main() {
 	uint flags = 0u;
 	uint shade_seed = ray_scene_hash(uint(px.y) * 65537u + uint(px.x) + rf.frame * 6271u);
 	bool replay = (rf.flags & F_REPLAY) != 0u;
+	uint trace_seed = replay ? shade_seed : ray_scene_hash(uint(px.y) * 65537u + uint(px.x) + rf.frame * 6271u + 0x510e527fu);
+#ifdef RS_ALPHA_SEED
+	tag = trace_seed;
+#else
 	if (replay) {
 		tag = shade_seed;
 	}
-	if (ray_scene_trace(origin, direction, rf.sky_distance, false, false, replay ? shade_seed : ray_scene_hash(uint(px.y) * 65537u + uint(px.x) + rf.frame * 6271u + 0x510e527fu), hit)) {
+#endif
+	if (ray_scene_trace(origin, direction, rf.sky_distance, false, false, trace_seed, hit)) {
 		RaySceneMaterial material = ray_scene_hit_material(hit);
 		point = origin + direction * hit.t;
 		vec3 normal = ray_scene_hit_normal(hit);
@@ -1646,6 +1665,7 @@ void rs_validate_pixel(ivec2 px) {
 	Reservoir h = rs_empty();
 	h.xs = uintBitsToFloat(a.xyz);
 	h.flags = flags;
+	h.tag = c.w;
 	if (replay) {
 		if (!rs_is_sky(h)) {
 			rs_validate_replay(px, a, b, c, q);
@@ -1671,7 +1691,7 @@ void rs_validate_pixel(ivec2 px) {
 		if (dist < 1e-3) {
 			return;
 		}
-		fresh = rs_fresh_lo(q.origin, delta / dist, dist, uint(px.y) * 65537u + uint(px.x) + rf.frame * 6271u, landed);
+		fresh = rs_fresh_lo(q.origin, delta / dist, dist, uint(px.y) * 65537u + uint(px.x) + rf.frame * 6271u, c.w, landed);
 	}
 	float l_old = rs_luma(lo_old);
 	float l_new = rs_luma(fresh);
