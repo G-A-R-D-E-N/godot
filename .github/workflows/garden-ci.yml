@@ -28,6 +28,35 @@ env:
   SCONS_CACHE_LIMIT: 3072
 
 jobs:
+  editor-build-scope:
+    name: Determine editor build scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      build: ${{ steps.scope.outputs.build }}
+    steps:
+      - id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_FILES: ${{ github.event.pull_request.changed_files }}
+        run: |
+          build=true
+          if [[ "$GITHUB_EVENT_NAME" == pull_request && "$PR_FILES" =~ ^[0-9]+$ && "$PR_FILES" -gt 0 && "$PR_FILES" -lt 3000 ]]; then
+            if gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files?per_page=100" > "$RUNNER_TEMP/pr-files.json"; then
+              build=$(jq -er --argjson expected "$PR_FILES" '
+                [ .[][] ] as $files |
+                [ $files[] | .filename, (.previous_filename // empty) ] as $paths |
+                if ($files | length) != $expected then error("incomplete PR file list")
+                elif all($paths[]; startswith(".github/") or (ascii_downcase | endswith(".md"))) then "false"
+                else "true" end
+              ' "$RUNNER_TEMP/pr-files.json") || build=true
+            fi
+          fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
   static-checks:
     name: Static checks
     runs-on: ubuntu-24.04
@@ -59,6 +88,8 @@ jobs:
 
   linux-editor:
     name: Linux editor (double, Mono)
+    needs: editor-build-scope
+    if: ${{ needs.editor-build-scope.outputs.build == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     steps:
@@ -143,6 +174,8 @@ jobs:
 
   windows-editor:
     name: Windows editor (MSVC, double, Mono)
+    needs: editor-build-scope
+    if: ${{ needs.editor-build-scope.outputs.build == 'true' }}
     runs-on: windows-latest
     timeout-minutes: 240
     env:
