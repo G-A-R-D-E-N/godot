@@ -531,5 +531,11 @@
 SConstruct                                    @godotengine/buildsystem
 SCsub                                         @godotengine/buildsystem
 /modules/gi_restir/                             @NomadsReach
+/modules/gi_restir/**/*.py                      @NomadsReach @godotengine/buildsystem
+/modules/gi_restir/**/SCsub                     @NomadsReach @godotengine/buildsystem
+/modules/gi_restir/tests/                       @NomadsReach @godotengine/tests
 /modules/gi_restir_di/                          @NomadsReach
+/modules/gi_restir_di/**/*.py                   @NomadsReach @godotengine/buildsystem
+/modules/gi_restir_di/**/SCsub                  @NomadsReach @godotengine/buildsystem
+/modules/gi_restir_di/tests/                    @NomadsReach @godotengine/tests
 /docs/code-notes/                               @NomadsReach
