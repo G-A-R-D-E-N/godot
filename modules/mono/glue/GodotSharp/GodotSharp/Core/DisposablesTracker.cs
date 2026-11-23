@@ -26,6 +26,8 @@ namespace Godot
 
         private static void OnGodotShuttingDownImpl()
         {
+            ShuttingDown = true;
+
             bool isStdoutVerbose;
 
             try
@@ -43,8 +45,6 @@ namespace Godot
 
             GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: false);
             bool drained = WaitForPendingFinalizers(DrainWaitMilliseconds);
-
-            ShuttingDown = true;
 
             bool settled = WaitForPendingFinalizers(SettleWaitMilliseconds);
 

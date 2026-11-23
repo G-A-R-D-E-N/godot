@@ -45,13 +45,25 @@ struct FillParams {
 	uint32_t source_width;
 	uint32_t source_height;
 	uint32_t cutoff;
-	uint32_t pad0;
+	uint32_t invert;
 	uint32_t pad1;
 	uint32_t pad2;
 };
 
-uint64_t _signature(RID p_rd, uint32_t p_width, uint32_t p_height) {
-	return (p_rd.get_id() * 1000003ULL) ^ (uint64_t(p_width) << 40) ^ (uint64_t(p_height) << 20);
+uint64_t _signature(RID p_rd, uint32_t p_width, uint32_t p_height, uint32_t p_data_version) {
+	return (p_rd.get_id() * 1000003ULL) ^ (uint64_t(p_width) << 40) ^ (uint64_t(p_height) << 20) ^ (uint64_t(p_data_version) << 8);
+}
+
+uint32_t _layer_cutoff_k(uint32_t p_cutoff) {
+	return p_cutoff & RayAlphaStore::LAYER_CUTOFF_MASK;
+}
+
+bool _layer_cutoff_invert(uint32_t p_cutoff) {
+	return (p_cutoff & RayAlphaStore::LAYER_CUTOFF_INVERT) != 0;
+}
+
+uint32_t _pack_layer_cutoff(uint32_t p_cutoff, bool p_invert) {
+	return p_cutoff | (p_invert ? RayAlphaStore::LAYER_CUTOFF_INVERT : 0u);
 }
 
 uint64_t _entry_hash(uint32_t p_layer, const RayAlphaStore::EntryKey &p_key) {
@@ -90,7 +102,10 @@ RayAlphaStore::~RayAlphaStore() {
 }
 
 void RayAlphaStore::configure(uint32_t p_max_layers, uint32_t p_layer_size, uint64_t p_texels_per_frame) {
-	const uint32_t layers_wanted = CLAMP(p_max_layers, 16u, 2048u);
+	uint32_t layers_wanted = CLAMP(p_max_layers, 16u, 2048u);
+	if (RD::get_singleton() != nullptr) {
+		layers_wanted = MIN(layers_wanted, uint32_t(RD::get_singleton()->limit_get(RD::LIMIT_MAX_TEXTURE_ARRAY_LAYERS)));
+	}
 	const uint32_t size_wanted = p_layer_size >= 512u ? 512u : 256u;
 	if (max_layers == layers_wanted && layer_size == size_wanted) {
 		texels_per_frame = p_texels_per_frame;
@@ -145,6 +160,7 @@ void RayAlphaStore::release() {
 	free_entries.clear();
 	entry_map.clear();
 	table_dirty = true;
+	textures_ok = false;
 	stats = Stats();
 }
 
@@ -171,6 +187,7 @@ bool RayAlphaStore::_ensure_pipeline() {
 }
 
 void RayAlphaStore::_free_textures() {
+	textures_ok = false;
 	for (RID &view : mean_mip_views) {
 		if (view.is_valid()) {
 			RD::get_singleton()->free_rid(view);
@@ -222,6 +239,7 @@ bool RayAlphaStore::_ensure_texture() {
 	}
 	rd->set_resource_name(layer_texture, "Ray Scene Alpha Layers");
 	rd->set_resource_name(mean_texture, "Ray Scene Alpha Mean");
+	textures_ok = true;
 	return true;
 }
 
@@ -362,7 +380,7 @@ RayAlphaStore::EntryKey RayAlphaStore::canonical_key(const EntryKey &p_raw, bool
 		key.far_gain = MAX(key.far_gain, 0.0f);
 		key.far_veil_alpha = CLAMP(key.far_veil_alpha, 0.0f, 1.0f);
 	}
-	key.bits = cull | (mode << ENTRY_FAR_MODE_SHIFT);
+	key.bits = cull | (mode << ENTRY_FAR_MODE_SHIFT) | (p_raw.bits & ENTRY_ALPHA_INVERT_MASK);
 	key.far_gain = _positive_zero(key.far_gain);
 	key.far_level = _positive_zero(key.far_level);
 	key.far_veil_alpha = _positive_zero(key.far_veil_alpha);
@@ -380,7 +398,8 @@ uint32_t RayAlphaStore::acquire(RID p_source, uint32_t p_cutoff, const EntryKey 
 	if (far_invalid) {
 		stats.far_invalid++;
 	}
-	const LayerKey layer_key = { p_source.get_id(), p_cutoff };
+	const bool invert = (key.bits & ENTRY_ALPHA_INVERT_MASK) != 0;
+	const LayerKey layer_key = { p_source.get_id(), _pack_layer_cutoff(p_cutoff, invert) };
 	uint32_t layer_index = 0;
 	if (const uint32_t *found = layer_map.getptr(layer_key)) {
 		layer_index = *found;
@@ -412,7 +431,7 @@ uint32_t RayAlphaStore::acquire(RID p_source, uint32_t p_cutoff, const EntryKey 
 		}
 		Layer &fresh = layers[layer_index];
 		fresh.source = p_source;
-		fresh.cutoff = p_cutoff;
+		fresh.cutoff = layer_key.cutoff;
 		layer_map.insert(layer_key, layer_index);
 	}
 	Layer &layer = layers[layer_index];
@@ -501,7 +520,8 @@ void RayAlphaStore::update() {
 		layer.source_rd = rd;
 		layer.width = format.width;
 		layer.height = format.height;
-		layer.signature = _signature(rd, format.width, format.height);
+		const uint32_t data_version = texture_storage->texture_get_data_version(layer.source);
+		layer.signature = _signature(rd, format.width, format.height, data_version);
 		if (layer.signature != layer.filled_signature || layer.state != LAYER_READY) {
 			if (layer.state != LAYER_PENDING) {
 				layer.state = LAYER_PENDING;
@@ -535,7 +555,8 @@ void RayAlphaStore::update() {
 			params.layer_size = layer_size;
 			params.source_width = layer.width;
 			params.source_height = layer.height;
-			params.cutoff = layer.cutoff;
+			params.cutoff = _layer_cutoff_k(layer.cutoff);
+			params.invert = _layer_cutoff_invert(layer.cutoff) ? 1u : 0u;
 			RD::get_singleton()->compute_list_set_push_constant(list, &params, sizeof(params));
 			const uint32_t groups = layer_size / 8u;
 			RD::get_singleton()->compute_list_dispatch(list, groups, groups, 1);

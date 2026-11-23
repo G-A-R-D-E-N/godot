@@ -12,7 +12,7 @@ layout(push_constant, std430) uniform Params {
 	uint source_width;
 	uint source_height;
 	uint cutoff;
-	uint pad0;
+	uint invert;
 	uint pad1;
 	uint pad2;
 }
@@ -57,7 +57,8 @@ void main() {
 			for (uint x = x0; x < x1; x++) {
 				float alpha = texelFetch(source_texture, ivec2(x, y), 0).a;
 				alpha_sum += alpha;
-				count += uint(round(alpha * 255.0)) >= params.cutoff ? 1u : 0u;
+				bool pass = params.invert != 0u ? uint(round(alpha * 255.0)) <= params.cutoff : uint(round(alpha * 255.0)) >= params.cutoff;
+				count += pass ? 1u : 0u;
 			}
 		}
 		samples = (x1 - x0) * (y1 - y0);
@@ -66,7 +67,8 @@ void main() {
 		vec2 uv = (vec2(id) + vec2(0.5)) / float(params.layer_size);
 		float alpha = textureLod(source_texture, uv, 0.0).a;
 		alpha_sum = alpha;
-		value = (alpha * 255.0 >= float(params.cutoff)) ? 1.0 : 0.0;
+		bool pass = params.invert != 0u ? alpha * 255.0 <= float(params.cutoff) : alpha * 255.0 >= float(params.cutoff);
+		value = pass ? 1.0 : 0.0;
 	}
 	imageStore(alpha_layers, ivec3(id, params.layer), vec4(value, 0.0, 0.0, 1.0));
 

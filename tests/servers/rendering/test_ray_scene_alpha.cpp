@@ -45,6 +45,8 @@ TEST_FORCE_LINK(test_ray_scene_alpha)
 #include "core/templates/local_vector.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene_alpha.h"
+#include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
+#include "servers/rendering/rendering_device.h"
 
 #include <type_traits>
 
@@ -276,7 +278,7 @@ Vector2 vertex_barycentrics(const Vector3 &p_point, const Vector3 &p_a, const Ve
 	return Vector2(ap.cross(ac).dot(normal) / area, ab.cross(ap).dot(normal) / area);
 }
 
-float fill_texel(const LocalVector<uint8_t> &p_source, uint32_t p_source_width, uint32_t p_source_height, uint32_t p_layer_size, uint32_t p_cutoff, uint32_t p_x, uint32_t p_y) {
+float fill_texel(const LocalVector<uint8_t> &p_source, uint32_t p_source_width, uint32_t p_source_height, uint32_t p_layer_size, uint32_t p_cutoff, uint32_t p_x, uint32_t p_y, bool p_invert = false) {
 	const uint32_t x0 = (p_x * p_source_width) / p_layer_size;
 	const uint32_t x1 = ((p_x + 1u) * p_source_width) / p_layer_size;
 	const uint32_t y0 = (p_y * p_source_height) / p_layer_size;
@@ -285,10 +287,29 @@ float fill_texel(const LocalVector<uint8_t> &p_source, uint32_t p_source_width, 
 	for (uint32_t y = y0; y < y1; y++) {
 		for (uint32_t x = x0; x < x1; x++) {
 			const float alpha = float(p_source[y * p_source_width + x]) / 255.0f;
-			count += uint32_t(Math::round(alpha * 255.0f)) >= p_cutoff ? 1u : 0u;
+			const uint32_t sample = uint32_t(Math::round(alpha * 255.0f));
+			const bool pass = p_invert ? sample <= p_cutoff : sample >= p_cutoff;
+			count += pass ? 1u : 0u;
 		}
 	}
 	return float(count) / float((x1 - x0) * (y1 - y0));
+}
+
+bool raster_visible(float p_texture_alpha, float p_threshold, float p_opacity) {
+	return p_texture_alpha * p_opacity >= p_threshold;
+}
+
+bool raster_visible_range(float p_texture_alpha, float p_threshold, const Vector2 &p_range) {
+	const float span = float(p_range.y - p_range.x);
+	const float mapped = float(p_range.x) + p_texture_alpha * span;
+	return mapped >= p_threshold;
+}
+
+float ray_cutoff_from_range(float p_threshold, const Vector2 &p_range, bool &r_invert) {
+	const float span = float(p_range.y - p_range.x);
+	r_invert = span < 0.0f;
+	const float cutoff = (p_threshold - float(p_range.x)) / span;
+	return CLAMP(cutoff, 0.0f, 1.0f);
 }
 
 TEST_CASE("[RayScene] Half float known answers") {
@@ -2477,6 +2498,100 @@ TEST_CASE("[RayScene] Alpha far state publishes on the next begin_update") {
 	CHECK(settled_store.get_entry(s_mode2).far_state == RayAlphaStore::LAYER_EMPTY);
 	CHECK(settled_store.get_entry(s_mode0).far_state == RayAlphaStore::LAYER_EMPTY);
 	CHECK(settled_store.get_change_serial() != refill_serial);
+}
+
+TEST_CASE("[RayScene] Alpha cutoff above one keeps fully discarded surfaces from blocking rays") {
+	const float threshold = 0.5f;
+	const float opacity = 0.1f;
+	const float cutoff = threshold / opacity;
+	CHECK(cutoff > 1.0f);
+	CHECK_FALSE(raster_visible(1.0f, threshold, opacity));
+}
+
+TEST_CASE("[RayScene] Inverted opacity texture range matches raster visibility") {
+	bool invert = false;
+	const Vector2 range(1.0f, 0.0f);
+	const float threshold = 0.5f;
+	const float cutoff = ray_cutoff_from_range(threshold, range, invert);
+	CHECK(invert);
+	CHECK(Math::is_equal_approx(cutoff, 0.5f));
+	const uint32_t cutoff_k = uint32_t(Math::ceil(cutoff * 255.0f));
+	LocalVector<uint8_t> source;
+	source.resize(8 * 8);
+	for (uint32_t i = 0; i < source.size(); i++) {
+		source[i] = uint8_t((i * 29u) % 256u);
+	}
+	for (uint32_t sample : { 0u, 32u, 64u, 127u, 128u, 200u, 255u }) {
+		const float alpha = float(sample) / 255.0f;
+		const bool raster = raster_visible_range(alpha, threshold, range);
+		LocalVector<uint8_t> plane;
+		plane.resize(8 * 8);
+		for (uint32_t i = 0; i < plane.size(); i++) {
+			plane[i] = uint8_t(sample);
+		}
+		const float layer = fill_texel(plane, 8, 8, 8, cutoff_k, 4, 4, true);
+		const bool ray = layer >= 0.5f;
+		CHECK(raster == ray);
+	}
+}
+
+TEST_CASE("[RayScene] Inverted alpha range gets its own cache layer") {
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	const RID source = RID::from_uint64(0x100000003ull);
+	const Vector2 one(1.0f, 1.0f);
+	const Vector2 zero(0.0f, 0.0f);
+	const uint32_t forward = store.acquire(source, 128, one, zero);
+	RayAlphaStore::EntryKey inverted = {};
+	inverted.scale[0] = 1.0f;
+	inverted.scale[1] = 1.0f;
+	inverted.bits = RayAlphaStore::ENTRY_ALPHA_INVERT_MASK;
+	const uint32_t flipped = store.acquire(source, 128, inverted);
+	REQUIRE(forward != 0);
+	REQUIRE(flipped != 0);
+	CHECK(forward != flipped);
+	CHECK(store.get_entry(forward).layer != store.get_entry(flipped).layer);
+}
+
+TEST_CASE("[RayScene] Alpha store clamps requested layers to the device array limit") {
+#ifdef RD_ENABLED
+	RD *rd = RD::get_singleton();
+	if (rd == nullptr) {
+		MESSAGE("SKIP: no RenderingDevice singleton.");
+		return;
+	}
+	const uint32_t device_limit = uint32_t(rd->limit_get(RD::LIMIT_MAX_TEXTURE_ARRAY_LAYERS));
+	REQUIRE(device_limit >= 16u);
+	RayAlphaStore store;
+	store.configure(device_limit + 512, 256, 1u << 20);
+	CHECK(store.get_max_layers() == device_limit);
+#else
+	MESSAGE("SKIP: RD_DISABLED.");
+#endif
+}
+
+TEST_CASE("[RayScene] Texture data version bumps after a same-RID image update") {
+#ifdef RD_ENABLED
+	TextureStorage *texture_storage = TextureStorage::get_singleton();
+	RD *rd = RD::get_singleton();
+	if (texture_storage == nullptr || rd == nullptr) {
+		MESSAGE("SKIP: renderer texture storage unavailable.");
+		return;
+	}
+	Ref<Image> image = Image::create(4, 4, false, Image::FORMAT_RGBA8);
+	image->fill(Color(1.0f, 0.0f, 0.0f, 1.0f));
+	const RID texture = texture_storage->texture_allocate();
+	texture_storage->texture_2d_initialize(texture, image);
+	CHECK(texture_storage->texture_get_data_version(texture) == 0);
+	image->fill(Color(0.0f, 1.0f, 0.0f, 128.0f / 255.0f));
+	texture_storage->texture_2d_update(texture, image);
+	CHECK(texture_storage->texture_get_data_version(texture) == 1);
+	texture_storage->texture_2d_update(texture, image);
+	CHECK(texture_storage->texture_get_data_version(texture) == 2);
+	texture_storage->texture_free(texture);
+#else
+	MESSAGE("SKIP: RD_DISABLED.");
+#endif
 }
 
 } // namespace TestRaySceneAlpha

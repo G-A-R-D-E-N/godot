@@ -57,6 +57,7 @@ LEGACY = {
     "running-drained": ["--running-finalizer", "--release-before-quit"],
 }
 OWNERSHIP = {
+    "shutdown-after-finalizer-timeout": "--shutdown-after-finalizer-timeout",
     "overlap": "--overlap-finalizer",
     "prebase": "--prebase-finalizer",
     "race": "--race-dispose",
@@ -76,6 +77,7 @@ OWNERSHIP = {
 }
 CONTROL = ["throw-shutdown", "throw-finalizer", "owner-api"]
 READY = {
+    "shutdown-after-finalizer-timeout": "READY shutdown-after-finalizer-timeout held.",
     "overlap": "READY overlap finalizer held inside base disposal.",
     "prebase": "READY prebase finalizer held before base disposal.",
     "throw-shutdown": "READY throw-shutdown disposal failed before base disposal;",

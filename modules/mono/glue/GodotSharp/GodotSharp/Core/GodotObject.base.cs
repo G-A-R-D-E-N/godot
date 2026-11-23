@@ -177,6 +177,18 @@ namespace Godot
         /// </summary>
         protected virtual void Dispose(bool disposing)
         {
+            if (!disposing && DisposablesTracker.ShuttingDown)
+            {
+                if (_weakReferenceToSelf != null)
+                {
+                    DisposablesTracker.UnregisterGodotObject(this, _weakReferenceToSelf);
+                }
+
+                Volatile.Write(ref _disposeCompleted, true);
+                NativePtr = IntPtr.Zero;
+                return;
+            }
+
             if (NativePtr != IntPtr.Zero)
             {
                 IntPtr gcHandleToFree = NativeFuncs.godotsharp_internal_object_get_associated_gchandle(NativePtr);

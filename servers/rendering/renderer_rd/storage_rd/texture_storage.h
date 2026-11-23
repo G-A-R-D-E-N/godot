@@ -204,6 +204,8 @@ private:
 
 		RID streaming_state;
 
+		uint32_t data_version = 0;
+
 		void cleanup();
 	};
 
@@ -648,6 +650,8 @@ public:
 
 	virtual RID texture_get_rd_texture(RID p_texture, bool p_srgb = false) const override;
 	virtual uint64_t texture_get_native_handle(RID p_texture, bool p_srgb = false) const override;
+
+	uint32_t texture_get_data_version(RID p_texture) const;
 
 	//internal usage
 	_FORCE_INLINE_ TextureType texture_get_type(RID p_texture) {

@@ -49,6 +49,10 @@ public:
 	static constexpr uint32_t ENTRY_CULL_MASK = 3u;
 	static constexpr uint32_t ENTRY_FAR_MODE_SHIFT = 2u;
 	static constexpr uint32_t ENTRY_FAR_MODE_MASK = 3u;
+	static constexpr uint32_t ENTRY_ALPHA_INVERT_SHIFT = 4u;
+	static constexpr uint32_t ENTRY_ALPHA_INVERT_MASK = 1u << ENTRY_ALPHA_INVERT_SHIFT;
+	static constexpr uint32_t LAYER_CUTOFF_INVERT = 0x100u;
+	static constexpr uint32_t LAYER_CUTOFF_MASK = 0xFFu;
 
 	struct EntryKey {
 		float scale[2] = {};
@@ -125,6 +129,7 @@ public:
 		return mode == 1u || mode == 2u;
 	}
 	bool is_configured() const { return max_layers > 0; }
+	bool has_alpha_textures() const { return textures_ok; }
 	RID get_layer_texture() const { return layer_texture; }
 	RID get_mean_texture() const { return mean_texture; }
 	RID get_table_buffer() const { return table_buffer; }
@@ -136,7 +141,7 @@ public:
 	uint32_t get_layer_count() const { return layers.size(); }
 	uint32_t get_live_layer_count() const { return layers.size() - free_layers.size(); }
 	RID get_layer_source(uint32_t p_layer) const { return layers[p_layer].source; }
-	uint32_t get_layer_cutoff(uint32_t p_layer) const { return layers[p_layer].cutoff; }
+	uint32_t get_layer_cutoff(uint32_t p_layer) const { return layers[p_layer].cutoff & LAYER_CUTOFF_MASK; }
 	uint32_t get_layer_state(uint32_t p_layer) const { return layers[p_layer].state; }
 	uint32_t get_layer_generation(uint32_t p_layer) const { return layers[p_layer].generation; }
 	uint32_t get_max_layers() const { return max_layers; }
@@ -196,6 +201,7 @@ private:
 
 	uint32_t max_layers = 0;
 	uint32_t layer_size = 256;
+	bool textures_ok = false;
 	uint64_t texels_per_frame = 0;
 	RID layer_texture;
 	RID mean_texture;

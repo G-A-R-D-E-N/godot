@@ -1648,7 +1648,13 @@ void TextureStorage::_texture_2d_update(RID p_texture, const Ref<Image> &p_image
 	TextureToRDFormat f;
 	Ref<Image> validated = _validate_texture_format(p_image, f);
 
+	tex->data_version++;
 	RD::get_singleton()->texture_update(tex->rd_texture, p_layer, validated->get_data());
+}
+
+uint32_t TextureStorage::texture_get_data_version(RID p_texture) const {
+	const Texture *tex = texture_owner.get_or_null(p_texture);
+	return tex != nullptr ? tex->data_version : 0;
 }
 
 void TextureStorage::texture_2d_update(RID p_texture, const Ref<Image> &p_image, int p_layer) {

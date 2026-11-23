@@ -70,6 +70,12 @@ public partial class ShutdownTrackerProbe : Node
                 tree.Quit();
                 return;
             }
+            if (args.Contains("--shutdown-after-finalizer-timeout"))
+            {
+                ShutdownAfterFinalizerTimeout.Start();
+                tree.Quit();
+                return;
+            }
             if (args.Contains("--race-dispose"))
             {
                 DisposeRace.Run();

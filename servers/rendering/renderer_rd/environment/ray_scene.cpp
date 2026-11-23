@@ -712,6 +712,9 @@ void RayScene::_alpha_entry(RID p_material, Material &r_material, float p_alpha_
 				return;
 			}
 			cutoff = (p_alpha_threshold - float(range.x)) / span;
+			if (span < 0.0f) {
+				key.bits |= RayAlphaStore::ENTRY_ALPHA_INVERT_MASK;
+			}
 			key.far_affine[0] = span;
 			key.far_affine[1] = float(range.x);
 		} else {
@@ -745,6 +748,10 @@ void RayScene::_alpha_entry(RID p_material, Material &r_material, float p_alpha_
 		alpha_counts.solid_no_texture++;
 		return;
 	}
+	if (cutoff > 1.0f) {
+		alpha_counts.solid_always++;
+		return;
+	}
 	cutoff = CLAMP(cutoff, 0.0f, 1.0f);
 	const uint32_t cutoff_k = uint32_t(Math::ceil(cutoff * 255.0f));
 	if (cutoff_k == 0) {
@@ -755,7 +762,8 @@ void RayScene::_alpha_entry(RID p_material, Material &r_material, float p_alpha_
 	key.scale[1] = float(scale.y);
 	key.offset[0] = float(offset.x);
 	key.offset[1] = float(offset.y);
-	key.bits = p_cull & RayAlphaStore::ENTRY_CULL_MASK;
+	const uint32_t invert_bits = key.bits & RayAlphaStore::ENTRY_ALPHA_INVERT_MASK;
+	key.bits = (p_cull & RayAlphaStore::ENTRY_CULL_MASK) | invert_bits;
 	const Variant far_mode_value = material_storage->material_get_declared_param(p_material, SNAME("alpha_far_mode"));
 	const int64_t far_mode = far_mode_value.get_type() == Variant::INT ? int64_t(far_mode_value) : 0;
 	if (far_mode == 1 || far_mode == 2) {
@@ -796,7 +804,13 @@ bool RayScene::_alpha_live(uint32_t p_flags) const {
 }
 
 bool RayScene::_alpha_ready() const {
-	return triangle_uv_buffer.is_valid() && alpha_store.get_table_buffer().is_valid() && alpha_store.get_layer_texture().is_valid() && alpha_store.get_mean_texture().is_valid();
+	if (!triangle_uv_buffer.is_valid() || !alpha_store.get_table_buffer().is_valid()) {
+		return false;
+	}
+	if (!alpha_enabled) {
+		return true;
+	}
+	return alpha_store.has_alpha_textures();
 }
 
 String RayScene::alpha_shader_defines() {
