@@ -113,13 +113,14 @@ jobs:
       - name: Unit tests
         timeout-minutes: 45
         run: |
-          ./bin/godot.linuxbsd.editor.double.x86_64.mono --headless --test --force-colors -s &
+          stdbuf -oL -eL ./bin/godot.linuxbsd.editor.double.x86_64.mono --headless --test --force-colors -s &
           pid=$!
           (sleep 1200; echo "::error::Unit tests still running after 20 minutes; dumping thread stacks"; nproc
             for g in "gdb" "sudo -n gdb"; do
               out=$($g -p "$pid" -batch -ex "thread apply all bt" 2>&1 || true)
               case "$out" in *"Thread "*) echo "$out" | tail -n 800; break ;; *) echo "$g: $out" | tail -n 5 ;; esac
             done
+            grep -E "VmRSS|Threads" /proc/$pid/status || true
             kill -9 "$pid") &
           watchdog=$!
           rc=0; wait "$pid" || rc=$?
@@ -204,7 +205,31 @@ jobs:
 
       - name: Unit tests
         timeout-minutes: 45
-        run: ./bin/godot.windows.editor.double.x86_64.mono.exe --headless --test --force-colors
+        shell: pwsh
+        run: |
+          $tests = Start-Process -FilePath ./bin/godot.windows.editor.double.x86_64.mono.exe -ArgumentList '--headless', '--test', '--force-colors' -PassThru -NoNewWindow
+          if (-not $tests.WaitForExit(1200000)) {
+            Write-Host "::error::Unit tests still running after 20 minutes; capturing a hang dump"
+            $hang = Join-Path $env:RUNNER_TEMP "unit-tests-hang.dmp"
+            Get-Process -Id $tests.Id | Format-List Id, CPU, Threads, WorkingSet64 | Out-String | Write-Host
+            try {
+              $dump = Start-Process -FilePath "$env:SystemRoot\System32\rundll32.exe" -ArgumentList "C:\Windows\System32\comsvcs.dll, MiniDump $($tests.Id) $hang full" -PassThru -Wait -NoNewWindow
+              Write-Host "hang dump exit $($dump.ExitCode)"
+            } catch {
+              Write-Host "hang dump failed: $($_.Exception.Message)"
+            }
+            Stop-Process -Id $tests.Id -Force
+            exit 1
+          }
+          exit $tests.ExitCode
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: unit-tests-hang-dump
+          path: ${{ runner.temp }}/unit-tests-hang.dmp
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Mono shutdown tracker regression
         run: python tests/mono_shutdown_tracker/run.py --candidate bin/godot.windows.editor.double.x86_64.mono.exe --output shutdown-tracker-logs
