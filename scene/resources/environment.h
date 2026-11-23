@@ -218,6 +218,16 @@ private:
 
 	void _update_night_vision();
 
+	bool local_exposure_enabled = false;
+	float local_exposure_strength = 1.0;
+	float local_exposure_shadow_contrast = 0.7;
+	float local_exposure_highlight_contrast = 0.8;
+	float local_exposure_max_shadow_lift = 2.0;
+	float local_exposure_max_highlight_drop = 1.5;
+	float local_exposure_pivot = 0.0;
+
+	void _update_local_exposure();
+
 	// Volumetric Fog
 	bool volumetric_fog_enabled = false;
 	float volumetric_fog_density = 0.05;
@@ -455,6 +465,21 @@ public:
 	float get_night_vision_acuity_radius() const;
 	void set_night_vision_highlight_range(float p_range);
 	float get_night_vision_highlight_range() const;
+
+	void set_local_exposure_enabled(bool p_enabled);
+	bool is_local_exposure_enabled() const;
+	void set_local_exposure_strength(float p_strength);
+	float get_local_exposure_strength() const;
+	void set_local_exposure_shadow_contrast(float p_contrast);
+	float get_local_exposure_shadow_contrast() const;
+	void set_local_exposure_highlight_contrast(float p_contrast);
+	float get_local_exposure_highlight_contrast() const;
+	void set_local_exposure_max_shadow_lift(float p_stops);
+	float get_local_exposure_max_shadow_lift() const;
+	void set_local_exposure_max_highlight_drop(float p_stops);
+	float get_local_exposure_max_highlight_drop() const;
+	void set_local_exposure_pivot(float p_pivot);
+	float get_local_exposure_pivot() const;
 
 	// Volumetric Fog
 	void set_volumetric_fog_enabled(bool p_enable);

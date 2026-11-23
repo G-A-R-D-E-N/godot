@@ -72,6 +72,16 @@ public:
 		float highlight_range = 0.0;
 	};
 
+	struct LocalExposure {
+		bool enabled = false;
+		float strength = 1.0;
+		float shadow_contrast = 0.7;
+		float highlight_contrast = 0.8;
+		float max_shadow_lift = 2.0;
+		float max_highlight_drop = 1.5;
+		float pivot = 0.0;
+	};
+
 private:
 	static RendererEnvironmentStorage *singleton;
 
@@ -128,6 +138,8 @@ private:
 		float aerial_perspective_max_distance = 32000.0;
 
 		NightVision night_vision;
+
+		LocalExposure local_exposure;
 
 		// Volumetric Fog
 		bool volumetric_fog_enabled = false;
@@ -287,6 +299,9 @@ public:
 
 	void environment_set_night_vision(RID p_env, bool p_enable, float p_mesopic_min, float p_mesopic_max, float p_blue_shift, const Vector2 &p_blue_shift_chromaticity, float p_desaturation, float p_acuity_radius, float p_highlight_range);
 	NightVision environment_get_night_vision(RID p_env) const;
+
+	void environment_set_local_exposure(RID p_env, bool p_enable, float p_strength, float p_shadow_contrast, float p_highlight_contrast, float p_max_shadow_lift, float p_max_highlight_drop, float p_pivot);
+	LocalExposure environment_get_local_exposure(RID p_env) const;
 
 	// Volumetric Fog
 	void environment_set_volumetric_fog(RID p_env, bool p_enable, float p_density, const Color &p_albedo, const Color &p_emission, float p_emission_energy, float p_anisotropy, float p_length, float p_detail_spread, float p_gi_inject, bool p_temporal_reprojection, float p_temporal_reprojection_amount, float p_ambient_inject, float p_sky_affect);

@@ -3004,6 +3004,28 @@
 		<member name="rendering/environment/gtao/steps" type="int" setter="" getter="" default="3">
 			Number of depth samples per slice side used by GTAO. Only used when [member rendering/environment/ssao/backend] is [code]GTAO[/code].
 		</member>
+		<member name="rendering/environment/local_exposure/edge_range" type="float" setter="" getter="" default="1.0">
+			For the [code]Edge-Checked Blur[/code] method of [member rendering/environment/local_exposure/method]: the distance, in stops, between a pixel's own luminance and the blurred base at which the pixel starts to follow its own luminance instead of the base. At twice this distance the base is ignored. Lower values protect edges more and adapt less across them.
+		</member>
+		<member name="rendering/environment/local_exposure/method" type="int" setter="" getter="" default="0">
+			The filter that builds the regional luminance base used by [member Environment.local_exposure_enabled]. [code]Bilateral Grid[/code] splats log luminance into a low-resolution grid over screen position and luminance, blurs it and looks each pixel up at its own luminance, so the base follows edges. [code]Edge-Checked Blur[/code] uses one blurred value per screen region and falls back to the pixel's own luminance where the two differ by more than [member rendering/environment/local_exposure/edge_range].
+			[b]Note:[/b] Only used by the Forward+ rendering method, on viewports with a single view.
+		</member>
+		<member name="rendering/environment/local_exposure/pivot_source" type="int" setter="" getter="" default="0">
+			Where the level that local exposure leaves unchanged comes from. [code]Fixed[/code] uses middle gray offset by [member Environment.local_exposure_pivot]. [code]Frame Median[/code] uses the median log luminance of the current frame, taken from the regional luminance grid and offset by the same amount, so the frame's typical region keeps its global exposure and local exposure only moves light between regions. Falls back to [code]Fixed[/code] for a frame with no luminance.
+		</member>
+		<member name="rendering/environment/local_exposure/range_sigma" type="float" setter="" getter="" default="1.0">
+			Width, in stops, of the blur along the luminance axis of the bilateral grid. Higher values let regions of more different brightness share one base, which adapts more smoothly and protects edges less.
+		</member>
+		<member name="rendering/environment/local_exposure/spatial_sigma" type="float" setter="" getter="" default="1.0">
+			Width, in grid cells, of the blur across the screen. A grid cell covers 32 by 32 pixels of the internal resolution.
+		</member>
+		<member name="rendering/environment/local_exposure/temporal_seconds" type="float" setter="" getter="" default="0.0">
+			Time constant, in seconds, of an exponential filter that smooths the regional base over time. [code]0[/code] disables it and uses each frame's own base. The filter restarts after a history reset and after any frame in which local exposure did not run.
+		</member>
+		<member name="rendering/environment/local_exposure/wide_blend" type="float" setter="" getter="" default="0.0">
+			For the [code]Bilateral Grid[/code] method: how much of the per-region mean over all luminances is mixed into the edge-following base. [code]0[/code] uses the edge-following base alone.
+		</member>
 		<member name="rendering/environment/screen_space_lighting/legacy_last_frame_source" type="bool" setter="" getter="" default="true">
 			If [code]false[/code], screen-space indirect lighting samples a bounce source written by the opaque pass (direct diffuse light plus emission weighted by [code]EMISSION_BOUNCE_WEIGHT[/code]) and screen-space reflections sample a reflection source (the opaque radiance without the screen-space reflection term and without fog). Both effects compress samples relative to the exposure the tonemapper uses, so their strength does not depend on the scale of the stored HDR values. Both reproject their samples with the camera and reject a sample when the previous frame held a different surface there (the reflection source stores the linear view depth in its alpha, SSIL keeps the previous frame's depth mipmaps), so moving objects and newly exposed surfaces leave no trail; a rejected sample counts as a miss. If [code]true[/code], both effects sample a copy of the previous final frame and compress the stored values directly, as in earlier versions; the previous frame feeds their own output and fog back into the next frame.
 			[b]Note:[/b] Only used by the Forward+ rendering method. Viewports with MSAA always sample the previous final frame, with the exposure-relative compression unless this setting is enabled.

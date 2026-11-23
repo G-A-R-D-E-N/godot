@@ -75,5 +75,11 @@ void main() {
 
 	highp float prev_lum = texelFetch(prev_luminance, ivec2(0, 0), 0).r;
 	luminance = prev_lum + (luminance - prev_lum) * clamp(settings.exposure_adjust, 0.0, 1.0);
+	if (settings.light_limit > 0.0 && prev_lum > 0.0) {
+		luminance = min(luminance, prev_lum * settings.light_limit);
+	}
+	if (settings.hold != 0u && prev_lum > 0.0) {
+		luminance = prev_lum;
+	}
 #endif
 }

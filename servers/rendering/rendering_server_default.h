@@ -905,6 +905,7 @@ public:
 	FUNC4(environment_set_fog_depth, RID, float, float, float)
 	FUNC4(environment_set_aerial_perspective, RID, bool, RID, float)
 	FUNC9(environment_set_night_vision, RID, bool, float, float, float, const Vector2 &, float, float, float)
+	FUNC8(environment_set_local_exposure, RID, bool, float, float, float, float, float, float)
 	FUNC14(environment_set_volumetric_fog, RID, bool, float, const Color &, const Color &, float, float, float, float, float, bool, float, float, float)
 
 	FUNC2(environment_set_volumetric_fog_volume_size, int, int)
@@ -947,6 +948,9 @@ public:
 	FUNC2(camera_attributes_set_auto_exposure_highlight_limit, RID, float)
 	FUNC3(camera_attributes_set_auto_exposure_adaptation, RID, float, float)
 	FUNC5(camera_attributes_set_auto_exposure_meter, RID, RSE::AutoExposureMeter, float, float, float)
+	FUNC4(camera_attributes_set_auto_exposure_response, RID, bool, float, float)
+	FUNC3(camera_attributes_set_auto_exposure_guard, RID, float, bool)
+	FUNC6(camera_attributes_set_auto_exposure_highlight, RID, float, float, float, float, float)
 
 	/* SCENARIO API */
 

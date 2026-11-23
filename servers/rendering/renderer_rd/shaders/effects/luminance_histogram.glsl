@@ -16,6 +16,8 @@ layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 layout(set = 0, binding = 0, std430) restrict buffer Histogram {
 	uint bins[BINS];
+	float shift;
+	float shift_valid;
 }
 histogram;
 
@@ -40,6 +42,18 @@ layout(push_constant, std430) uniform Params {
 	uint set_immediate;
 	float adaptation;
 	float adaptation_pivot;
+	float highlight_percentile;
+	float highlight_ceiling;
+	float highlight_max_shift;
+	float light_adjust;
+	float dark_adjust;
+	uint exponential;
+	float light_limit;
+	uint hold;
+	float highlight_rise;
+	float highlight_fall;
+	uint shift_stale;
+	uint pad0;
 }
 params;
 
@@ -50,6 +64,7 @@ shared uint local_bins[BINS];
 #ifdef RESOLVE
 shared float local_sum[BINS];
 shared float local_kept[BINS];
+shared float local_high[BINS];
 #endif
 
 void main() {
@@ -117,6 +132,14 @@ void main() {
 	float part = max(min(above, hi) - max(below, lo), 0.0);
 	local_sum[t] = part * (MIN_LOG2 + (float(t) + 0.5) * BIN_WIDTH);
 	local_kept[t] = part;
+	float high = -1.0;
+	if (params.highlight_percentile > 0.0 && count > 0u) {
+		float mark = clamp(params.highlight_percentile, 0.0, 1.0) * float(total);
+		if (above >= mark && below < mark) {
+			high = float(t) + (mark - below) / float(count);
+		}
+	}
+	local_high[t] = high;
 	groupMemoryBarrier();
 	barrier();
 
@@ -124,6 +147,7 @@ void main() {
 		if (t < size) {
 			local_sum[t] += local_sum[t + size];
 			local_kept[t] += local_kept[t + size];
+			local_high[t] = max(local_high[t], local_high[t + size]);
 		}
 		groupMemoryBarrier();
 		barrier();
@@ -132,14 +156,45 @@ void main() {
 	if (t == 0u) {
 		float prev = texelFetch(prev_luminance, ivec2(0, 0), 0).r;
 		float result = clamp(prev > 0.0 ? prev : params.min_luminance, params.min_luminance, params.max_luminance);
+		bool shift_valid = histogram.shift_valid > 0.5 && prev > 0.0 && params.set_immediate == 0u && params.shift_stale == 0u;
+		float shift = shift_valid ? histogram.shift : 0.0;
 		if (local_kept[0] > 0.0) {
-			float target = luminance_adapt(exp2(local_sum[0] / local_kept[0]), params.adaptation, params.adaptation_pivot);
+			float log_target = local_sum[0] / local_kept[0];
+			float stepped = log_target;
+			float raw = 0.0;
+			if (local_high[0] >= 0.0) {
+				float log_high = MIN_LOG2 + local_high[0] * BIN_WIDTH;
+				stepped = clamp(log_high - params.highlight_ceiling, log_target, log_target + params.highlight_max_shift);
+				raw = clamp(log_high - params.highlight_ceiling - log_target, 0.0, params.highlight_max_shift);
+			}
+			if (!shift_valid) {
+				shift = raw;
+			} else {
+				shift = shift >= 0.0 ? min(shift, params.highlight_max_shift) : raw;
+				if (params.hold == 0u) {
+					float rate = raw > shift ? params.highlight_rise : params.highlight_fall;
+					shift = rate >= 1.0 ? raw : shift + (raw - shift) * rate;
+				}
+			}
+			log_target = shift == raw ? stepped : log_target + shift;
+			float target = luminance_adapt(exp2(log_target), params.adaptation, params.adaptation_pivot);
 			if (params.set_immediate != 0u || !(prev > 0.0)) {
 				result = clamp(target, params.min_luminance, params.max_luminance);
+			} else if (params.exponential != 0u) {
+				float rate = target > prev ? params.light_adjust : params.dark_adjust;
+				result = clamp(prev * exp2(log2(target / prev) * rate), params.min_luminance, params.max_luminance);
 			} else {
 				result = clamp(prev + (target - prev) * params.exposure_adjust, params.min_luminance, params.max_luminance);
 			}
+			if (params.light_limit > 0.0 && prev > 0.0) {
+				result = max(min(result, prev * params.light_limit), params.min_luminance);
+			}
 		}
+		if (params.hold != 0u && prev > 0.0) {
+			result = prev;
+		}
+		histogram.shift = shift;
+		histogram.shift_valid = (shift_valid || local_kept[0] > 0.0) ? 1.0 : 0.0;
 		imageStore(dest_luminance, ivec2(0, 0), vec4(result));
 	}
 #endif
