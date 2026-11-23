@@ -471,6 +471,7 @@ void RenderingDeviceGraph::_add_command_to_graph(ResourceTracker **p_resource_tr
 				// Also assign the usage to the slice and consider it a write operation. Consider the parent's current usage access as its own.
 				resource_tracker->usage = new_resource_usage;
 				resource_tracker->usage_access = resource_tracker->parent->usage_access;
+				resource_tracker->usage_stages = resource_tracker->parent->usage_stages;
 				write_usage = true;
 
 				// Indicate the area that should be tracked is the entire resource.
@@ -525,6 +526,7 @@ void RenderingDeviceGraph::_add_command_to_graph(ResourceTracker **p_resource_tr
 								// Delete the slice from the dirty list and revert it to the usage of the parent.
 								if (current_tracker->texture_driver_id.id != 0) {
 									_add_texture_barrier_to_command(current_tracker->texture_driver_id, current_tracker->usage_access, new_usage_access, current_tracker->usage, resource_tracker->parent->usage, current_tracker->texture_subresources, command_normalization_barriers, r_command->normalization_barrier_index, r_command->normalization_barrier_count);
+									r_command->previous_stages = r_command->previous_stages | current_tracker->usage_stages;
 
 									// Merge the area of the slice with the current tracking area of the command and indicate it's a write usage as well.
 									search_tracker_rect = search_tracker_rect.merge(current_tracker->texture_slice_or_dirty_rect);
@@ -559,6 +561,7 @@ void RenderingDeviceGraph::_add_command_to_graph(ResourceTracker **p_resource_tr
 				// If it wasn't in the list, assume the usage is the same as the parent. Consider the parent's current usage access as its own.
 				resource_tracker->usage = resource_tracker->parent->usage;
 				resource_tracker->usage_access = resource_tracker->parent->usage_access;
+				resource_tracker->usage_stages = resource_tracker->parent->usage_stages;
 
 				if (resource_tracker->usage != new_resource_usage) {
 					// Insert to the dirty list if the requested usage is different.
@@ -585,6 +588,7 @@ void RenderingDeviceGraph::_add_command_to_graph(ResourceTracker **p_resource_tr
 				if (current_tracker->texture_driver_id.id != 0) {
 					// Transition all slices to the layout of the parent resource.
 					_add_texture_barrier_to_command(current_tracker->texture_driver_id, current_tracker->usage_access, new_usage_access, current_tracker->usage, resource_tracker->usage, current_tracker->texture_subresources, command_normalization_barriers, r_command->normalization_barrier_index, r_command->normalization_barrier_count);
+					r_command->previous_stages = r_command->previous_stages | current_tracker->usage_stages;
 				}
 
 				current_tracker->in_parent_dirty_list = false;
@@ -601,6 +605,8 @@ void RenderingDeviceGraph::_add_command_to_graph(ResourceTracker **p_resource_tr
 		bool write_usage_after_write = (write_usage && search_tracker->write_command_or_list_index >= 0);
 		if (different_usage || write_usage_after_write) {
 			// A barrier must be pushed if the usage is different of it's a write usage and there was already a command that wrote to this resource previously.
+			r_command->previous_stages = r_command->previous_stages | resource_tracker->usage_stages;
+
 			if (resource_tracker->texture_driver_id.id != 0) {
 				if (resource_tracker->usage_access.is_empty()) {
 					// FIXME: If the tracker does not know the previous type of usage, assume the generic memory write one.
@@ -628,6 +634,7 @@ void RenderingDeviceGraph::_add_command_to_graph(ResourceTracker **p_resource_tr
 
 		// Always update the access of the tracker according to the latest usage.
 		resource_tracker->usage_access = new_usage_access;
+		resource_tracker->usage_stages = r_command->self_stages;
 
 		// Always accumulate the stages of the tracker with the commands that use it.
 		search_tracker->current_frame_stages = search_tracker->current_frame_stages | r_command->self_stages;

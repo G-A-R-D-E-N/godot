@@ -509,17 +509,34 @@ namespace Godot.Bridge
             GetOrCreateScriptBridgeForType(scriptType, outScript);
         }
 
+        private static unsafe bool TryReferenceScriptBridge(Type scriptType, godot_ref* outScript)
+        {
+            if (!_scriptTypeBiMap.TryGetScriptPtr(scriptType, out IntPtr scriptPtr))
+                return false;
+
+            NativeFuncs.godotsharp_ref_new_from_ref_counted_ptr(out *outScript, scriptPtr);
+            if (!outScript->IsNull)
+                return true;
+
+            _scriptTypeBiMap.ReadWriteLock.EnterWriteLock();
+            try
+            {
+                _scriptTypeBiMap.Remove(scriptPtr);
+            }
+            finally
+            {
+                _scriptTypeBiMap.ReadWriteLock.ExitWriteLock();
+            }
+            return false;
+        }
+
         private static unsafe void GetOrCreateScriptBridgeForType(Type scriptType, godot_ref* outScript)
         {
             _scriptTypeBiMap.ReadWriteLock.EnterUpgradeableReadLock();
             try
             {
-                if (_scriptTypeBiMap.TryGetScriptPtr(scriptType, out IntPtr scriptPtr))
-                {
-                    // Use existing
-                    NativeFuncs.godotsharp_ref_new_from_ref_counted_ptr(out *outScript, scriptPtr);
+                if (TryReferenceScriptBridge(scriptType, outScript))
                     return;
-                }
 
                 // This path is slower, but it's only executed for the first instantiation of the type
                 CreateScriptBridgeForType(scriptType, outScript);
@@ -540,10 +557,8 @@ namespace Godot.Bridge
                 _scriptTypeBiMap.ReadWriteLock.EnterUpgradeableReadLock();
                 try
                 {
-                    if (_scriptTypeBiMap.TryGetScriptPtr(scriptType, out IntPtr scriptPtr))
+                    if (TryReferenceScriptBridge(scriptType, outScript))
                     {
-                        // Use existing
-                        NativeFuncs.godotsharp_ref_new_from_ref_counted_ptr(out *outScript, scriptPtr);
                         scriptPath = null;
                         return false;
                     }

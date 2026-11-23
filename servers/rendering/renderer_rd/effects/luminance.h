@@ -40,6 +40,19 @@
 
 namespace RendererRD {
 
+struct LuminanceHistogramPolicy {
+	float highlight_percentile = 0.0;
+	float highlight_ceiling = 2.5;
+	float highlight_max_shift = 4.0;
+	bool exponential = false;
+	float light_adjust = 1.0;
+	float dark_adjust = 1.0;
+	float light_limit = 0.0;
+	bool hold = false;
+	float highlight_rise = 1.0;
+	float highlight_fall = 1.0;
+};
+
 class Luminance {
 private:
 	bool prefer_raster_effects;
@@ -61,7 +74,8 @@ private:
 		float adaptation;
 		float adaptation_pivot;
 		uint32_t final_level;
-		float pad[2];
+		float light_limit;
+		uint32_t hold;
 	};
 
 	struct LuminanceReduce {
@@ -87,7 +101,8 @@ private:
 		float adaptation;
 		float adaptation_pivot;
 		uint32_t final_level;
-		float pad[2];
+		float light_limit;
+		uint32_t hold;
 	};
 
 	struct LuminanceReduceFragment {
@@ -97,6 +112,7 @@ private:
 	} luminance_reduce_raster;
 
 	static constexpr int LUMINANCE_HISTOGRAM_BINS = 256;
+	static constexpr int LUMINANCE_HISTOGRAM_STATE = 2;
 	static constexpr int LUMINANCE_HISTOGRAM_MAX_SAMPLES = 1 << 21;
 
 	enum LuminanceHistogramMode {
@@ -117,6 +133,18 @@ private:
 		uint32_t set_immediate;
 		float adaptation;
 		float adaptation_pivot;
+		float highlight_percentile;
+		float highlight_ceiling;
+		float highlight_max_shift;
+		float light_adjust;
+		float dark_adjust;
+		uint32_t exponential;
+		float light_limit;
+		uint32_t hold;
+		float highlight_rise;
+		float highlight_fall;
+		uint32_t shift_stale;
+		uint32_t pad;
 	};
 
 	struct LuminanceHistogram {
@@ -126,6 +154,8 @@ private:
 	} luminance_histogram;
 
 public:
+	using HistogramPolicy = LuminanceHistogramPolicy;
+
 	class LuminanceBuffers : public RenderBufferCustomDataRD {
 		GDCLASS(LuminanceBuffers, RenderBufferCustomDataRD);
 
@@ -138,6 +168,7 @@ public:
 		Vector<RID> reduce;
 		RID current;
 		RID histogram;
+		bool histogram_shift_stale = false;
 
 		virtual void configure(RenderSceneBuffersRD *p_render_buffers) override;
 		virtual void free_data() override;
@@ -149,8 +180,8 @@ public:
 
 	Ref<LuminanceBuffers> get_luminance_buffers(Ref<RenderSceneBuffersRD> p_render_buffers);
 	RID get_current_luminance_buffer(Ref<RenderSceneBuffersRD> p_render_buffers);
-	void luminance_reduction(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set = false, float p_highlight_limit = 0.0, float p_adaptation = 1.0, float p_adaptation_pivot = 0.0);
-	void luminance_histogram_meter(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set, float p_clip_low, float p_clip_high, float p_center_weight, float p_adaptation = 1.0, float p_adaptation_pivot = 0.0);
+	void luminance_reduction(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set = false, float p_highlight_limit = 0.0, float p_adaptation = 1.0, float p_adaptation_pivot = 0.0, float p_light_limit = 0.0, bool p_hold = false);
+	void luminance_histogram_meter(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set, float p_clip_low, float p_clip_high, float p_center_weight, float p_adaptation = 1.0, float p_adaptation_pivot = 0.0, const HistogramPolicy &p_policy = HistogramPolicy());
 	static int histogram_stride(const Size2i p_size);
 	bool supports_histogram_meter() const { return !prefer_raster_effects; }
 

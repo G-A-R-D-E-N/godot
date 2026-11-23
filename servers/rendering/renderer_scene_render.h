@@ -77,6 +77,7 @@ public:
 	virtual uint32_t sdfgi_get_pending_region_cascade(const Ref<RenderSceneBuffers> &p_render_buffers, int p_region) const = 0;
 
 	virtual AABB ray_scene_get_region(const Vector3 &p_camera_position) const { return AABB(); }
+	virtual AABB ray_scene_get_light_region(const Vector3 &p_camera_position) { return ray_scene_get_region(p_camera_position); }
 	virtual void ray_scene_update(const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const Vector<RID> &p_directional_lights, RID p_camera_attributes, const Vector3 &p_camera_position) {}
 
 	/* SKY API */
@@ -192,6 +193,9 @@ public:
 
 	void environment_set_night_vision(RID p_env, bool p_enable, float p_mesopic_min, float p_mesopic_max, float p_blue_shift, const Vector2 &p_blue_shift_chromaticity, float p_desaturation, float p_acuity_radius, float p_highlight_range);
 	RendererEnvironmentStorage::NightVision environment_get_night_vision(RID p_env) const;
+
+	void environment_set_local_exposure(RID p_env, bool p_enable, float p_strength, float p_shadow_contrast, float p_highlight_contrast, float p_max_shadow_lift, float p_max_highlight_drop, float p_pivot);
+	RendererEnvironmentStorage::LocalExposure environment_get_local_exposure(RID p_env) const;
 
 	// Volumetric Fog
 	void environment_set_volumetric_fog(RID p_env, bool p_enable, float p_density, const Color &p_albedo, const Color &p_emission, float p_emission_energy, float p_anisotropy, float p_length, float p_detail_spread, float p_gi_inject, bool p_temporal_reprojection, float p_temporal_reprojection_amount, float p_ambient_inject, float p_sky_affect);

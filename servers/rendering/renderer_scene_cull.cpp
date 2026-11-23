@@ -772,6 +772,8 @@ void RendererSceneCull::instance_set_base(RID p_instance, RID p_base) {
 				geom->geometry_instance->set_use_lightmap(RID(), instance->lightmap_uv_scale, instance->lightmap_slice_index);
 				geom->geometry_instance->set_instance_shader_uniforms_offset(instance->instance_uniforms.location());
 				geom->geometry_instance->set_cast_double_sided_shadows(instance->cast_shadows == RSE::SHADOW_CASTING_SETTING_DOUBLE_SIDED);
+				geom->geometry_instance->set_cast_shadows_setting(instance->cast_shadows);
+				geom->geometry_instance->set_ray_scene_occluder(instance->ray_scene_occluder);
 				if (instance->lightmap_sh.size() == 9) {
 					geom->geometry_instance->set_lightmap_capture(instance->lightmap_sh.ptr());
 				}
@@ -1365,6 +1367,29 @@ void RendererSceneCull::instance_geometry_set_flag(RID p_instance, RSE::Instance
 				}
 			}
 		} break;
+		case RSE::INSTANCE_FLAG_RAY_SCENE_OCCLUDER: {
+			ERR_FAIL_COND_MSG(p_enabled && instance->base_type != RSE::INSTANCE_MESH, "INSTANCE_FLAG_RAY_SCENE_OCCLUDER works on mesh instances only.");
+			instance->ray_scene_occluder = p_enabled;
+
+			if ((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK && instance->base_data) {
+				InstanceGeometryData *geom = static_cast<InstanceGeometryData *>(instance->base_data);
+				ERR_FAIL_NULL(geom->geometry_instance);
+				geom->geometry_instance->set_ray_scene_occluder(p_enabled);
+			}
+		} break;
+		case RSE::INSTANCE_FLAG_RAY_SCENE_EXCLUDE: {
+			ERR_FAIL_COND_MSG(p_enabled && instance->base_type != RSE::INSTANCE_MESH, "INSTANCE_FLAG_RAY_SCENE_EXCLUDE works on mesh instances only.");
+			instance->ray_scene_exclude = p_enabled;
+
+			if (instance->scenario && instance->array_index >= 0) {
+				InstanceData &idata = instance->scenario->instance_data[instance->array_index];
+				if (instance->ray_scene_exclude) {
+					idata.flags |= InstanceData::FLAG_RAY_SCENE_EXCLUDE;
+				} else {
+					idata.flags &= ~InstanceData::FLAG_RAY_SCENE_EXCLUDE;
+				}
+			}
+		} break;
 		default: {
 		}
 	}
@@ -1397,6 +1422,7 @@ void RendererSceneCull::instance_geometry_set_cast_shadows_setting(RID p_instanc
 		ERR_FAIL_NULL(geom->geometry_instance);
 
 		geom->geometry_instance->set_cast_double_sided_shadows(instance->cast_shadows == RSE::SHADOW_CASTING_SETTING_DOUBLE_SIDED);
+		geom->geometry_instance->set_cast_shadows_setting(instance->cast_shadows);
 	}
 
 	_instance_queue_update(instance, false, true);
@@ -1635,6 +1661,14 @@ Variant RendererSceneCull::instance_geometry_get_shader_parameter_default_value(
 	ERR_FAIL_NULL_V(instance, Variant());
 
 	return instance->instance_uniforms.get_default(p_parameter);
+}
+
+RenderGeometryInstance *RendererSceneCull::instance_get_geometry_instance(RID p_instance) const {
+	const Instance *instance = instance_owner.get_or_null(p_instance);
+	if (!instance || instance->base_type != RSE::INSTANCE_MESH || !instance->base_data) {
+		return nullptr;
+	}
+	return static_cast<const InstanceGeometryData *>(instance->base_data)->geometry_instance;
 }
 
 void RendererSceneCull::mesh_generate_pipelines(RID p_mesh, bool p_background_compilation) {
@@ -1897,6 +1931,9 @@ void RendererSceneCull::_update_instance(Instance *p_instance) const {
 		}
 		if (p_instance->ray_scene_only && p_instance->base_type == RSE::INSTANCE_MESH) {
 			idata.flags |= InstanceData::FLAG_RAY_SCENE_ONLY;
+		}
+		if (p_instance->ray_scene_exclude && p_instance->base_type == RSE::INSTANCE_MESH) {
+			idata.flags |= InstanceData::FLAG_RAY_SCENE_EXCLUDE;
 		}
 
 		p_instance->scenario->instance_data.push_back(idata);
@@ -2991,12 +3028,16 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 #define OCCLUSION_CULLED (cull_data.occlusion_buffer != nullptr && (cull_data.scenario->instance_data[i].flags & InstanceData::FLAG_IGNORE_OCCLUSION_CULLING) == 0 && cull_data.occlusion_buffer->is_occluded(cull_data.scenario->instance_aabbs[i].bounds, cull_data.cam_transform.origin, inv_cam_transform, *cull_data.camera_matrix, z_near, is_orthogonal, cull_data.scenario->instance_data[i].occlusion_timeout))
 
 		if (!HIDDEN_BY_VISIBILITY_CHECKS) {
-			if (cull_data.cull->ray_scene_region.has_volume() && LAYER_CHECK && cull_data.scenario->instance_aabbs[i].in_aabb(cull_data.cull->ray_scene_region) && VIS_CHECK) {
+			if (cull_data.cull->ray_scene_region.has_volume() && !(idata.flags & InstanceData::FLAG_RAY_SCENE_EXCLUDE) && LAYER_CHECK) {
 				uint32_t base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
 				if (base_type == RSE::INSTANCE_MESH) {
-					cull_result.ray_scene_geometry_instances.push_back(idata.instance_geometry);
-				} else if (base_type == RSE::INSTANCE_LIGHT && RSG::light_storage->light_get_type(idata.base_rid) != RSE::LIGHT_DIRECTIONAL) {
-					cull_result.ray_scene_lights.push_back(RID::from_uint64(idata.instance_data_rid));
+					if (cull_data.scenario->instance_aabbs[i].in_aabb(cull_data.cull->ray_scene_region) && VIS_CHECK) {
+						cull_result.ray_scene_geometry_instances.push_back(idata.instance_geometry);
+					}
+				} else if (base_type == RSE::INSTANCE_LIGHT) {
+					if (cull_data.scenario->instance_aabbs[i].in_aabb(cull_data.cull->ray_scene_light_region) && VIS_CHECK && RSG::light_storage->light_get_type(idata.base_rid) != RSE::LIGHT_DIRECTIONAL) {
+						cull_result.ray_scene_lights.push_back(RID::from_uint64(idata.instance_data_rid));
+					}
 				}
 			}
 
@@ -3489,6 +3530,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 	}
 
 	cull.ray_scene_region = p_reflection_probe.is_null() ? scene_render->ray_scene_get_region(p_camera_data->main_transform.origin) : AABB();
+	cull.ray_scene_light_region = p_reflection_probe.is_null() ? scene_render->ray_scene_get_light_region(p_camera_data->main_transform.origin) : AABB();
 
 	scene_cull_result.clear();
 

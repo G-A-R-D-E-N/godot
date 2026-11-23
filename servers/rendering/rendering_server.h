@@ -325,6 +325,8 @@ public:
 	virtual void light_set_distance_fade(RID p_light, bool p_enabled, float p_begin, float p_shadow, float p_length) = 0;
 	virtual void light_set_reverse_cull_face_mode(RID p_light, bool p_enabled) = 0;
 	virtual void light_set_shadow_caster_mask(RID p_light, uint32_t p_caster_mask) = 0;
+	virtual void light_set_direct_shadow(RID p_light, bool p_owned, float p_movement, float p_size, float p_clearance, const TypedArray<RID> &p_shells, const PackedInt32Array &p_surfaces) = 0;
+	virtual void light_set_direct_mean_energy(RID p_light, float p_energy) = 0;
 	virtual void light_set_allow_contact_shadows(RID p_light, bool p_enable) = 0;
 
 	virtual void light_set_bake_mode(RID p_light, RSE::LightBakeMode p_bake_mode) = 0;
@@ -366,6 +368,7 @@ public:
 	virtual void reflection_probe_set_update_mode(RID p_probe, RSE::ReflectionProbeUpdateMode p_mode) = 0;
 	virtual void reflection_probe_set_intensity(RID p_probe, float p_intensity) = 0;
 	virtual void reflection_probe_set_blend_distance(RID p_probe, float p_blend_distance) = 0;
+	virtual void reflection_probe_set_priority(RID p_probe, int p_priority) = 0;
 
 	virtual void reflection_probe_set_ambient_mode(RID p_probe, RSE::ReflectionProbeAmbientMode p_mode) = 0;
 	virtual void reflection_probe_set_ambient_color(RID p_probe, const Color &p_color) = 0;
@@ -716,6 +719,7 @@ public:
 	virtual void environment_set_fog_depth(RID p_env, float p_curve, float p_begin, float p_end) = 0;
 	virtual void environment_set_aerial_perspective(RID p_env, bool p_enable, RID p_texture, float p_max_distance) = 0;
 	virtual void environment_set_night_vision(RID p_env, bool p_enable, float p_mesopic_min, float p_mesopic_max, float p_blue_shift, const Vector2 &p_blue_shift_chromaticity, float p_desaturation, float p_acuity_radius, float p_highlight_range) = 0;
+	virtual void environment_set_local_exposure(RID p_env, bool p_enable, float p_strength, float p_shadow_contrast, float p_highlight_contrast, float p_max_shadow_lift, float p_max_highlight_drop, float p_pivot) = 0;
 
 	virtual void environment_set_volumetric_fog(RID p_env, bool p_enable, float p_density, const Color &p_albedo, const Color &p_emission, float p_emission_energy, float p_anisotropy, float p_length, float p_detail_spread, float p_gi_inject, bool p_temporal_reprojection, float p_temporal_reprojection_amount, float p_ambient_inject, float p_sky_affect) = 0;
 	virtual void environment_set_volumetric_fog_volume_size(int p_size, int p_depth) = 0;
@@ -742,6 +746,9 @@ public:
 	virtual void camera_attributes_set_auto_exposure_highlight_limit(RID p_camera_attributes, float p_limit) = 0;
 	virtual void camera_attributes_set_auto_exposure_adaptation(RID p_camera_attributes, float p_adaptation, float p_pivot_luminance) = 0;
 	virtual void camera_attributes_set_auto_exposure_meter(RID p_camera_attributes, RSE::AutoExposureMeter p_meter, float p_clip_low, float p_clip_high, float p_center_weight) = 0;
+	virtual void camera_attributes_set_auto_exposure_response(RID p_camera_attributes, bool p_exponential, float p_light_adaptation_time, float p_dark_adaptation_time) = 0;
+	virtual void camera_attributes_set_auto_exposure_guard(RID p_camera_attributes, float p_light_adaptation_limit, bool p_hold) = 0;
+	virtual void camera_attributes_set_auto_exposure_highlight(RID p_camera_attributes, float p_percentile, float p_ceiling, float p_max_shift, float p_adaptation_time, float p_release_time) = 0;
 
 	/* SCENARIO API */
 
@@ -751,6 +758,7 @@ public:
 	virtual void scenario_set_fallback_environment(RID p_scenario, RID p_environment) = 0;
 	virtual void scenario_set_camera_attributes(RID p_scenario, RID p_camera_attributes) = 0;
 	virtual void scenario_set_compositor(RID p_scenario, RID p_compositor) = 0;
+	virtual void scenario_set_reflection_atlas_size(RID p_scenario, int p_reflection_size, int p_reflection_count) = 0;
 
 	/* INSTANCING API */
 

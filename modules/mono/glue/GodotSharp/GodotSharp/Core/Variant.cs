@@ -40,6 +40,9 @@ public partial struct Variant : IDisposable
 
         private void Dispose(bool disposing)
         {
+            if (!disposing && DisposablesTracker.ShuttingDown)
+                return;
+
             _native.DangerousSelfRef.Dispose();
 
             if (_weakReferenceToSelf != null)

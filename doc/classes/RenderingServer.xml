@@ -72,6 +72,27 @@
 				Sets partial auto-exposure adaptation. Below [param pivot_luminance], in the same luminance unit as the min and max passed to [method camera_attributes_set_auto_exposure], a metered luminance [code]L[/code] becomes [code]pivot_luminance * (L / pivot_luminance)^adaptation[/code] before the clamp. [param adaptation] [code]1.0[/code] or a pivot of [code]0.0[/code] leaves the meter unchanged. This has the same meaning as [member CameraAttributes.auto_exposure_adaptation].
 			</description>
 		</method>
+		<method name="camera_attributes_set_auto_exposure_guard">
+			<return type="void" />
+			<param index="0" name="camera_attributes" type="RID" />
+			<param index="1" name="light_adaptation_limit" type="float" />
+			<param index="2" name="hold" type="bool" />
+			<description>
+				Sets the fastest auto exposure may follow a brightening scene, in stops per second, and whether it holds its current value. See [member CameraAttributes.auto_exposure_light_adaptation_limit] and [member CameraAttributes.auto_exposure_hold].
+			</description>
+		</method>
+		<method name="camera_attributes_set_auto_exposure_highlight">
+			<return type="void" />
+			<param index="0" name="camera_attributes" type="RID" />
+			<param index="1" name="percentile" type="float" />
+			<param index="2" name="ceiling" type="float" />
+			<param index="3" name="max_shift" type="float" />
+			<param index="4" name="adaptation_time" type="float" default="0.0" />
+			<param index="5" name="release_time" type="float" default="0.0" />
+			<description>
+				Sets the highlight rule of the log histogram meter. See [member CameraAttributes.auto_exposure_highlight_percentile], [member CameraAttributes.auto_exposure_highlight_adaptation_time] and [member CameraAttributes.auto_exposure_highlight_release_time].
+			</description>
+		</method>
 		<method name="camera_attributes_set_auto_exposure_highlight_limit">
 			<return type="void" />
 			<param index="0" name="camera_attributes" type="RID" />
@@ -89,6 +110,16 @@
 			<param index="4" name="center_weight" type="float" />
 			<description>
 				Sets the auto-exposure meter and, for [constant AUTO_EXPOSURE_METER_LOG_HISTOGRAM], the fractions of the darkest and brightest metering weight to ignore (each [code]0.0[/code] to [code]0.45[/code]) and the weight toward the lower middle of the frame ([code]0.0[/code] to [code]1.0[/code]). These have the same meaning as [member CameraAttributes.auto_exposure_meter], [member CameraAttributes.auto_exposure_histogram_clip_low], [member CameraAttributes.auto_exposure_histogram_clip_high] and [member CameraAttributes.auto_exposure_center_weight].
+			</description>
+		</method>
+		<method name="camera_attributes_set_auto_exposure_response">
+			<return type="void" />
+			<param index="0" name="camera_attributes" type="RID" />
+			<param index="1" name="exponential" type="bool" />
+			<param index="2" name="light_adaptation_time" type="float" />
+			<param index="3" name="dark_adaptation_time" type="float" />
+			<description>
+				Sets how auto exposure moves toward its target. See [member CameraAttributes.auto_exposure_exponential_response].
 			</description>
 		</method>
 		<method name="camera_attributes_set_dof_blur">
@@ -1456,6 +1487,20 @@
 				Configures glow for the specified environment RID. See [code]glow_*[/code] properties in [Environment] for more information.
 			</description>
 		</method>
+		<method name="environment_set_local_exposure">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="strength" type="float" />
+			<param index="3" name="shadow_contrast" type="float" />
+			<param index="4" name="highlight_contrast" type="float" />
+			<param index="5" name="max_shadow_lift" type="float" />
+			<param index="6" name="max_highlight_drop" type="float" />
+			<param index="7" name="pivot" type="float" />
+			<description>
+				Configures per-region exposure adaptation of the tonemapper for the specified environment RID. See [code]local_exposure_*[/code] properties in [Environment] for more information.
+			</description>
+		</method>
 		<method name="environment_set_night_vision">
 			<return type="void" />
 			<param index="0" name="env" type="RID" />
@@ -2304,6 +2349,29 @@
 			<param index="1" name="mask" type="int" />
 			<description>
 				Sets the cull mask for this 3D light. Lights only affect objects in the selected layers. Equivalent to [member Light3D.light_cull_mask].
+			</description>
+		</method>
+		<method name="light_set_direct_mean_energy">
+			<return type="void" />
+			<param index="0" name="light" type="RID" />
+			<param index="1" name="energy" type="float" />
+			<description>
+				Sets the flicker-mean energy of this 3D omni or spot light for the resampled direct lighting, in the same units as [constant LIGHT_PARAM_ENERGY]. The resampler ranks head lamps and picks tail lamps by this energy, so a flickering lamp keeps its place. With [member ProjectSettings.rendering/global_illumination/direct/resampled/energy_arm] set to [code]Mean[/code], resampled tail lamps are also shaded at this energy in place of their live energy, so a single sample does not carry the lamp's flicker; with the default, [code]Live[/code], they are shaded at their live energy. A negative value clears it, and the light is then shaded at its live energy. Call it only when the mean changes, not every frame.
+			</description>
+		</method>
+		<method name="light_set_direct_shadow">
+			<return type="void" />
+			<param index="0" name="light" type="RID" />
+			<param index="1" name="owned" type="bool" />
+			<param index="2" name="movement" type="float" />
+			<param index="3" name="size" type="float" />
+			<param index="4" name="clearance" type="float" default="0.0" />
+			<param index="5" name="shells" type="RID[]" default="[]" />
+			<param index="6" name="surfaces" type="PackedInt32Array" default="PackedInt32Array()" />
+			<description>
+				Sets how the ray-traced direct shadows enabled by [member ProjectSettings.rendering/global_illumination/direct/enabled] treat this 3D omni or spot light. [param owned] is [code]false[/code] for a light they should leave out. [param movement] is how far, in meters on each axis, the light flickers around its position; a move within that range is not treated as the light having been moved elsewhere. [param size] is the radius of the light source that shadow rays aim at, in meters; a negative value uses [constant LIGHT_PARAM_SIZE]. A light with no call to this method is owned, with a [param movement] of [code]0.0[/code] and a negative [param size].
+				[param clearance] is the radius, in meters, of a sphere around the light that its shadow rays treat as empty: a point inside it is fully lit, and rays from outside stop at its surface. A [param clearance] smaller than the source radius uses the source radius, so [code]0.0[/code] leaves the shadows unchanged.
+				[param shells] lists up to 7 instances (as returned by [method instance_create]) that never shadow this light, such as the fixture's own glass. [param surfaces] is parallel to it: each entry is the surface index of that instance to leave out, or [code]-1[/code] for the whole instance. Only this light's rays skip them; every other light and global illumination still sees them. An instance that is not in the ray scene this frame is left out of the list until it comes back. The call fails if the two arrays differ in size, have more than 7 entries, a shell is not a valid [RID], or a surface index is below [code]-1[/code].
 			</description>
 		</method>
 		<method name="light_set_distance_fade" keywords="light_set_lod">
@@ -3643,6 +3711,14 @@
 				Sets the origin offset to be used when this reflection probe is in box project mode. Equivalent to [member ReflectionProbe.origin_offset].
 			</description>
 		</method>
+		<method name="reflection_probe_set_priority">
+			<return type="void" />
+			<param index="0" name="probe" type="RID" />
+			<param index="1" name="priority" type="int" />
+			<description>
+				Sets the blending priority of this probe. Where probe volumes overlap, the probe with the higher priority is applied after the others, so it takes precedence inside its blend region. Probes with equal priority are ordered by size, larger first. A negative value is treated as zero for ordering. With [member ProjectSettings.rendering/reflections/reflection_atlas/priority_fast_filter] enabled, any non-zero priority also makes the probe filter all its roughness levels in the frame after its first capture instead of one level per frame, until the capture is published. The default is [code]0[/code].
+			</description>
+		</method>
 		<method name="reflection_probe_set_reflection_mask">
 			<return type="void" />
 			<param index="0" name="probe" type="RID" />
@@ -3720,6 +3796,15 @@
 			<param index="1" name="environment" type="RID" />
 			<description>
 				Sets the fallback environment to be used by this scenario. The fallback environment is used if no environment is set. Internally, this is used by the editor to provide a default environment.
+			</description>
+		</method>
+		<method name="scenario_set_reflection_atlas_size">
+			<return type="void" />
+			<param index="0" name="scenario" type="RID" />
+			<param index="1" name="reflection_size" type="int" />
+			<param index="2" name="reflection_count" type="int" />
+			<description>
+				Sets the face size and the number of cubemaps of the reflection atlas used by this scenario, overriding [member ProjectSettings.rendering/reflections/reflection_atlas/reflection_size] and [member ProjectSettings.rendering/reflections/reflection_atlas/reflection_count] for it. Changing either value frees the atlas, and every probe in the scenario has to be captured again.
 			</description>
 		</method>
 		<method name="screen_space_roughness_limiter_set_active">
@@ -5940,6 +6025,15 @@
 		<constant name="VIEWPORT_DEBUG_DRAW_SSGI_CONFIDENCE" value="49" enum="ViewportDebugDraw">
 			Draws the traced screen-space GI confidence: white = the screen-space result is used fully, black = the fallback ambient light (sky, probes) is used.
 		</constant>
+		<constant name="VIEWPORT_DEBUG_DRAW_REFLECTION_PROVIDER_WEIGHTS" value="50" enum="ViewportDebugDraw">
+			Draws the share of each reflection provider in the indirect specular light before screen-space reflections: red = sky environment, green = global illumination rough specular fill, blue = local reflection probe. The three shares add up to 1 wherever at least one provider exists. Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="VIEWPORT_DEBUG_DRAW_SPECULAR_OCCLUSION" value="51" enum="ViewportDebugDraw">
+			Draws the specular occlusion factor alone, the value that scales the indirect specular light (white = unoccluded). Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="VIEWPORT_DEBUG_DRAW_RESOLVED_INDIRECT_SPECULAR" value="52" enum="ViewportDebugDraw">
+			Draws the final weighted indirect specular radiance of each surface, after the sky, GI fill, probes, specular occlusion, screen-space reflections and BRDF weight, without the sky background. Only supported when using the Forward+ rendering method.
+		</constant>
 		<constant name="VIEWPORT_VRS_DISABLED" value="0" enum="ViewportVRSMode">
 			Variable rate shading is disabled.
 		</constant>
@@ -6309,9 +6403,15 @@
 			Always draw, even if the instance would be culled by occlusion culling. Does not affect view frustum culling.
 		</constant>
 		<constant name="INSTANCE_FLAG_RAY_SCENE_ONLY" value="4" enum="InstanceFlags">
-			Keeps the instance out of the camera draw lists while the global illumination ray scene still traces it. Mesh instances only; set the base first. The instance must still pass the ray scene region and layer tests. Shadow casting is separate; set it off on the instance if the proxy must not cast. Off by default.
+			Keeps the instance out of the camera draw lists while the global illumination ray scene still traces it. Mesh instances only; set the base first. The instance must still pass the ray scene region and layer tests. Shadow casting is separate: with shadow casting off the instance casts no raster shadow, and global illumination shadow rays pass through it unless [constant INSTANCE_FLAG_RAY_SCENE_OCCLUDER] is set. Off by default.
 		</constant>
-		<constant name="INSTANCE_FLAG_MAX" value="5" enum="InstanceFlags">
+		<constant name="INSTANCE_FLAG_RAY_SCENE_OCCLUDER" value="5" enum="InstanceFlags">
+			Makes a mesh instance with shadow casting off still block global illumination shadow rays, so it gives ray traced shadows without raster shadows. Other shadow casting settings are unchanged, and a material's [code]gi_shadow_pass[/code] still lets shadow rays through. Mesh instances only; set the base first. Off by default.
+		</constant>
+		<constant name="INSTANCE_FLAG_RAY_SCENE_EXCLUDE" value="6" enum="InstanceFlags">
+			Keeps a mesh instance out of the global illumination ray scene while the camera still draws it, so it neither blocks nor bounces global illumination rays. Raster shadows are unchanged. With [constant INSTANCE_FLAG_RAY_SCENE_ONLY] also set the instance is in neither. Mesh instances only; set the base first. Off by default.
+		</constant>
+		<constant name="INSTANCE_FLAG_MAX" value="7" enum="InstanceFlags">
 			Represents the size of the [enum InstanceFlags] enum.
 		</constant>
 		<constant name="SHADOW_CASTING_SETTING_OFF" value="0" enum="ShadowCastingSetting">

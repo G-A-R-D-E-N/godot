@@ -35,6 +35,7 @@
 			<param index="1" name="flags" type="int" enum="RenderingDevice.AccelerationStructureFlagBits" is_bitfield="true" />
 			<description>
 				Creates a new Bottom-Level Acceleration Structure (BLAS). It can be accessed with the RID that is returned.
+				Every vertex buffer and index buffer used by the geometries must have been created with both [constant BUFFER_CREATION_DEVICE_ADDRESS_BIT] and [constant BUFFER_CREATION_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT]. If a buffer lacks either bit, an error is printed and an invalid RID is returned.
 				Once finished with your RID, you will want to free the RID using the RenderingDevice's [method free_rid] method.
 			</description>
 		</method>
@@ -1312,6 +1313,7 @@
 			<param index="1" name="flags" type="int" enum="RenderingDevice.AccelerationStructureFlagBits" is_bitfield="true" />
 			<description>
 				Creates a new Top-Level Acceleration Structure (TLAS). It can be accessed with the RID that is returned.
+				Pass [constant ACCELERATION_STRUCTURE_RAY_QUERY_ONLY_BIT] in [param flags] when the TLAS is only used from ray queries, so that [method tlas_build] does not demand a hit shader binding table range for each instance.
 				Once finished with your RID, you will want to free the RID using the RenderingDevice's [method free_rid] method.
 			</description>
 		</method>
@@ -2400,6 +2402,9 @@
 		<constant name="ACCELERATION_STRUCTURE_LOW_MEMORY_BIT" value="16" enum="AccelerationStructureFlagBits" is_bitfield="true" experimental="">
 			Reduces the memory usage of the acceleration structure, potentially at the cost of reduced ray traversal performance.
 		</constant>
+		<constant name="ACCELERATION_STRUCTURE_RAY_QUERY_ONLY_BIT" value="256" enum="AccelerationStructureFlagBits" is_bitfield="true" experimental="">
+			Only valid for a Top-Level Acceleration Structure: [method blas_create] refuses it, and [method tlas_create] refuses it on a device without ray query support. Declares that the structure is traced only through ray queries inside compute or fragment shaders and never through a raytracing pipeline. A TLAS created with this bit accepts instances without a hit shader binding table range and writes a hit shader binding table offset of 0 for every instance. A TLAS created without this bit still requires a valid range for each instance that has a BLAS. [method tlas_create] removes the bit before the flags reach the graphics driver.
+		</constant>
 		<constant name="ACCELERATION_STRUCTURE_GEOMETRY_OPAQUE_BIT" value="1" enum="AccelerationStructureGeometryFlagBits" is_bitfield="true" experimental="">
 			An opaque geometry does not invoke the any hit shaders.
 		</constant>
@@ -2987,6 +2992,12 @@
 		</constant>
 		<constant name="MEMORY_TOTAL" value="2" enum="MemoryType">
 			Total memory taken. This is greater than the sum of [constant MEMORY_TEXTURES] and [constant MEMORY_BUFFERS], as it also includes miscellaneous memory usage.
+		</constant>
+		<constant name="MEMORY_DEVICE_BUDGET" value="3" enum="MemoryType">
+			Video memory the operating system currently lets this process use: the largest budget among the device-local memory heaps, since such heaps can share the same video memory. It shrinks when other processes, such as the display, take video memory. Returns [code]0[/code] when the driver cannot report it.
+		</constant>
+		<constant name="MEMORY_DEVICE_USAGE" value="4" enum="MemoryType">
+			Video memory the operating system currently charges to this process, summed over the device-local memory heaps. Compare it with [constant MEMORY_DEVICE_BUDGET]. Returns [code]0[/code] when the driver cannot report it.
 		</constant>
 		<constant name="INVALID_ID" value="-1">
 			Returned by functions that return an ID if a value is invalid.

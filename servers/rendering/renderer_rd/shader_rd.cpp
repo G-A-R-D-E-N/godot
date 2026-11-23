@@ -262,12 +262,17 @@ void ShaderRD::_initialize_version(Version *p_version) {
 	_clear_version(p_version);
 
 	p_version->valid = false;
+	p_version->creation_group_failed = false;
 	p_version->dirty = false;
 
 	p_version->variants.resize_initialized(variant_defines.size());
 	p_version->variant_data.resize(variant_defines.size());
 	p_version->group_compilation_tasks.resize_initialized(group_enabled.size());
 	p_version->group_loaded_from_cache.resize_initialized(group_enabled.size());
+	p_version->group_started.resize_initialized(group_enabled.size());
+	p_version->group_started.fill(false);
+	p_version->group_lazy.resize_initialized(group_enabled.size());
+	p_version->group_lazy.fill(false);
 }
 
 void ShaderRD::_clear_version(Version *p_version) {
@@ -340,7 +345,11 @@ void ShaderRD::_build_variant_code(StringBuilder &builder, uint32_t p_variant, c
 				}
 			} break;
 			case StageTemplate::Chunk::TYPE_TEXT: {
-				builder.append(chunk.text.get_data());
+				if (strstr(general_defines.get_data(), "#define SHADER_GLSL_VERSION_460") && strstr(chunk.text.get_data(), "#version 450")) {
+					builder.append(String::utf8(chunk.text.get_data()).replace("#version 450", "#version 460"));
+				} else {
+					builder.append(chunk.text.get_data());
+				}
 			} break;
 		}
 	}
@@ -421,15 +430,24 @@ void ShaderRD::_compile_variant(uint32_t p_variant, CompileData p_data) {
 
 	Vector<String> variant_stage_sources = _build_variant_stage_sources(variant, p_data);
 	Vector<RD::ShaderStageSPIRVData> variant_stages = compile_stages(variant_stage_sources, dynamic_buffers);
-	ERR_FAIL_COND(variant_stages.is_empty());
+	if (unlikely(variant_stages.is_empty())) {
+		p_data.version->variant_data.write[variant] = Vector<uint8_t>();
+		return;
+	}
 
 	Vector<uint8_t> shader_data = RD::get_singleton()->shader_compile_binary_from_spirv(variant_stages, name + ":" + itos(variant));
-	ERR_FAIL_COND(shader_data.is_empty());
-
-	{
-		p_data.version->variants.write[variant] = RD::get_singleton()->shader_create_from_bytecode_with_samplers(shader_data, p_data.version->variants[variant], immutable_samplers);
-		p_data.version->variant_data.write[variant] = shader_data;
+	if (unlikely(shader_data.is_empty())) {
+		p_data.version->variant_data.write[variant] = Vector<uint8_t>();
+		return;
 	}
+
+	RID shader = RD::get_singleton()->shader_create_from_bytecode_with_samplers(shader_data, p_data.version->variants[variant], immutable_samplers);
+	if (unlikely(shader.is_null())) {
+		p_data.version->variant_data.write[variant] = Vector<uint8_t>();
+		return;
+	}
+	p_data.version->variants.write[variant] = shader;
+	p_data.version->variant_data.write[variant] = shader_data;
 }
 
 Vector<String> ShaderRD::version_build_variant_stage_sources(RID p_version, int p_variant) {
@@ -624,11 +642,15 @@ String ShaderRD::_get_cache_file_path(Version *p_version, int p_group, const Str
 void ShaderRD::_load_variant_from_cache(uint32_t p_variant, CompileData p_data) {
 	uint32_t variant = group_to_variant_map[p_data.group][p_variant];
 	if (!variants_enabled[variant]) {
-		p_data.version->variants.write[variant] = RID();
 		return; // Variant is disabled, return.
 	}
 
-	p_data.version->variants.write[variant] = RD::get_singleton()->shader_create_from_bytecode_with_samplers(p_data.version->variant_data[variant], p_data.version->variants[variant], immutable_samplers);
+	RID shader = RD::get_singleton()->shader_create_from_bytecode_with_samplers(p_data.version->variant_data[variant], p_data.version->variants[variant], immutable_samplers);
+	if (unlikely(shader.is_null())) {
+		p_data.version->variant_data.write[variant] = Vector<uint8_t>();
+		return;
+	}
+	p_data.version->variants.write[variant] = shader;
 }
 
 bool ShaderRD::_load_from_cache(Version *p_version, int p_group) {
@@ -715,6 +737,7 @@ void ShaderRD::_allocate_placeholders(Version *p_version, int p_group) {
 			p_version->variants.write[variant_id] = shader;
 		}
 	}
+	p_version->group_lazy.write[p_group] = true;
 }
 
 // Try to compile all variants for a given group.
@@ -723,6 +746,11 @@ void ShaderRD::_compile_version_start(Version *p_version, int p_group) {
 	if (!group_enabled[p_group]) {
 		return;
 	}
+
+	if (p_version->group_started.size() <= p_group || p_version->group_started[p_group]) {
+		return;
+	}
+	p_version->group_started.write[p_group] = true;
 
 	p_version->dirty = false;
 
@@ -751,41 +779,45 @@ void ShaderRD::_compile_version_end(Version *p_version, int p_group) {
 	WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group_task);
 	p_version->group_compilation_tasks.write[p_group] = 0;
 
-	bool all_valid = true;
-
-	for (uint32_t i = 0; i < group_to_variant_map[p_group].size(); i++) {
-		int variant_id = group_to_variant_map[p_group][i];
-		if (!variants_enabled[variant_id]) {
-			continue; // Disabled.
-		}
-		if (p_version->variants[variant_id].is_null()) {
-			all_valid = false;
-			break;
-		}
+	const LocalVector<int> &group_variants = group_to_variant_map[p_group];
+	LocalVector<GroupVariantState> variant_states;
+	variant_states.resize(group_variants.size());
+	for (uint32_t i = 0; i < group_variants.size(); i++) {
+		int variant_id = group_variants[i];
+		variant_states[i].enabled = variants_enabled[variant_id];
+		variant_states[i].shader_valid = p_version->variants[variant_id].is_valid();
+		variant_states[i].data_size = p_version->variant_data[variant_id].size();
 	}
 
-	if (!all_valid) {
-		// Clear versions if they exist.
-		for (int i = 0; i < variant_defines.size(); i++) {
-			if (!variants_enabled[i] || !group_enabled[variant_defines[i].group]) {
-				continue; // Disabled.
-			}
-			if (!p_version->variants[i].is_null()) {
-				RD::get_singleton()->free_rid(p_version->variants[i]);
-			}
-		}
+	GroupEndState end_state;
+	end_state.version_valid = p_version->valid;
+	end_state.creation_group_failed = p_version->creation_group_failed;
+	end_state.group_lazy = p_version->group_lazy[p_group];
+	end_state.loaded_from_cache = p_version->group_loaded_from_cache[p_group];
+#if ENABLE_SHADER_CACHE
+	end_state.cache_user_dir_valid = shader_cache_user_dir_valid;
+#endif
+	const GroupEndPlan plan = plan_group_end(variant_states, end_state);
 
-		p_version->variants.clear();
-		p_version->variant_data.clear();
+	if (!plan.group_ok) {
+		ERR_PRINT(vformat("Shader %s: group %d could not be %s; its variants are unavailable.", name, p_group, end_state.loaded_from_cache ? "loaded from the shader cache" : "compiled"));
+		for (uint32_t index : plan.free_indices) {
+			RD::get_singleton()->free_rid(p_version->variants[group_variants[index]]);
+		}
+		for (int variant_id : group_variants) {
+			p_version->variants.write[variant_id] = RID();
+			p_version->variant_data.write[variant_id] = Vector<uint8_t>();
+		}
+		p_version->creation_group_failed = plan.creation_group_failed;
+		p_version->valid = plan.version_valid;
 		return;
 	}
-#if ENABLE_SHADER_CACHE
-	else if (shader_cache_user_dir_valid && !p_version->group_loaded_from_cache[p_group]) {
+
+	if (plan.save_to_cache) {
 		_save_to_cache(p_version, p_group);
 	}
-#endif
 
-	p_version->valid = true;
+	p_version->valid = plan.version_valid;
 }
 
 void ShaderRD::_compile_ensure_finished(Version *p_version) {
@@ -1229,6 +1261,29 @@ PackedByteArray ShaderRD::save_shader_cache_bytes(const LocalVector<int> &p_vari
 
 	DEV_ASSERT((bytes.ptrw() + bytes.size()) == bytes_ptr);
 	return bytes;
+}
+
+ShaderRD::GroupEndPlan ShaderRD::plan_group_end(const LocalVector<GroupVariantState> &p_variants, const GroupEndState &p_state) {
+	GroupEndPlan plan;
+	for (const GroupVariantState &variant : p_variants) {
+		if (variant.enabled && (!variant.shader_valid || variant.data_size <= 0)) {
+			plan.group_ok = false;
+			break;
+		}
+	}
+
+	plan.creation_group_failed = p_state.creation_group_failed || (!plan.group_ok && !p_state.group_lazy);
+	plan.version_valid = !plan.creation_group_failed && (p_state.version_valid || plan.group_ok);
+	plan.save_to_cache = plan.group_ok && p_state.cache_user_dir_valid && !p_state.loaded_from_cache;
+
+	if (!plan.group_ok) {
+		for (uint32_t i = 0; i < p_variants.size(); i++) {
+			if (p_variants[i].shader_valid) {
+				plan.free_indices.push_back(i);
+			}
+		}
+	}
+	return plan;
 }
 
 String ShaderRD::shader_cache_user_dir;

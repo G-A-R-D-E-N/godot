@@ -38,6 +38,8 @@
 #include "servers/rendering/renderer_rd/effects/motion_vectors_store.h"
 #include "servers/rendering/renderer_rd/effects/ss_effects.h"
 #include "servers/rendering/renderer_rd/effects/taa.h"
+#include "servers/rendering/renderer_rd/environment/direct_resampler_hooks.h"
+#include "servers/rendering/renderer_rd/environment/direct_shadows.h"
 #include "servers/rendering/renderer_rd/forward_clustered/scene_shader_forward_clustered.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/best_fit_normal.glsl.gen.h"
@@ -328,6 +330,17 @@ private:
 		SCREEN_SPACE_EFFECTS_FLAGS_USE_BENT_NORMALS = (1 << 5),
 		SCREEN_SPACE_EFFECTS_FLAGS_STOCHASTIC_SSR = (1 << 6),
 		SCREEN_SPACE_EFFECTS_FLAGS_LIGHTING_SOURCES = (1 << 7),
+		SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SKY = (1 << 8),
+		SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_GI_FILL = (1 << 9),
+		SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_PROBES = (1 << 10),
+		SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SSR = (1 << 11),
+		SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SPECULAR_OCCLUSION = (1 << 12),
+		SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SHIFT = 8,
+		SCREEN_SPACE_EFFECTS_FLAGS_UNIFIED_LOOKUP = (1 << 13),
+		SCREEN_SPACE_EFFECTS_FLAGS_HORIZON_GEOMETRIC = (1 << 14),
+		SCREEN_SPACE_EFFECTS_FLAGS_COAT_MATCH = (1 << 15),
+		SCREEN_SPACE_EFFECTS_FLAGS_BLEND_FILL_SKIP = (1 << 16),
+		SCREEN_SPACE_EFFECTS_FLAGS_TRANSPARENT_PASS = (1 << 17),
 	};
 
 	struct SceneState {
@@ -794,6 +807,10 @@ private:
 	RendererRD::TAA *taa = nullptr;
 	RendererRD::FSR2Effect *fsr2_effect = nullptr;
 	RendererRD::SSEffects *ss_effects = nullptr;
+	RendererRD::DirectShadows *direct_shadows = nullptr;
+	RID direct_shadow_slots;
+	RID direct_shadow_factors;
+	RID direct_resampled;
 
 #ifdef METAL_MFXTEMPORAL_ENABLED
 	RendererRD::MFXTemporalEffect *mfx_temporal_effect = nullptr;
@@ -832,7 +849,7 @@ private:
 	void _select_local_contact_shadows(RenderDataRD *p_render_data);
 	void _process_sscs(Ref<RenderSceneBuffersRD> p_render_buffers, const Projection *p_projections, const Transform3D &p_transform, const LocalVector<int> &p_contact_shadows, const LocalVector<RID> &p_local_contact_shadows, const RenderShadowData *p_render_shadows, float p_taa_frame_count);
 	void _copy_framebuffer_to_ss_effects(Ref<RenderSceneBuffersRD> p_render_buffers, bool p_use_ssil, bool p_use_ssr);
-	void _pre_opaque_render(RenderDataRD *p_render_data, bool p_use_ssao, bool p_use_ssil, bool p_use_ssr, bool p_use_sscs, bool p_use_gi, const RID *p_normal_roughness_slices, const RID *p_voxel_gi_buffer_slices);
+	void _pre_opaque_render(RenderDataRD *p_render_data, bool p_use_ssao, bool p_use_ssil, bool p_use_ssr, bool p_use_sscs, bool p_use_gi, const RID *p_normal_roughness_slices, const RID *p_voxel_gi_buffer_slices, bool p_use_direct_lights);
 	void _process_sss(Ref<RenderSceneBuffersRD> p_render_buffers, const Projection &p_camera, uint32_t p_taa_frame, bool p_sss_radius_written);
 
 	/* Debug */

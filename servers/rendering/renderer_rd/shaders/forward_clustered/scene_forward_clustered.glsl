@@ -1086,7 +1086,7 @@ vec3 debug_lighting_source(vec4 p_weights, float p_surfel_share) {
 	return min(p_weights.x * vec3(0.1, 0.3, 1.0) + p_weights.y * mix(gi_color, vec3(0.0, 0.8, 0.8), p_surfel_share) + p_weights.z * vec3(0.0, 1.0, 0.0) + p_weights.w * vec3(1.0, 0.0, 1.0), vec3(1.0));
 }
 
-vec3 debug_lighting_component(uint p_component, vec3 p_direct_diffuse, vec3 p_direct_specular, vec3 p_indirect_diffuse, vec3 p_indirect_specular, vec3 p_emission, vec4 p_fog, float p_ssr_confidence, float p_persistent_ao, vec4 p_specular_source, vec4 p_ambient_source, float p_surfel_share) {
+vec3 debug_lighting_component(uint p_component, vec3 p_direct_diffuse, vec3 p_direct_specular, vec3 p_indirect_diffuse, vec3 p_indirect_specular, vec3 p_emission, vec4 p_fog, float p_ssr_confidence, float p_persistent_ao, vec4 p_specular_source, vec4 p_ambient_source, float p_surfel_share, vec4 p_reflection_debug) {
 	switch (p_component) {
 		case 1u:
 			return p_direct_diffuse;
@@ -1108,6 +1108,12 @@ vec3 debug_lighting_component(uint p_component, vec3 p_direct_diffuse, vec3 p_di
 			return vec3(p_persistent_ao);
 		case 12u:
 			return debug_lighting_source(p_specular_source, 0.0);
+		case 14u:
+			return p_reflection_debug.xyz;
+		case 15u:
+			return vec3(p_reflection_debug.w);
+		case 16u:
+			return p_indirect_specular;
 	}
 	return debug_lighting_source(p_ambient_source, p_surfel_share);
 }
@@ -1229,6 +1235,111 @@ uint cluster_get_range_clip_mask(uint i, uint z_min, uint z_max) {
 	return bitfieldInsert(uint(0), uint(0xFFFFFFFF), local_min, mask_width);
 }
 
+#if !defined(USE_SHADOW_TO_OPACITY) && !defined(USE_VERTEX_LIGHTING) && !defined(USE_MULTIVIEW) && !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED)
+#define DIRECT_RESAMPLED_ROUTE
+#include "../environment/di_sampler_inc.glsl"
+
+bool direct_record_ok = false;
+vec3 direct_record_vertex = vec3(0.0);
+vec3 direct_record_normal = vec3(0.0);
+int direct_record_tails = 0;
+int direct_record_heads = 0;
+bool direct_record_check = false;
+bool direct_no_layer = false;
+bool direct_route_loaded = false;
+uint direct_tail_slots[7];
+
+void direct_record_begin(in SceneData scene_data, vec3 p_vertex) {
+	direct_record_ok = false;
+	direct_record_check = false;
+	direct_route_loaded = false;
+	if (!sc_use_direct_resampled()) {
+		return;
+	}
+	ivec2 pixel = ivec2(gl_FragCoord.xy);
+	int layers = textureSize(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), 0).z;
+	if (layers < 2) {
+		return;
+	}
+	uvec2 head = texelFetch(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), ivec3(pixel, 0), 0).xy;
+	float depth = uintBitsToFloat(head.y & 0x7FFFFFFFu);
+	if (!(depth > 0.0)) {
+		return;
+	}
+	vec2 uv = (vec2(pixel) + 0.5) * scene_data.screen_pixel_size;
+	vec4 view_h = inv_projection_matrix * vec4(uv * 2.0 - 1.0, depth, 1.0);
+	direct_record_vertex = view_h.xyz / view_h.w;
+	float record_depth = max(-direct_record_vertex.z, 1e-4);
+	if (abs(-p_vertex.z - record_depth) > 0.01 * record_depth) {
+		return;
+	}
+	direct_record_normal = di_oct_decode(unpackSnorm2x16(head.x));
+	direct_record_tails = layers - 1;
+	direct_record_heads = textureSize(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), 0).z - 1 - direct_record_tails;
+	direct_record_ok = direct_record_heads >= 0 && direct_record_heads <= 7 && direct_record_tails <= 7;
+	direct_record_check = direct_record_ok && (head.y & 0x80000000u) != 0u;
+}
+
+int direct_route(uint p_flags, vec3 p_position, float p_inv_radius) {
+	direct_head_layer = -1;
+	direct_tail_layer = -1;
+	if (!direct_record_ok || (p_flags & 1u) == 0u) {
+		return -1;
+	}
+	vec3 rel = p_position - direct_record_vertex;
+	if (dot(rel, rel) * p_inv_radius * p_inv_radius >= 1.0 || dot(direct_record_normal, rel) <= 0.0) {
+		return -1;
+	}
+	ivec2 pixel = ivec2(gl_FragCoord.xy);
+	if (!direct_route_loaded) {
+		direct_own_load(pixel);
+		for (int k = 0; k < 7; k++) {
+			direct_tail_slots[k] = 0xFFFFFFFFu;
+			if (k < direct_record_tails) {
+				direct_tail_slots[k] = texelFetch(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), ivec3(pixel, k + 1), 0).x;
+			}
+		}
+		direct_route_loaded = true;
+	}
+	uint slot = (p_flags >> 1) & 0xFFFFu;
+	for (int i = 0; i < 7; i++) {
+		if (i < direct_record_heads && direct_own_slots[i] == slot) {
+			direct_head_layer = i;
+			return -1;
+		}
+	}
+	int passes = 0;
+	for (int k = 0; k < 7; k++) {
+		if (k < direct_record_tails && direct_tail_slots[k] == slot) {
+			passes++;
+		}
+	}
+	direct_no_layer = direct_no_layer || (passes == 0 && direct_record_check);
+	return passes;
+}
+
+float direct_tail_pass(uint p_flags, vec3 p_live_color, int p_pass) {
+	uint slot = (p_flags >> 1) & 0xFFFFu;
+	ivec2 pixel = ivec2(gl_FragCoord.xy);
+	int seen = 0;
+	for (int k = 0; k < 7; k++) {
+		if (k >= direct_record_tails || direct_tail_slots[k] != slot) {
+			continue;
+		}
+		if (seen == p_pass) {
+			uvec2 entry = texelFetch(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), ivec3(pixel, k + 1), 0).xy;
+			direct_tail_layer = direct_record_heads + k;
+			float weight = uintBitsToFloat(entry.y);
+			DirectSlotData data = direct_slots.data[slot];
+			direct_tail_color = weight < 0.0 ? p_live_color : vec3(data.mean_r, data.mean_g, data.mean_b);
+			return abs(weight) / float(direct_record_tails);
+		}
+		seen++;
+	}
+	return 0.0;
+}
+#endif
+
 float specular_occlusion_cone(float p_ao, float p_roughness, vec3 p_bent_normal, vec3 p_reflection) {
 	float cos_a_v = sqrt(1.0 - p_ao);
 	float limited_roughness = max(p_roughness, 0.01);
@@ -1324,6 +1435,7 @@ void fragment_shader(in SceneData scene_data) {
 	vec4 fog = vec4(0.0, 0.0, 0.0, 1.0);
 	float ssr_confidence = 0.0;
 	float persistent_ao = 1.0;
+	vec4 reflection_debug = vec4(0.0, 0.0, 0.0, 1.0);
 	vec4 specular_source = vec4(0.0);
 	vec4 ambient_source = vec4(0.0);
 #if defined(CUSTOM_RADIANCE_USED)
@@ -1897,7 +2009,11 @@ void fragment_shader(in SceneData scene_data) {
 	vec3 indirect_normal = normal;
 #endif
 
-	if (bool(scene_data.flags & SCENE_DATA_FLAGS_USE_REFLECTION_CUBEMAP)) {
+	const bool reflect_sky = bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SKY);
+	const bool unified_lookup = bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_UNIFIED_LOOKUP);
+	const bool horizon_geometric = bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_HORIZON_GEOMETRIC);
+	const vec3 horizon_normal = horizon_geometric ? geo_normal : normal;
+	if (reflect_sky && bool(scene_data.flags & SCENE_DATA_FLAGS_USE_REFLECTION_CUBEMAP)) {
 #ifdef LIGHT_ANISOTROPY_USED
 		// https://google.github.io/filament/Filament.html#lighting/imagebasedlights/anisotropy
 		vec3 anisotropic_direction = anisotropy >= 0.0 ? binormal : tangent;
@@ -1911,7 +2027,7 @@ void fragment_shader(in SceneData scene_data) {
 		ref_vec = mix(ref_vec, normal, roughness * roughness);
 #endif
 
-		float horizon = min(1.0 + dot(ref_vec, normal), 1.0);
+		float horizon = min(1.0 + dot(ref_vec, horizon_normal), 1.0);
 		ref_vec = scene_data.radiance_inverse_xform * ref_vec;
 
 #ifdef USE_RADIANCE_OCTMAP_ARRAY
@@ -1935,10 +2051,10 @@ void fragment_shader(in SceneData scene_data) {
 		indirect_specular_light *= scene_data.IBL_exposure_normalization;
 		indirect_specular_light *= horizon * horizon;
 		indirect_specular_light *= scene_data.ambient_light_color_energy.a;
-	} else if (bool(scene_data.flags & SCENE_DATA_FLAGS_USE_REFLECTION_COLOR)) {
+	} else if (reflect_sky && bool(scene_data.flags & SCENE_DATA_FLAGS_USE_REFLECTION_COLOR)) {
 		indirect_specular_light = scene_data.reflection_color.rgb;
 	}
-	specular_source.x = float(bool(scene_data.flags & (SCENE_DATA_FLAGS_USE_REFLECTION_CUBEMAP | SCENE_DATA_FLAGS_USE_REFLECTION_COLOR)));
+	specular_source.x = float(reflect_sky && bool(scene_data.flags & (SCENE_DATA_FLAGS_USE_REFLECTION_CUBEMAP | SCENE_DATA_FLAGS_USE_REFLECTION_COLOR)));
 
 #if defined(CUSTOM_RADIANCE_USED)
 	indirect_specular_light = mix(indirect_specular_light, custom_radiance.rgb, custom_radiance.a);
@@ -1985,11 +2101,20 @@ void fragment_shader(in SceneData scene_data) {
 #endif
 	vec3 cc_specular_light = vec3(0.0);
 	vec3 cc_ref_vec = vec3(0.0);
+	float coat_match_fill = 1.0;
+	float coat_match_ssr = 1.0;
 #ifdef INDIRECT_COAT_USED
+	if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_COAT_MATCH)) {
+		coat_match_fill = min(1.0, smoothstep(0.5, 1.0, CLEARCOAT_IBL_ROUGHNESS) / max(smoothstep(0.5, 1.0, roughness), 1e-3));
+		coat_match_ssr = smoothstep(0.5, 1.0, (CLEARCOAT_IBL_ROUGHNESS * CLEARCOAT_IBL_ROUGHNESS) / max(roughness * roughness, 1e-6));
+		float coat_ground = smoothstep(0.0, 0.5, -dot(scene_data.inv_view_matrix[1].xyz, reflect(-view, CLEARCOAT_NORMAL)));
+		coat_match_fill = mix(coat_match_fill, 1.0, coat_ground);
+		coat_match_ssr = mix(coat_match_ssr, 1.0, coat_ground);
+	}
 	cc_ref_vec = mix(reflect(-view, CLEARCOAT_NORMAL), CLEARCOAT_NORMAL, CLEARCOAT_IBL_BEND);
 #endif
 
-	if (bool(scene_data.flags & SCENE_DATA_FLAGS_USE_REFLECTION_CUBEMAP)) {
+	if (reflect_sky && bool(scene_data.flags & SCENE_DATA_FLAGS_USE_REFLECTION_CUBEMAP)) {
 		cc_ref_vec = reflect(-view, CLEARCOAT_NORMAL);
 		cc_ref_vec = mix(cc_ref_vec, CLEARCOAT_NORMAL, CLEARCOAT_IBL_BEND);
 
@@ -2012,7 +2137,11 @@ void fragment_shader(in SceneData scene_data) {
 
 #endif //USE_RADIANCE_OCTMAP_ARRAY
 		cc_specular_light += clearcoat_light * scene_data.IBL_exposure_normalization * scene_data.ambient_light_color_energy.a;
-	} else if (bool(scene_data.flags & SCENE_DATA_FLAGS_USE_REFLECTION_COLOR)) {
+		if (horizon_geometric) {
+			float cc_horizon = min(1.0 + dot(cc_ref_vec, geo_normal), 1.0);
+			cc_specular_light *= cc_horizon * cc_horizon;
+		}
+	} else if (reflect_sky && bool(scene_data.flags & SCENE_DATA_FLAGS_USE_REFLECTION_COLOR)) {
 		cc_specular_light = scene_data.reflection_color.rgb;
 	}
 #endif // LIGHT_CLEARCOAT_USED
@@ -2382,12 +2511,14 @@ void fragment_shader(in SceneData scene_data) {
 
 		ambient_light = mix(ambient_light, buffer_ambient.rgb, buffer_ambient.a);
 		bounce_gi_light = buffer_ambient.rgb * buffer_ambient.a;
-		indirect_specular_light = mix(indirect_specular_light, buffer_reflection.rgb, buffer_reflection.a);
-		gi_specular_share = buffer_reflection.a;
+		const bool fill_blocked = bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_BLEND_FILL_SKIP) && bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_TRANSPARENT_PASS);
+		const float gi_fill_alpha = bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_GI_FILL) && !fill_blocked ? buffer_reflection.a : 0.0;
+		indirect_specular_light = mix(indirect_specular_light, buffer_reflection.rgb, gi_fill_alpha);
+		gi_specular_share = gi_fill_alpha;
 		ambient_source = mix(ambient_source, vec4(0.0, 1.0, 0.0, 0.0), buffer_ambient.a);
-		specular_source = mix(specular_source, vec4(0.0, 1.0, 0.0, 0.0), buffer_reflection.a);
+		specular_source = mix(specular_source, vec4(0.0, 1.0, 0.0, 0.0), gi_fill_alpha);
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
-		cc_specular_light = mix(cc_specular_light, buffer_reflection.rgb, buffer_reflection.a);
+		cc_specular_light = mix(cc_specular_light, buffer_reflection.rgb, gi_fill_alpha * coat_match_fill);
 #endif
 	}
 #endif // !USE_LIGHTMAP
@@ -2404,6 +2535,12 @@ void fragment_shader(in SceneData scene_data) {
 		ao_light_affect = mix(ao_light_affect, max(ao_light_affect, implementation_data.ssao_light_affect), implementation_data.ssao_ao_affect);
 	}
 
+	const vec3 ibl_specular_light = indirect_specular_light;
+	float ibl_probe_share = 1.0;
+#if defined(INDIRECT_COAT_USED) || defined(LIGHT_CLEARCOAT_USED)
+	const vec3 cc_ibl_specular_light = cc_specular_light;
+	float cc_ibl_probe_share = 1.0;
+#endif
 	{ // process reflections
 
 		vec4 reflection_accum = vec4(0.0, 0.0, 0.0, 0.0);
@@ -2435,7 +2572,7 @@ void fragment_shader(in SceneData scene_data) {
 #endif
 		vec3 ref_vec = normalize(reflect(-view, bent_normal));
 		// Interpolate between mirror and rough reflection by using linear_roughness * linear_roughness.
-		ref_vec = mix(ref_vec, bent_normal, roughness * roughness * roughness * roughness);
+		ref_vec = mix(ref_vec, bent_normal, unified_lookup ? roughness * roughness : roughness * roughness * roughness * roughness);
 
 		for (uint i = item_from; i < item_to; i++) {
 			uint mask = cluster_buffer.data[cluster_reflection_offset + i];
@@ -2474,6 +2611,24 @@ void fragment_shader(in SceneData scene_data) {
 			}
 		}
 
+		if (!bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_PROBES)) {
+			reflection_accum = vec4(0.0);
+#ifdef LIGHT_CLEARCOAT_USED
+			cc_reflection_accum = vec4(0.0);
+#endif
+		}
+
+		if (unified_lookup || horizon_geometric) {
+			float probe_horizon = min(1.0 + dot(ref_vec, horizon_normal), 1.0);
+			reflection_accum.rgb *= probe_horizon * probe_horizon;
+		}
+#ifdef LIGHT_CLEARCOAT_USED
+		if (horizon_geometric) {
+			float cc_probe_horizon = min(1.0 + dot(cc_ref_vec, geo_normal), 1.0);
+			cc_reflection_accum.rgb *= cc_probe_horizon * cc_probe_horizon;
+		}
+#endif
+
 		if (ambient_accum.a < 1.0) {
 			ambient_accum.rgb = ambient_light * (1.0 - ambient_accum.a) + ambient_accum.rgb;
 		}
@@ -2490,6 +2645,7 @@ void fragment_shader(in SceneData scene_data) {
 
 		if (reflection_accum.a > 0.0) {
 			indirect_specular_light = reflection_accum.rgb;
+			ibl_probe_share = max(1.0 - reflection_accum.a, 0.0);
 		}
 		specular_source = specular_source * (1.0 - float(reflection_accum.a)) + vec4(0.0, 0.0, reflection_accum.a, 0.0);
 		gi_specular_share *= max(1.0 - reflection_accum.a, 0.0);
@@ -2497,6 +2653,7 @@ void fragment_shader(in SceneData scene_data) {
 #ifdef LIGHT_CLEARCOAT_USED
 		if (cc_reflection_accum.a > 0.0) {
 			cc_specular_light = cc_reflection_accum.rgb;
+			cc_ibl_probe_share = max(1.0 - cc_reflection_accum.a, 0.0);
 		}
 #endif
 
@@ -2540,6 +2697,10 @@ void fragment_shader(in SceneData scene_data) {
 		ambient_light *= ambient_ao;
 		policy_ambient_light *= ambient_occlusion;
 #endif // MULTI_BOUNCE_OCCLUSION_ENABLED
+		const vec3 pre_occlusion_specular = indirect_specular_light;
+#if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+		const vec3 pre_occlusion_cc_specular = cc_specular_light;
+#endif
 #if !defined(SPECULAR_OCCLUSION_DISABLED) || defined(SPECULAR_OCCLUSION_COMBINED)
 #ifdef BENT_NORMAL_MAP_USED
 		// Apply cone to cone intersection with cosine weighted assumption:
@@ -2548,12 +2709,13 @@ void fragment_shader(in SceneData scene_data) {
 		// Based on Christopher Oat and Pedro V. Sander's "Ambient aperture lighting":
 		// https://advances.realtimerendering.com/s2006/Chapter8-Ambient_Aperture_Lighting.pdf
 		float specular_occlusion = specular_occlusion_cone(specular_ao, roughness, bent_normal_vector, reflect(-view, normal));
-		indirect_specular_light *= specular_occlusion;
+		indirect_specular_light -= ibl_specular_light * ibl_probe_share * (1.0 - specular_occlusion);
+		reflection_debug.w = specular_occlusion;
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
 #ifdef INDIRECT_COAT_NORMAL_ACTIVE
-		cc_specular_light *= cc_custom ? specular_occlusion_cone(specular_ao, indirect_coat_roughness, bent_normal_vector, reflect(-view, cc_normal)) : specular_occlusion;
+		cc_specular_light -= cc_ibl_specular_light * cc_ibl_probe_share * (1.0 - (cc_custom ? specular_occlusion_cone(specular_ao, indirect_coat_roughness, bent_normal_vector, reflect(-view, cc_normal)) : specular_occlusion));
 #else
-		cc_specular_light *= specular_occlusion;
+		cc_specular_light -= cc_ibl_specular_light * cc_ibl_probe_share * (1.0 - specular_occlusion);
 #endif
 #endif
 #else // BENT_NORMAL_MAP_USED
@@ -2583,18 +2745,26 @@ void fragment_shader(in SceneData scene_data) {
 			cc_specular_occlusion = cc_custom ? specular_occlusion_cone(specular_ao, indirect_coat_roughness, occlusion_bent_normal, reflect(-view, cc_normal)) : specular_occlusion;
 #endif
 		}
-		indirect_specular_light *= specular_occlusion;
+		indirect_specular_light -= ibl_specular_light * ibl_probe_share * (1.0 - specular_occlusion);
+		reflection_debug.w = specular_occlusion;
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
 #ifdef SPECULAR_OCCLUSION_COMBINED
-		cc_specular_light *= specular_occlusion_lagarde(clamp(dot(CLEARCOAT_NORMAL, view), 0.0, 1.0), specular_ao, indirect_coat_roughness * indirect_coat_roughness);
+		cc_specular_light -= cc_ibl_specular_light * cc_ibl_probe_share * (1.0 - specular_occlusion_lagarde(clamp(dot(CLEARCOAT_NORMAL, view), 0.0, 1.0), specular_ao, indirect_coat_roughness * indirect_coat_roughness));
 #elif defined(INDIRECT_COAT_NORMAL_ACTIVE)
-		cc_specular_light *= cc_specular_occlusion;
+		cc_specular_light -= cc_ibl_specular_light * cc_ibl_probe_share * (1.0 - cc_specular_occlusion);
 #else
-		cc_specular_light *= specular_occlusion;
+		cc_specular_light -= cc_ibl_specular_light * cc_ibl_probe_share * (1.0 - specular_occlusion);
 #endif
 #endif
 #endif // BENT_NORMAL_MAP_USED
 #endif // SPECULAR_OCCLUSION_DISABLED
+		if (!bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SPECULAR_OCCLUSION)) {
+			indirect_specular_light = pre_occlusion_specular;
+#if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+			cc_specular_light = pre_occlusion_cc_specular;
+#endif
+			reflection_debug.w = 1.0;
+		}
 #ifdef INDIRECT_DIFFUSE_WEIGHT_USED
 		vec3 ambient_weight = indirect_diffuse_weight * (1.0 - decal_coverage) + (albedo.rgb - decal_base_albedo * (1.0 - decal_coverage)) * (1.0 - metallic);
 #else
@@ -2620,8 +2790,10 @@ void fragment_shader(in SceneData scene_data) {
 #endif
 #endif
 
+		reflection_debug.xyz = specular_source.xyz;
+
 		//process ssr
-		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSR)) {
+		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSR) && bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SSR)) {
 			bool resolve_ssr = bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_RESOLVE_SSR);
 
 			float ssr_mip_level = 0.0;
@@ -2657,7 +2829,7 @@ void fragment_shader(in SceneData scene_data) {
 			indirect_specular_light = indirect_specular_light * (1.0 - ssr.a) + ssr.rgb;
 			specular_source = specular_source * (1.0 - ssr.a) + vec4(0.0, 0.0, 0.0, ssr.a);
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
-			cc_specular_light = cc_specular_light * (1.0 - ssr.a) + ssr.rgb;
+			cc_specular_light = cc_specular_light * (1.0 - ssr.a * coat_match_ssr) + ssr.rgb * coat_match_ssr;
 #endif
 		}
 	}
@@ -3205,6 +3377,37 @@ void fragment_shader(in SceneData scene_data) {
 	}
 
 #ifndef USE_VERTEX_LIGHTING
+#ifdef LIGHT_BACKLIGHT_USED
+#define DIRECT_ARGS_BACKLIGHT backlight,
+#else
+#define DIRECT_ARGS_BACKLIGHT
+#endif
+#ifdef LIGHT_TRANSMITTANCE_USED
+#define DIRECT_ARGS_TRANSMITTANCE transmittance_color, transmittance_depth, transmittance_boost,
+#else
+#define DIRECT_ARGS_TRANSMITTANCE
+#endif
+#ifdef LIGHT_RIM_USED
+#define DIRECT_ARGS_RIM rim, rim_tint,
+#else
+#define DIRECT_ARGS_RIM
+#endif
+#ifdef LIGHT_CLEARCOAT_USED
+#define DIRECT_ARGS_CLEARCOAT clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
+#else
+#define DIRECT_ARGS_CLEARCOAT
+#endif
+#ifdef LIGHT_ANISOTROPY_USED
+#define DIRECT_ARGS_ANISOTROPY binormal, tangent, anisotropy,
+#else
+#define DIRECT_ARGS_ANISOTROPY
+#endif
+#define DIRECT_LAMP_ARGS light_index, vertex, view, normal, vertex_ddx, vertex_ddy, f0, roughness, metallic, scene_data.taa_frame_count, albedo, alpha, screen_uv, energy_compensation, DIRECT_ARGS_BACKLIGHT DIRECT_ARGS_TRANSMITTANCE DIRECT_ARGS_RIM DIRECT_ARGS_CLEARCOAT DIRECT_ARGS_ANISOTROPY
+#ifdef DIRECT_RESAMPLED_ROUTE
+	if (sc_use_direct_resampled()) {
+		direct_record_begin(scene_data, vertex);
+	}
+#endif
 	{ //omni lights
 
 		uint cluster_omni_offset = cluster_offset;
@@ -3242,26 +3445,29 @@ void fragment_shader(in SceneData scene_data) {
 					continue; // Statically baked light and object uses lightmap, skip
 				}
 
-				light_process_omni(light_index, vertex, view, normal, vertex_ddx, vertex_ddy, f0, roughness, metallic, scene_data.taa_frame_count, albedo, alpha, screen_uv, energy_compensation,
-#ifdef LIGHT_BACKLIGHT_USED
-						backlight,
+#ifdef DIRECT_RESAMPLED_ROUTE
+				if (sc_use_direct_resampled()) {
+					int direct_passes = direct_route(omni_lights.data[light_index].flags, omni_lights.data[light_index].position, omni_lights.data[light_index].inv_radius);
+					if (direct_passes == 0) {
+						continue;
+					}
+					for (int direct_pass = 0; direct_pass < max(direct_passes, 1); direct_pass++) {
+						float direct_scale = direct_passes > 0 ? direct_tail_pass(omni_lights.data[light_index].flags, omni_lights.data[light_index].color, direct_pass) : 1.0;
+						hvec3 lamp_diffuse = direct_passes > 0 ? hvec3(0.0) : diffuse_light;
+						hvec3 lamp_specular = direct_passes > 0 ? hvec3(0.0) : direct_specular_light;
+						light_process_omni(DIRECT_LAMP_ARGS lamp_diffuse, lamp_specular);
+						if (direct_passes > 0) {
+							diffuse_light += hvec3(vec3(lamp_diffuse) * direct_scale);
+							direct_specular_light += hvec3(vec3(lamp_specular) * direct_scale);
+						} else {
+							diffuse_light = lamp_diffuse;
+							direct_specular_light = lamp_specular;
+						}
+					}
+					continue;
+				}
 #endif
-#ifdef LIGHT_TRANSMITTANCE_USED
-						transmittance_color,
-						transmittance_depth,
-						transmittance_boost,
-#endif
-#ifdef LIGHT_RIM_USED
-						rim,
-						rim_tint,
-#endif
-#ifdef LIGHT_CLEARCOAT_USED
-						clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
-#endif // LIGHT_CLEARCOAT_USED
-#ifdef LIGHT_ANISOTROPY_USED
-						binormal, tangent, anisotropy,
-#endif
-						diffuse_light, direct_specular_light);
+				light_process_omni(DIRECT_LAMP_ARGS diffuse_light, direct_specular_light);
 			}
 		}
 	}
@@ -3303,29 +3509,38 @@ void fragment_shader(in SceneData scene_data) {
 					continue; // Statically baked light and object uses lightmap, skip
 				}
 
-				light_process_spot(light_index, vertex, view, normal, vertex_ddx, vertex_ddy, f0, roughness, metallic, scene_data.taa_frame_count, albedo, alpha, screen_uv, energy_compensation,
-#ifdef LIGHT_BACKLIGHT_USED
-						backlight,
+#ifdef DIRECT_RESAMPLED_ROUTE
+				if (sc_use_direct_resampled()) {
+					int direct_passes = direct_route(spot_lights.data[light_index].flags, spot_lights.data[light_index].position, spot_lights.data[light_index].inv_radius);
+					if (direct_passes == 0) {
+						continue;
+					}
+					for (int direct_pass = 0; direct_pass < max(direct_passes, 1); direct_pass++) {
+						float direct_scale = direct_passes > 0 ? direct_tail_pass(spot_lights.data[light_index].flags, spot_lights.data[light_index].color, direct_pass) : 1.0;
+						hvec3 lamp_diffuse = direct_passes > 0 ? hvec3(0.0) : diffuse_light;
+						hvec3 lamp_specular = direct_passes > 0 ? hvec3(0.0) : direct_specular_light;
+						light_process_spot(DIRECT_LAMP_ARGS lamp_diffuse, lamp_specular);
+						if (direct_passes > 0) {
+							diffuse_light += hvec3(vec3(lamp_diffuse) * direct_scale);
+							direct_specular_light += hvec3(vec3(lamp_specular) * direct_scale);
+						} else {
+							diffuse_light = lamp_diffuse;
+							direct_specular_light = lamp_specular;
+						}
+					}
+					continue;
+				}
 #endif
-#ifdef LIGHT_TRANSMITTANCE_USED
-						transmittance_color,
-						transmittance_depth,
-						transmittance_boost,
-#endif
-#ifdef LIGHT_RIM_USED
-						rim,
-						rim_tint,
-#endif
-#ifdef LIGHT_CLEARCOAT_USED
-						clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
-#endif // LIGHT_CLEARCOAT_USED
-#ifdef LIGHT_ANISOTROPY_USED
-						binormal, tangent, anisotropy,
-#endif
-						diffuse_light, direct_specular_light);
+				light_process_spot(DIRECT_LAMP_ARGS diffuse_light, direct_specular_light);
 			}
 		}
 	}
+#undef DIRECT_LAMP_ARGS
+#undef DIRECT_ARGS_BACKLIGHT
+#undef DIRECT_ARGS_TRANSMITTANCE
+#undef DIRECT_ARGS_RIM
+#undef DIRECT_ARGS_CLEARCOAT
+#undef DIRECT_ARGS_ANISOTROPY
 
 	if (sc_cluster_has_area_light()) { // area lights
 
@@ -3635,9 +3850,15 @@ void fragment_shader(in SceneData scene_data) {
 #endif //!FOG_DISABLED
 
 	if (sc_debug_lighting_component() != 0u) {
-		diffuse_buffer.rgb = debug_lighting_component(sc_debug_lighting_component(), diffuse_light, direct_specular_light, ambient_light, indirect_specular_light, output_emission, fog, ssr_confidence, persistent_ao, specular_source, ambient_source, surfel_coverage.y);
+		diffuse_buffer.rgb = debug_lighting_component(sc_debug_lighting_component(), diffuse_light, direct_specular_light, ambient_light, indirect_specular_light, output_emission, fog, ssr_confidence, persistent_ao, specular_source, ambient_source, surfel_coverage.y, reflection_debug);
 		specular_buffer.rgb = vec3(0.0);
 	}
+#ifdef DIRECT_RESAMPLED_ROUTE
+	if (sc_use_direct_resampled() && direct_no_layer) {
+		diffuse_buffer.rgb = vec3(16384.0, 0.0, 16384.0);
+		specular_buffer.rgb = vec3(0.0);
+	}
+#endif
 
 #else //MODE_SEPARATE_SPECULAR
 
@@ -3655,8 +3876,13 @@ void fragment_shader(in SceneData scene_data) {
 #endif //!FOG_DISABLED
 
 	if (sc_debug_lighting_component() != 0u) {
-		frag_color.rgb = debug_lighting_component(sc_debug_lighting_component(), diffuse_light, direct_specular_light, ambient_light, indirect_specular_light, output_emission, fog, ssr_confidence, persistent_ao, specular_source, ambient_source, surfel_coverage.y);
+		frag_color.rgb = debug_lighting_component(sc_debug_lighting_component(), diffuse_light, direct_specular_light, ambient_light, indirect_specular_light, output_emission, fog, ssr_confidence, persistent_ao, specular_source, ambient_source, surfel_coverage.y, reflection_debug);
 	}
+#ifdef DIRECT_RESAMPLED_ROUTE
+	if (sc_use_direct_resampled() && direct_no_layer) {
+		frag_color.rgb = vec3(16384.0, 0.0, 16384.0);
+	}
+#endif
 
 #if defined(PREMUL_ALPHA_USED) && !defined(MODE_RENDER_DEPTH)
 	frag_color.rgb *= premul_alpha;

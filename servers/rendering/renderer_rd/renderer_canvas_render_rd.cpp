@@ -3190,6 +3190,9 @@ void RendererCanvasRenderRD::_render_batch(RD::DrawListID p_draw_list, CanvasSha
 
 			for (uint32_t j = 0; j < surf_count; j++) {
 				void *surface = mesh_storage->mesh_get_surface(mesh, j);
+				if (!mesh_storage->mesh_surface_has_buffers(surface)) {
+					continue;
+				}
 
 				RSE::PrimitiveType primitive = mesh_storage->mesh_surface_get_primitive(surface);
 				ERR_CONTINUE(primitive < 0 || primitive >= RSE::PRIMITIVE_MAX);

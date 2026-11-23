@@ -696,7 +696,7 @@ Error ResourceLoaderBinary::load() {
 			if (cache_mode == ResourceFormatLoader::CACHE_MODE_REPLACE && ResourceCache::has(path)) {
 				//use the existing one
 				Ref<Resource> cached = ResourceCache::get_ref(path);
-				if (cached->get_class() == t) {
+				if (cached.is_valid() && cached->get_class() == t) {
 					cached->reset_state();
 					res = cached;
 				}

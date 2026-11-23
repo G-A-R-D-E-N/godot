@@ -270,6 +270,10 @@ bool SceneShaderForwardMobile::ShaderData::casts_shadows() const {
 	return !has_alpha || (uses_depth_prepass_alpha && !(depth_draw == DEPTH_DRAW_DISABLED || depth_test != DEPTH_TEST_ENABLED));
 }
 
+bool SceneShaderForwardMobile::ShaderData::blends_additively() const {
+	return blend_mode == BLEND_MODE_ADD;
+}
+
 RenderingServerTypes::ShaderNativeSourceCode SceneShaderForwardMobile::ShaderData::get_native_source_code() const {
 	if (version.is_valid()) {
 		return SceneShaderForwardMobile::singleton->shader.version_get_native_source_code(version);

@@ -34,9 +34,73 @@ TEST_FORCE_LINK(test_file_access)
 
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
+#include "core/os/thread.h"
+#include "core/templates/safe_refcount.h"
 #include "tests/test_utils.h"
 
 namespace TestFileAccess {
+
+#ifdef THREADS_ENABLED
+struct RenameWriter {
+	String temp_path;
+	String target_path;
+	SafeNumeric<uint32_t> *saved = nullptr;
+	SafeNumeric<uint32_t> *finished = nullptr;
+};
+
+static void rename_writer_thread(void *p_data) {
+	RenameWriter *writer = static_cast<RenameWriter *>(p_data);
+	Ref<DirAccess> dir = DirAccess::create(DirAccess::ACCESS_FILESYSTEM);
+	for (int i = 0; i < 500; i++) {
+		Ref<FileAccess> f = FileAccess::open(writer->temp_path, FileAccess::WRITE);
+		if (f.is_null()) {
+			continue;
+		}
+		f->store_32(i);
+		f->close();
+		if (dir->rename(writer->temp_path, writer->target_path) == OK) {
+			writer->saved->increment();
+		} else {
+			dir->remove(writer->temp_path);
+		}
+	}
+	writer->finished->increment();
+}
+
+TEST_CASE("[DirAccess] Renaming onto a file never leaves the target missing") {
+	const String target_path = TestUtils::get_temp_path("rename_onto_file.bin");
+	Ref<FileAccess> first = FileAccess::open(target_path, FileAccess::WRITE);
+	REQUIRE(first.is_valid());
+	first->store_32(0);
+	first->close();
+
+	SafeNumeric<uint32_t> saved;
+	SafeNumeric<uint32_t> finished;
+	RenameWriter writers[2];
+	Thread threads[2];
+	for (int i = 0; i < 2; i++) {
+		writers[i] = { target_path + "." + itos(i) + ".tmp", target_path, &saved, &finished };
+		threads[i].start(rename_writer_thread, &writers[i]);
+	}
+
+	Ref<DirAccess> dir = DirAccess::create(DirAccess::ACCESS_FILESYSTEM);
+	uint32_t missing = 0;
+	while (finished.get() < 2) {
+		if (!dir->file_exists(target_path)) {
+			missing++;
+		}
+	}
+	for (int i = 0; i < 2; i++) {
+		threads[i].wait_to_finish();
+	}
+
+	CHECK_MESSAGE(missing == 0, vformat("The target was missing on %d checks.", missing));
+	CHECK(dir->file_exists(target_path));
+	CHECK(saved.get() > 0);
+
+	dir->remove(target_path);
+}
+#endif
 
 TEST_CASE("[FileAccess] CSV read") {
 	Ref<FileAccess> f = FileAccess::open(TestUtils::get_data_path("testdata.csv"), FileAccess::READ);

@@ -20,9 +20,35 @@ GODOT_PACKAGES = ["godot.net.sdk", "godotsharp", "godot.sourcegenerators", "godo
 # fifteen-second gates that print a FAIL of their own when they expire, so the short budget
 # only backstops them.
 GATED_CASE_ELAPSED_LIMIT = 15
+GATED_CASE_TIMEOUT = 40
+LONG_GATE_CASES = {
+    "zombie",
+    "zombie-rewrap",
+    "zombie-scripted",
+    "zombie-scripted-child",
+    "zombie-scripted-held",
+    "zombie-scripted-ignore",
+    "zombie-scripted-replace",
+    "zombie-scripted-replace-child",
+    "zombie-scripted-stress",
+}
+EXPECTED_WARNING = {
+    "zombie-scripted-held": "Its new managed instance has default values.",
+    "zombie-scripted-ignore": "Its new managed instance has default values.",
+}
+TOLERATED_WARNING = {
+    "zombie-scripted-stress": "Its new managed instance has default values.",
+}
+# Must stay rare: many of these lines mean the finalizer is rebuilding wrappers nobody holds.
+TOLERATED_WARNING_LIMIT = 10
+# Must exceed the sixty-second gates in ZombieBinding.cs.
+LONG_GATE_ELAPSED_LIMIT = 75
+LONG_GATE_TIMEOUT = 90
 STRESS_CASE = "race"
 STRESS_CASE_ELAPSED_LIMIT = 300
 STRESS_CASE_TIMEOUT = 360
+WARMUP_TIMEOUT = 60
+WARMUP_LINE = "WARMUP started and quit."
 
 LEGACY = {
     "queued-held": [],
@@ -38,6 +64,15 @@ OWNERSHIP = {
     "throw-finalizer": "--throw-recover-finalizer",
     "reentrant-throw": "--reentrant-throw-finalizer",
     "owner-api": "--owner-prebase-api",
+    "zombie": "--zombie-binding",
+    "zombie-rewrap": "--zombie-rewrap",
+    "zombie-scripted": "--zombie-scripted",
+    "zombie-scripted-child": "--zombie-scripted-child",
+    "zombie-scripted-held": "--zombie-scripted-held",
+    "zombie-scripted-ignore": "--zombie-scripted-ignore",
+    "zombie-scripted-replace": "--zombie-scripted-replace",
+    "zombie-scripted-replace-child": "--zombie-scripted-replace-child",
+    "zombie-scripted-stress": "--zombie-scripted-stress",
 }
 CONTROL = ["throw-shutdown", "throw-finalizer", "owner-api"]
 READY = {
@@ -46,6 +81,15 @@ READY = {
     "throw-shutdown": "READY throw-shutdown disposal failed before base disposal;",
     "throw-finalizer": "READY throw-finalizer disposal failed before base disposal;",
     "reentrant-throw": "READY reentrant-throw disposal failed before base disposal;",
+    "zombie": "READY zombie binding set up:",
+    "zombie-rewrap": "READY zombie rewrap set up:",
+    "zombie-scripted": "READY zombie scripted set up:",
+    "zombie-scripted-child": "READY zombie scripted child set up:",
+    "zombie-scripted-held": "READY zombie scripted held set up:",
+    "zombie-scripted-ignore": "READY zombie scripted ignore set up:",
+    "zombie-scripted-replace": "READY zombie scripted replace set up:",
+    "zombie-scripted-replace-child": "READY zombie scripted replace child set up:",
+    "zombie-scripted-stress": "READY zombie scripted stress set up:",
 }
 
 
@@ -137,15 +181,26 @@ def cases(version):
 
 
 def case_elapsed_limit(case):
+    if case in LONG_GATE_CASES:
+        return LONG_GATE_ELAPSED_LIMIT
     return STRESS_CASE_ELAPSED_LIMIT if case == STRESS_CASE else GATED_CASE_ELAPSED_LIMIT
+
+
+def case_timeout(case):
+    if case in LONG_GATE_CASES:
+        return LONG_GATE_TIMEOUT
+    return STRESS_CASE_TIMEOUT if case == STRESS_CASE else GATED_CASE_TIMEOUT
 
 
 def judge(version, case, result, elapsed, output, engine):
     assembly_lines = [line[9:] for line in output.splitlines() if line.startswith("ASSEMBLY ")]
+    tolerated = case in TOLERATED_WARNING and output.count(TOLERATED_WARNING[case]) <= TOLERATED_WARNING_LIMIT
     diagnostics = [
         line
         for line in output.splitlines()
         if any(token in line.lower() for token in ["error:", "warning:", "leaked", "fail ", "crashed", "fatal:"])
+        and not (case in EXPECTED_WARNING and EXPECTED_WARNING[case] in line)
+        and not (tolerated and TOLERATED_WARNING[case] in line)
     ]
     owned = case in OWNERSHIP
     running = case.startswith("running")
@@ -154,7 +209,8 @@ def judge(version, case, result, elapsed, output, engine):
     passed &= Path(assembly_lines[0]).resolve().is_relative_to(engine.parent) if assembly_lines else False
     if owned:
         ready = READY.get(case, "") in output
-        success = result.returncode == 0 and ready and f"PASS {case}:" in output and not diagnostics
+        warned = EXPECTED_WARNING.get(case, "") in output
+        success = result.returncode == 0 and ready and warned and f"PASS {case}:" in output and not diagnostics
         if version == "control":
             failed = f"FAIL {case}:" in output or result.returncode != 0
             return passed and failed and f"PASS {case}:" not in output, diagnostics, assembly_lines
@@ -174,6 +230,38 @@ def judge(version, case, result, elapsed, output, engine):
         if running:
             passed &= "PASS running: the finalizer owned the only native pointer transition." in output
     return passed, diagnostics, assembly_lines
+
+
+def as_text(stream):
+    if stream is None:
+        return ""
+    return stream.decode("utf-8", "replace") if isinstance(stream, bytes) else stream
+
+
+def warm_up(engine, project, output, flags):
+    """One untimed start and quit of the candidate on the probe project, before the timed cases."""
+    started = time.monotonic()
+    try:
+        result = subprocess.run(
+            [str(engine), "--headless", "--verbose", "--path", str(project), "--", "--warmup"],
+            capture_output=True,
+            text=True,
+            timeout=WARMUP_TIMEOUT,
+            creationflags=flags,
+        )
+        code, text = result.returncode, result.stdout + result.stderr
+    except subprocess.TimeoutExpired as expired:
+        code, text = None, as_text(expired.stdout) + as_text(expired.stderr)
+    elapsed = time.monotonic() - started
+    (output / "warmup.log").write_text(text, encoding="utf-8")
+    lowered = text.lower()
+    passed = (
+        code == 0
+        and elapsed < WARMUP_TIMEOUT
+        and WARMUP_LINE in text
+        and not any(token in lowered for token in ["crashed", "fatal:"])
+    )
+    return {"exit": code, "elapsed_seconds": elapsed, "passed": passed}
 
 
 def main():
@@ -243,6 +331,9 @@ def main():
     ]:
         identities.append(identity(feed / file_name))
         identities.append(identity(packages / package_id / sdk_version / f"{package_id}.{sdk_version}.nupkg"))
+    warmup = warm_up(candidate, project, args.output, flags)
+    verdict = "PASS" if warmup["passed"] else "FAIL"
+    print(f"candidate-warmup {verdict} ({warmup['elapsed_seconds']:.1f}s, exit {warmup['exit']})", flush=True)
     engines = [("baseline", args.baseline), ("candidate", candidate), ("control", args.control)]
     for version, engine in engines:
         if engine is None:
@@ -256,7 +347,7 @@ def main():
                 [str(engine), "--headless", "--verbose", "--path", str(project), "--", *user_args],
                 capture_output=True,
                 text=True,
-                timeout=STRESS_CASE_TIMEOUT if case == STRESS_CASE else 40,
+                timeout=case_timeout(case),
                 creationflags=flags,
             )
             elapsed = time.monotonic() - started
@@ -283,12 +374,15 @@ def main():
                 "resolved_packages": resolved,
                 "nuget_packages": str(packages),
                 "identities": identities,
+                "warmup": warmup,
                 "runs": runs,
             },
             indent=2,
         ),
         encoding="utf-8",
     )
+    if not warmup["passed"]:
+        raise RuntimeError("Shutdown tracker warm-up failed; see warmup.log and results.json.")
     if not all(run["passed"] for run in runs):
         raise RuntimeError("Shutdown tracker comparison failed; see results.json.")
 

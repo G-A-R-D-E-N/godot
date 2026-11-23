@@ -38,8 +38,8 @@ layout(push_constant, std430) uniform Params {
 	float adaptation;
 	float adaptation_pivot;
 	uint final_level;
-	float pad0;
-	float pad1;
+	float light_limit;
+	uint hold;
 }
 params;
 
@@ -91,6 +91,12 @@ void main() {
 #ifdef WRITE_LUMINANCE
 		float prev_lum = texelFetch(prev_luminance, ivec2(0, 0), 0).r; //1 pixel previous exposure
 		avg = clamp(prev_lum + (avg - prev_lum) * params.exposure_adjust, params.min_luminance, params.max_luminance);
+		if (params.light_limit > 0.0 && prev_lum > 0.0) {
+			avg = max(min(avg, prev_lum * params.light_limit), params.min_luminance);
+		}
+		if (params.hold != 0u && prev_lum > 0.0) {
+			avg = prev_lum;
+		}
 #endif
 		imageStore(dest_luminance, pos, vec4(avg));
 	}

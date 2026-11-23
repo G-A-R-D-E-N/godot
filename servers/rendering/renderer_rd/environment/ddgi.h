@@ -43,6 +43,8 @@ class RenderSceneBuffersRD;
 
 namespace RendererRD {
 
+class RayScene;
+
 class DDGI {
 public:
 	static constexpr uint32_t MAX_LEVELS = 4;
@@ -73,7 +75,13 @@ public:
 		TRACE_MODE_PROBES,
 		TRACE_MODE_DEBUG,
 		TRACE_MODE_SURFELS,
+		TRACE_MODE_RTGI,
 		TRACE_MODE_MAX
+	};
+
+	enum TraceGroup {
+		TRACE_GROUP_BASE,
+		TRACE_GROUP_RTGI,
 	};
 
 	enum SkyFlags {
@@ -176,6 +184,7 @@ public:
 		Vector3i g_min[MAX_LEVELS];
 		bool level_valid[MAX_LEVELS] = {};
 		uint32_t frame = 0;
+		uint32_t alpha_generation = 0;
 
 		RID irradiance;
 		RID distance;
@@ -210,7 +219,16 @@ private:
 	DdgiTraceShaderRD trace_shader;
 	RID trace_shader_version;
 	PipelineDeferredRD trace_pipelines[TRACE_MODE_MAX];
+	DdgiTraceShaderRD trace_shader_hw;
+	RID trace_shader_hw_version;
+	PipelineDeferredRD trace_pipelines_hw[TRACE_MODE_MAX];
+	String trace_defines;
+	bool trace_hw_valid = false;
 	bool use_octmap_array = false;
+
+	static Vector<ShaderRD::VariantDefine> _trace_modes();
+	bool _ensure_trace_hw();
+	bool _trace_usable(RayScene *p_ray_scene);
 
 	void _dispatch(Mode p_mode, const Ref<Volume> &p_volume, uint32_t p_x_groups, int32_t p_indirect_offset = -1);
 	void _reset_counts(const Ref<Volume> &p_volume, const Vector3 &p_camera_position);
@@ -226,6 +244,7 @@ public:
 
 	void update(const Ref<RenderSceneBuffersRD> &p_render_buffers, const Vector3 &p_camera_position);
 	void trace_surfels(const Ref<Volume> &p_volume, const LocalVector<RD::Uniform> &p_surfel_uniforms, RID p_indirect_buffer, uint32_t p_indirect_offset);
+	bool trace_rtgi(const Ref<Volume> &p_volume, RID p_output, const LocalVector<RD::Uniform> &p_uniforms, uint32_t p_x_groups, uint32_t p_y_groups);
 	void process(const Ref<Volume> &p_volume, RID p_environment, SkyRD::Sky *p_sky, RID p_camera_attributes, const Projection &p_projection, const Transform3D &p_camera_transform, const Size2i &p_screen_size);
 };
 

@@ -1354,6 +1354,7 @@ private:
 
 		// --- Top Level ---
 		uint32_t max_instance_count = 0;
+		bool ray_query_only = false;
 
 		struct InstanceBuffer {
 			RDD::BufferID driver_id;
@@ -1865,6 +1866,10 @@ private:
 		TightLocalVector<uint64_t> timestamp_cpu_result_values;
 		TightLocalVector<uint64_t> timestamp_result_values;
 		uint32_t timestamp_result_count = 0;
+		TightLocalVector<String> timestamp_carry_names;
+		TightLocalVector<uint64_t> timestamp_carry_cpu_values;
+		TightLocalVector<uint64_t> timestamp_carry_values;
+		uint32_t timestamp_carry_count = 0;
 		uint64_t index = 0;
 	};
 
@@ -1897,7 +1902,7 @@ protected:
 
 public:
 	void _free_internal(RID p_id);
-	void _begin_frame(bool p_presented = false);
+	void _begin_frame(bool p_presented = false, bool p_mid_frame = false);
 	void _end_frame();
 	void _execute_frame(bool p_present);
 	void _stall_for_frame(uint32_t p_frame);
@@ -1952,7 +1957,9 @@ public:
 	enum MemoryType {
 		MEMORY_TEXTURES,
 		MEMORY_BUFFERS,
-		MEMORY_TOTAL
+		MEMORY_TOTAL,
+		MEMORY_DEVICE_BUDGET,
+		MEMORY_DEVICE_USAGE
 	};
 
 	uint64_t get_memory_usage(MemoryType p_type) const;

@@ -33,10 +33,12 @@
 TEST_FORCE_LINK(test_command_queue)
 
 #include "core/config/project_settings.h"
+#include "core/object/ref_counted.h"
 #include "core/object/worker_thread_pool.h"
 #include "core/os/os.h"
 #include "core/os/thread.h"
 #include "core/templates/command_queue_mt.h"
+#include "core/templates/safe_refcount.h"
 
 namespace TestCommandQueue {
 
@@ -517,6 +519,82 @@ TEST_CASE("[CommandQueue] Test Parameter Passing Semantics") {
 	}
 
 	sts.destroy_threads();
+}
+
+struct LockOrderState {
+	CommandQueueMT queue;
+	SafeFlag lock_held;
+	SafeFlag release_started;
+	SafeFlag release_timed_out;
+	SafeFlag holder_timed_out;
+
+	static bool wait_for(const SafeFlag &p_flag, uint64_t p_timeout_msec) {
+		uint64_t start = OS::get_singleton()->get_ticks_msec();
+		while (!p_flag.is_set()) {
+			if (OS::get_singleton()->get_ticks_msec() - start > p_timeout_msec) {
+				return false;
+			}
+			OS::get_singleton()->delay_usec(100);
+		}
+		return true;
+	}
+
+	void wait_for_holder(const Ref<RefCounted> &p_payload) {
+		if (!wait_for(lock_held, 10000)) {
+			holder_timed_out.set();
+		}
+	}
+
+	void no_op() {}
+};
+
+class LockOrderPayload : public RefCounted {
+	GDSOFTCLASS(LockOrderPayload, RefCounted);
+
+public:
+	LockOrderState *state = nullptr;
+
+	~LockOrderPayload() {
+		state->release_started.set();
+		uint64_t start = OS::get_singleton()->get_ticks_msec();
+		while (state->lock_held.is_set()) {
+			if (OS::get_singleton()->get_ticks_msec() - start > 10000) {
+				state->release_timed_out.set();
+				return;
+			}
+			OS::get_singleton()->delay_usec(100);
+		}
+	}
+};
+
+static void hold_lock_then_push(void *p_state) {
+	LockOrderState *state = static_cast<LockOrderState *>(p_state);
+	state->lock_held.set();
+	if (!LockOrderState::wait_for(state->release_started, 10000)) {
+		state->holder_timed_out.set();
+	}
+	state->queue.push(state, &LockOrderState::no_op);
+	state->lock_held.clear();
+}
+
+TEST_CASE("[CommandQueue] Test Releasing Arguments Without The Queue Lock") {
+	LockOrderState state;
+	Ref<LockOrderPayload> payload;
+	payload.instantiate();
+	payload->state = &state;
+	state.queue.push(&state, &LockOrderState::wait_for_holder, Ref<RefCounted>(payload));
+	payload.unref();
+	CHECK_FALSE(state.release_started.is_set());
+
+	Thread holder;
+	holder.start(hold_lock_then_push, &state);
+	state.queue.flush_all();
+	holder.wait_to_finish();
+	state.queue.flush_all();
+
+	CHECK_FALSE_MESSAGE(state.holder_timed_out.is_set(), "The holder thread never saw the argument being released.");
+	CHECK_FALSE_MESSAGE(state.release_timed_out.is_set(),
+			"Releasing a command's argument waited on a lock whose holder was blocked pushing to the queue.");
 }
 
 } // namespace TestCommandQueue

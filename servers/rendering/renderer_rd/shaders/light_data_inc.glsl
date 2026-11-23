@@ -21,7 +21,7 @@ struct LightData { //this structure needs to be as packed as possible
 	float specular_amount;
 	float shadow_opacity;
 	uint sscs_index;
-	float pad;
+	uint flags;
 
 	vec4 atlas_rect; // rect in the shadow atlas
 	mat4 shadow_matrix;

@@ -151,6 +151,8 @@ private:
 			uint64_t particles_render_pass = 0;
 
 			RID uniform_set;
+
+			bool buffers_failed = false;
 		};
 
 		uint32_t blend_shape_count = 0;
@@ -174,6 +176,7 @@ private:
 		HashSet<Mesh *> shadow_owners;
 
 		String path;
+		bool buffers_failed_reported = false;
 
 		Dependency dependency;
 	};
@@ -461,6 +464,11 @@ public:
 	_FORCE_INLINE_ bool mesh_surface_has_lod(void *p_surface) const {
 		Mesh::Surface *s = reinterpret_cast<Mesh::Surface *>(p_surface);
 		return s->lod_count > 0;
+	}
+
+	_FORCE_INLINE_ bool mesh_surface_has_buffers(void *p_surface) const {
+		Mesh::Surface *s = reinterpret_cast<Mesh::Surface *>(p_surface);
+		return s && !s->buffers_failed;
 	}
 
 	_FORCE_INLINE_ uint32_t mesh_surface_get_vertices_drawn_count(void *p_surface) const {

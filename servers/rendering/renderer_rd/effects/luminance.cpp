@@ -99,7 +99,9 @@ void Luminance::LuminanceBuffers::set_prefer_raster_effects(bool p_prefer_raster
 void Luminance::LuminanceBuffers::configure(RenderSceneBuffersRD *p_render_buffers) {
 	Size2i internal_size = p_render_buffers->get_internal_size();
 	if (!prefer_raster_effects) {
-		histogram = RD::get_singleton()->storage_buffer_create(LUMINANCE_HISTOGRAM_BINS * sizeof(uint32_t));
+		Vector<uint8_t> zeros;
+		zeros.resize_initialized((LUMINANCE_HISTOGRAM_BINS + LUMINANCE_HISTOGRAM_STATE) * sizeof(uint32_t));
+		histogram = RD::get_singleton()->storage_buffer_create(zeros.size(), zeros);
 	}
 	int w = internal_size.x;
 	int h = internal_size.y;
@@ -189,7 +191,8 @@ RID Luminance::get_current_luminance_buffer(Ref<RenderSceneBuffersRD> p_render_b
 	return RID();
 }
 
-void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set, float p_highlight_limit, float p_adaptation, float p_adaptation_pivot) {
+void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set, float p_highlight_limit, float p_adaptation, float p_adaptation_pivot, float p_light_limit, bool p_hold) {
+	p_luminance_buffers->histogram_shift_stale = true;
 	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
 	ERR_FAIL_NULL(uniform_set_cache);
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
@@ -213,6 +216,8 @@ void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_
 		push_constant.highlight_limit = highlight_multiplier;
 		push_constant.adaptation = p_adaptation;
 		push_constant.adaptation_pivot = p_adaptation_pivot;
+		push_constant.light_limit = p_set ? 0.0f : p_light_limit;
+		push_constant.hold = (p_hold && !p_set) ? 1 : 0;
 
 		Size2i dest_size = p_source_size;
 
@@ -257,6 +262,8 @@ void Luminance::luminance_reduction(RID p_source_texture, const Size2i p_source_
 		push_constant.highlight_limit = highlight_multiplier;
 		push_constant.adaptation = p_adaptation;
 		push_constant.adaptation_pivot = p_adaptation_pivot;
+		push_constant.light_limit = p_set ? 0.0f : p_light_limit;
+		push_constant.hold = (p_hold && !p_set) ? 1 : 0;
 
 		RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 
@@ -312,7 +319,7 @@ int Luminance::histogram_stride(const Size2i p_size) {
 	return MAX(1, int(Math::ceil(Math::sqrt(double(p_size.x) * double(p_size.y) / double(LUMINANCE_HISTOGRAM_MAX_SAMPLES)))));
 }
 
-void Luminance::luminance_histogram_meter(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set, float p_clip_low, float p_clip_high, float p_center_weight, float p_adaptation, float p_adaptation_pivot) {
+void Luminance::luminance_histogram_meter(RID p_source_texture, const Size2i p_source_size, Ref<LuminanceBuffers> p_luminance_buffers, float p_min_luminance, float p_max_luminance, float p_adjust, bool p_set, float p_clip_low, float p_clip_high, float p_center_weight, float p_adaptation, float p_adaptation_pivot, const HistogramPolicy &p_policy) {
 	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
 	ERR_FAIL_NULL(uniform_set_cache);
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
@@ -337,6 +344,18 @@ void Luminance::luminance_histogram_meter(RID p_source_texture, const Size2i p_s
 	push_constant.set_immediate = p_set ? 1 : 0;
 	push_constant.adaptation = p_adaptation;
 	push_constant.adaptation_pivot = p_adaptation_pivot;
+	push_constant.highlight_percentile = p_policy.highlight_percentile;
+	push_constant.highlight_ceiling = p_policy.highlight_ceiling;
+	push_constant.highlight_max_shift = p_policy.highlight_max_shift;
+	push_constant.light_adjust = p_policy.light_adjust;
+	push_constant.dark_adjust = p_policy.dark_adjust;
+	push_constant.exponential = p_policy.exponential ? 1 : 0;
+	push_constant.light_limit = p_set ? 0.0f : p_policy.light_limit;
+	push_constant.hold = (p_policy.hold && !p_set) ? 1 : 0;
+	push_constant.highlight_rise = p_set ? 1.0f : p_policy.highlight_rise;
+	push_constant.highlight_fall = p_set ? 1.0f : p_policy.highlight_fall;
+	push_constant.shift_stale = p_luminance_buffers->histogram_shift_stale ? 1 : 0;
+	p_luminance_buffers->histogram_shift_stale = false;
 
 	RD::get_singleton()->buffer_clear(p_luminance_buffers->histogram, 0, LUMINANCE_HISTOGRAM_BINS * sizeof(uint32_t));
 

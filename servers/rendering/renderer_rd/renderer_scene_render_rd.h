@@ -35,6 +35,7 @@
 #include "servers/rendering/renderer_rd/effects/copy_effects.h"
 #include "servers/rendering/renderer_rd/effects/debug_effects.h"
 #include "servers/rendering/renderer_rd/effects/fsr.h"
+#include "servers/rendering/renderer_rd/effects/local_exposure.h"
 #include "servers/rendering/renderer_rd/effects/luminance.h"
 #include "servers/rendering/renderer_rd/effects/resolve.h"
 #include "servers/rendering/renderer_rd/effects/smaa.h"
@@ -66,6 +67,7 @@ protected:
 	RendererRD::CopyEffects *copy_effects = nullptr;
 	RendererRD::DebugEffects *debug_effects = nullptr;
 	RendererRD::Luminance *luminance = nullptr;
+	RendererRD::LocalExposure *local_exposure = nullptr;
 	RendererRD::SMAA *smaa = nullptr;
 	RendererRD::ToneMapper *tone_mapper = nullptr;
 	RendererRD::FSR *fsr = nullptr;
@@ -190,6 +192,7 @@ public:
 	RendererRD::GI *get_gi() { return &gi; }
 
 	virtual AABB ray_scene_get_region(const Vector3 &p_camera_position) const override;
+	virtual AABB ray_scene_get_light_region(const Vector3 &p_camera_position) override;
 	virtual void ray_scene_update(const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const Vector<RID> &p_directional_lights, RID p_camera_attributes, const Vector3 &p_camera_position) override;
 
 	/* SKY */
