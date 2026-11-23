@@ -771,7 +771,7 @@ void process_gi(ivec2 pos, vec3 vertex, inout vec4 ambient_light, inout vec4 ref
 #endif
 
 #ifdef USE_SURFELS
-		{
+		if (length(vertex) <= surfel_data.max_distance) {
 			SurfelLookup lookup = surfel_lookup(vertex + surfel_data.camera_to_anchor, normal, SURFEL_INVALID);
 			vec3 surfel_light = surfel_eval_irradiance(lookup.sh_r, lookup.sh_g, lookup.sh_b, normal) * ddgi.energy;
 			float debug_scale = max(dot(max(ambient_light.rgb, surfel_light), vec3(0.2126, 0.7152, 0.0722)), 1e-6) * 2.0;
@@ -968,3 +968,4 @@ void main() {
 	}
 #endif
 }
+
