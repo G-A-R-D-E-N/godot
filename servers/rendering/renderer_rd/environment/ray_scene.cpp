@@ -748,13 +748,15 @@ void RayScene::_alpha_entry(RID p_material, Material &r_material, float p_alpha_
 		alpha_counts.solid_no_texture++;
 		return;
 	}
+	const bool invert = (key.bits & RayAlphaStore::ENTRY_ALPHA_INVERT_MASK) != 0;
 	if (cutoff > 1.0f) {
-		alpha_counts.solid_always++;
+		r_material.flags |= MATERIAL_FLAG_SKIP;
+		alpha_counts.solid_degenerate++;
 		return;
 	}
 	cutoff = CLAMP(cutoff, 0.0f, 1.0f);
-	const uint32_t cutoff_k = uint32_t(Math::ceil(cutoff * 255.0f));
-	if (cutoff_k == 0) {
+	const uint32_t cutoff_k = invert ? uint32_t(Math::floor(cutoff * 255.0f)) : uint32_t(Math::ceil(cutoff * 255.0f));
+	if (cutoff_k == 0 && !invert) {
 		alpha_counts.solid_always++;
 		return;
 	}
@@ -762,8 +764,7 @@ void RayScene::_alpha_entry(RID p_material, Material &r_material, float p_alpha_
 	key.scale[1] = float(scale.y);
 	key.offset[0] = float(offset.x);
 	key.offset[1] = float(offset.y);
-	const uint32_t invert_bits = key.bits & RayAlphaStore::ENTRY_ALPHA_INVERT_MASK;
-	key.bits = (p_cull & RayAlphaStore::ENTRY_CULL_MASK) | invert_bits;
+	key.bits = (p_cull & RayAlphaStore::ENTRY_CULL_MASK) | (key.bits & RayAlphaStore::ENTRY_ALPHA_INVERT_MASK);
 	const Variant far_mode_value = material_storage->material_get_declared_param(p_material, SNAME("alpha_far_mode"));
 	const int64_t far_mode = far_mode_value.get_type() == Variant::INT ? int64_t(far_mode_value) : 0;
 	if (far_mode == 1 || far_mode == 2) {
@@ -810,11 +811,11 @@ bool RayScene::_alpha_ready() const {
 	if (!alpha_enabled) {
 		return true;
 	}
-	return alpha_store.has_alpha_textures();
+	return alpha_store.has_bindable_textures();
 }
 
 String RayScene::alpha_shader_defines() {
-	if (!singleton) {
+	if (!singleton || !singleton->alpha_enabled) {
 		return String();
 	}
 	String defines = "\n#define RAY_SCENE_ALPHA\n";

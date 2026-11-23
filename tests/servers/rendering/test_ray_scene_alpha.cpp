@@ -43,10 +43,13 @@ TEST_FORCE_LINK(test_ray_scene_alpha)
 #include "core/templates/hash_map.h"
 #include "core/templates/hash_set.h"
 #include "core/templates/local_vector.h"
+#include "scene/resources/image.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene_alpha.h"
 #include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
 #include "servers/rendering/rendering_device.h"
+
+using RendererRD::TextureStorage;
 
 #include <type_traits>
 
@@ -310,6 +313,10 @@ float ray_cutoff_from_range(float p_threshold, const Vector2 &p_range, bool &r_i
 	r_invert = span < 0.0f;
 	const float cutoff = (p_threshold - float(p_range.x)) / span;
 	return CLAMP(cutoff, 0.0f, 1.0f);
+}
+
+uint32_t ray_cutoff_k(float p_cutoff, bool p_invert) {
+	return p_invert ? uint32_t(Math::floor(p_cutoff * 255.0f)) : uint32_t(Math::ceil(p_cutoff * 255.0f));
 }
 
 TEST_CASE("[RayScene] Half float known answers") {
@@ -2506,6 +2513,13 @@ TEST_CASE("[RayScene] Alpha cutoff above one keeps fully discarded surfaces from
 	const float cutoff = threshold / opacity;
 	CHECK(cutoff > 1.0f);
 	CHECK_FALSE(raster_visible(1.0f, threshold, opacity));
+	const uint32_t skip_flags = RayScene::MATERIAL_FLAG_SKIP;
+	const LocalVector<RayAlphaStore::TableEntry> table;
+	const LocalVector<RayScene::TriangleUv> uvs;
+	CoverageSample coverage;
+	coverage.constant = 1.0f;
+	CHECK(alpha_passes(skip_flags, 0, 0, 0.5f, 0.25f, 1, table, uvs, coverage, false));
+	CHECK_FALSE(alpha_passes(skip_flags | (1u << RayScene::MATERIAL_ALPHA_SHIFT), 0, 0, 0.5f, 0.25f, 1, table, uvs, coverage, false));
 }
 
 TEST_CASE("[RayScene] Inverted opacity texture range matches raster visibility") {
@@ -2515,7 +2529,7 @@ TEST_CASE("[RayScene] Inverted opacity texture range matches raster visibility")
 	const float cutoff = ray_cutoff_from_range(threshold, range, invert);
 	CHECK(invert);
 	CHECK(Math::is_equal_approx(cutoff, 0.5f));
-	const uint32_t cutoff_k = uint32_t(Math::ceil(cutoff * 255.0f));
+	const uint32_t cutoff_k = ray_cutoff_k(cutoff, invert);
 	LocalVector<uint8_t> source;
 	source.resize(8 * 8);
 	for (uint32_t i = 0; i < source.size(); i++) {
@@ -2578,17 +2592,43 @@ TEST_CASE("[RayScene] Texture data version bumps after a same-RID image update")
 		MESSAGE("SKIP: renderer texture storage unavailable.");
 		return;
 	}
-	Ref<Image> image = Image::create(4, 4, false, Image::FORMAT_RGBA8);
+	Ref<Image> image = Image::create_empty(4, 4, false, Image::FORMAT_RGBA8);
 	image->fill(Color(1.0f, 0.0f, 0.0f, 1.0f));
 	const RID texture = texture_storage->texture_allocate();
 	texture_storage->texture_2d_initialize(texture, image);
 	CHECK(texture_storage->texture_get_data_version(texture) == 0);
-	image->fill(Color(0.0f, 1.0f, 0.0f, 128.0f / 255.0f));
+	image->fill(Color(0.0f, 1.0f, 0.0f, 0.5f));
 	texture_storage->texture_2d_update(texture, image);
 	CHECK(texture_storage->texture_get_data_version(texture) == 1);
 	texture_storage->texture_2d_update(texture, image);
 	CHECK(texture_storage->texture_get_data_version(texture) == 2);
 	texture_storage->texture_free(texture);
+#else
+	MESSAGE("SKIP: RD_DISABLED.");
+#endif
+}
+
+TEST_CASE("[RayScene] Proxy textures follow source data version updates") {
+#ifdef RD_ENABLED
+	TextureStorage *texture_storage = TextureStorage::get_singleton();
+	RD *rd = RD::get_singleton();
+	if (texture_storage == nullptr || rd == nullptr) {
+		MESSAGE("SKIP: renderer texture storage unavailable.");
+		return;
+	}
+	Ref<Image> image = Image::create_empty(4, 4, false, Image::FORMAT_RGBA8);
+	image->fill(Color(1.0f, 1.0f, 1.0f, 0.0f));
+	const RID base = texture_storage->texture_allocate();
+	texture_storage->texture_2d_initialize(base, image);
+	const RID proxy = texture_storage->texture_allocate();
+	texture_storage->texture_proxy_initialize(proxy, base);
+	CHECK(texture_storage->texture_get_data_version(proxy) == 0);
+	image->fill(Color(1.0f, 1.0f, 1.0f, 1.0f));
+	texture_storage->texture_2d_update(base, image);
+	CHECK(texture_storage->texture_get_data_version(base) == 1);
+	CHECK(texture_storage->texture_get_data_version(proxy) == 1);
+	texture_storage->texture_free(proxy);
+	texture_storage->texture_free(base);
 #else
 	MESSAGE("SKIP: RD_DISABLED.");
 #endif

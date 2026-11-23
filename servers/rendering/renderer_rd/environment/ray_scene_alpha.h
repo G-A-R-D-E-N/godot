@@ -129,9 +129,11 @@ public:
 		return mode == 1u || mode == 2u;
 	}
 	bool is_configured() const { return max_layers > 0; }
-	bool has_alpha_textures() const { return textures_ok; }
+	bool has_bindable_textures() const { return textures_ok || fallback_layer_texture.is_valid(); }
 	RID get_layer_texture() const { return layer_texture; }
 	RID get_mean_texture() const { return mean_texture; }
+	RID bind_layer_texture() const { return textures_ok ? layer_texture : fallback_layer_texture; }
+	RID bind_mean_texture() const { return textures_ok ? mean_texture : fallback_mean_texture; }
 	RID get_table_buffer() const { return table_buffer; }
 	uint32_t get_layer_size() const { return layer_size; }
 	const TableEntry &get_entry(uint32_t p_index) const { return entries[p_index]; }
@@ -194,7 +196,9 @@ private:
 	void _mark_state_changed();
 	bool _ensure_pipeline();
 	bool _ensure_texture();
+	bool _ensure_fallback_textures();
 	void _free_textures();
+	void _free_fallback_textures();
 	void _update_far_mips();
 	void _ensure_table_capacity(uint32_t p_count);
 	void _upload_table();
@@ -206,6 +210,8 @@ private:
 	RID layer_texture;
 	RID mean_texture;
 	RID mean_mip_views[MEAN_MIP_COUNT];
+	RID fallback_layer_texture;
+	RID fallback_mean_texture;
 	RID table_buffer;
 	uint32_t table_capacity = 0;
 	LocalVector<Layer> layers;

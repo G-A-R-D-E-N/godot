@@ -1649,12 +1649,27 @@ void TextureStorage::_texture_2d_update(RID p_texture, const Ref<Image> &p_image
 	Ref<Image> validated = _validate_texture_format(p_image, f);
 
 	tex->data_version++;
+	for (int i = 0; i < tex->proxies.size(); i++) {
+		Texture *proxy = texture_owner.get_or_null(tex->proxies[i]);
+		if (proxy != nullptr) {
+			proxy->data_version = tex->data_version;
+		}
+	}
 	RD::get_singleton()->texture_update(tex->rd_texture, p_layer, validated->get_data());
 }
 
 uint32_t TextureStorage::texture_get_data_version(RID p_texture) const {
 	const Texture *tex = texture_owner.get_or_null(p_texture);
-	return tex != nullptr ? tex->data_version : 0;
+	if (tex == nullptr) {
+		return 0;
+	}
+	if (tex->is_proxy && tex->proxy_to.is_valid()) {
+		const Texture *base = texture_owner.get_or_null(tex->proxy_to);
+		if (base != nullptr) {
+			return base->data_version;
+		}
+	}
+	return tex->data_version;
 }
 
 void TextureStorage::texture_2d_update(RID p_texture, const Ref<Image> &p_image, int p_layer) {

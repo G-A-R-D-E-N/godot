@@ -177,44 +177,66 @@ namespace Godot
         /// </summary>
         protected virtual void Dispose(bool disposing)
         {
-            if (!disposing && DisposablesTracker.ShuttingDown)
+            if (!disposing)
             {
-                if (_weakReferenceToSelf != null)
-                {
-                    DisposablesTracker.UnregisterGodotObject(this, _weakReferenceToSelf);
-                }
-
-                Volatile.Write(ref _disposeCompleted, true);
-                NativePtr = IntPtr.Zero;
-                return;
+                DisposablesTracker.EnterFinalizerDisposal();
             }
 
-            if (NativePtr != IntPtr.Zero)
+            try
             {
-                IntPtr gcHandleToFree = NativeFuncs.godotsharp_internal_object_get_associated_gchandle(NativePtr);
-
-                if (gcHandleToFree != IntPtr.Zero)
+                if (!disposing && DisposablesTracker.ShuttingDown)
                 {
-                    object? target = GCHandle.FromIntPtr(gcHandleToFree).Target;
-                    // The GC handle may have been replaced in another thread. Release it only if
-                    // it's associated to this managed instance, or if the target is no longer alive.
-                    if (target != this && target != null)
-                        gcHandleToFree = IntPtr.Zero;
+                    NativePtr = IntPtr.Zero;
+                    CompleteManagedDisposal();
+                    return;
                 }
 
-                if (_memoryOwn)
+                if (NativePtr != IntPtr.Zero)
                 {
-                    NativeFuncs.godotsharp_internal_refcounted_disposed(NativePtr, gcHandleToFree,
-                        (!disposing).ToGodotBool());
-                }
-                else
-                {
-                    NativeFuncs.godotsharp_internal_object_disposed(NativePtr, gcHandleToFree);
+                    IntPtr gcHandleToFree = NativeFuncs.godotsharp_internal_object_get_associated_gchandle(NativePtr);
+
+                    if (gcHandleToFree != IntPtr.Zero)
+                    {
+                        object? target = GCHandle.FromIntPtr(gcHandleToFree).Target;
+                        // The GC handle may have been replaced in another thread. Release it only if
+                        // it's associated to this managed instance, or if the target is no longer alive.
+                        if (target != this && target != null)
+                            gcHandleToFree = IntPtr.Zero;
+                    }
+
+                    if (!disposing && DisposablesTracker.ShuttingDown)
+                    {
+                        NativePtr = IntPtr.Zero;
+                        CompleteManagedDisposal();
+                        return;
+                    }
+
+                    if (_memoryOwn)
+                    {
+                        NativeFuncs.godotsharp_internal_refcounted_disposed(NativePtr, gcHandleToFree,
+                            (!disposing).ToGodotBool());
+                    }
+                    else
+                    {
+                        NativeFuncs.godotsharp_internal_object_disposed(NativePtr, gcHandleToFree);
+                    }
+
+                    NativePtr = IntPtr.Zero;
                 }
 
-                NativePtr = IntPtr.Zero;
+                CompleteManagedDisposal();
             }
+            finally
+            {
+                if (!disposing)
+                {
+                    DisposablesTracker.ExitFinalizerDisposal();
+                }
+            }
+        }
 
+        private void CompleteManagedDisposal()
+        {
             if (_weakReferenceToSelf != null)
             {
                 DisposablesTracker.UnregisterGodotObject(this, _weakReferenceToSelf);

@@ -54,6 +54,8 @@ namespace Godot
                     "later finalizers skip their native frees.");
             }
 
+            WaitForInFlightFinalizerDisposals();
+
             if (isStdoutVerbose)
                 GD.Print("Unloading: Disposing tracked instances...");
 
@@ -95,6 +97,30 @@ namespace Godot
         private const int SettleWaitMilliseconds = 1000;
 
         internal static volatile bool ShuttingDown;
+        internal static int InFlightFinalizerDisposals;
+
+        internal static void EnterFinalizerDisposal()
+        {
+            Interlocked.Increment(ref InFlightFinalizerDisposals);
+        }
+
+        internal static void ExitFinalizerDisposal()
+        {
+            Interlocked.Decrement(ref InFlightFinalizerDisposals);
+        }
+
+        private static void WaitForInFlightFinalizerDisposals()
+        {
+            var clock = Stopwatch.StartNew();
+            while (Volatile.Read(ref InFlightFinalizerDisposals) > 0)
+            {
+                if (clock.ElapsedMilliseconds >= DrainWaitMilliseconds)
+                {
+                    return;
+                }
+                Thread.Sleep(1);
+            }
+        }
 
         private sealed class FinalizerWait
         {

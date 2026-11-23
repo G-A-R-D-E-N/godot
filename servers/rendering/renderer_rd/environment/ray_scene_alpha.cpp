@@ -109,12 +109,14 @@ void RayAlphaStore::configure(uint32_t p_max_layers, uint32_t p_layer_size, uint
 	const uint32_t size_wanted = p_layer_size >= 512u ? 512u : 256u;
 	if (max_layers == layers_wanted && layer_size == size_wanted) {
 		texels_per_frame = p_texels_per_frame;
+		_ensure_fallback_textures();
 		return;
 	}
 	release();
 	max_layers = layers_wanted;
 	layer_size = size_wanted;
 	texels_per_frame = p_texels_per_frame;
+	_ensure_fallback_textures();
 	entries.clear();
 	entries.push_back(TableEntry());
 	entries[0].layer = 0;
@@ -131,6 +133,7 @@ void RayAlphaStore::release() {
 		change_serial++;
 	}
 	_free_textures();
+	_free_fallback_textures();
 	if (table_buffer.is_valid()) {
 		RD::get_singleton()->free_rid(table_buffer);
 		table_buffer = RID();
@@ -184,6 +187,53 @@ bool RayAlphaStore::_ensure_pipeline() {
 		mean_mip_pipeline = RD::get_singleton()->compute_pipeline_create(mip_shader);
 	}
 	return fill_pipeline.is_valid() && mean_mip_pipeline.is_valid();
+}
+
+void RayAlphaStore::_free_fallback_textures() {
+	if (fallback_layer_texture.is_valid()) {
+		RD::get_singleton()->free_rid(fallback_layer_texture);
+		fallback_layer_texture = RID();
+	}
+	if (fallback_mean_texture.is_valid()) {
+		RD::get_singleton()->free_rid(fallback_mean_texture);
+		fallback_mean_texture = RID();
+	}
+}
+
+bool RayAlphaStore::_ensure_fallback_textures() {
+	if (fallback_layer_texture.is_valid() && fallback_mean_texture.is_valid()) {
+		return true;
+	}
+	RD *rd = RD::get_singleton();
+	if (rd == nullptr) {
+		return false;
+	}
+	_free_fallback_textures();
+	RD::TextureFormat format;
+	format.format = RD::DATA_FORMAT_R8_UNORM;
+	format.texture_type = RD::TEXTURE_TYPE_2D_ARRAY;
+	format.width = 1;
+	format.height = 1;
+	format.depth = 1;
+	format.array_layers = 1;
+	format.mipmaps = 1;
+	format.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
+	fallback_layer_texture = rd->texture_create(format, RD::TextureView());
+	if (fallback_layer_texture.is_null()) {
+		return false;
+	}
+	format.mipmaps = MEAN_MIP_COUNT;
+	fallback_mean_texture = rd->texture_create(format, RD::TextureView());
+	if (fallback_mean_texture.is_null()) {
+		_free_fallback_textures();
+		return false;
+	}
+	const Vector<uint8_t> white{ 255 };
+	rd->texture_update(fallback_layer_texture, 0, white);
+	rd->texture_update(fallback_mean_texture, 0, white);
+	rd->set_resource_name(fallback_layer_texture, "Ray Scene Alpha Layers Fallback");
+	rd->set_resource_name(fallback_mean_texture, "Ray Scene Alpha Mean Fallback");
+	return true;
 }
 
 void RayAlphaStore::_free_textures() {
@@ -390,7 +440,10 @@ RayAlphaStore::EntryKey RayAlphaStore::canonical_key(const EntryKey &p_raw, bool
 }
 
 uint32_t RayAlphaStore::acquire(RID p_source, uint32_t p_cutoff, const EntryKey &p_key) {
-	if (max_layers == 0 || p_source.is_null() || p_cutoff == 0 || p_cutoff > 255 || !_finite_uv(p_key)) {
+	if (max_layers == 0 || p_source.is_null() || p_cutoff > 255 || !_finite_uv(p_key)) {
+		return 0;
+	}
+	if (p_cutoff == 0 && (p_key.bits & ENTRY_ALPHA_INVERT_MASK) == 0) {
 		return 0;
 	}
 	bool far_invalid = false;
@@ -497,7 +550,7 @@ void RayAlphaStore::update() {
 	stats.fill_texels_this_frame = 0;
 	stats.source_missing_frames = 0;
 	if (!_ensure_texture()) {
-		return;
+		_ensure_fallback_textures();
 	}
 
 	TextureStorage *texture_storage = TextureStorage::get_singleton();
