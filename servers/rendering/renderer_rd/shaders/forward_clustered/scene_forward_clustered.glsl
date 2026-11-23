@@ -2535,6 +2535,12 @@ void fragment_shader(in SceneData scene_data) {
 		ao_light_affect = mix(ao_light_affect, max(ao_light_affect, implementation_data.ssao_light_affect), implementation_data.ssao_ao_affect);
 	}
 
+	const vec3 ibl_specular_light = indirect_specular_light;
+	float ibl_probe_share = 1.0;
+#if defined(INDIRECT_COAT_USED) || defined(LIGHT_CLEARCOAT_USED)
+	const vec3 cc_ibl_specular_light = cc_specular_light;
+	float cc_ibl_probe_share = 1.0;
+#endif
 	{ // process reflections
 
 		vec4 reflection_accum = vec4(0.0, 0.0, 0.0, 0.0);
@@ -2639,6 +2645,7 @@ void fragment_shader(in SceneData scene_data) {
 
 		if (reflection_accum.a > 0.0) {
 			indirect_specular_light = reflection_accum.rgb;
+			ibl_probe_share = max(1.0 - reflection_accum.a, 0.0);
 		}
 		specular_source = specular_source * (1.0 - float(reflection_accum.a)) + vec4(0.0, 0.0, reflection_accum.a, 0.0);
 		gi_specular_share *= max(1.0 - reflection_accum.a, 0.0);
@@ -2646,6 +2653,7 @@ void fragment_shader(in SceneData scene_data) {
 #ifdef LIGHT_CLEARCOAT_USED
 		if (cc_reflection_accum.a > 0.0) {
 			cc_specular_light = cc_reflection_accum.rgb;
+			cc_ibl_probe_share = max(1.0 - cc_reflection_accum.a, 0.0);
 		}
 #endif
 
@@ -2701,13 +2709,13 @@ void fragment_shader(in SceneData scene_data) {
 		// Based on Christopher Oat and Pedro V. Sander's "Ambient aperture lighting":
 		// https://advances.realtimerendering.com/s2006/Chapter8-Ambient_Aperture_Lighting.pdf
 		float specular_occlusion = specular_occlusion_cone(specular_ao, roughness, bent_normal_vector, reflect(-view, normal));
-		indirect_specular_light *= specular_occlusion;
+		indirect_specular_light -= ibl_specular_light * ibl_probe_share * (1.0 - specular_occlusion);
 		reflection_debug.w = specular_occlusion;
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
 #ifdef INDIRECT_COAT_NORMAL_ACTIVE
-		cc_specular_light *= cc_custom ? specular_occlusion_cone(specular_ao, indirect_coat_roughness, bent_normal_vector, reflect(-view, cc_normal)) : specular_occlusion;
+		cc_specular_light -= cc_ibl_specular_light * cc_ibl_probe_share * (1.0 - (cc_custom ? specular_occlusion_cone(specular_ao, indirect_coat_roughness, bent_normal_vector, reflect(-view, cc_normal)) : specular_occlusion));
 #else
-		cc_specular_light *= specular_occlusion;
+		cc_specular_light -= cc_ibl_specular_light * cc_ibl_probe_share * (1.0 - specular_occlusion);
 #endif
 #endif
 #else // BENT_NORMAL_MAP_USED
@@ -2737,15 +2745,15 @@ void fragment_shader(in SceneData scene_data) {
 			cc_specular_occlusion = cc_custom ? specular_occlusion_cone(specular_ao, indirect_coat_roughness, occlusion_bent_normal, reflect(-view, cc_normal)) : specular_occlusion;
 #endif
 		}
-		indirect_specular_light *= specular_occlusion;
+		indirect_specular_light -= ibl_specular_light * ibl_probe_share * (1.0 - specular_occlusion);
 		reflection_debug.w = specular_occlusion;
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
 #ifdef SPECULAR_OCCLUSION_COMBINED
-		cc_specular_light *= specular_occlusion_lagarde(clamp(dot(CLEARCOAT_NORMAL, view), 0.0, 1.0), specular_ao, indirect_coat_roughness * indirect_coat_roughness);
+		cc_specular_light -= cc_ibl_specular_light * cc_ibl_probe_share * (1.0 - specular_occlusion_lagarde(clamp(dot(CLEARCOAT_NORMAL, view), 0.0, 1.0), specular_ao, indirect_coat_roughness * indirect_coat_roughness));
 #elif defined(INDIRECT_COAT_NORMAL_ACTIVE)
-		cc_specular_light *= cc_specular_occlusion;
+		cc_specular_light -= cc_ibl_specular_light * cc_ibl_probe_share * (1.0 - cc_specular_occlusion);
 #else
-		cc_specular_light *= specular_occlusion;
+		cc_specular_light -= cc_ibl_specular_light * cc_ibl_probe_share * (1.0 - specular_occlusion);
 #endif
 #endif
 #endif // BENT_NORMAL_MAP_USED
