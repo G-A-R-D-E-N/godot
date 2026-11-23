@@ -7,6 +7,8 @@
 #define RTGI_FLAG_NOT_TRACED 16u
 #define RTGI_FLAG_GUIDED 32u
 #define RTGI_FLAG_THINNED 64u
+#define RTGI_FLAG_NONFINITE_ORIGIN 128u
+#define RTGI_FLAG_NONFINITE_NORMAL 256u
 
 #define RTGI_TILE_TRACE 1u
 #define RTGI_TILE_REASON_DDGI 2u
@@ -14,6 +16,7 @@
 #define RTGI_TILE_REASON_CHECK 8u
 #define RTGI_TILE_REASON_FORCED 16u
 #define RTGI_TILE_HAS_GEOMETRY 32u
+#define RTGI_TILE_REASON_DDGI_WRONG 64u
 
 #define RTGI_FRAME_FLAG_ORTHOGONAL 1u
 #define RTGI_FRAME_FLAG_HISTORY_CUT 2u
@@ -23,6 +26,18 @@
 #define RTGI_FRAME_FLAG_SSGI_VALID_TEXTURE 32u
 #define RTGI_FRAME_FLAG_SOFT_CUT 64u
 #define RTGI_FRAME_FLAG_RESTART_SPHERES 128u
+#define RTGI_FRAME_FLAG_MODULE_OUTPUT 256u
+#define RTGI_FRAME_FLAG_REPLAY 512u
+#define RTGI_FRAME_FLAG_DEBUG_NONFINITE_NORMAL 1024u
+
+#define RTGI_DDGI_WRONG_EVENTS 1u
+#define RTGI_DDGI_WRONG_MEMORY 2u
+#define RTGI_DDGI_WRONG_ACTIVE 4u
+#define RTGI_DDGI_WRONG_READ 8u
+
+#define RTGI_MEMORY_FRAMES 255u
+#define RTGI_MEMORY_EVENTS 256u
+#define RTGI_MEMORY_DISAGREE 512u
 
 #define RTGI_DEBUG_NONE 0u
 #define RTGI_DEBUG_TILE_CLASS 1u
@@ -99,6 +114,10 @@ vec3 rtgi_candidate_radiance(uvec4 p_second) {
 	return vec3(rg.x, rg.y, b.x);
 }
 
+bool rtgi_is_finite(vec3 p_value) {
+	return !(any(isnan(p_value)) || any(isinf(p_value)));
+}
+
 uint rtgi_candidate_flags(uvec4 p_second) {
 	return p_second.y >> 16u;
 }
@@ -118,4 +137,13 @@ bool rtgi_thin_keeps(uvec2 p_pixel, uint p_frame, uint p_seed, float p_fraction)
 	uint hashed = rtgi_pcg(p_frame * 2654435761u + p_seed);
 	uvec2 offset = uvec2(hashed & 7u, (hashed >> 3u) & 7u);
 	return rtgi_bayer8(p_pixel + offset) < uint(p_fraction * 64.0 + 0.5);
+}
+
+ivec2 rtgi_anchor_pixel(ivec2 p_trace_pixel, int p_scale, ivec2 p_screen_size) {
+	ivec2 scale = ivec2(max(p_scale, 1));
+	return min(p_trace_pixel * scale + scale / 2, p_screen_size - 1);
+}
+
+uint rtgi_shade_key(ivec2 p_pixel, uint p_frame) {
+	return uint(p_pixel.y) * 65537u + uint(p_pixel.x) + p_frame * 6271u;
 }

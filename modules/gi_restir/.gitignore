@@ -1,0 +1,3 @@
+shaders/restir_core_inc.glsl
+shaders/restir_core_*.glsl
+__pycache__/

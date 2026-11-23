@@ -294,6 +294,7 @@ private:
 		RSE::ReflectionProbeUpdateMode update_mode = RSE::REFLECTION_PROBE_UPDATE_ONCE;
 		float intensity = 1.0;
 		float blend_distance = 1.0;
+		int priority = 0;
 		RSE::ReflectionProbeAmbientMode ambient_mode = RSE::REFLECTION_PROBE_AMBIENT_ENVIRONMENT;
 		Color ambient_color;
 		float ambient_color_energy = 1.0;
@@ -388,16 +389,20 @@ private:
 		uint32_t box_project;
 		uint32_t ambient_mode;
 		float exposure_normalization;
-		uint32_t pad0;
+		uint32_t priority;
 		uint32_t pad1;
 		uint32_t pad2;
 		float local_matrix[16]; // up to here for spot and omni, rest is for directional
 	};
 
 	struct ReflectionProbeInstanceSort {
+		int priority;
 		float size;
 		ReflectionProbeInstance *probe_instance;
 		bool operator<(const ReflectionProbeInstanceSort &p_sort) const {
+			if (priority != p_sort.priority) {
+				return priority < p_sort.priority;
+			}
 			return size < p_sort.size;
 		}
 	};
@@ -533,6 +538,7 @@ public:
 	static LightStorage *get_singleton();
 	static float light_render_energy(float p_energy, float p_intensity, RSE::LightType p_type, bool p_physical_units);
 	DirectLightTable &get_direct_lights() { return direct_lights; }
+	void write_direct_dump_lamps(LocalVector<float> &r_values, uint32_t p_slots) const;
 	const HashMap<RID, uint32_t> &get_direct_shells() const { return direct_shells; }
 
 	LightStorage();
@@ -579,6 +585,7 @@ public:
 	virtual void light_set_shadow_caster_mask(RID p_light, uint32_t p_caster_mask) override;
 	virtual uint32_t light_get_shadow_caster_mask(RID p_light) const override;
 	virtual void light_set_direct_shadow(RID p_light, bool p_owned, float p_movement, float p_size, float p_clearance, const TypedArray<RID> &p_shells, const PackedInt32Array &p_surfaces) override;
+	virtual void light_set_direct_mean_energy(RID p_light, float p_energy) override;
 	virtual void light_set_bake_mode(RID p_light, RSE::LightBakeMode p_bake_mode) override;
 	virtual void light_set_max_sdfgi_cascade(RID p_light, uint32_t p_cascade) override;
 	virtual void light_set_allow_contact_shadows(RID p_light, bool p_enable) override;
@@ -685,6 +692,13 @@ public:
 		ERR_FAIL_NULL_V(light, 0.0);
 
 		return light->param[RSE::LIGHT_PARAM_TRANSMITTANCE_BIAS];
+	}
+
+	_FORCE_INLINE_ float light_get_direct_size(RID p_light) const {
+		const Light *light = light_owner.get_or_null(p_light);
+		ERR_FAIL_NULL_V(light, 0.0);
+
+		return light->direct.resolved_size(light->param[RSE::LIGHT_PARAM_SIZE]);
 	}
 
 	virtual bool light_get_reverse_cull_face_mode(RID p_light) const override {
@@ -944,6 +958,7 @@ public:
 	virtual void reflection_probe_set_update_mode(RID p_probe, RSE::ReflectionProbeUpdateMode p_mode) override;
 	virtual void reflection_probe_set_intensity(RID p_probe, float p_intensity) override;
 	virtual void reflection_probe_set_blend_distance(RID p_probe, float p_blend_distance) override;
+	virtual void reflection_probe_set_priority(RID p_probe, int p_priority) override;
 	virtual void reflection_probe_set_ambient_mode(RID p_probe, RSE::ReflectionProbeAmbientMode p_mode) override;
 	virtual void reflection_probe_set_ambient_color(RID p_probe, const Color &p_color) override;
 	virtual void reflection_probe_set_ambient_energy(RID p_probe, float p_energy) override;
@@ -974,6 +989,7 @@ public:
 
 	float reflection_probe_get_intensity(RID p_probe) const;
 	float reflection_probe_get_blend_distance(RID p_probe) const;
+	int reflection_probe_get_priority(RID p_probe) const;
 	bool reflection_probe_is_interior(RID p_probe) const;
 	bool reflection_probe_is_box_projection(RID p_probe) const;
 	RSE::ReflectionProbeAmbientMode reflection_probe_get_ambient_mode(RID p_probe) const;

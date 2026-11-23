@@ -888,6 +888,13 @@ uint32_t RenderForwardClustered::_setup_environment(const RenderDataRD *p_render
 	} else {
 		scene_state.ubo.ss_effects_flags = 0;
 	}
+	const uint32_t reflection_provider_mask = p_render_data->reflection_probe.is_null() ? (uint32_t)CLAMP((int)GLOBAL_GET_CACHED(int, "rendering/reflections/provider_mask"), 0, 31) : 31u;
+	scene_state.ubo.ss_effects_flags |= reflection_provider_mask << SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SHIFT;
+	scene_state.ubo.ss_effects_flags |= bool(GLOBAL_GET_CACHED(bool, "rendering/reflections/unified_lookup")) ? SCREEN_SPACE_EFFECTS_FLAGS_UNIFIED_LOOKUP : 0;
+	scene_state.ubo.ss_effects_flags |= bool(GLOBAL_GET_CACHED(bool, "rendering/reflections/horizon_geometric")) ? SCREEN_SPACE_EFFECTS_FLAGS_HORIZON_GEOMETRIC : 0;
+	scene_state.ubo.ss_effects_flags |= bool(GLOBAL_GET_CACHED(bool, "rendering/reflections/ssr_coat_match")) ? SCREEN_SPACE_EFFECTS_FLAGS_COAT_MATCH : 0;
+	scene_state.ubo.ss_effects_flags |= bool(GLOBAL_GET_CACHED(bool, "rendering/reflections/blend_fill_skip")) ? SCREEN_SPACE_EFFECTS_FLAGS_BLEND_FILL_SKIP : 0;
+	scene_state.ubo.ss_effects_flags |= !p_opaque_render_buffers ? SCREEN_SPACE_EFFECTS_FLAGS_TRANSPARENT_PASS : 0;
 	RID ss_exposure_texture;
 	scene_state.ubo.ss_exposure = _get_screen_space_exposure(p_render_data, ss_exposure_texture);
 
@@ -2114,8 +2121,13 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 
 	direct_shadow_slots = RID();
 	direct_shadow_factors = RID();
+	direct_resampled = RID();
+	RendererRD::DirectResampler *resampler = RendererRD::DirectResampler::get_singleton();
 	if (rb_data.is_valid() && !(p_use_direct_lights && p_render_data->scene_data->view_count == 1 && p_render_data->cluster_buffer.is_valid())) {
 		direct_shadows->release(rb);
+		if (resampler) {
+			resampler->release(rb);
+		}
 	} else if (rb_data.is_valid()) {
 		RENDER_TIMESTAMP("Direct Shadows");
 		RD::get_singleton()->draw_command_begin_label("Direct Shadows");
@@ -2127,6 +2139,7 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 		input.omni_buffer = light_storage->get_omni_light_buffer();
 		input.spot_buffer = light_storage->get_spot_light_buffer();
 		input.projection = p_render_data->scene_data->get_cam_projection();
+		input.jitter = p_render_data->scene_data->taa_jitter;
 		input.camera = p_render_data->scene_data->cam_transform;
 		input.region_half = ray_scene_get_region(p_render_data->scene_data->cam_transform.origin).size * 0.5;
 		input.cluster_size = p_render_data->cluster_size;
@@ -2134,9 +2147,29 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 		input.z_far = p_render_data->scene_data->z_far;
 		input.frame = RSG::rasterizer->get_frame_number();
 		input.table_generation = light_storage->get_direct_lights().get_generation();
+		RID record;
+		if (resampler && resampler->is_enabled() && direct_shadows->prepare_lamps(input, light_storage->get_direct_lights())) {
+			RendererRD::DirectResampler::Input resample_input;
+			static_cast<RendererRD::DirectFrameView &>(resample_input) = input;
+			resample_input.lamp_buffer = direct_shadows->get_lamp_buffer();
+			direct_shadows->get_history(rb, input.table_generation, resample_input.history_slots, resample_input.history_factors, resample_input.history_camera, resample_input.history_projection, resample_input.history_guide);
+			RendererRD::DirectResampler::Output resample_output;
+			if (resampler->run(resample_input, resample_output)) {
+				input.entries = resample_output.entries;
+				input.head_entries = resample_output.head_entries;
+				input.tail_samples = resample_output.tail_samples;
+				input.tail_visibility = resample_output.tail_visibility;
+				record = resample_output.record;
+				RENDER_TIMESTAMP("Direct Shadows Trace");
+				RD::get_singleton()->draw_command_begin_label("Direct Shadows Trace");
+			}
+		} else if (resampler) {
+			resampler->release(rb);
+		}
 		if (direct_shadows->process(input, light_storage->get_direct_lights())) {
 			direct_shadow_slots = direct_shadows->get_slots(rb);
 			direct_shadow_factors = direct_shadows->get_factors(rb);
+			direct_resampled = input.entries.is_valid() ? record : RID();
 		}
 		RD::get_singleton()->draw_command_end_label();
 	}
@@ -2591,7 +2624,8 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		clear_color = p_default_bg_color.srgb_to_linear();
 	}
 
-	const bool flat_debug_view = !is_reflection_probe && get_debug_draw_mode() >= RSE::VIEWPORT_DEBUG_DRAW_PERSISTENT_AO && get_debug_draw_mode() <= RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE;
+	const bool provider_debug_view = !is_reflection_probe && get_debug_draw_mode() >= RSE::VIEWPORT_DEBUG_DRAW_REFLECTION_PROVIDER_WEIGHTS && get_debug_draw_mode() <= RSE::VIEWPORT_DEBUG_DRAW_RESOLVED_INDIRECT_SPECULAR;
+	const bool flat_debug_view = provider_debug_view || (!is_reflection_probe && get_debug_draw_mode() >= RSE::VIEWPORT_DEBUG_DRAW_PERSISTENT_AO && get_debug_draw_mode() <= RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE);
 	if (flat_debug_view) {
 		draw_sky = false;
 		draw_sky_fog_only = false;
@@ -2690,10 +2724,13 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 	base_specialization.use_far_shadow = light_storage->has_far_shadow();
 	base_specialization.use_direct_shadow = direct_shadow_factors.is_valid();
+	base_specialization.use_direct_resampled = direct_resampled.is_valid();
 	if (current_cluster_builder) {
 		base_specialization.cluster_has_area_light = current_cluster_builder->get_cluster_count_by_type(ClusterBuilderRD::ELEMENT_TYPE_AREA_LIGHT) != 0;
 	}
-	if ((!is_reflection_probe && get_debug_draw_mode() >= RSE::VIEWPORT_DEBUG_DRAW_DIRECT_DIFFUSE && get_debug_draw_mode() <= RSE::VIEWPORT_DEBUG_DRAW_SSR_CONFIDENCE) || flat_debug_view) {
+	if (provider_debug_view) {
+		base_specialization.debug_lighting_component = get_debug_draw_mode() - RSE::VIEWPORT_DEBUG_DRAW_REFLECTION_PROVIDER_WEIGHTS + 14;
+	} else if ((!is_reflection_probe && get_debug_draw_mode() >= RSE::VIEWPORT_DEBUG_DRAW_DIRECT_DIFFUSE && get_debug_draw_mode() <= RSE::VIEWPORT_DEBUG_DRAW_SSR_CONFIDENCE) || flat_debug_view) {
 		base_specialization.debug_lighting_component = get_debug_draw_mode() - RSE::VIEWPORT_DEBUG_DRAW_DIRECT_DIFFUSE + 1;
 	}
 
@@ -2941,6 +2978,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	uint32_t transparent_pass_uniform_buffer_index = _setup_environment(p_render_data, is_reflection_probe, screen_size, screen_size, p_default_bg_color, false);
 
 	base_specialization.use_direct_shadow = false;
+	base_specialization.use_direct_resampled = false;
 
 	if (scene_state.used_back_depth_texture && rb_data.is_valid()) {
 		_render_back_depth_pass(p_render_data, reverse_cull, is_multiview, radiance_texture, samplers, transparent_pass_uniform_buffer_index, base_specialization);
@@ -4472,6 +4510,9 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		const bool direct_bound = p_render_data && p_render_list != RENDER_LIST_ALPHA && direct_shadow_factors.is_valid();
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 52, direct_bound ? direct_shadow_slots : black));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 53, direct_bound ? direct_shadow_factors : black));
+		const bool resampled_bound = direct_bound && direct_resampled.is_valid();
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 54, resampled_bound ? direct_resampled : direct_shadows->get_resampled_dummy()));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 55, resampled_bound ? direct_shadows->get_lamp_buffer() : direct_shadows->get_lamp_dummy()));
 	}
 
 	return UniformSetCacheRD::get_singleton()->get_cache_vec(scene_shader.get_default_shader_rd(is_multiview), RENDER_PASS_UNIFORM_SET, uniforms);
@@ -6070,6 +6111,9 @@ RenderForwardClustered::RenderForwardClustered() {
 
 RenderForwardClustered::~RenderForwardClustered() {
 	RD::get_singleton()->free_rid(default_sky_sh_buffer);
+	if (RendererRD::DirectResampler::get_singleton()) {
+		RendererRD::DirectResampler::get_singleton()->free_device_resources();
+	}
 
 	if (ss_effects != nullptr) {
 		memdelete(ss_effects);

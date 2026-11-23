@@ -28,7 +28,6 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-
 #include "tests/test_macros.h"
 
 TEST_FORCE_LINK(test_ray_scene_class)
@@ -48,13 +47,23 @@ constexpr RSE::ShadowCastingSetting SETTINGS[] = {
 	RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY,
 };
 
-constexpr uint32_t FLAG_COMBINATIONS = 32;
+constexpr uint32_t FLAG_COMBINATIONS = 64;
+
+constexpr uint32_t ALPHA_INDICES[] = {
+	0,
+	1u << RayScene::MATERIAL_ALPHA_SHIFT,
+	5u << RayScene::MATERIAL_ALPHA_SHIFT,
+	RayScene::MATERIAL_ALPHA_MASK,
+};
 
 uint32_t skip_mask(bool p_any, uint32_t p_skip) {
 	return RayScene::MATERIAL_FLAG_SKIP | (p_any ? RayScene::MATERIAL_FLAG_SHADOW_PASS : RayScene::MATERIAL_FLAG_SHADOW_ONLY) | p_skip;
 }
 
 bool always_accepted(uint32_t p_flags) {
+	if ((p_flags & RayScene::MATERIAL_ALPHA_MASK) != 0) {
+		return false;
+	}
 	for (const bool any : { false, true }) {
 		for (const uint32_t skip : { 0u, uint32_t(RayScene::MATERIAL_FLAG_BLEND) }) {
 			if ((p_flags & skip_mask(any, skip)) != 0 || (p_flags & RayScene::MATERIAL_FLAG_BLEND) != 0) {
@@ -81,15 +90,28 @@ TEST_CASE("[RayScene] Instance class known answers") {
 	CHECK(RayScene::surface_candidates(64, RayScene::MATERIAL_FLAG_BLEND) == ~uint64_t(0));
 	CHECK(RayScene::surface_candidates(64, RayScene::MATERIAL_FLAG_TWO_SIDED) == 0);
 	CHECK(RayScene::surface_candidates(63, RayScene::MATERIAL_FLAG_SKIP) == uint64_t(1) << 63);
+	for (const uint32_t surface : { 0u, 5u, 63u }) {
+		CHECK(RayScene::surface_candidates(surface, 1u << RayScene::MATERIAL_ALPHA_SHIFT) == uint64_t(1) << surface);
+		CHECK(RayScene::surface_candidates(surface, RayScene::MATERIAL_ALPHA_MASK) == uint64_t(1) << surface);
+	}
+	CHECK(RayScene::surface_candidates(64, 5u << RayScene::MATERIAL_ALPHA_SHIFT) == ~uint64_t(0));
+	const uint32_t pending = (RayScene::MATERIAL_FLAG_TWO_SIDED | (5u << RayScene::MATERIAL_ALPHA_SHIFT)) & ~RayScene::MATERIAL_ALPHA_MASK;
+	CHECK(pending == uint32_t(RayScene::MATERIAL_FLAG_TWO_SIDED));
+	CHECK(RayScene::surface_candidates(5, pending) == 0);
+	CHECK(RayScene::instance_class(RayScene::surface_candidates(5, pending), 0) == RayScene::INSTANCE_CLASS_OPAQUE);
 }
 
 TEST_CASE("[RayScene] A surface is opaque to hardware only when every software ray accepts it outright") {
 	for (RSE::ShadowCastingSetting setting : SETTINGS) {
-		for (uint32_t flags = 0; flags < FLAG_COMBINATIONS; flags++) {
-			const uint32_t final_flags = flags | RayScene::shadow_cast_flags(setting);
-			INFO("setting ", int(setting), " flags ", flags);
-			for (const uint32_t surface : { 0u, 5u, 63u }) {
-				CHECK((RayScene::surface_candidates(surface, final_flags) == 0) == always_accepted(final_flags));
+		for (const bool occluder : { false, true }) {
+			for (const uint32_t alpha : ALPHA_INDICES) {
+				for (uint32_t flags = 0; flags < FLAG_COMBINATIONS; flags++) {
+					const uint32_t final_flags = flags | alpha | RayScene::shadow_cast_flags(setting, occluder);
+					INFO("setting ", int(setting), " occluder ", occluder, " alpha ", alpha, " flags ", flags);
+					for (const uint32_t surface : { 0u, 5u, 63u }) {
+						CHECK((RayScene::surface_candidates(surface, final_flags) == 0) == always_accepted(final_flags));
+					}
+				}
 			}
 		}
 	}
@@ -103,6 +125,8 @@ TEST_CASE("[RayScene] The opaque geometry of a split instance holds only surface
 		RayScene::MATERIAL_FLAG_BLEND,
 		RayScene::shadow_cast_flags(RSE::SHADOW_CASTING_SETTING_OFF),
 		RayScene::shadow_cast_flags(RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY),
+		5u << RayScene::MATERIAL_ALPHA_SHIFT,
+		RayScene::MATERIAL_FLAG_TWO_SIDED | RayScene::MATERIAL_ALPHA_MASK,
 	};
 	constexpr uint32_t surfaces = 3;
 	const uint32_t choice_count = std_size(choices);

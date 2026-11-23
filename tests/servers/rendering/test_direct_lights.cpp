@@ -455,14 +455,16 @@ TEST_CASE("[DirectLights] Clear starts over") {
 	CHECK(table.observe(light_id(2), lamp_at(Vector3())) == a);
 }
 
-TEST_CASE("[DirectLights] GPU slot is 24 bytes with the new fields last") {
-	CHECK(sizeof(DirectLightTable::GpuSlot) == 24);
+TEST_CASE("[DirectLights] GPU slot is 48 bytes with the new fields last") {
+	CHECK(sizeof(DirectLightTable::GpuSlot) == 48);
 	CHECK(offsetof(DirectLightTable::GpuSlot, caster_mask) == 0);
 	CHECK(offsetof(DirectLightTable::GpuSlot, size) == 4);
 	CHECK(offsetof(DirectLightTable::GpuSlot, reset_frame) == 8);
 	CHECK(offsetof(DirectLightTable::GpuSlot, dynamic) == 12);
 	CHECK(offsetof(DirectLightTable::GpuSlot, clearance) == 16);
 	CHECK(offsetof(DirectLightTable::GpuSlot, exclude) == 20);
+	CHECK(offsetof(DirectLightTable::GpuSlot, anchor_offset) == 24);
+	CHECK(offsetof(DirectLightTable::GpuSlot, mean_color) == 36);
 	CHECK(sizeof(DirectLightTable::GpuExclude) == 8);
 	CHECK(offsetof(DirectLightTable::GpuExclude, first) == 0);
 	CHECK(offsetof(DirectLightTable::GpuExclude, span) == 4);

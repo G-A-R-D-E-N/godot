@@ -849,6 +849,15 @@
 		<constant name="DEBUG_DRAW_SSGI_CONFIDENCE" value="49" enum="DebugDraw">
 			Draws the traced screen-space GI confidence: white = the screen-space result is used fully, black = the fallback ambient light (sky, probes) is used.
 		</constant>
+		<constant name="DEBUG_DRAW_REFLECTION_PROVIDER_WEIGHTS" value="50" enum="DebugDraw">
+			Draws the share of each reflection provider in the indirect specular light before screen-space reflections: red = sky environment, green = global illumination rough specular fill, blue = local reflection probe. The three shares add up to 1 wherever at least one provider exists. Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_SPECULAR_OCCLUSION" value="51" enum="DebugDraw">
+			Draws the specular occlusion factor alone, the value that scales the indirect specular light (white = unoccluded). Only supported when using the Forward+ rendering method.
+		</constant>
+		<constant name="DEBUG_DRAW_RESOLVED_INDIRECT_SPECULAR" value="52" enum="DebugDraw">
+			Draws the final weighted indirect specular radiance of each surface, after the sky, GI fill, probes, specular occlusion, screen-space reflections and BRDF weight, without the sky background. Only supported when using the Forward+ rendering method.
+		</constant>
 		<constant name="DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_NEAREST" value="0" enum="DefaultCanvasItemTextureFilter">
 			The texture filter reads from the nearest pixel only. This makes the texture look pixelated from up close, and grainy from a distance (due to mipmaps not being sampled).
 		</constant>

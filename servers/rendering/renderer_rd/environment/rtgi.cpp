@@ -33,7 +33,6 @@
 #include "core/config/project_settings.h"
 #include "core/io/file_access.h"
 #include "core/io/json.h"
-#include "servers/rendering/rendering_server_globals.h"
 #include "servers/rendering/renderer_rd/environment/gi_compositor.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
@@ -42,6 +41,7 @@
 #include "servers/rendering/renderer_rd/storage_rd/render_scene_buffers_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
 #include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
+#include "servers/rendering/rendering_server_globals.h"
 #include "servers/rendering/storage/utilities.h"
 
 using namespace RendererRD;
@@ -59,6 +59,7 @@ namespace {
 #define RB_RTGI_HISTORY(m_index) RB_RTGI_PAIR("history", m_index)
 #define RB_RTGI_MOMENTS(m_index) RB_RTGI_PAIR("moments", m_index)
 #define RB_RTGI_FILTER(m_index) RB_RTGI_PAIR("filter", m_index)
+#define RB_RTGI_TILE_MEMORY(m_index) RB_RTGI_PAIR("tile_memory", m_index)
 
 constexpr uint32_t RTGI_COUNTERS_BINDING = 15;
 constexpr uint32_t MAX_ATROUS = 6;
@@ -67,6 +68,8 @@ constexpr double CAMERA_CUT_DISTANCE = 25.0;
 } // namespace
 
 RtgiPass *RtgiPass::singleton = nullptr;
+SafeNumeric<uint64_t> RtgiPass::release_free_data_total;
+SafeNumeric<uint64_t> RtgiPass::release_pass_total;
 
 RtgiPass::Settings RtgiPass::get_project_settings() {
 	Settings settings;
@@ -94,6 +97,15 @@ RtgiPass::Settings RtgiPass::get_project_settings() {
 	settings.restart_quiet_frames = CLAMP(int(GLOBAL_GET_CACHED(int, "rendering/global_illumination/rtgi/restart_quiet_frames")), 0, 1024);
 	settings.directional_jump_degrees = CLAMP(float(GLOBAL_GET_CACHED(float, "rendering/global_illumination/rtgi/directional_jump_degrees")), 0.1f, 180.0f);
 	settings.directional_jump_floor = MAX(float(GLOBAL_GET_CACHED(float, "rendering/global_illumination/rtgi/directional_jump_floor")), 0.0f);
+	settings.ddgi_wrong_events = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/rtgi/ddgi_wrong_events");
+	settings.ddgi_wrong_memory = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/rtgi/ddgi_wrong_memory");
+	settings.ddgi_wrong_frames = CLAMP(int(GLOBAL_GET_CACHED(int, "rendering/global_illumination/rtgi/ddgi_wrong_frames")), 1, int(TILE_MEMORY_FRAMES));
+	settings.ddgi_wrong_tau = CLAMP(float(GLOBAL_GET_CACHED(float, "rendering/global_illumination/rtgi/ddgi_wrong_tau")), 0.0f, 16.0f);
+	settings.ddgi_wrong_target = CLAMP(float(GLOBAL_GET_CACHED(float, "rendering/global_illumination/rtgi/ddgi_wrong_target")), 0.0f, 255.0f);
+	settings.ddgi_wrong_noise = CLAMP(float(GLOBAL_GET_CACHED(float, "rendering/global_illumination/rtgi/ddgi_wrong_noise")), 0.0f, 16.0f);
+	settings.ddgi_wrong_floor = CLAMP(float(GLOBAL_GET_CACHED(float, "rendering/global_illumination/rtgi/ddgi_wrong_floor")), 1e-6f, 1e6f);
+	settings.ddgi_wrong_rho = CLAMP(float(GLOBAL_GET_CACHED(float, "rendering/global_illumination/rtgi/ddgi_wrong_rho")), 0.0f, 1.0f);
+	settings.debug_nonfinite_normal = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/rtgi/debug_nonfinite_normal");
 	return settings;
 }
 
@@ -173,6 +185,7 @@ void RtgiPass::_ensure_textures(const Ref<RenderSceneBuffersRD> &p_render_buffer
 	create(RB_RTGI_RAY, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, storage_sampling, trace, false);
 	create(RB_RTGI_TILES, RD::DATA_FORMAT_R32_UINT, storage_sampling, tiles, false);
 	for (int i = 0; i < 2; i++) {
+		create(RB_RTGI_TILE_MEMORY(i), RD::DATA_FORMAT_R16_UINT, clearable, tiles, true);
 		create(RB_RTGI_GEO_POSITION(i), RD::DATA_FORMAT_R32G32B32A32_SFLOAT, clearable, trace, true);
 		create(RB_RTGI_GEO_NORMAL(i), RD::DATA_FORMAT_R8G8B8A8_UNORM, clearable, trace, true);
 		create(RB_RTGI_HISTORY(i), RD::DATA_FORMAT_R16G16B16A16_SFLOAT, clearable, trace, true);
@@ -257,6 +270,7 @@ bool RtgiPass::process(const Ref<RenderSceneBuffersRD> &p_render_buffers, DDGI &
 		buffers = p_render_buffers->get_custom_data(RB_SCOPE_RTGI);
 	} else {
 		buffers.instantiate();
+		buffers->owner = p_render_buffers.ptr();
 		p_render_buffers->set_custom_data(RB_SCOPE_RTGI, buffers);
 	}
 
@@ -272,10 +286,20 @@ void RtgiPass::_read_light_changes(const Ref<RtgiBuffers> &p_buffers, const Sett
 	LocalVector<DDGILightTracker::Event> events;
 	const uint64_t asked = p_buffers->have_previous ? p_buffers->event_serial : UINT64_MAX;
 	const uint64_t serial = DDGILightTracker::events_since(asked, events);
+	uint64_t lost = 0;
 	if (asked != UINT64_MAX) {
-		p_buffers->events_lost += serial - asked - events.size();
+		lost = serial - asked - events.size();
+		p_buffers->events_lost += lost;
 	}
 	p_buffers->event_serial = serial;
+	p_buffers->backend_events_lost = uint32_t(MIN(lost, uint64_t(UINT32_MAX)));
+	p_buffers->backend_events.clear();
+	const Vector3 anchor = RayScene::get_singleton() ? RayScene::get_singleton()->get_anchor() : Vector3();
+	for (const DDGILightTracker::Event &event : events) {
+		DDGILightTracker::Event relative = event;
+		relative.center = event.center - anchor;
+		p_buffers->backend_events.push_back(relative);
+	}
 
 	const Vector3 origin = p_inputs.camera_transform.origin;
 	const Vector3 region_half = RendererSceneRenderRD::get_singleton()->ray_scene_get_region(origin).size * 0.5;
@@ -323,10 +347,12 @@ void RtgiPass::_read_light_changes(const Ref<RtgiBuffers> &p_buffers, const Sett
 }
 
 bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const Ref<RtgiBuffers> &p_buffers, DDGI &p_ddgi, const FrameInputs &p_inputs) {
-	const Settings settings = get_project_settings();
+	Settings settings = get_project_settings();
 	RayScene *ray_scene = RayScene::get_singleton();
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
 	TextureStorage *texture_storage = TextureStorage::get_singleton();
+	const bool backend_ran_before = p_buffers->backend_ran;
+	p_buffers->backend_ran = false;
 
 	if (GLOBAL_GET_CACHED(bool, "rendering/global_illumination/compositor/debug_provider")) {
 		_refuse(p_buffers, "compositor debug_provider is on");
@@ -348,6 +374,15 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 	if (p_inputs.depth.is_null() || p_inputs.normal_roughness.is_null()) {
 		_refuse(p_buffers, "no depth or normal buffer");
 		return false;
+	}
+
+	RtgiResampleBackend *backend = GIModuleHooks::get_singleton()->get_rtgi_backend();
+	if (backend && !backend->is_active()) {
+		backend->release(p_render_buffers.ptr());
+		backend = nullptr;
+	}
+	if (backend && backend->wants_all_tiles()) {
+		settings.force_trace = true;
 	}
 
 	FrameInputs inputs = p_inputs;
@@ -433,9 +468,36 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 	if (ssgi_texture) {
 		flags |= FRAME_FLAG_SSGI_VALID_TEXTURE;
 	}
+	if (settings.debug_nonfinite_normal) {
+		flags |= FRAME_FLAG_DEBUG_NONFINITE_NORMAL;
+	}
+
+	const bool tile_memory_on = settings.ddgi_wrong_events || settings.ddgi_wrong_memory;
+	uint32_t ddgi_wrong_bits = 0;
+	if (tile_memory_on) {
+		ddgi_wrong_bits |= DDGI_WRONG_ACTIVE;
+		if (cut == CUT_NONE && p_buffers->tile_memory_written) {
+			ddgi_wrong_bits |= DDGI_WRONG_READ;
+		}
+		if (settings.ddgi_wrong_events && selection.count > 0) {
+			if (selection.dropped > 0) {
+				p_buffers->r5_overflows++;
+			} else {
+				ddgi_wrong_bits |= DDGI_WRONG_EVENTS;
+				p_buffers->r5_frames++;
+			}
+		}
+		if (settings.ddgi_wrong_memory && cut == CUT_NONE) {
+			ddgi_wrong_bits |= DDGI_WRONG_MEMORY;
+		}
+	}
+	p_buffers->tile_memory_written = false;
+	p_buffers->last_ddgi_wrong_bits = ddgi_wrong_bits;
+	uint32_t route_n_target = 0;
 
 	const Transform3D previous_transform = p_buffers->have_previous ? p_buffers->previous_transform : inputs.camera_transform;
 	const Projection previous_projection = p_buffers->have_previous ? p_buffers->previous_projection : inputs.projection;
+	const Projection previous_drawn_projection = p_buffers->have_previous ? p_buffers->previous_drawn_projection : inputs.drawn_projection;
 	const Transform3D delta = previous_transform.affine_inverse() * inputs.camera_transform;
 
 	const uint32_t current = p_buffers->index;
@@ -443,17 +505,33 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 	const uint32_t atrous_count = settings.atrous_iterations;
 
 	FrameUBO frame_data;
-	_fill_frame_ubo(frame_data, settings, p_buffers, inputs, volume, flags, DEBUG_VIEW_NONE, 1, slot_scale, delta, previous_projection);
-	if ((flags & FRAME_FLAG_RESTART_SPHERES) != 0) {
-		frame_data.restart_count = selection.count;
-		memcpy(frame_data.restart_spheres, selection.spheres, sizeof(selection.spheres));
-	}
-	RD::get_singleton()->buffer_update(frame_ubo, 0, sizeof(FrameUBO), &frame_data);
-	for (uint32_t i = 0; i < atrous_count; i++) {
-		FrameUBO step_data = frame_data;
-		step_data.atrous_step = 1 << i;
-		RD::get_singleton()->buffer_update(atrous_ubo[i], 0, sizeof(FrameUBO), &step_data);
-	}
+	auto upload_frame = [&](uint32_t p_flags) {
+		_fill_frame_ubo(frame_data, settings, p_buffers, inputs, volume, p_flags, DEBUG_VIEW_NONE, 1, slot_scale, delta, previous_projection);
+		if ((p_flags & FRAME_FLAG_RESTART_SPHERES) != 0 || (ddgi_wrong_bits & DDGI_WRONG_EVENTS) != 0) {
+			frame_data.restart_count = selection.count;
+			memcpy(frame_data.restart_spheres, selection.spheres, sizeof(selection.spheres));
+		}
+		if (ddgi_wrong_bits != 0) {
+			frame_data.ddgi_wrong_frames = settings.ddgi_wrong_frames;
+			frame_data.ddgi_wrong_bits = ddgi_wrong_bits;
+			frame_data.ddgi_wrong_rho = settings.ddgi_wrong_rho;
+			frame_data.ddgi_wrong_tau = settings.ddgi_wrong_tau;
+			frame_data.ddgi_wrong_target = settings.ddgi_wrong_target;
+			frame_data.ddgi_wrong_noise = settings.ddgi_wrong_noise;
+			frame_data.ddgi_wrong_floor = settings.ddgi_wrong_floor;
+		}
+		if ((p_flags & FRAME_FLAG_MODULE_OUTPUT) != 0 && route_n_target > 0) {
+			frame_data.n_target = route_n_target;
+			frame_data.target_samples = float(settings.history_cap);
+		}
+		RD::get_singleton()->buffer_update(frame_ubo, 0, sizeof(FrameUBO), &frame_data);
+		for (uint32_t i = 0; i < atrous_count; i++) {
+			FrameUBO step_data = frame_data;
+			step_data.atrous_step = 1 << i;
+			RD::get_singleton()->buffer_update(atrous_ubo[i], 0, sizeof(FrameUBO), &step_data);
+		}
+	};
+	upload_frame(flags);
 
 	TraceUBO trace_data = {};
 	MaterialStorage::store_camera(inputs.drawn_projection.inverse(), trace_data.inv_projection);
@@ -465,7 +543,7 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 	trace_data.frame = inputs.frame_index;
 	trace_data.seed = settings.seed;
 	trace_data.scale = scale;
-	trace_data.flags = flags;
+	trace_data.flags = flags | (backend && backend->wants_replay() ? uint32_t(FRAME_FLAG_REPLAY) : 0u);
 	trace_data.origin_scale = settings.origin_scale;
 	trace_data.origin_floor = settings.origin_floor;
 	trace_data.mirror_below_surface = settings.mirror_below_surface ? 1u : 0u;
@@ -493,6 +571,8 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 	const RID history_previous = p_render_buffers->get_texture(RB_SCOPE_RTGI, RB_RTGI_HISTORY(previous));
 	const RID moments_current = p_render_buffers->get_texture(RB_SCOPE_RTGI, RB_RTGI_MOMENTS(current));
 	const RID moments_previous = p_render_buffers->get_texture(RB_SCOPE_RTGI, RB_RTGI_MOMENTS(previous));
+	const RID tile_memory_current = p_render_buffers->get_texture(RB_SCOPE_RTGI, RB_RTGI_TILE_MEMORY(current));
+	const RID tile_memory_previous = p_render_buffers->get_texture(RB_SCOPE_RTGI, RB_RTGI_TILE_MEMORY(previous));
 
 	if (counter_buffer.is_valid()) {
 		RD::get_singleton()->buffer_clear(counter_buffer, 0, sizeof(uint32_t) * COUNTER_MAX);
@@ -512,6 +592,10 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 4, geo_position_current));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 5, geo_normal_current));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 6, tiles));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 7, tile_memory_previous));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 8, tile_memory_current));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 9, geo_position_previous));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 10, history_previous));
 		LocalVector<RD::Uniform> ddgi_uniforms = volume->gather_uniforms();
 		ddgi_uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_SAMPLER, 4, linear_sampler));
 		_dispatch(MODE_CLASSIFY, frame_ubo, uniforms, &ddgi_uniforms, uint32_t(tile_count.x), uint32_t(tile_count.y), true);
@@ -531,6 +615,99 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 			_refuse(p_buffers, "the trace did not run");
 			return false;
 		}
+	}
+
+	bool denoise = false;
+	if (backend) {
+		Projection correction;
+		correction.set_depth_correction(true);
+		RtgiFrameInputs backend_inputs;
+		backend_inputs.buffers = p_render_buffers.ptr();
+		backend_inputs.screen_size = inputs.screen_size;
+		backend_inputs.trace_size = inputs.trace_size;
+		backend_inputs.slot_size = inputs.slot_size;
+		backend_inputs.ray_fraction = ray_fraction;
+		backend_inputs.depth = inputs.depth;
+		backend_inputs.normal_roughness = inputs.normal_roughness;
+		backend_inputs.geo_position = geo_position_current;
+		backend_inputs.geo_normal = geo_normal_current;
+		backend_inputs.previous_geo_position = geo_position_previous;
+		backend_inputs.previous_geo_normal = geo_normal_previous;
+		backend_inputs.candidate_first = candidate_first;
+		backend_inputs.candidate_second = candidate_second;
+		backend_inputs.tile_texture = tiles;
+		backend_inputs.projection = inputs.projection;
+		backend_inputs.previous_projection = previous_projection;
+		backend_inputs.drawn_projection = inputs.drawn_projection;
+		backend_inputs.previous_drawn_projection = previous_drawn_projection;
+		backend_inputs.camera_transform = inputs.camera_transform;
+		backend_inputs.previous_camera_transform = previous_transform;
+		backend_inputs.view_to_previous_clip = (correction * previous_projection) * Projection(delta);
+		backend_inputs.frame_index = inputs.frame_index;
+		backend_inputs.trace_scale = scale;
+		backend_inputs.epochs = inputs.epochs;
+		backend_inputs.dirty_source = GIEpochs::get_singleton();
+		backend_inputs.history_cut = !backend_ran_before || (flags & (FRAME_FLAG_HISTORY_CUT | FRAME_FLAG_CAMERA_CUT)) != 0u;
+		backend_inputs.hardware = ray_scene->uses_hardware();
+		backend_inputs.ray_scene = ray_scene;
+		backend_inputs.shade.ddgi_ubo = volume->ubo;
+		backend_inputs.shade.probe_data = volume->probe_data;
+		backend_inputs.shade.irradiance = volume->irradiance;
+		backend_inputs.shade.distance = volume->distance;
+		backend_inputs.shade.sky_texture = volume->sky_texture;
+		for (int i = 0; i < 3; i++) {
+			backend_inputs.shade.sky_color_or_orientation[i] = volume->trace_constant.sky_color_or_orientation[i];
+		}
+		backend_inputs.shade.sky_flags = volume->trace_constant.sky_flags;
+		backend_inputs.shade.sky_border_size[0] = volume->trace_constant.sky_border_size[0];
+		backend_inputs.shade.sky_border_size[1] = volume->trace_constant.sky_border_size[1];
+		backend_inputs.shade.sky_energy = volume->trace_constant.sky_energy;
+		backend_inputs.shade.bounce_energy = volume->trace_constant.bounce_energy;
+		backend_inputs.shade.emission_exposure = volume->trace_constant.emission_exposure;
+		backend_inputs.shade.valid = volume->ubo.is_valid() && volume->probe_data.is_valid() && volume->irradiance.is_valid() && volume->distance.is_valid();
+		backend_inputs.events = p_buffers->backend_events.ptr();
+		backend_inputs.event_count = p_buffers->backend_events.size();
+		backend_inputs.events_lost = p_buffers->backend_events_lost;
+		backend_inputs.directional_jump = directional.jumps > 0;
+		backend_inputs.restart_quiet_frames = settings.restart_quiet_frames;
+		RtgiResampleOutput backend_output;
+		if (backend->begin_frame(backend_inputs)) {
+			RENDER_TIMESTAMP("RTGI Backend");
+			backend->resample(backend_inputs, backend_output);
+			p_buffers->backend_ran = true;
+			denoise = backend_output.valid && backend_output.denoise && backend_output.radiance.is_valid() && backend_output.coverage.is_valid();
+		}
+		if (denoise) {
+			if (backend_output.history_cap > 0u) {
+				settings.history_cap = CLAMP(backend_output.history_cap, 1u, 255u);
+			}
+		} else {
+			p_buffers->backend_refusals++;
+		}
+		if (denoise && backend_output.history_cut && cut == CUT_NONE) {
+			cut = CUT_MODULE;
+		}
+		if (denoise && backend_output.mode == RTGI_OUTPUT_MODULE) {
+			flags |= FRAME_FLAG_MODULE_OUTPUT;
+			p_buffers->module_output_frames++;
+			if (backend_output.n_target > 0u) {
+				route_n_target = MIN(backend_output.n_target, 255u);
+				p_buffers->route_frames++;
+			}
+		}
+	}
+	p_buffers->last_n_target = route_n_target;
+	if (cut == CUT_NONE && p_buffers->previous_denoise != denoise) {
+		cut = CUT_MODULE;
+	}
+	if (cut == CUT_MODULE) {
+		flags |= FRAME_FLAG_HISTORY_CUT;
+		p_buffers->cut_counts[CUT_MODULE]++;
+		p_buffers->last_cut = CUT_MODULE;
+		p_buffers->frames_since_cut = 0;
+	}
+	if (denoise || cut == CUT_MODULE) {
+		upload_frame(flags);
 	}
 
 	RENDER_TIMESTAMP("RTGI Temporal");
@@ -583,6 +760,7 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 7, moments_current));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 8, p_render_buffers->get_texture(RB_SCOPE_GI_EXTRA, RB_TEX_EXTRA_RADIANCE)));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 9, p_render_buffers->get_texture(RB_SCOPE_GI_EXTRA, RB_TEX_EXTRA_COVERAGE)));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 10, tiles));
 		_dispatch(MODE_COMPOSE, frame_ubo, uniforms, nullptr, Math::division_round_up(uint32_t(inputs.slot_size.x), 8u), Math::division_round_up(uint32_t(inputs.slot_size.y), 8u), false);
 	}
 
@@ -616,11 +794,18 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 	p_buffers->have_previous = true;
 	p_buffers->previous_transform = inputs.camera_transform;
 	p_buffers->previous_projection = inputs.projection;
+	p_buffers->previous_drawn_projection = inputs.drawn_projection;
 	p_buffers->previous_hardware = inputs.hardware;
 	p_buffers->previous_epochs = inputs.epochs;
 	p_buffers->have_epochs = true;
 	p_buffers->frames_processed++;
 	p_buffers->frames_since_cut++;
+	p_buffers->previous_denoise = denoise;
+	p_buffers->tile_memory_written = tile_memory_on;
+	p_buffers->backend_active = denoise;
+	if (denoise) {
+		p_buffers->backend_frames++;
+	}
 
 	const uint32_t accumulated = MIN(p_buffers->frames_since_cut, settings.history_cap);
 	const float confidence = gi_provider_confidence_from_samples(accumulated, settings.target_samples);
@@ -640,9 +825,24 @@ bool RtgiPass::_process(const Ref<RenderSceneBuffersRD> &p_render_buffers, const
 	return true;
 }
 
+void RtgiPass::RtgiBuffers::free_data() {
+	backend_ran = false;
+	if (owner == nullptr) {
+		return;
+	}
+	if (RtgiResampleBackend *backend = GIModuleHooks::get_singleton()->get_rtgi_backend()) {
+		backend->release(owner);
+		release_free_data_total.increment();
+	}
+}
+
 void RtgiPass::release(const Ref<RenderSceneBuffersRD> &p_render_buffers) {
 	if (p_render_buffers.is_null() || !p_render_buffers->has_custom_data(RB_SCOPE_RTGI)) {
 		return;
+	}
+	if (RtgiResampleBackend *backend = GIModuleHooks::get_singleton()->get_rtgi_backend()) {
+		backend->release(p_render_buffers.ptr());
+		release_pass_total.increment();
 	}
 	p_render_buffers->clear_context(RB_SCOPE_RTGI);
 	p_render_buffers->set_custom_data(RB_SCOPE_RTGI, Ref<RenderBufferCustomDataRD>());
@@ -655,6 +855,10 @@ void RtgiPass::_read_counters(const Ref<RtgiBuffers> &p_buffers) {
 	const Vector<uint8_t> data = RD::get_singleton()->buffer_get_data(counter_buffer);
 	if (data.size() == int64_t(sizeof(p_buffers->last_counters))) {
 		memcpy(p_buffers->last_counters, data.ptr(), sizeof(p_buffers->last_counters));
+		p_buffers->counted_frames++;
+		for (int i = 0; i < COUNTER_MAX; i++) {
+			p_buffers->counter_totals[i] += p_buffers->last_counters[i];
+		}
 	}
 }
 
@@ -691,12 +895,23 @@ void RtgiPass::_write_status(const Ref<RenderSceneBuffersRD> &p_render_buffers, 
 	restarts["directional_jumps"] = int64_t(p_buffers->directional_jumps);
 	restarts["directional_repeats"] = int64_t(p_buffers->directional_repeats);
 	status["restarts"] = restarts;
+	Dictionary ddgi_wrong;
+	ddgi_wrong["bits"] = int64_t(p_buffers->last_ddgi_wrong_bits);
+	ddgi_wrong["r5_frames"] = int64_t(p_buffers->r5_frames);
+	ddgi_wrong["r5_overflow"] = int64_t(p_buffers->r5_overflows);
+	status["ddgi_wrong"] = ddgi_wrong;
+	Dictionary route;
+	route["module_output_frames"] = int64_t(p_buffers->module_output_frames);
+	route["route_frames"] = int64_t(p_buffers->route_frames);
+	route["n_target"] = int64_t(p_buffers->last_n_target);
+	status["route"] = route;
 	Dictionary cuts;
 	cuts["first"] = int64_t(p_buffers->cut_counts[CUT_FIRST]);
 	cuts["resize"] = int64_t(p_buffers->cut_counts[CUT_RESIZE]);
 	cuts["camera"] = int64_t(p_buffers->cut_counts[CUT_CAMERA]);
 	cuts["backend"] = int64_t(p_buffers->cut_counts[CUT_BACKEND]);
 	cuts["request"] = int64_t(p_buffers->cut_counts[CUT_REQUEST]);
+	cuts["module"] = int64_t(p_buffers->cut_counts[CUT_MODULE]);
 	status["cuts"] = cuts;
 	status["screen_width"] = p_buffers->screen_size.width;
 	status["screen_height"] = p_buffers->screen_size.height;
@@ -710,6 +925,8 @@ void RtgiPass::_write_status(const Ref<RenderSceneBuffersRD> &p_render_buffers, 
 	status["ray_capacity"] = int64_t(p_buffers->last_trace_pixel_capacity);
 	status["atrous_iterations"] = int64_t(p_buffers->last_atrous_iterations);
 	status["last_inputs"] = p_buffers->last_inputs;
+	status["rtgi_release_free_data"] = int64_t(release_free_data_total.get());
+	status["rtgi_release_pass"] = int64_t(release_pass_total.get());
 	GIProviderRecord published;
 	if (GICompositor::get_record(p_render_buffers, published)) {
 		Dictionary record;
@@ -738,7 +955,30 @@ void RtgiPass::_write_status(const Ref<RenderSceneBuffersRD> &p_render_buffers, 
 		counters["valid_rays"] = int64_t(values[COUNTER_RAYS]) - int64_t(values[COUNTER_BACKFACE]);
 		counters["history_rejects"] = int64_t(values[COUNTER_HISTORY_REJECTS]);
 		counters["restarted"] = int64_t(values[COUNTER_RESTARTED]);
+		counters["tiles_wrong_events"] = int64_t(values[COUNTER_TILES_WRONG_EVENTS]);
+		counters["tiles_wrong_memory"] = int64_t(values[COUNTER_TILES_WRONG_MEMORY]);
+		counters["nonfinite_origin"] = int64_t(values[COUNTER_NONFINITE_ORIGIN]);
+		counters["nonfinite_normal"] = int64_t(values[COUNTER_NONFINITE_NORMAL]);
+		counters["counted_frames"] = int64_t(p_buffers->counted_frames);
+		static const char *const names[COUNTER_MAX] = { "tiles_total", "tiles_traced", "trace_pixels", "rays", "hits", "sky_misses", "backface", "history_rejects", "restarted", "tiles_wrong_events", "tiles_wrong_memory", "nonfinite_origin", "nonfinite_normal" };
+		Dictionary totals;
+		for (int i = 0; i < COUNTER_MAX; i++) {
+			totals[names[i]] = int64_t(p_buffers->counter_totals[i]);
+		}
+		counters["totals"] = totals;
 		status["gpu_counters"] = counters;
+	}
+	if (const RtgiResampleBackend *registered = GIModuleHooks::get_singleton()->get_rtgi_backend()) {
+		Dictionary backend;
+		backend["name"] = String::utf8(registered->get_name());
+		backend["active"] = p_buffers->backend_active;
+		backend["frames"] = int64_t(p_buffers->backend_frames);
+		backend["refusals"] = int64_t(p_buffers->backend_refusals);
+		backend["module_cuts"] = int64_t(p_buffers->cut_counts[CUT_MODULE]);
+		Dictionary own;
+		registered->get_status(own);
+		backend["status"] = own;
+		status["backend"] = backend;
 	}
 	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::WRITE);
 	if (file.is_valid()) {

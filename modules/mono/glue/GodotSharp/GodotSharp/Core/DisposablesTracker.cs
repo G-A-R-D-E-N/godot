@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Threading;
 using Godot.NativeInterop;
 
 #nullable enable
@@ -37,6 +39,22 @@ namespace Godot
             }
 
             if (isStdoutVerbose)
+                GD.Print("Unloading: Draining pending finalizers...");
+
+            GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: false);
+            bool drained = WaitForPendingFinalizers(DrainWaitMilliseconds);
+
+            ShuttingDown = true;
+
+            bool settled = WaitForPendingFinalizers(SettleWaitMilliseconds);
+
+            if (!drained || !settled)
+            {
+                GD.PrintErr($"DisposablesTracker: finalizers still running after {(drained ? SettleWaitMilliseconds : DrainWaitMilliseconds)} ms; " +
+                    "later finalizers skip their native frees.");
+            }
+
+            if (isStdoutVerbose)
                 GD.Print("Unloading: Disposing tracked instances...");
 
             // Dispose Godot Objects first, and only then dispose other disposables
@@ -45,18 +63,73 @@ namespace Godot
 
             foreach (WeakReference<GodotObject> item in GodotObjectInstances.Keys)
             {
-                if (item.TryGetTarget(out GodotObject? self))
-                    self.Dispose();
+                try
+                {
+                    if (item.TryGetTarget(out GodotObject? self))
+                        self.Dispose();
+                }
+                catch (Exception e)
+                {
+                    ExceptionUtils.LogException(e);
+                }
             }
 
             foreach (WeakReference<IDisposable> item in OtherInstances.Keys)
             {
-                if (item.TryGetTarget(out IDisposable? self))
-                    self.Dispose();
+                try
+                {
+                    if (item.TryGetTarget(out IDisposable? self))
+                        self.Dispose();
+                }
+                catch (Exception e)
+                {
+                    ExceptionUtils.LogException(e);
+                }
             }
 
             if (isStdoutVerbose)
                 GD.Print("Unloading: Finished disposing tracked instances.");
+        }
+
+        private const int DrainWaitMilliseconds = 5000;
+        private const int SettleWaitMilliseconds = 1000;
+
+        internal static volatile bool ShuttingDown;
+
+        private sealed class FinalizerWait
+        {
+            public volatile bool Done;
+        }
+
+        private static bool WaitForPendingFinalizers(int timeoutMilliseconds)
+        {
+            var wait = new FinalizerWait();
+            try
+            {
+                var thread = new Thread(() =>
+                {
+                    GC.WaitForPendingFinalizers();
+                    wait.Done = true;
+                })
+                {
+                    IsBackground = true,
+                    Name = "Godot shutdown finalizer wait",
+                };
+                thread.Start();
+            }
+            catch (Exception e)
+            {
+                ExceptionUtils.LogException(e);
+                return false;
+            }
+            var clock = Stopwatch.StartNew();
+            while (!wait.Done)
+            {
+                if (clock.ElapsedMilliseconds >= timeoutMilliseconds)
+                    return false;
+                Thread.Sleep(1);
+            }
+            return true;
         }
 
         private static ConcurrentDictionary<WeakReference<GodotObject>, byte> GodotObjectInstances { get; } =

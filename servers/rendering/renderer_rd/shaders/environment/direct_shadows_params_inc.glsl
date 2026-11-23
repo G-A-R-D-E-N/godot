@@ -5,6 +5,12 @@ struct DirectLamp {
 	uint dynamic;
 	float clearance;
 	uint exclude;
+	float anchor_offset_x;
+	float anchor_offset_y;
+	float anchor_offset_z;
+	float mean_r;
+	float mean_g;
+	float mean_b;
 };
 
 layout(set = 0, binding = 4, std140) uniform Params {
@@ -39,9 +45,37 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	float range_scale;
 	float dynamic_cap;
 	uint count;
-	uint pad2;
+	uint head_entries;
+	uint tail_visibility;
+	uint cold_frames;
+	ivec2 full_size;
+	vec2 jitter_delta;
+	uint pad0;
+	uint pad1;
 }
 params;
+
+#ifdef QUARTER
+ivec2 direct_block_pixel(ivec2 p_block, uint p_phase) {
+	return p_block * 2 + ivec2(int(p_phase & 1u), int(p_phase >> 1u));
+}
+
+float direct_guide_depth(uint p_word) {
+	return uintBitsToFloat(p_word & ~3u);
+}
+
+vec3 direct_rebuild_position(ivec2 p_full_pixel, float p_depth) {
+	vec2 uv = (vec2(p_full_pixel) + 0.5) * params.pixel_size * 2.0 - 1.0;
+	vec2 at_unit = vec2(params.inv_projection[0][0], params.inv_projection[1][1]) * uv;
+	return params.inv_projection[2][3] == 0.0 ? vec3(at_unit + params.inv_projection[3].xy, -p_depth) : vec3(at_unit * p_depth, -p_depth);
+}
+
+float direct_surface_weight(vec3 p_center_position, vec3 p_center_normal, float p_center_depth, vec3 p_other_position, vec3 p_other_normal) {
+	float plane = abs(dot(p_center_normal, p_other_position - p_center_position));
+	float facing = max(dot(p_center_normal, p_other_normal), 0.0);
+	return exp(-plane / max(0.01 * p_center_depth, 1e-4)) * facing * facing;
+}
+#endif
 
 vec2 direct_oct_encode(vec3 p_normal) {
 	vec2 folded = p_normal.xy / (abs(p_normal.x) + abs(p_normal.y) + abs(p_normal.z));

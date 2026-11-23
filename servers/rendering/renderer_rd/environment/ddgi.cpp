@@ -235,7 +235,7 @@ void DDGI::init(SkyRD *p_sky) {
 	}
 
 	use_octmap_array = p_sky->sky_use_octmap_array;
-	trace_defines = vformat("\n#define RAY_SCENE_BLAS_STACK_SIZE %d\n#define RAY_SCENE_TLAS_STACK_SIZE %d\n", RayScene::BLAS_MAX_DEPTH, RayScene::TLAS_MAX_DEPTH) + (use_octmap_array ? "\n#define USE_RADIANCE_OCTMAP_ARRAY\n" : "");
+	trace_defines = vformat("\n#define RAY_SCENE_BLAS_STACK_SIZE %d\n#define RAY_SCENE_TLAS_STACK_SIZE %d\n", RayScene::BLAS_MAX_DEPTH, RayScene::TLAS_MAX_DEPTH) + (use_octmap_array ? "\n#define USE_RADIANCE_OCTMAP_ARRAY\n" : "") + RayScene::alpha_shader_defines();
 	trace_shader.initialize(_trace_modes(), trace_defines);
 	trace_shader_version = trace_shader.version_create();
 	for (int i = 0; i < TRACE_MODE_MAX; i++) {
@@ -322,9 +322,12 @@ void DDGI::update(const Ref<RenderSceneBuffersRD> &p_render_buffers, const Vecto
 	}
 
 	const Settings settings = get_project_settings();
-	if (volume.is_null() || volume->ubo.is_null() || !volume->settings.same_storage(settings)) {
+	RayScene *ray_scene = RayScene::get_singleton();
+	const uint32_t alpha_generation = ray_scene ? ray_scene->get_alpha_generation() : 0;
+	if (volume.is_null() || volume->ubo.is_null() || !volume->settings.same_storage(settings) || (ray_scene && volume->alpha_generation != alpha_generation)) {
 		volume.instantiate();
 		volume->allocate(settings);
+		volume->alpha_generation = alpha_generation;
 		p_render_buffers->set_custom_data(RB_SCOPE_DDGI, volume);
 	}
 	volume->settings = settings;
@@ -553,10 +556,15 @@ bool DDGI::trace_rtgi(const Ref<Volume> &p_volume, RID p_output, const LocalVect
 	PipelineDeferredRD &rtgi_pipeline = hardware ? trace_pipelines_hw[TRACE_MODE_RTGI] : trace_pipelines[TRACE_MODE_RTGI];
 	if (!rtgi_shader.is_group_enabled(TRACE_GROUP_RTGI)) {
 		rtgi_shader.enable_group(TRACE_GROUP_RTGI);
-		rtgi_pipeline.create_compute_pipeline(rtgi_shader.version_get_shader(hardware ? trace_shader_hw_version : trace_shader_version, TRACE_MODE_RTGI));
+		RID rtgi_shader_rid = rtgi_shader.version_get_shader(hardware ? trace_shader_hw_version : trace_shader_version, TRACE_MODE_RTGI);
+		if (rtgi_shader_rid.is_valid()) {
+			rtgi_pipeline.create_compute_pipeline(rtgi_shader_rid);
+		}
 	}
-	if (hardware && !rtgi_pipeline.get_rid().is_valid()) {
-		ray_scene->refuse_hardware("the hardware RTGI trace pipeline could not be made");
+	if (!rtgi_pipeline.get_rid().is_valid()) {
+		if (hardware) {
+			ray_scene->refuse_hardware("the hardware RTGI trace pipeline could not be made");
+		}
 		return false;
 	}
 	_trace(TRACE_MODE_RTGI, p_volume, p_output, p_volume->trace_constant, p_x_groups, p_y_groups, RID(), 0, &p_uniforms);

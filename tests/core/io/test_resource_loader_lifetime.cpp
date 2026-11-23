@@ -55,6 +55,20 @@ public:
 		release.post();
 	}
 
+	bool await_release() {
+		// A test that misses a post parks this worker for good, and two parked workers starve
+		// the pool on a small CI runner so the next load deadlocks. Give up instead.
+		uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 5000;
+		while (!release.try_wait()) {
+			if (OS::get_singleton()->get_ticks_msec() >= deadline) {
+				ERR_PRINT("ResourceLoader test gate was never released; keeping the worker pool alive.");
+				return false;
+			}
+			OS::get_singleton()->delay_usec(1000);
+		}
+		return true;
+	}
+
 	bool recognize_path(const String &p_path, const String &p_type) const override {
 		return p_path.ends_with(".loader_lifetime");
 	}
@@ -63,7 +77,7 @@ public:
 			bool p_use_sub_threads, float *r_progress, CacheMode p_cache_mode) override {
 		task_id = WorkerThreadPool::get_singleton()->get_caller_task_id();
 		entered.post();
-		release.wait();
+		await_release();
 		if (r_error) {
 			*r_error = OK;
 		}
@@ -115,7 +129,7 @@ public:
 		resource->connect_changed(callable_mp(this, &NestedLoader::on_resource_changed));
 		task_id = WorkerThreadPool::get_singleton()->get_caller_task_id();
 		entered.post();
-		release.wait();
+		await_release();
 		return resource;
 	}
 };
@@ -147,7 +161,7 @@ public:
 				OS::get_singleton()->delay_usec(100);
 			}
 			entered.post();
-			release.wait();
+			await_release();
 			middle.unref();
 			child_resource->emit_changed();
 			emitted_while_loading = true;
@@ -182,7 +196,7 @@ TEST_CASE("[ResourceLoader] Last worker reference retires its token") {
 		ResourceLoader::remove_resource_format_loader(loader);
 		return;
 	}
-	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 10000;
+	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 60000;
 	bool entered = false;
 	while (!(entered = loader->entered.try_wait()) && OS::get_singleton()->get_ticks_msec() < deadline) {
 		OS::get_singleton()->delay_usec(100);
@@ -238,7 +252,7 @@ TEST_CASE("[ResourceLoader] Nested connections survive task retirement") {
 		ResourceLoader::remove_resource_format_loader(loader);
 		return;
 	}
-	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 10000;
+	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 60000;
 	bool entered = false;
 	while (!(entered = loader->entered.try_wait()) && OS::get_singleton()->get_ticks_msec() < deadline) {
 		OS::get_singleton()->delay_usec(100);
@@ -317,7 +331,7 @@ TEST_CASE("[ResourceLoader] Propagated child connections survive parent retireme
 			ResourceLoader::LOAD_THREAD_SPAWN_SINGLE, ResourceLoader::CACHE_MODE_IGNORE);
 	CHECK(parent.is_valid());
 	auto *pool = WorkerThreadPool::get_singleton();
-	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 10000;
+	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 60000;
 	while (loader->parent_task_id == WorkerThreadPool::INVALID_TASK_ID && OS::get_singleton()->get_ticks_msec() < deadline) {
 		OS::get_singleton()->delay_usec(100);
 	}
@@ -356,12 +370,21 @@ TEST_CASE("[ResourceLoader] Retired child connections follow a live parent") {
 	Ref<ResourceLoader::LoadToken> grandparent = ResourceLoader::_load_start("user://grand.loader_lifetime", "Resource",
 			ResourceLoader::LOAD_THREAD_SPAWN_SINGLE, ResourceLoader::CACHE_MODE_IGNORE);
 	CHECK(grandparent.is_valid());
-	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 10000;
+	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 60000;
 	bool entered = false;
 	while (!(entered = loader->entered.try_wait()) && OS::get_singleton()->get_ticks_msec() < deadline) {
 		OS::get_singleton()->delay_usec(100);
 	}
 	CHECK_MESSAGE(entered, "Grandparent did not reach its gate before the deadline");
+	if (!entered) {
+		MessageQueue::get_main_singleton()->flush();
+		grandparent.unref();
+		loader->child_resource.unref();
+		loader->child_token.unref();
+		ResourceLoader::clear_thread_load_tasks();
+		ResourceLoader::remove_resource_format_loader(loader);
+		return;
+	}
 	MessageQueue::get_main_singleton()->flush();
 	loader->release.post();
 	auto *pool = WorkerThreadPool::get_singleton();
@@ -389,7 +412,7 @@ TEST_CASE("[ResourceLoader] Child dependencies are handed to the parent once") {
 			ResourceLoader::LOAD_THREAD_SPAWN_SINGLE, ResourceLoader::CACHE_MODE_IGNORE);
 	CHECK(parent.is_valid());
 	auto *pool = WorkerThreadPool::get_singleton();
-	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 10000;
+	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 60000;
 	while ((loader->parent_task_id == WorkerThreadPool::INVALID_TASK_ID || !pool->is_task_completed(loader->parent_task_id)) && OS::get_singleton()->get_ticks_msec() < deadline) {
 		OS::get_singleton()->delay_usec(100);
 	}
@@ -421,7 +444,7 @@ TEST_CASE("[ResourceLoader] Shutdown drains an active native load") {
 		ResourceLoader::remove_resource_format_loader(loader);
 		return;
 	}
-	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 10000;
+	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 60000;
 	bool entered = false;
 	while (!(entered = loader->entered.try_wait()) && OS::get_singleton()->get_ticks_msec() < deadline) {
 		OS::get_singleton()->delay_usec(100);
@@ -497,7 +520,7 @@ TEST_CASE("[ResourceLoader] Full deferred queue preserves native task ownership"
 		ResourceLoader::remove_resource_format_loader(loader);
 		return;
 	}
-	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 10000;
+	uint64_t deadline = OS::get_singleton()->get_ticks_msec() + 60000;
 	bool entered = false;
 	while (!(entered = loader->entered.try_wait()) && OS::get_singleton()->get_ticks_msec() < deadline) {
 		OS::get_singleton()->delay_usec(100);

@@ -37,8 +37,9 @@
 #include "servers/rendering/renderer_rd/effects/fsr2.h"
 #include "servers/rendering/renderer_rd/effects/motion_vectors_store.h"
 #include "servers/rendering/renderer_rd/effects/ss_effects.h"
-#include "servers/rendering/renderer_rd/environment/direct_shadows.h"
 #include "servers/rendering/renderer_rd/effects/taa.h"
+#include "servers/rendering/renderer_rd/environment/direct_resampler_hooks.h"
+#include "servers/rendering/renderer_rd/environment/direct_shadows.h"
 #include "servers/rendering/renderer_rd/forward_clustered/scene_shader_forward_clustered.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/best_fit_normal.glsl.gen.h"
@@ -329,6 +330,17 @@ private:
 		SCREEN_SPACE_EFFECTS_FLAGS_USE_BENT_NORMALS = (1 << 5),
 		SCREEN_SPACE_EFFECTS_FLAGS_STOCHASTIC_SSR = (1 << 6),
 		SCREEN_SPACE_EFFECTS_FLAGS_LIGHTING_SOURCES = (1 << 7),
+		SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SKY = (1 << 8),
+		SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_GI_FILL = (1 << 9),
+		SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_PROBES = (1 << 10),
+		SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SSR = (1 << 11),
+		SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SPECULAR_OCCLUSION = (1 << 12),
+		SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SHIFT = 8,
+		SCREEN_SPACE_EFFECTS_FLAGS_UNIFIED_LOOKUP = (1 << 13),
+		SCREEN_SPACE_EFFECTS_FLAGS_HORIZON_GEOMETRIC = (1 << 14),
+		SCREEN_SPACE_EFFECTS_FLAGS_COAT_MATCH = (1 << 15),
+		SCREEN_SPACE_EFFECTS_FLAGS_BLEND_FILL_SKIP = (1 << 16),
+		SCREEN_SPACE_EFFECTS_FLAGS_TRANSPARENT_PASS = (1 << 17),
 	};
 
 	struct SceneState {
@@ -798,6 +810,7 @@ private:
 	RendererRD::DirectShadows *direct_shadows = nullptr;
 	RID direct_shadow_slots;
 	RID direct_shadow_factors;
+	RID direct_resampled;
 
 #ifdef METAL_MFXTEMPORAL_ENABLED
 	RendererRD::MFXTemporalEffect *mfx_temporal_effect = nullptr;

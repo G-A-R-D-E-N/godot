@@ -30,6 +30,8 @@
 
 #include "environment_storage.h"
 
+#include "servers/rendering/storage/local_exposure_limits.h"
+
 #ifdef DEBUG_ENABLED
 #include "core/os/os.h"
 #endif
@@ -520,6 +522,26 @@ RendererEnvironmentStorage::NightVision RendererEnvironmentStorage::environment_
 	Environment *env = environment_owner.get_or_null(p_env);
 	ERR_FAIL_NULL_V(env, NightVision());
 	return env->night_vision;
+}
+
+void RendererEnvironmentStorage::environment_set_local_exposure(RID p_env, bool p_enable, float p_strength, float p_shadow_contrast, float p_highlight_contrast, float p_max_shadow_lift, float p_max_highlight_drop, float p_pivot) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	ERR_FAIL_COND(Math::is_nan(p_strength) || Math::is_nan(p_shadow_contrast) || Math::is_nan(p_highlight_contrast) || Math::is_nan(p_max_shadow_lift) || Math::is_nan(p_max_highlight_drop) || Math::is_nan(p_pivot));
+	LocalExposure &local = env->local_exposure;
+	local.enabled = p_enable;
+	local.strength = LocalExposureLimits::strength(p_strength);
+	local.shadow_contrast = LocalExposureLimits::contrast(p_shadow_contrast);
+	local.highlight_contrast = LocalExposureLimits::contrast(p_highlight_contrast);
+	local.max_shadow_lift = LocalExposureLimits::shift(p_max_shadow_lift);
+	local.max_highlight_drop = LocalExposureLimits::shift(p_max_highlight_drop);
+	local.pivot = LocalExposureLimits::pivot(p_pivot);
+}
+
+RendererEnvironmentStorage::LocalExposure RendererEnvironmentStorage::environment_get_local_exposure(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, LocalExposure());
+	return env->local_exposure;
 }
 
 float RendererEnvironmentStorage::environment_get_fog_depth_begin(RID p_env) const {

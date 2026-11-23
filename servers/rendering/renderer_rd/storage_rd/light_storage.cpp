@@ -47,6 +47,47 @@ LightStorage *LightStorage::get_singleton() {
 	return singleton;
 }
 
+void LightStorage::write_direct_dump_lamps(LocalVector<float> &r_values, uint32_t p_slots) const {
+	const uint32_t values = DirectLightTable::DUMP_LAMP_VALUES;
+	r_values.resize(p_slots * values);
+	for (uint32_t i = 0; i < r_values.size(); i++) {
+		r_values[i] = 0.0f;
+	}
+	for (uint32_t i = 0; i < omni_light_count + spot_light_count; i++) {
+		const bool spot = i >= omni_light_count;
+		const uint32_t index = spot ? i - omni_light_count : i;
+		const LightData &light = spot ? spot_lights[index] : omni_lights[index];
+		if ((light.flags & 1u) == 0u) {
+			continue;
+		}
+		const uint32_t slot = (light.flags >> 1) & 0xFFFFu;
+		if (slot == DirectLightTable::NO_SLOT || slot >= p_slots) {
+			continue;
+		}
+		float *row = &r_values[slot * values];
+		row[0] = light.color[0];
+		row[1] = light.color[1];
+		row[2] = light.color[2];
+		row[3] = light.inv_radius;
+		row[4] = light.attenuation;
+		row[5] = spot ? 2.0f : 1.0f;
+		row[6] = light.position[0];
+		row[7] = light.position[1];
+		row[8] = light.position[2];
+		row[9] = light.direction[0];
+		row[10] = light.direction[1];
+		row[11] = light.direction[2];
+		row[12] = light.cos_spot_angle;
+		row[13] = light.inv_spot_attenuation;
+		row[14] = light.specular_amount;
+		row[15] = light.shadow_opacity;
+		row[16] = float((light.flags >> 17) & 0xFFu);
+		row[17] = light.size;
+		row[18] = float(index);
+		row[19] += 1.0f;
+	}
+}
+
 float LightStorage::light_render_energy(float p_energy, float p_intensity, RSE::LightType p_type, bool p_physical_units) {
 	float energy = p_energy;
 	if (!p_physical_units) {
@@ -381,6 +422,12 @@ void LightStorage::light_set_direct_shadow(RID p_light, bool p_owned, float p_mo
 			direct_shells.insert(shell, 1);
 		}
 	}
+}
+
+void LightStorage::light_set_direct_mean_energy(RID p_light, float p_energy) {
+	Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL(light);
+	light->direct.mean_energy = p_energy >= 0.0f ? p_energy : -1.0f;
 }
 
 void LightStorage::_release_direct_shells(const DirectLightTable::Setting &p_setting) {
@@ -1342,6 +1389,16 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 			lamp.caster_mask = light->shadow_caster_mask;
 			lamp.type = type;
 			lamp.clearance = light->direct.clearance;
+			float mean_energy = energy;
+			if (light->direct.mean_energy >= 0.0f) {
+				mean_energy = light_render_energy(sign * light->direct.mean_energy * fade, light->param[RSE::LIGHT_PARAM_INTENSITY], type, RendererSceneRenderRD::get_singleton()->is_using_physical_light_units());
+				if (p_render_data->camera_attributes.is_valid()) {
+					mean_energy *= RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes);
+				}
+			}
+			lamp.mean_color[0] = linear_col.r * mean_energy;
+			lamp.mean_color[1] = linear_col.g * mean_energy;
+			lamp.mean_color[2] = linear_col.b * mean_energy;
 			lamp.shell_count = light->direct.shell_count;
 			const RayScene *ray_scene = RayScene::get_singleton();
 			for (uint32_t k = 0; k < lamp.shell_count; k++) {
@@ -1571,6 +1628,13 @@ void LightStorage::reflection_probe_set_blend_distance(RID p_probe, float p_blen
 	reflection_probe->blend_distance = p_blend_distance;
 }
 
+void LightStorage::reflection_probe_set_priority(RID p_probe, int p_priority) {
+	ReflectionProbe *reflection_probe = reflection_probe_owner.get_or_null(p_probe);
+	ERR_FAIL_NULL(reflection_probe);
+
+	reflection_probe->priority = p_priority;
+}
+
 void LightStorage::reflection_probe_set_ambient_mode(RID p_probe, RSE::ReflectionProbeAmbientMode p_mode) {
 	ReflectionProbe *reflection_probe = reflection_probe_owner.get_or_null(p_probe);
 	ERR_FAIL_NULL(reflection_probe);
@@ -1758,6 +1822,13 @@ float LightStorage::reflection_probe_get_intensity(RID p_probe) const {
 	ERR_FAIL_NULL_V(reflection_probe, 0);
 
 	return reflection_probe->intensity;
+}
+
+int LightStorage::reflection_probe_get_priority(RID p_probe) const {
+	const ReflectionProbe *reflection_probe = reflection_probe_owner.get_or_null(p_probe);
+	ERR_FAIL_NULL_V(reflection_probe, 0);
+
+	return reflection_probe->priority;
 }
 
 float LightStorage::reflection_probe_get_blend_distance(RID p_probe) const {
@@ -2163,10 +2234,14 @@ bool LightStorage::reflection_probe_instance_postprocess_step(RID p_instance) {
 		data.create_reflection_fast_filter(false);
 	} else {
 		const int mip_count = (int)data.layers[0].mipmaps.size();
-		if (rpi->processing_layer < mip_count) {
-			data.create_reflection_importance_sample(false, rpi->processing_layer, RendererSceneRenderRD::get_singleton()->get_sky()->sky_ggx_samples_quality);
-			rpi->processing_layer++;
-		}
+		const ReflectionProbe *rush_probe = reflection_probe_owner.get_or_null(rpi->probe);
+		const bool rush = rush_probe && rush_probe->priority != 0 && rpi->atlas_index < 0 && GLOBAL_GET("rendering/reflections/reflection_atlas/priority_fast_filter");
+		do {
+			if (rpi->processing_layer < mip_count) {
+				data.create_reflection_importance_sample(false, rpi->processing_layer, RendererSceneRenderRD::get_singleton()->get_sky()->sky_ggx_samples_quality);
+				rpi->processing_layer++;
+			}
+		} while (rush && rpi->processing_layer < mip_count);
 		if (rpi->processing_layer < mip_count) {
 			return false;
 		}
@@ -2276,6 +2351,7 @@ void LightStorage::update_reflection_probe_buffer(RenderDataRD *p_render_data, c
 		float probe_size = extents.length();
 
 		reflection_sort[reflection_count].probe_instance = rpi;
+		reflection_sort[reflection_count].priority = MAX(probe->priority, 0);
 		reflection_sort[reflection_count].size = -probe_size;
 		reflection_count++;
 	}
@@ -2317,6 +2393,7 @@ void LightStorage::update_reflection_probe_buffer(RenderDataRD *p_render_data, c
 
 		reflection_ubo.intensity = probe->intensity;
 		reflection_ubo.blend_distance = probe->blend_distance;
+		reflection_ubo.priority = (uint32_t)MAX(probe->priority, 0);
 		reflection_ubo.ambient_mode = probe->ambient_mode;
 
 		reflection_ubo.exterior = !probe->interior;

@@ -1,13 +1,13 @@
 # No-raster-shadow instance flag
 
-`servers/rendering/rendering_server_enums.h:InstanceFlags` adds `INSTANCE_FLAG_NO_RASTER_SHADOW` (value 5, default
-off; `INSTANCE_FLAG_MAX` moves to 6). It keeps an instance out of every light's raster shadow map while camera
+`servers/rendering/rendering_server_enums.h:InstanceFlags` adds `INSTANCE_FLAG_NO_RASTER_SHADOW` (value 7, default
+off; `INSTANCE_FLAG_MAX` moves to 8). It keeps an instance out of every light's raster shadow map while camera
 drawing and the global illumination ray scene stay as they are. With `INSTANCE_FLAG_RAY_SCENE_ONLY` and casting on,
 an instance is traced by shadow and bounce rays only: a ray proxy for ground the camera already draws, which must not
 draw that ground's shadow a second time. `INSTANCE_FLAG_RAY_SCENE_ONLY` alone is unchanged, so a camera-hidden
 instance that still casts raster shadows (a room hidden by portal culling, for one) keeps casting.
 
-- `servers/rendering/renderer_scene_cull.h:InstanceData`: `FLAG_NO_RASTER_SHADOW = 1 << 26`; `Instance::no_raster_shadow`
+- `servers/rendering/renderer_scene_cull.h:InstanceData`: `FLAG_NO_RASTER_SHADOW = 1 << 27`; `Instance::no_raster_shadow`
   (default false). Three rules live here so every site reads the same one:
   - `casts_raster_shadow(casts, no_raster_shadow)`, and its flags form `casts_raster_shadow(flags)`: casting on and
     the new flag off.

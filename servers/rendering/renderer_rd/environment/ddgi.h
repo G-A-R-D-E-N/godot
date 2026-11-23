@@ -184,6 +184,7 @@ public:
 		Vector3i g_min[MAX_LEVELS];
 		bool level_valid[MAX_LEVELS] = {};
 		uint32_t frame = 0;
+		uint32_t alpha_generation = 0;
 
 		RID irradiance;
 		RID distance;

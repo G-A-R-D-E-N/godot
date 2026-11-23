@@ -54,27 +54,35 @@ bool stops(uint32_t p_flags, bool p_shadow_ray) {
 
 TEST_CASE("[RayScene] Cast setting flag known answers") {
 	CHECK(RayScene::shadow_cast_flags(RSE::SHADOW_CASTING_SETTING_ON) == 0);
-	CHECK(RayScene::shadow_cast_flags(RSE::SHADOW_CASTING_SETTING_DOUBLE_SIDED) == 0);
+	CHECK(RayScene::shadow_cast_flags(RSE::SHADOW_CASTING_SETTING_DOUBLE_SIDED) == RayScene::MATERIAL_FLAG_SHADOW_TWO_SIDED);
 	CHECK(RayScene::shadow_cast_flags(RSE::SHADOW_CASTING_SETTING_OFF) == RayScene::MATERIAL_FLAG_SHADOW_PASS);
 	CHECK(RayScene::shadow_cast_flags(RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY) == RayScene::MATERIAL_FLAG_SHADOW_ONLY);
+	CHECK(RayScene::shadow_cast_flags(RSE::SHADOW_CASTING_SETTING_ON, true) == 0);
+	CHECK(RayScene::shadow_cast_flags(RSE::SHADOW_CASTING_SETTING_DOUBLE_SIDED, true) == RayScene::MATERIAL_FLAG_SHADOW_TWO_SIDED);
+	CHECK(RayScene::shadow_cast_flags(RSE::SHADOW_CASTING_SETTING_OFF, true) == 0);
+	CHECK(RayScene::shadow_cast_flags(RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY, true) == RayScene::MATERIAL_FLAG_SHADOW_ONLY);
 }
 
 TEST_CASE("[RayScene] Shadow and bounce rays per cast setting") {
 	struct Role {
 		const char *name;
 		RSE::ShadowCastingSetting setting;
+		bool occluder;
 		bool shadow_stops;
 		bool bounce_stops;
 	};
 	const Role roles[] = {
-		{ "caster, and the sun cap as ray scene only", RSE::SHADOW_CASTING_SETTING_ON, true, true },
-		{ "double sided caster", RSE::SHADOW_CASTING_SETTING_DOUBLE_SIDED, true, true },
-		{ "outside quiet caster", RSE::SHADOW_CASTING_SETTING_OFF, false, true },
-		{ "pane patch, cookie on or off", RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY, true, false },
+		{ "caster, and the sun cap as ray scene only", RSE::SHADOW_CASTING_SETTING_ON, false, true, true },
+		{ "double sided caster", RSE::SHADOW_CASTING_SETTING_DOUBLE_SIDED, false, true, true },
+		{ "outside quiet caster, and a culled room's quiet mesh", RSE::SHADOW_CASTING_SETTING_OFF, false, false, true },
+		{ "pane patch, cookie on or off", RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY, false, true, false },
+		{ "ray ground: cast off with the occluder opt in", RSE::SHADOW_CASTING_SETTING_OFF, true, true, true },
+		{ "caster with the occluder opt in", RSE::SHADOW_CASTING_SETTING_ON, true, true, true },
+		{ "pane patch with the occluder opt in", RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY, true, true, false },
 	};
 	for (const Role &role : roles) {
 		INFO(role.name);
-		const uint32_t flags = RayScene::shadow_cast_flags(role.setting);
+		const uint32_t flags = RayScene::shadow_cast_flags(role.setting, role.occluder);
 		CHECK(stops(flags, true) == role.shadow_stops);
 		CHECK(stops(flags, false) == role.bounce_stops);
 	}
@@ -82,10 +90,52 @@ TEST_CASE("[RayScene] Shadow and bounce rays per cast setting") {
 
 TEST_CASE("[RayScene] A skipped material passes every ray whatever the cast setting") {
 	for (RSE::ShadowCastingSetting setting : SETTINGS) {
-		INFO("setting ", int(setting));
-		const uint32_t flags = RayScene::shadow_cast_flags(setting) | RayScene::MATERIAL_FLAG_SKIP;
-		CHECK_FALSE(stops(flags, true));
-		CHECK_FALSE(stops(flags, false));
+		for (const bool occluder : { false, true }) {
+			INFO("setting ", int(setting), " occluder ", occluder);
+			const uint32_t flags = RayScene::shadow_cast_flags(setting, occluder) | RayScene::MATERIAL_FLAG_SKIP;
+			CHECK_FALSE(stops(flags, true));
+			CHECK_FALSE(stops(flags, false));
+		}
+	}
+}
+
+TEST_CASE("[RayScene] The double sided caster bit goes only onto live cut-out slots") {
+	CHECK((RayScene::CANDIDATE_FLAGS & RayScene::MATERIAL_FLAG_SHADOW_TWO_SIDED) == 0);
+	const uint32_t double_sided = RayScene::shadow_cast_flags(RSE::SHADOW_CASTING_SETTING_DOUBLE_SIDED);
+	const uint32_t live_slots[] = {
+		1u << RayScene::MATERIAL_ALPHA_SHIFT,
+		5u << RayScene::MATERIAL_ALPHA_SHIFT,
+		RayScene::MATERIAL_FLAG_TWO_SIDED | RayScene::MATERIAL_ALPHA_MASK,
+	};
+	const uint32_t solid_slots[] = {
+		0,
+		RayScene::MATERIAL_FLAG_TWO_SIDED,
+		RayScene::MATERIAL_FLAG_BLEND,
+		RayScene::MATERIAL_FLAG_SHADOW_PASS,
+	};
+	for (const uint32_t slot : live_slots) {
+		INFO("live slot ", slot);
+		CHECK(RayScene::slot_cast_flags(slot, double_sided) == RayScene::MATERIAL_FLAG_SHADOW_TWO_SIDED);
+	}
+	for (const uint32_t slot : solid_slots) {
+		INFO("solid slot ", slot);
+		CHECK(RayScene::slot_cast_flags(slot, double_sided) == 0);
+	}
+	for (RSE::ShadowCastingSetting setting : SETTINGS) {
+		for (const bool occluder : { false, true }) {
+			INFO("setting ", int(setting), " occluder ", occluder);
+			const uint32_t flags = RayScene::shadow_cast_flags(setting, occluder);
+			const uint32_t rest = flags & ~uint32_t(RayScene::MATERIAL_FLAG_SHADOW_TWO_SIDED);
+			CHECK(((flags & RayScene::MATERIAL_FLAG_SHADOW_TWO_SIDED) != 0) == (setting == RSE::SHADOW_CASTING_SETTING_DOUBLE_SIDED));
+			for (const uint32_t slot : live_slots) {
+				CHECK(RayScene::slot_cast_flags(slot, flags) == flags);
+			}
+			for (const uint32_t slot : solid_slots) {
+				CHECK(RayScene::slot_cast_flags(slot, flags) == rest);
+			}
+			CHECK(stops(flags, true) == stops(rest, true));
+			CHECK(stops(flags, false) == stops(rest, false));
+		}
 	}
 }
 

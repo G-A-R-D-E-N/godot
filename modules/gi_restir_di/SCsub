@@ -1,0 +1,42 @@
+#!/usr/bin/env python
+from misc.utility.scons_hints import *
+
+import methods
+
+Import("env")
+Import("env_modules")
+
+env_gi_restir_di = env_modules.Clone()
+
+lab = env["gi_restir_di_lab"]
+lab_sources = ["direct_sampler_lab.cpp", "direct_sampler_lab_report.cpp"]
+shaders = ["di_resample", "di_sampler_test"] if lab else ["di_resample"]
+
+
+def lab_config_builder(target, source, env):
+    with methods.generated_wrapper(str(target[0])) as file:
+        if source[0].read():
+            file.write("#define DI_RESAMPLER_LAB\n")
+
+
+env_gi_restir_di.CommandNoCache("di_resampler_config.gen.h", env.Value(lab), env.Run(lab_config_builder))
+
+if "RD_GLSL" in env["BUILDERS"]:
+    for shader in shaders:
+        env_gi_restir_di.RD_GLSL("shaders/" + shader + ".glsl")
+        env_gi_restir_di.Depends(
+            "shaders/" + shader + ".glsl.gen.h",
+            [
+                "#servers/rendering/renderer_rd/shaders/environment/di_sampler_inc.glsl",
+                "#servers/rendering/renderer_rd/shaders/light_data_inc.glsl",
+                "#glsl_builders.py",
+            ],
+        )
+
+if lab:
+    env_gi_restir_di.add_source_files(env.modules_sources, "*.cpp")
+else:
+    env_gi_restir_di.add_source_files(
+        env.modules_sources,
+        [f for f in env_gi_restir_di.Glob("*.cpp") if f.name not in lab_sources and not f.name.endswith(".gen.cpp")],
+    )

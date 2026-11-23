@@ -65,6 +65,7 @@ public:
 	virtual void light_set_shadow_caster_mask(RID p_light, uint32_t p_caster_mask) = 0;
 	virtual uint32_t light_get_shadow_caster_mask(RID p_light) const = 0;
 	virtual void light_set_direct_shadow(RID p_light, bool p_owned, float p_movement, float p_size, float p_clearance, const TypedArray<RID> &p_shells, const PackedInt32Array &p_surfaces) = 0;
+	virtual void light_set_direct_mean_energy(RID p_light, float p_energy) = 0;
 	virtual void light_set_bake_mode(RID p_light, RSE::LightBakeMode p_bake_mode) = 0;
 	virtual void light_set_max_sdfgi_cascade(RID p_light, uint32_t p_cascade) = 0;
 	virtual void light_set_allow_contact_shadows(RID p_light, bool p_enable) = 0;
@@ -127,6 +128,7 @@ public:
 	virtual void reflection_probe_set_resolution(RID p_probe, int p_resolution) = 0;
 	virtual void reflection_probe_set_intensity(RID p_probe, float p_intensity) = 0;
 	virtual void reflection_probe_set_blend_distance(RID p_probe, float p_blend_distance) = 0;
+	virtual void reflection_probe_set_priority(RID p_probe, int p_priority) = 0;
 	virtual void reflection_probe_set_ambient_mode(RID p_probe, RSE::ReflectionProbeAmbientMode p_mode) = 0;
 	virtual void reflection_probe_set_ambient_color(RID p_probe, const Color &p_color) = 0;
 	virtual void reflection_probe_set_ambient_energy(RID p_probe, float p_energy) = 0;

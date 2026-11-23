@@ -13,12 +13,20 @@
 #define RAY_SCENE_MATERIAL_SHADOW_PASS 8u
 #define RAY_SCENE_MATERIAL_SHADOW_ONLY 16u
 #define RAY_SCENE_BLEND_TIE 1e-4
+#define RAY_SCENE_TIE_ULPS 4.0
+#define RAY_SCENE_FLOAT_EPSILON 1.1920929e-7
 #define RAY_SCENE_BAND_NODE 0x80000000u
 
-#define RAY_SCENE_SKIP_MASK(m_any, m_skip) (RAY_SCENE_MATERIAL_SKIP | ((m_any) ? RAY_SCENE_MATERIAL_SHADOW_PASS : RAY_SCENE_MATERIAL_SHADOW_ONLY) | (m_skip))
+#define RAY_SCENE_SKIP_MASK(m_shadow, m_skip) (RAY_SCENE_MATERIAL_SKIP | ((m_shadow) ? RAY_SCENE_MATERIAL_SHADOW_PASS : RAY_SCENE_MATERIAL_SHADOW_ONLY) | (m_skip))
 #define RAY_SCENE_CASTER_SKIPS(m_layer_mask, m_caster_mask) ((m_caster_mask) != RAY_SCENE_ALL_CASTERS && ((m_layer_mask) & (m_caster_mask)) == 0u)
-#define RAY_SCENE_TIE_REACH(m_t) ((m_t) * (1.0 + RAY_SCENE_BLEND_TIE))
-#define RAY_SCENE_TIE_LIMIT(m_limit, m_hit, m_blend) float m_limit = (m_hit).t; if ((m_hit).instance != RAY_SCENE_NO_HIT && (m_blend) != (m_hit).blend) { m_limit *= (m_blend) ? 1.0 + RAY_SCENE_BLEND_TIE : 1.0 - RAY_SCENE_BLEND_TIE; }
+#define RAY_SCENE_TIE_SCALE(m_origin) max(max(abs((m_origin).x), abs((m_origin).y)), abs((m_origin).z))
+#define RAY_SCENE_TIE_ABS(m_t, m_scale) (RAY_SCENE_TIE_ULPS * RAY_SCENE_FLOAT_EPSILON * max((m_scale), (m_t)))
+#define RAY_SCENE_TIE_REACH(m_t, m_scale) ((m_t) * (1.0 + RAY_SCENE_BLEND_TIE) + RAY_SCENE_TIE_ABS(m_t, m_scale))
+#define RAY_SCENE_TIE_LIMIT(m_limit, m_hit, m_blend, m_scale) \
+	float m_limit = (m_hit).t; \
+	if ((m_hit).instance != RAY_SCENE_NO_HIT && (m_blend) != (m_hit).blend) { \
+		m_limit = (m_blend) ? RAY_SCENE_TIE_REACH(m_limit, m_scale) : m_limit * (1.0 - RAY_SCENE_BLEND_TIE) - RAY_SCENE_TIE_ABS(m_limit, m_scale); \
+	}
 #define RAY_SCENE_COVERAGE_SEED(m_seed) ray_scene_hash((m_seed) ^ 0x6a09e667u)
 #define RAY_SCENE_COVERAGE_MISSES(m_seed, m_triangle, m_instance, m_coverage) (float(ray_scene_hash(ray_scene_hash((m_seed) + (m_triangle)) + (m_instance)) >> 8u) >= (m_coverage) * 16777216.0)
 
@@ -123,6 +131,42 @@ ray_scene;
 layout(set = RAY_SCENE_SET, binding = 7) uniform accelerationStructureEXT ray_scene_tlas;
 #endif
 
+#ifdef RAY_SCENE_ALPHA
+#define RAY_SCENE_ALPHA_SHIFT 8u
+#define RAY_SCENE_ALPHA_STATE_READY 2u
+#define RAY_SCENE_MATERIAL_SHADOW_TWO_SIDED 32u
+#define RAY_SCENE_ALPHA_CULL_MASK 3u
+#define RAY_SCENE_ALPHA_CULL_BACK 2u
+
+layout(set = RAY_SCENE_SET, binding = 9, std430) restrict readonly buffer RaySceneTriangleUvs {
+	uint data[];
+}
+ray_scene_triangle_uvs;
+
+layout(set = RAY_SCENE_SET, binding = 10) uniform sampler2DArray ray_scene_alpha_mean;
+
+struct RaySceneAlphaEntry {
+	uint layer;
+	uint state;
+	vec2 scale;
+	vec2 offset;
+	uint bits;
+	float far_gain;
+	float far_level;
+	float far_veil_alpha;
+	vec2 far_affine;
+	float density;
+	uint far_state;
+};
+
+layout(set = RAY_SCENE_SET, binding = 13, std430) restrict readonly buffer RaySceneAlphaTable {
+	RaySceneAlphaEntry data[];
+}
+ray_scene_alpha_table;
+
+layout(set = RAY_SCENE_SET, binding = 14) uniform sampler2DArray ray_scene_alpha_layers;
+#endif
+
 struct RaySceneHit {
 	float t;
 	uint instance;
@@ -140,6 +184,92 @@ uint ray_scene_hash(uint p_value) {
 	return p_value;
 }
 
+#ifdef RAY_SCENE_REPLAY
+bool ray_scene_replay = false;
+
+#define RAY_SCENE_MIN_TARGET 5.421011e-20
+
+#define RAY_SCENE_LIGHT_KEY(m_index, m_id) (ray_scene_replay ? (m_id) : (m_index))
+#define RAY_SCENE_PICKS(m_stream, m_race) (ray_scene_replay ? (m_race) : (m_stream))
+
+float ray_scene_precise_divide(float p_a, float p_b) {
+	precise float quotient = p_a / p_b;
+	precise float residual = fma(-quotient, p_b, p_a);
+	precise float corrected = fma(residual, 1.0 / p_b, quotient);
+	return corrected;
+}
+
+float ray_scene_race_exponential(uint p_seed_hash, uint p_id) {
+	uint k = ray_scene_hash(p_seed_hash ^ ray_scene_hash(p_id)) >> 9u;
+	if (k < 4194304u) {
+		return -log((float(k) + 0.5) * exp2(-23.0));
+	}
+	precise float v = (8388607.5 - float(k)) * exp2(-23.0);
+	precise float t = v / (2.0 - v);
+	precise float t2 = t * t;
+	precise float series = 1.0 / 13.0;
+	series = fma(series, t2, 1.0 / 11.0);
+	series = fma(series, t2, 1.0 / 9.0);
+	series = fma(series, t2, 1.0 / 7.0);
+	series = fma(series, t2, 1.0 / 5.0);
+	series = fma(series, t2, 1.0 / 3.0);
+	series = fma(series, t2, 1.0);
+	return 2.0 * t * series;
+}
+
+bool ray_scene_race_step(inout float r_key, inout uint r_id, uint p_seed_hash, uint p_id, float p_weight) {
+	float key = ray_scene_precise_divide(ray_scene_race_exponential(p_seed_hash, p_id), p_weight);
+	if (key < r_key || (key == r_key && p_id < r_id)) {
+		r_key = key;
+		r_id = p_id;
+		return true;
+	}
+	return false;
+}
+#else
+#define RAY_SCENE_LIGHT_KEY(m_index, m_id) (m_index)
+#define RAY_SCENE_PICKS(m_stream, m_race) (m_stream)
+#endif
+
+#ifdef RAY_SCENE_ALPHA
+bool ray_scene_alpha_culled(uint p_bits, uint p_flags, bool p_backface, bool p_shadow) {
+	uint cull = p_bits & RAY_SCENE_ALPHA_CULL_MASK;
+	if (cull == 0u || (p_shadow && (p_flags & RAY_SCENE_MATERIAL_SHADOW_TWO_SIDED) != 0u)) {
+		return false;
+	}
+	bool seen_back = p_backface != p_shadow;
+	return cull == RAY_SCENE_ALPHA_CULL_BACK ? seen_back : !seen_back;
+}
+
+bool ray_scene_alpha_covered(RaySceneAlphaEntry p_entry, uint p_triangle, uint p_instance, vec2 p_bary, uint p_seed) {
+	uint base = p_triangle * 4u;
+	float w0 = 1.0 - p_bary.x - p_bary.y;
+	vec2 uv = unpackHalf2x16(ray_scene_triangle_uvs.data[base]) * w0 + unpackHalf2x16(ray_scene_triangle_uvs.data[base + 1u]) * p_bary.x + unpackHalf2x16(ray_scene_triangle_uvs.data[base + 2u]) * p_bary.y;
+	uv = uv * p_entry.scale + p_entry.offset;
+	float coverage = textureLod(ray_scene_alpha_layers, vec3(uv, float(p_entry.layer)), 0.0).r;
+#ifdef RAY_SCENE_ALPHA_THRESHOLD
+	return coverage >= 0.5;
+#else
+	return coverage > float(ray_scene_hash(ray_scene_hash(p_seed ^ (p_triangle * 0x9e3779b9u)) + p_instance) >> 8u) / 16777216.0;
+#endif
+}
+
+bool ray_scene_alpha_passes(uint p_flags, uint p_triangle, uint p_instance, vec2 p_bary, uint p_seed, bool p_backface, bool p_shadow) {
+	uint index = p_flags >> RAY_SCENE_ALPHA_SHIFT;
+	if (index == 0u) {
+		return true;
+	}
+	RaySceneAlphaEntry entry = ray_scene_alpha_table.data[index];
+	if (entry.state != RAY_SCENE_ALPHA_STATE_READY) {
+		return true;
+	}
+	if (ray_scene_alpha_culled(entry.bits, p_flags, p_backface, p_shadow)) {
+		return false;
+	}
+	return ray_scene_alpha_covered(entry, p_triangle, p_instance, p_bary, p_seed);
+}
+#endif
+
 vec3 ray_scene_safe_inverse(vec3 p_direction) {
 	vec3 safe = mix(vec3(1e-20), abs(p_direction), greaterThan(abs(p_direction), vec3(1e-20)));
 	return 1.0 / (safe * mix(vec3(-1.0), vec3(1.0), greaterThanEqual(p_direction, vec3(0.0))));
@@ -156,15 +286,15 @@ bool ray_scene_box(vec3 p_origin, vec3 p_inv_direction, vec3 p_min, vec3 p_max, 
 }
 
 #ifndef RAY_SCENE_HW
-void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, vec3 p_origin, vec3 p_direction, bool p_any, uint p_skip, uint p_seed, bool p_band, inout RaySceneHit r_hit) {
+void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, vec3 p_origin, vec3 p_direction, bool p_any, bool p_shadow, uint p_skip, uint p_seed, bool p_band, float p_tie_scale, float p_near_backface, inout RaySceneHit r_hit) {
 	vec3 inv_direction = ray_scene_safe_inverse(p_direction);
-	uint skip_mask = RAY_SCENE_SKIP_MASK(p_any, p_skip);
+	uint skip_mask = RAY_SCENE_SKIP_MASK(p_shadow, p_skip);
 	uint stack[RAY_SCENE_BLAS_STACK_SIZE];
 	uint sp = 0;
 
 	float t_near;
 	RaySceneNode node = ray_scene_blas_nodes.data[p_root];
-	if (!ray_scene_box(p_origin, inv_direction, node.bmin, node.bmax, RAY_SCENE_TIE_REACH(r_hit.t), t_near)) {
+	if (!ray_scene_box(p_origin, inv_direction, node.bmin, node.bmax, RAY_SCENE_TIE_REACH(r_hit.t, p_tie_scale), t_near)) {
 		return;
 	}
 	bool band = p_band || t_near > r_hit.t;
@@ -191,7 +321,7 @@ void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, 
 					continue;
 				}
 				float t = dot(triangle.e2.xyz, q) * inv_det;
-				if (t > 0.0 && t < RAY_SCENE_TIE_REACH(r_hit.t)) {
+				if (t > 0.0 && t < RAY_SCENE_TIE_REACH(r_hit.t, p_tie_scale)) {
 					uint material_index = p_material_offset + triangle.surface;
 #ifdef RAY_SCENE_EXCLUDE
 					if (exclude_count != 0u && ray_scene_excluded(material_index)) {
@@ -202,11 +332,19 @@ void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, 
 					if ((flags & skip_mask) != 0u) {
 						continue;
 					}
+					if (t < p_near_backface && det > 0.0 && (flags & (RAY_SCENE_MATERIAL_TWO_SIDED | RAY_SCENE_MATERIAL_BLEND)) == 0u) {
+						continue;
+					}
+#ifdef RAY_SCENE_ALPHA
+					if (!ray_scene_alpha_passes(flags, triangle_index, p_instance, vec2(u, v), p_seed, det > 0.0, p_shadow)) {
+						continue;
+					}
+#endif
 					bool blend = (flags & RAY_SCENE_MATERIAL_BLEND) != 0u;
 					if (band && !blend) {
 						continue;
 					}
-					RAY_SCENE_TIE_LIMIT(limit, r_hit, blend);
+					RAY_SCENE_TIE_LIMIT(limit, r_hit, blend, p_tie_scale);
 					if (t >= limit) {
 						continue;
 					}
@@ -229,7 +367,7 @@ void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, 
 			RaySceneNode b = ray_scene_blas_nodes.data[left + 1u];
 			float ta;
 			float tb;
-			float reach = RAY_SCENE_TIE_REACH(r_hit.t);
+			float reach = RAY_SCENE_TIE_REACH(r_hit.t, p_tie_scale);
 			bool hit_a = ray_scene_box(p_origin, inv_direction, a.bmin, a.bmax, reach, ta);
 			bool hit_b = ray_scene_box(p_origin, inv_direction, b.bmin, b.bmax, reach, tb);
 			bool band_a = band || ta > r_hit.t;
@@ -256,7 +394,7 @@ void ray_scene_trace_blas(uint p_root, uint p_material_offset, uint p_instance, 
 	}
 }
 
-bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, uint p_skip, uint p_caster_mask, uint p_seed, out RaySceneHit r_hit) {
+bool ray_scene_trace_masked_near(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, bool p_shadow, uint p_skip, uint p_caster_mask, uint p_seed, float p_near_backface, out RaySceneHit r_hit) {
 	r_hit.t = p_t_max;
 	r_hit.instance = RAY_SCENE_NO_HIT;
 	r_hit.triangle = 0u;
@@ -268,12 +406,13 @@ bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool
 
 	vec3 inv_direction = ray_scene_safe_inverse(p_direction);
 	uint seed = RAY_SCENE_COVERAGE_SEED(p_seed);
+	float tie_scale = RAY_SCENE_TIE_SCALE(p_origin);
 	uint stack[RAY_SCENE_TLAS_STACK_SIZE];
 	uint sp = 0;
 
 	float t_near;
 	RaySceneNode node = ray_scene_tlas_nodes.data[0u];
-	if (!ray_scene_box(p_origin, inv_direction, node.bmin, node.bmax, RAY_SCENE_TIE_REACH(r_hit.t), t_near)) {
+	if (!ray_scene_box(p_origin, inv_direction, node.bmin, node.bmax, RAY_SCENE_TIE_REACH(r_hit.t, tie_scale), t_near)) {
 		return false;
 	}
 	bool band = t_near > r_hit.t;
@@ -288,7 +427,7 @@ bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool
 				vec4 origin = vec4(p_origin, 1.0);
 				vec3 local_origin = vec3(dot(instance.world_to_object[0], origin), dot(instance.world_to_object[1], origin), dot(instance.world_to_object[2], origin));
 				vec3 local_direction = vec3(dot(instance.world_to_object[0].xyz, p_direction), dot(instance.world_to_object[1].xyz, p_direction), dot(instance.world_to_object[2].xyz, p_direction));
-				ray_scene_trace_blas(instance.blas_root, instance.material_offset, node.left_first + i, local_origin, local_direction, p_any, p_skip, seed, band, r_hit);
+				ray_scene_trace_blas(instance.blas_root, instance.material_offset, node.left_first + i, local_origin, local_direction, p_any, p_shadow, p_skip, seed, band, tie_scale, p_near_backface, r_hit);
 				if (p_any && r_hit.instance != RAY_SCENE_NO_HIT) {
 					return true;
 				}
@@ -299,7 +438,7 @@ bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool
 			RaySceneNode b = ray_scene_tlas_nodes.data[left + 1u];
 			float ta;
 			float tb;
-			float reach = RAY_SCENE_TIE_REACH(r_hit.t);
+			float reach = RAY_SCENE_TIE_REACH(r_hit.t, tie_scale);
 			bool hit_a = ray_scene_box(p_origin, inv_direction, a.bmin, a.bmax, reach, ta);
 			bool hit_b = ray_scene_box(p_origin, inv_direction, b.bmin, b.bmax, reach, tb);
 			bool band_a = band || ta > r_hit.t;
@@ -330,12 +469,16 @@ bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool
 #include "ray_scene_hw_inc.glsl"
 #endif
 
-bool ray_scene_trace(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, uint p_seed, out RaySceneHit r_hit) {
-	return ray_scene_trace_masked(p_origin, p_direction, p_t_max, p_any, 0u, RAY_SCENE_ALL_CASTERS, p_seed, r_hit);
+bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, bool p_shadow, uint p_skip, uint p_caster_mask, uint p_seed, out RaySceneHit r_hit) {
+	return ray_scene_trace_masked_near(p_origin, p_direction, p_t_max, p_any, p_shadow, p_skip, p_caster_mask, p_seed, 0.0, r_hit);
+}
+
+bool ray_scene_trace(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, bool p_shadow, uint p_seed, out RaySceneHit r_hit) {
+	return ray_scene_trace_masked(p_origin, p_direction, p_t_max, p_any, p_shadow, 0u, RAY_SCENE_ALL_CASTERS, p_seed, r_hit);
 }
 
 bool ray_scene_trace_opaque(vec3 p_origin, vec3 p_direction, float p_t_max, uint p_seed, out RaySceneHit r_hit) {
-	return ray_scene_trace_masked(p_origin, p_direction, p_t_max, false, RAY_SCENE_MATERIAL_BLEND, RAY_SCENE_ALL_CASTERS, p_seed, r_hit);
+	return ray_scene_trace_masked(p_origin, p_direction, p_t_max, false, false, RAY_SCENE_MATERIAL_BLEND, RAY_SCENE_ALL_CASTERS, p_seed, r_hit);
 }
 
 vec3 ray_scene_hit_normal(RaySceneHit p_hit) {
@@ -362,7 +505,7 @@ float ray_scene_omni_attenuation(float p_distance, float p_inv_range, float p_de
 
 bool ray_scene_unshadowed(vec3 p_position, vec3 p_normal, float p_bias, vec3 p_to_light, float p_distance, uint p_caster_mask, uint p_seed) {
 	RaySceneHit shadow;
-	return !ray_scene_trace_masked(p_position + p_normal * p_bias, p_to_light, max(p_distance - p_bias, 0.0), true, 0u, p_caster_mask, p_seed, shadow);
+	return !ray_scene_trace_masked_near(p_position + p_normal * p_bias, p_to_light, max(p_distance - p_bias, 0.0), true, true, 0u, p_caster_mask, p_seed, 0.25 * p_bias, shadow);
 }
 
 vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float p_max_distance, uint p_seed) {
@@ -378,6 +521,12 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 	uint exact_mask[RAY_SCENE_EXACT_LIGHTS];
 	uint chosen_mask = RAY_SCENE_ALL_CASTERS;
 	uint local_count = 0u;
+#ifdef RAY_SCENE_REPLAY
+	uint exact_id[RAY_SCENE_EXACT_LIGHTS];
+	uint race_seed = ray_scene_hash(p_seed);
+	float race_key = uintBitsToFloat(0x7f800000u);
+	uint race_id = 0xFFFFFFFFu;
+#endif
 	for (uint i = 0u; i < ray_scene.light_count; i++) {
 		RaySceneLight light = ray_scene_lights.data[i];
 		vec3 to_light;
@@ -390,7 +539,7 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 			if (dot(light.direction, offset) <= 0.0) {
 				continue;
 			}
-			uint rect_seed = ray_scene_hash(p_seed + 0x68bc21ebu) ^ (i * 0x9e3779b9u);
+			uint rect_seed = ray_scene_hash(p_seed + 0x68bc21ebu) ^ (RAY_SCENE_LIGHT_KEY(i, light.pad) * 0x9e3779b9u);
 			vec2 rect_uv = vec2(float(ray_scene_hash(rect_seed) >> 8u), float(ray_scene_hash(rect_seed ^ 0x2f8f3d5bu) >> 8u)) * (2.0 / 16777216.0) - 1.0;
 			vec3 relative = light.position + light.half_a * rect_uv.x + light.half_b * rect_uv.y - p_position;
 			distance = length(relative);
@@ -417,7 +566,7 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 		}
 		vec3 light_value = light.color * (light.energy * attenuation * n_dot_l / 3.14159265359);
 		if (light.type == RAY_SCENE_LIGHT_DIRECTIONAL) {
-			if (ray_scene_unshadowed(p_position, p_normal, p_bias, to_light, distance, light.caster_mask, (p_seed + i * 0x632be5abu) ^ 0x85ebca6bu)) {
+			if (ray_scene_unshadowed(p_position, p_normal, p_bias, to_light, distance, light.caster_mask, (p_seed + RAY_SCENE_LIGHT_KEY(i, light.pad) * 0x632be5abu) ^ 0x85ebca6bu)) {
 				light_sum += light_value;
 			}
 			continue;
@@ -426,15 +575,23 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 		if (weight <= 0.0) {
 			continue;
 		}
+#ifdef RAY_SCENE_REPLAY
+		if (ray_scene_replay && !(weight >= RAY_SCENE_MIN_TARGET && !isinf(weight))) {
+			continue;
+		}
+#endif
 		total_weight += weight;
 		if (local_count < RAY_SCENE_EXACT_LIGHTS) {
 			exact_light[local_count] = light_value;
 			exact_direction[local_count] = to_light;
 			exact_distance[local_count] = distance;
 			exact_mask[local_count] = light.caster_mask;
+#ifdef RAY_SCENE_REPLAY
+			exact_id[local_count] = light.pad;
+#endif
 		}
 		local_count++;
-		if (float(ray_scene_hash(p_seed ^ (i * 0x9e3779b9u)) >> 8u) * total_weight < weight * 16777216.0) {
+		if (RAY_SCENE_PICKS(float(ray_scene_hash(p_seed ^ (i * 0x9e3779b9u)) >> 8u) * total_weight < weight * 16777216.0, ray_scene_race_step(race_key, race_id, race_seed, light.pad, weight))) {
 			chosen_light = light_value;
 			chosen_direction = to_light;
 			chosen_distance = distance;
@@ -444,7 +601,7 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 	}
 	if (local_count <= RAY_SCENE_EXACT_LIGHTS) {
 		for (uint i = 0u; i < local_count; i++) {
-			if (ray_scene_unshadowed(p_position, p_normal, p_bias, exact_direction[i], exact_distance[i], exact_mask[i], p_seed + (i + 0x10000u) * 0x632be5abu)) {
+			if (ray_scene_unshadowed(p_position, p_normal, p_bias, exact_direction[i], exact_distance[i], exact_mask[i], p_seed + (RAY_SCENE_LIGHT_KEY(i, exact_id[i]) + 0x10000u) * 0x632be5abu)) {
 				light_sum += exact_light[i];
 			}
 		}
@@ -453,3 +610,5 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 	}
 	return light_sum;
 }
+
+#define gi_hit_direct_light ray_scene_direct_light

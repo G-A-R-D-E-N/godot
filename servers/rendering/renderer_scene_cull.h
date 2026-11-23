@@ -281,7 +281,8 @@ public:
 			FLAG_GEOM_PROJECTOR_SOFTSHADOW_DIRTY = (1 << 23),
 			FLAG_IGNORE_ALL_CULLING = (1 << 24),
 			FLAG_RAY_SCENE_ONLY = (1 << 25),
-			FLAG_NO_RASTER_SHADOW = (1 << 26),
+			FLAG_RAY_SCENE_EXCLUDE = (1 << 26),
+			FLAG_NO_RASTER_SHADOW = (1 << 27),
 		};
 
 		static constexpr bool draws_in_camera(uint32_t p_flags) {
@@ -438,6 +439,8 @@ public:
 
 		bool ignore_occlusion_culling;
 		bool ray_scene_only = false;
+		bool ray_scene_occluder = false;
+		bool ray_scene_exclude = false;
 		bool no_raster_shadow = false;
 		bool ignore_all_culling;
 
@@ -1158,6 +1161,7 @@ public:
 		} sdfgi;
 
 		AABB ray_scene_region;
+		AABB ray_scene_light_region;
 
 		SpinLock lock;
 
@@ -1328,6 +1332,7 @@ public:
 
 	PASS4(environment_set_aerial_perspective, RID, bool, RID, float)
 	PASS9(environment_set_night_vision, RID, bool, float, float, float, const Vector2 &, float, float, float)
+	PASS8(environment_set_local_exposure, RID, bool, float, float, float, float, float, float)
 
 	// Volumentric Fog
 	PASS14(environment_set_volumetric_fog, RID, bool, float, const Color &, const Color &, float, float, float, float, float, bool, float, float, float)
