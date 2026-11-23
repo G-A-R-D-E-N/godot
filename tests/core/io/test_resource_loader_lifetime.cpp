@@ -111,6 +111,7 @@ public:
 	Semaphore entered;
 	Semaphore release;
 	WorkerThreadPool::TaskID task_id = WorkerThreadPool::INVALID_TASK_ID;
+	WorkerThreadPool::TaskID parent_task_id = WorkerThreadPool::INVALID_TASK_ID;
 
 	void release_worker() {
 		release.post();
@@ -155,7 +156,6 @@ public:
 class NestedLoader : public GatedLoader {
 public:
 	Ref<ResourceLoader::LoadToken> child_token;
-	WorkerThreadPool::TaskID parent_task_id = WorkerThreadPool::INVALID_TASK_ID;
 	String child_path = "user://child.loader_lifetime";
 	bool parent_started = false;
 	bool changed = false;
@@ -210,7 +210,6 @@ class AwaitingLoader : public GatedLoader {
 public:
 	Ref<ResourceLoader::LoadToken> child_token;
 	Ref<Resource> child_resource;
-	WorkerThreadPool::TaskID parent_task_id = WorkerThreadPool::INVALID_TASK_ID;
 	bool changed = false;
 
 	void on_resource_changed() {
@@ -273,15 +272,8 @@ static bool all_gated_tasks_completed(GatedLoader *p_loader, WorkerThreadPool *p
 	if (p_loader->task_id != WorkerThreadPool::INVALID_TASK_ID && !p_pool->is_task_completed(p_loader->task_id)) {
 		return false;
 	}
-	if (NestedLoader *nested = Object::cast_to<NestedLoader>(p_loader)) {
-		if (nested->parent_task_id != WorkerThreadPool::INVALID_TASK_ID && !p_pool->is_task_completed(nested->parent_task_id)) {
-			return false;
-		}
-	}
-	if (AwaitingLoader *awaiting = Object::cast_to<AwaitingLoader>(p_loader)) {
-		if (awaiting->parent_task_id != WorkerThreadPool::INVALID_TASK_ID && !p_pool->is_task_completed(awaiting->parent_task_id)) {
-			return false;
-		}
+	if (p_loader->parent_task_id != WorkerThreadPool::INVALID_TASK_ID && !p_pool->is_task_completed(p_loader->parent_task_id)) {
+		return false;
 	}
 	return true;
 }
@@ -297,7 +289,6 @@ static void stop_loader_test(GatedLoader *p_loader) {
 		OS::get_singleton()->delay_usec(100);
 	}
 	if (!all_gated_tasks_completed(p_loader, pool)) {
-		ERR_PRINT("ResourceLoader lifetime test: loader worker still running; aborting the test run.");
 		CRASH_NOW_MSG("ResourceLoader lifetime test left a loader worker running after timeout.");
 	}
 	ResourceLoader::remove_resource_format_loader(p_loader);
