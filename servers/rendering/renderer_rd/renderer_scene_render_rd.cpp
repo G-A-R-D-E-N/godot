@@ -35,6 +35,7 @@
 #include "core/io/image.h"
 #include "core/object/callable_mp.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
+#include "servers/rendering/renderer_rd/environment/gi_epochs.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/framebuffer_cache_rd.h"
 #include "servers/rendering/renderer_rd/shaders/decal_data_inc.glsl.gen.h"
@@ -45,6 +46,7 @@
 #include "servers/rendering/rendering_server_default.h"
 #include "servers/rendering/rendering_server_enums.h"
 #include "servers/rendering/shader_include_db.h"
+#include "servers/rendering/storage/auto_exposure_guard.h"
 #include "servers/rendering/storage/camera_attributes_storage.h"
 
 void get_vogel_disk(float *r_kernel, int p_sample_count) {
@@ -709,6 +711,8 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 		if (GLOBAL_GET_CACHED(bool, "rendering/environment/auto_exposure/clamp_adjust")) {
 			step = CLAMP(step, 0.0, 1.0);
 		}
+		const bool auto_exposure_hold = !set_immediate && RSG::camera_attributes->camera_attributes_get_auto_exposure_hold(p_render_data->camera_attributes);
+		const float auto_exposure_light_limit = AutoExposureGuard::light_factor(RSG::camera_attributes->camera_attributes_get_auto_exposure_light_adaptation_limit(p_render_data->camera_attributes), time_step, set_immediate);
 		float auto_exposure_min_sensitivity = RSG::camera_attributes->camera_attributes_get_auto_exposure_min_sensitivity(p_render_data->camera_attributes);
 		float auto_exposure_max_sensitivity = RSG::camera_attributes->camera_attributes_get_auto_exposure_max_sensitivity(p_render_data->camera_attributes);
 		const bool auto_exposure_log = GLOBAL_GET_CACHED(bool, "rendering/environment/auto_exposure/debug_log");
@@ -718,23 +722,36 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 		const float auto_exposure_adaptation = RSG::camera_attributes->camera_attributes_get_auto_exposure_adaptation(p_render_data->camera_attributes);
 		const float auto_exposure_adaptation_pivot = RSG::camera_attributes->camera_attributes_get_auto_exposure_adaptation_pivot(p_render_data->camera_attributes);
 		if (auto_exposure_histogram) {
+			RendererRD::Luminance::HistogramPolicy histogram_policy;
+			histogram_policy.highlight_percentile = RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_percentile(p_render_data->camera_attributes);
+			histogram_policy.highlight_ceiling = RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_ceiling(p_render_data->camera_attributes);
+			histogram_policy.highlight_max_shift = RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_max_shift(p_render_data->camera_attributes);
+			histogram_policy.exponential = RSG::camera_attributes->camera_attributes_get_auto_exposure_exponential_response(p_render_data->camera_attributes);
+			histogram_policy.light_limit = auto_exposure_light_limit;
+			histogram_policy.hold = auto_exposure_hold;
+			histogram_policy.highlight_rise = AutoExposureGuard::highlight_rate(RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_adaptation_time(p_render_data->camera_attributes), time_step, set_immediate);
+			histogram_policy.highlight_fall = AutoExposureGuard::highlight_rate(RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_release_time(p_render_data->camera_attributes), time_step, set_immediate);
+			if (histogram_policy.exponential) {
+				histogram_policy.light_adjust = MIN(MAX(1.0 - Math::exp(-time_step / MAX(RSG::camera_attributes->camera_attributes_get_auto_exposure_light_adaptation_time(p_render_data->camera_attributes), 0.001)), 0.0), 1.0);
+				histogram_policy.dark_adjust = MIN(MAX(1.0 - Math::exp(-time_step / MAX(RSG::camera_attributes->camera_attributes_get_auto_exposure_dark_adaptation_time(p_render_data->camera_attributes), 0.001)), 0.0), 1.0);
+			}
 			luminance->luminance_histogram_meter(rb->get_internal_texture(0), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate,
 					RSG::camera_attributes->camera_attributes_get_auto_exposure_clip_low(p_render_data->camera_attributes),
 					RSG::camera_attributes->camera_attributes_get_auto_exposure_clip_high(p_render_data->camera_attributes),
 					RSG::camera_attributes->camera_attributes_get_auto_exposure_center_weight(p_render_data->camera_attributes),
-					auto_exposure_adaptation, auto_exposure_adaptation_pivot);
+					auto_exposure_adaptation, auto_exposure_adaptation_pivot, histogram_policy);
 		} else {
 			if (auto_exposure_meter == RSE::AUTO_EXPOSURE_METER_LOG_HISTOGRAM) {
 				WARN_PRINT_ONCE("The log histogram auto-exposure meter needs the compute effects path; using the mean meter.");
 			}
-			luminance->luminance_reduction(rb->get_internal_texture(0), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate, RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_limit(p_render_data->camera_attributes), auto_exposure_adaptation, auto_exposure_adaptation_pivot);
+			luminance->luminance_reduction(rb->get_internal_texture(0), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate, RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_limit(p_render_data->camera_attributes), auto_exposure_adaptation, auto_exposure_adaptation_pivot, auto_exposure_light_limit, auto_exposure_hold);
 		}
 		if (auto_exposure_log) {
 			const float luminance_multiplier = rb->get_luminance_multiplier();
 			String head = vformat("AEX_LOG drawn %d size %dx%d step %s speed %s adjust_raw %s adjust_used %s immediate %d min_l %s max_l %s lum_mult %s scale %s",
 					Engine::get_singleton()->get_frames_drawn(), rb->get_internal_size().x, rb->get_internal_size().y, time_step, auto_exposure_speed, step_raw, step, set_immediate ? 1 : 0,
 					auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, luminance_multiplier, RSG::camera_attributes->camera_attributes_get_auto_exposure_scale(p_render_data->camera_attributes));
-			head += vformat(" meter %s adaptation %s pivot_l %s", auto_exposure_histogram ? "log_histogram" : "mean", auto_exposure_adaptation, auto_exposure_adaptation_pivot);
+			head += vformat(" meter %s adaptation %s pivot_l %s light_limit %s hold %d", auto_exposure_histogram ? "log_histogram" : "mean", auto_exposure_adaptation, auto_exposure_adaptation_pivot, auto_exposure_light_limit, auto_exposure_hold ? 1 : 0);
 			if (auto_exposure_log_hdr) {
 				const AutoExposureHdrScan scan = auto_exposure_scan_hdr(rb->get_internal_texture(), rb->get_base_data_format(), rb->get_internal_size());
 				if (scan.valid) {
@@ -855,6 +872,32 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 		}
 	}
 
+	Ref<RendererRD::LocalExposure::Buffers> local_exposure_buffers;
+	RID local_exposure_grid;
+	RendererEnvironmentStorage::LocalExposure local_exposure_settings;
+	bool local_exposure_frame_median = false;
+	if (local_exposure && can_use_effects && can_use_storage && rb->get_view_count() == 1 && p_render_data->environment.is_valid()) {
+		local_exposure_settings = environment_get_local_exposure(p_render_data->environment);
+		if (local_exposure_settings.enabled && local_exposure_settings.strength > 0.0) {
+			RENDER_TIMESTAMP("Local Exposure");
+			RD::get_singleton()->draw_command_begin_label("Local Exposure");
+
+			local_exposure_buffers = local_exposure->get_buffers(rb);
+			RendererRD::LocalExposure::Settings local_exposure_quality;
+			local_exposure_quality.spatial_sigma = GLOBAL_GET_CACHED(float, "rendering/environment/local_exposure/spatial_sigma");
+			local_exposure_quality.range_sigma = GLOBAL_GET_CACHED(float, "rendering/environment/local_exposure/range_sigma");
+			const float local_exposure_seconds = GLOBAL_GET_CACHED(float, "rendering/environment/local_exposure/temporal_seconds");
+			local_exposure_quality.temporal_alpha = local_exposure_seconds > 0.0 ? MIN(MAX(1.0 - Math::exp(-time_step / local_exposure_seconds), 0.0), 1.0) : 1.0;
+			local_exposure_quality.reset_history = rb->get_history_reset();
+			local_exposure_quality.frame = RSG::rasterizer->get_frame_number();
+			local_exposure_frame_median = GLOBAL_GET_CACHED(uint32_t, "rendering/environment/local_exposure/pivot_source") == 1;
+			local_exposure_quality.frame_median = local_exposure_frame_median;
+			local_exposure_grid = local_exposure->process(rb->get_internal_texture(), rb->get_internal_size(), local_exposure_buffers, local_exposure_quality);
+
+			RD::get_singleton()->draw_command_end_label();
+		}
+	}
+
 	{
 		RENDER_TIMESTAMP("Tonemap");
 		RD::get_singleton()->draw_command_begin_label("Tonemap");
@@ -929,7 +972,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 			tonemap.exposure = environment_get_exposure(p_render_data->environment);
 			tonemap.max_value = max_value;
 		}
-		if (debug_draw >= RSE::VIEWPORT_DEBUG_DRAW_PERSISTENT_AO && debug_draw <= RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE) {
+		if ((debug_draw >= RSE::VIEWPORT_DEBUG_DRAW_PERSISTENT_AO && debug_draw <= RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE) || debug_draw == RSE::VIEWPORT_DEBUG_DRAW_REFLECTION_PROVIDER_WEIGHTS || debug_draw == RSE::VIEWPORT_DEBUG_DRAW_SPECULAR_OCCLUSION) {
 			tonemap.tonemap_mode = RSE::ENV_TONE_MAPPER_LINEAR;
 			tonemap.agx_late_shoulder = false;
 			tonemap.exposure = 1.0;
@@ -957,6 +1000,17 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 		tonemap.view_count = rb->get_view_count();
 		if (can_use_effects) {
 			_setup_night_vision(tonemap, p_render_data);
+		}
+		if (local_exposure_buffers.is_valid() && local_exposure_grid.is_valid()) {
+			tonemap.use_local_exposure = true;
+			tonemap.local_exposure = local_exposure_settings;
+			tonemap.local_exposure_grid = local_exposure_grid;
+			tonemap.local_exposure_wide = local_exposure_buffers->wide;
+			tonemap.local_exposure_pivot_source = local_exposure_frame_median ? 1 : 0;
+			tonemap.local_exposure_median = local_exposure_frame_median ? local_exposure_buffers->median : RID();
+			tonemap.local_exposure_method = MIN(GLOBAL_GET_CACHED(uint32_t, "rendering/environment/local_exposure/method"), 1u);
+			tonemap.local_exposure_wide_blend = CLAMP(GLOBAL_GET_CACHED(float, "rendering/environment/local_exposure/wide_blend"), 0.0f, 1.0f);
+			tonemap.local_exposure_edge_range = CLAMP(GLOBAL_GET_CACHED(float, "rendering/environment/local_exposure/edge_range"), 0.1f, 6.0f);
 		}
 
 		RID dest_fb;
@@ -1226,6 +1280,8 @@ bool RendererSceneRenderRD::_debug_draw_can_use_effects(RSE::ViewportDebugDraw p
 		case RSE::VIEWPORT_DEBUG_DRAW_PERSISTENT_AO:
 		case RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_SPECULAR:
 		case RSE::VIEWPORT_DEBUG_DRAW_FALLBACK_SOURCE_DIFFUSE:
+		case RSE::VIEWPORT_DEBUG_DRAW_REFLECTION_PROVIDER_WEIGHTS:
+		case RSE::VIEWPORT_DEBUG_DRAW_SPECULAR_OCCLUSION:
 			can_use_effects = false;
 			break;
 		// Modes that draws information over part of the viewport needs camera effects because we see partially the normal draw mode.
@@ -1590,13 +1646,21 @@ void RendererSceneRenderRD::_post_prepass_render(RenderDataRD *p_render_data, bo
 }
 
 AABB RendererSceneRenderRD::ray_scene_get_region(const Vector3 &p_camera_position) const {
-	if (!RendererRD::RayScene::get_singleton() || !RendererRD::DDGI::is_enabled()) {
+	if (!RendererRD::RayScene::get_singleton() || !RendererRD::RayScene::is_needed()) {
 		return AABB();
 	}
 	const RendererRD::DDGI::Settings settings = RendererRD::DDGI::get_project_settings();
 	const real_t spacing = settings.spacing * real_t(1 << (settings.level_count - 1));
 	const Vector3 half = (Vector3(settings.dims) * 0.5 + Vector3(2, 2, 2)) * spacing;
 	return AABB(p_camera_position - half, half * 2.0);
+}
+
+AABB RendererSceneRenderRD::ray_scene_get_light_region(const Vector3 &p_camera_position) {
+	const AABB region = ray_scene_get_region(p_camera_position);
+	if (!region.has_volume() || GLOBAL_GET_CACHED(int, "rendering/global_illumination/ray_scene/light_pick_mode") != RendererRD::RayScene::LIGHT_PICK_STABLE) {
+		return region;
+	}
+	return RendererRD::RayScene::get_singleton()->get_light_region(p_camera_position, region.size * 0.5);
 }
 
 void RendererSceneRenderRD::ray_scene_update(const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const Vector<RID> &p_directional_lights, RID p_camera_attributes, const Vector3 &p_camera_position) {
@@ -1671,8 +1735,12 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 			scene_data.directional_shadow_pixel_size.y = 1.0 / directional_shadow_size;
 		}
 
+		const RID sky_rid = p_environment.is_valid() ? environment_get_sky(p_environment) : RID();
+		if (p_reflection_probe.is_null() && rb->update_gi_sky(sky_rid)) {
+			RendererRD::GIEpochs::get_singleton()->bump(RendererRD::GIEpochs::SOURCE_SKY);
+		}
+
 		if (p_environment.is_valid()) {
-			RID sky_rid = environment_get_sky(p_environment);
 			if (sky_rid.is_valid()) {
 				int radiance_size = sky.sky_get_radiance_size(sky_rid);
 				scene_data.radiance_pixel_size = 1.0f / radiance_size;
@@ -1812,6 +1880,7 @@ void RendererSceneRenderRD::set_debug_draw_mode(RSE::ViewportDebugDraw p_debug_d
 }
 
 void RendererSceneRenderRD::update() {
+	RendererRD::RayScene::watch_needed();
 	sky.publish_completed_cycles();
 	sky.update_dirty_skys();
 }
@@ -2130,6 +2199,9 @@ void RendererSceneRenderRD::init() {
 	copy_effects = memnew(RendererRD::CopyEffects(raster_effects));
 	debug_effects = memnew(RendererRD::DebugEffects);
 	luminance = memnew(RendererRD::Luminance(!can_use_storage));
+	if (can_use_storage) {
+		local_exposure = memnew(RendererRD::LocalExposure);
+	}
 	smaa = memnew(RendererRD::SMAA);
 	tone_mapper = memnew(RendererRD::ToneMapper(!can_use_storage));
 	if (can_use_vrs) {
@@ -2151,6 +2223,9 @@ RendererSceneRenderRD::~RendererSceneRenderRD() {
 	memdelete(copy_effects);
 	memdelete(debug_effects);
 	memdelete(luminance);
+	if (local_exposure) {
+		memdelete(local_exposure);
+	}
 	memdelete(smaa);
 	memdelete(tone_mapper);
 	memdelete(vrs);

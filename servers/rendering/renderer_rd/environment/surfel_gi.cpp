@@ -32,6 +32,7 @@
 
 #include "core/config/project_settings.h"
 #include "core/math/math_funcs_binary.h"
+#include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_scene_buffers_rd.h"
 #include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
@@ -164,9 +165,12 @@ void SurfelGI::update(const Ref<RenderSceneBuffersRD> &p_render_buffers, const V
 	}
 
 	const Settings settings = get_project_settings();
-	if (volume.is_null() || volume->ubo.is_null() || !volume->settings.same_storage(settings)) {
+	RayScene *ray_scene = RayScene::get_singleton();
+	const uint32_t alpha_generation = ray_scene ? ray_scene->get_alpha_generation() : 0;
+	if (volume.is_null() || volume->ubo.is_null() || !volume->settings.same_storage(settings) || (ray_scene && volume->alpha_generation != alpha_generation)) {
 		volume.instantiate();
 		volume->allocate(settings);
+		volume->alpha_generation = alpha_generation;
 		p_render_buffers->set_custom_data(RB_SCOPE_SURFELS, volume);
 	}
 	volume->settings = settings;

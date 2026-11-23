@@ -284,6 +284,7 @@ public:
 			FLAG_GEOM_PROJECTOR_SOFTSHADOW_DIRTY = (1 << 23),
 			FLAG_IGNORE_ALL_CULLING = (1 << 24),
 			FLAG_RAY_SCENE_ONLY = (1 << 25),
+			FLAG_RAY_SCENE_EXCLUDE = (1 << 26),
 		};
 
 		uint32_t flags = 0;
@@ -424,6 +425,8 @@ public:
 
 		bool ignore_occlusion_culling;
 		bool ray_scene_only = false;
+		bool ray_scene_occluder = false;
+		bool ray_scene_exclude = false;
 		bool ignore_all_culling;
 
 		Vector<RID> materials;
@@ -1090,6 +1093,7 @@ public:
 	virtual void instance_geometry_get_shader_parameter_list(RID p_instance, List<PropertyInfo> *p_parameters) const;
 	virtual Variant instance_geometry_get_shader_parameter(RID p_instance, const StringName &p_parameter) const;
 	virtual Variant instance_geometry_get_shader_parameter_default_value(RID p_instance, const StringName &p_parameter) const;
+	virtual RenderGeometryInstance *instance_get_geometry_instance(RID p_instance) const;
 
 	virtual void mesh_generate_pipelines(RID p_mesh, bool p_background_compilation);
 	virtual uint32_t get_pipeline_compilations(RSE::PipelineSource p_source);
@@ -1142,6 +1146,7 @@ public:
 		} sdfgi;
 
 		AABB ray_scene_region;
+		AABB ray_scene_light_region;
 
 		SpinLock lock;
 
@@ -1312,6 +1317,7 @@ public:
 
 	PASS4(environment_set_aerial_perspective, RID, bool, RID, float)
 	PASS9(environment_set_night_vision, RID, bool, float, float, float, const Vector2 &, float, float, float)
+	PASS8(environment_set_local_exposure, RID, bool, float, float, float, float, float, float)
 
 	// Volumentric Fog
 	PASS14(environment_set_volumetric_fog, RID, bool, float, const Color &, const Color &, float, float, float, float, float, bool, float, float, float)

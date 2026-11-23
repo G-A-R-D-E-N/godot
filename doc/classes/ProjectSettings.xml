@@ -141,7 +141,7 @@
 			<return type="String" />
 			<param index="0" name="path" type="String" />
 			<description>
-				Returns the absolute, native OS path corresponding to the localized [param path] (starting with [code]res://[/code] or [code]user://[/code]). The returned path will vary depending on the operating system and user preferences. See [url=$DOCS_URL/tutorials/io/data_paths.html]File paths in Godot projects[/url] to see what those paths convert to. See also [method localize_path].
+				Returns the absolute, native OS path corresponding to the localised [param path] (starting with [code]res://[/code] or [code]user://[/code]). The returned path will vary depending on the operating system and user preferences. See [url=$DOCS_URL/tutorials/io/data_paths.html]File paths in Godot projects[/url] to see what those paths convert to. See also [method localize_path].
 				[b]Note:[/b] [method globalize_path] with [code]res://[/code] will not work in an exported project. Instead, prepend the executable's base directory to the path when running from an exported project:
 				[codeblock]
 				var path = ""
@@ -182,7 +182,7 @@
 			<return type="String" />
 			<param index="0" name="path" type="String" />
 			<description>
-				Returns the localized path (starting with [code]res://[/code]) corresponding to the absolute, native OS [param path]. See also [method globalize_path].
+				Returns the localised path (starting with [code]res://[/code]) corresponding to the absolute, native OS [param path]. See also [method globalize_path].
 			</description>
 		</method>
 		<method name="save">
@@ -288,7 +288,7 @@
 			The number of accessibility information updates per second.
 		</member>
 		<member name="animation/compatibility/default_parent_skeleton_in_mesh_instance_3d" type="bool" setter="" getter="" default="false">
-			If [code]true[/code], [member MeshInstance3D.skeleton] will point to the parent node ([code]..[/code]) by default, which was the behavior before Godot 4.6. It's recommended to keep this setting disabled unless the old behavior is needed for compatibility.
+			If [code]true[/code], [member MeshInstance3D.skeleton] will point to the parent node ([code]..[/code]) by default, which was the behaviour before Godot 4.6. It's recommended to keep this setting disabled unless the old behaviour is needed for compatibility.
 			[b]Note:[/b] If you disable this option in an existing project, it's strongly recommended to use the [code]Project &gt; Tools &gt; Upgrade Project Files...[/code] option to ensure existing scenes do not break.
 		</member>
 		<member name="animation/warnings/check_angle_interpolation_type_conflicting" type="bool" setter="" getter="" default="true">
@@ -319,7 +319,7 @@
 			Specifies how the splash image will be stretched. For the original size without stretching, set to disabled. See [enum RenderingServer.SplashStretchMode] constants for more information.
 		</member>
 		<member name="application/boot_splash/use_filter" type="bool" setter="" getter="" default="true">
-			If [code]true[/code], applies linear filtering when scaling the image (recommended for high-resolution artwork). If [code]false[/code], uses nearest-neighbor interpolation (recommended for pixel art).
+			If [code]true[/code], applies linear filtering when scaling the image (recommended for high-resolution artwork). If [code]false[/code], uses nearest-neighbour interpolation (recommended for pixel art).
 		</member>
 		<member name="application/config/auto_accept_quit" type="bool" setter="" getter="" default="true">
 			If [code]true[/code], the application automatically accepts quitting requests.
@@ -342,7 +342,7 @@
 			Icon set in [code].icns[/code] format used on macOS to set the game's icon. This is done automatically on start by calling [method DisplayServer.set_native_icon].
 		</member>
 		<member name="application/config/name" type="String" setter="" getter="" default="&quot;&quot;">
-			The project's name. It is used both by the Project Manager and by exporters. The project name can be translated by translating its value in localization files. The window title will be set to match the project name automatically on startup.
+			The project's name. It is used both by the Project Manager and by exporters. The project name can be translated by translating its value in localisation files. The window title will be set to match the project name automatically on startup.
 			[b]Note:[/b] Changing this value will also change the user data folder's path if [member application/config/use_custom_user_dir] is [code]false[/code]. After renaming the project, you will no longer be able to access existing data in [code]user://[/code] unless you rename the old folder to match the new project name. See [url=$DOCS_URL/tutorials/io/data_paths.html]Data paths[/url] in the documentation for more information.
 		</member>
 		<member name="application/config/name_localized" type="Dictionary" setter="" getter="" default="{}">
@@ -387,7 +387,7 @@
 		</member>
 		<member name="application/run/enable_alt_space_menu" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], allows the [kbd]Alt + Space[/kbd] keys to display the window menu. This menu allows the user to perform various window management operations such as moving, resizing, or minimizing the window.
-			[b]Note:[/b] When the menu is displayed, project execution will pause until the menu is [i]fully[/i] closed due to Windows behavior. Consider this when enabling this setting in a networked multiplayer game. The menu is only considered fully closed when an option is selected, when the user clicks outside, or when [kbd]Escape[/kbd] is pressed after bringing up the window menu [i]and[/i] another key is pressed afterwards.
+			[b]Note:[/b] When the menu is displayed, project execution will pause until the menu is [i]fully[/i] closed due to Windows behaviour. Consider this when enabling this setting in a networked multiplayer game. The menu is only considered fully closed when an option is selected, when the user clicks outside, or when [kbd]Escape[/kbd] is pressed after bringing up the window menu [i]and[/i] another key is pressed afterwards.
 			[b]Note:[/b] This setting is implemented only on Windows.
 		</member>
 		<member name="application/run/flush_stdout_on_print" type="bool" setter="" getter="" default="false">
@@ -431,7 +431,7 @@
 			[b]Note:[/b] This property is only read when the project starts. To change the rendering FPS cap at runtime, set [member Engine.max_fps] instead.
 		</member>
 		<member name="application/run/print_header" type="bool" setter="" getter="" default="true">
-			If [code]true[/code], the engine header is printed in the console on startup. This header describes the current version of the engine, as well as the renderer being used. This behavior can also be disabled on the command line with the [code]--no-header[/code] option.
+			If [code]true[/code], the engine header is printed in the console on startup. This header describes the current version of the engine, as well as the renderer being used. This behaviour can also be disabled on the command line with the [code]--no-header[/code] option.
 		</member>
 		<member name="application/run/use_game_mode" type="bool" setter="" getter="" default="true">
 			If [code]true[/code], the engine will request [url=https://github.com/FeralInteractive/gamemode]GameMode[/url] to be activated. This allows optimizing system performance during gameplay, e.g. by using a specific CPU governor or forcing a high GPU power state. The GameMode daemon needs to be installed and running on the system to work (typically available as [code]gamemode[/code] in Linux distribution repositories).
@@ -496,7 +496,7 @@
 			[b]Warning:[/b] Forcing [b]Stream[/b] on the Web platform may cause high audio latency and crackling, especially when exporting a multi-threaded game.
 		</member>
 		<member name="audio/general/ios/mix_with_others" type="bool" setter="" getter="" default="false">
-			Sets the [url=https://developer.apple.com/documentation/avfaudio/avaudiosession/categoryoptions/1616611-mixwithothers]mixWithOthers[/url] option for the AVAudioSession on iOS. This will override the mix behavior, if the category is set to [code]Play and Record[/code], [code]Playback[/code], or [code]Multi Route[/code].
+			Sets the [url=https://developer.apple.com/documentation/avfaudio/avaudiosession/categoryoptions/1616611-mixwithothers]mixWithOthers[/url] option for the AVAudioSession on iOS. This will override the mix behaviour, if the category is set to [code]Play and Record[/code], [code]Playback[/code], or [code]Multi Route[/code].
 			[code]Ambient[/code] always has this set per default.
 		</member>
 		<member name="audio/general/ios/session_category" type="int" setter="" getter="" default="0" keywords="ambient, play, record, solo">
@@ -987,7 +987,7 @@
 		</member>
 		<member name="display/window/frame_pacing/android/swappy_mode" type="int" setter="" getter="" default="2" keywords="pipeline">
 			Swappy mode to use. The options are:
-			- [code]pipeline_forced_on[/code]: Try to honor [member Engine.max_fps]. Pipelining is always on. This is the same behavior as a desktop PC.
+			- [code]pipeline_forced_on[/code]: Try to honor [member Engine.max_fps]. Pipelining is always on. This is the same behaviour as a desktop PC.
 			- [code]auto_fps_pipeline_forced_on[/code]: Calculate the max FPS automatically. The actual max FPS will be between [code]0[/code] and [member Engine.max_fps]. While this sounds convenient, beware that Swappy will often downgrade the max FPS until it finds a value that can be maintained. That means, if your game runs between 40fps and 60fps on a 60hz screen, after some time Swappy will downgrade the max FPS so that the game renders at a perfect 30fps.
 			- [code]auto_fps_auto_pipeline[/code]: Same as [code]auto_fps_pipeline_forced_on[/code], but if Swappy detects that rendering is very fast (for example it takes less than 8ms to render on a 60hz screen), Swappy will disable pipelining to minimize input latency. This is the default.
 			[b]Note:[/b] If [member Engine.max_fps] is [code]0[/code], the actual max FPS will be considered to be the screen's refresh rate (often 60hz, 90hz, or 120hz, depending on device model and OS settings).
@@ -1035,7 +1035,7 @@
 			Main window initial position (in virtual desktop coordinates), this setting is used only if [member display/window/size/initial_position_type] is set to "Absolute" ([code]0[/code]).
 			[b]Note:[/b] This setting only affects the exported project, or when the project is run from the command line. In the editor, the value of [member EditorSettings.run/window_placement/rect_custom_position] is used instead.
 		</member>
-		<member name="display/window/size/initial_position_type" type="int" setter="" getter="" default="1" keywords="absolute, center, screen">
+		<member name="display/window/size/initial_position_type" type="int" setter="" getter="" default="1" keywords="absolute, centre, screen">
 			Main window initial position.
 			[code]0[/code] - "Absolute", [member display/window/size/initial_position] is used to set window position.
 			[code]1[/code] - "Primary Screen Center".
@@ -1121,7 +1121,7 @@
 		</member>
 		<member name="display/window/vsync/vsync_mode" type="int" setter="" getter="" default="1" keywords="adaptive, mailbox">
 			Sets the V-Sync mode for the main game window. The editor's own V-Sync mode can be set using [member EditorSettings.interface/editor/display/vsync_mode].
-			See [enum DisplayServer.VSyncMode] for possible values and how they affect the behavior of your application.
+			See [enum DisplayServer.VSyncMode] for possible values and how they affect the behaviour of your application.
 			Depending on the platform and rendering method, the engine will fall back to [b]Enabled[/b] if the desired mode is not supported.
 			V-Sync can be disabled on the command line using the [code]--disable-vsync[/code] [url=$DOCS_URL/tutorials/editor/command_line_tutorial.html]command line argument[/url].
 			[b]Note:[/b] The [b]Adaptive[/b] and [b]Mailbox[/b] V-Sync modes are only supported in the Forward+ and Mobile rendering methods, not Compatibility.
@@ -1243,7 +1243,7 @@
 			Override for [member filesystem/import/fbx2gltf/enabled] on the Web where FBX2glTF can't easily be accessed from Godot.
 		</member>
 		<member name="gui/common/auto_focus_strategy" type="int" setter="" getter="" default="0">
-			Determines what strategy to use when inferring the top/left/right/bottom [Control] to focus if no neighbor is defined.
+			Determines what strategy to use when inferring the top/left/right/bottom [Control] to focus if no neighbour is defined.
 			- [b]Legacy[/b] is the old focus strategy up until Godot 4.8. It shouldn't be used for new projects, as the new default (Balloon) yields more intuitive results.
 			- [b]Balloon[/b] searches for both the closest and most aligned [Control] node in the input direction, akin to an expanding balloon which stops at the first node it finds.
 		</member>
@@ -1256,7 +1256,7 @@
 		<member name="gui/common/show_focus_state_on_pointer_event" type="int" setter="" getter="" default="1">
 			Determines whether a [Control] should visually indicate focus when that focus is gained using a mouse or touch input.
 			- [b]Never[/b] ([code]0[/code]) show the focused state for mouse/touch input.
-			- [b]Text Input Controls[/b] ([code]1[/code]) show the focused state even if that focus was gained via mouse/touch input (similar to browser behavior).
+			- [b]Text Input Controls[/b] ([code]1[/code]) show the focused state even if that focus was gained via mouse/touch input (similar to browser behaviour).
 			- [b]Always[/b] ([code]2[/code]) show the focused state, even if that focus was gained via mouse/touch input.
 		</member>
 		<member name="gui/common/snap_controls_to_pixels" type="bool" setter="" getter="" default="true">
@@ -1366,7 +1366,7 @@
 			[b]Note:[/b] Default [code]ui_*[/code] actions cannot be removed as they are necessary for the internal logic of several [Control]s. The events assigned to the action can however be modified.
 		</member>
 		<member name="input/ui_end" type="Dictionary" setter="" getter="">
-			Default [InputEventAction] to go to the end position of a [Control] (e.g. last item in an [ItemList] or a [Tree]), matching the behavior of [constant KEY_END] on typical desktop UI systems.
+			Default [InputEventAction] to go to the end position of a [Control] (e.g. last item in an [ItemList] or a [Tree]), matching the behaviour of [constant KEY_END] on typical desktop UI systems.
 			[b]Note:[/b] Default [code]ui_*[/code] actions cannot be removed as they are necessary for the internal logic of several [Control]s. The events assigned to the action can however be modified.
 		</member>
 		<member name="input/ui_filedialog_delete" type="Dictionary" setter="" getter="">
@@ -1401,11 +1401,11 @@
 			[b]Note:[/b] Default [code]ui_*[/code] actions cannot be removed as they are necessary for the internal logic of several [Control]s. The events assigned to the action can however be modified.
 		</member>
 		<member name="input/ui_focus_next" type="Dictionary" setter="" getter="">
-			Default [InputEventAction] to focus the next [Control] in the scene. The focus behavior can be configured via [member Control.focus_next].
+			Default [InputEventAction] to focus the next [Control] in the scene. The focus behaviour can be configured via [member Control.focus_next].
 			[b]Note:[/b] Default [code]ui_*[/code] actions cannot be removed as they are necessary for the internal logic of several [Control]s. The events assigned to the action can however be modified.
 		</member>
 		<member name="input/ui_focus_prev" type="Dictionary" setter="" getter="">
-			Default [InputEventAction] to focus the previous [Control] in the scene. The focus behavior can be configured via [member Control.focus_previous].
+			Default [InputEventAction] to focus the previous [Control] in the scene. The focus behaviour can be configured via [member Control.focus_previous].
 			[b]Note:[/b] Default [code]ui_*[/code] actions cannot be removed as they are necessary for the internal logic of several [Control]s. The events assigned to the action can however be modified.
 		</member>
 		<member name="input/ui_graph_delete" type="Dictionary" setter="" getter="">
@@ -1434,7 +1434,7 @@
 			macOS specific override for the shortcut to follow a [GraphNode] output port connection.
 		</member>
 		<member name="input/ui_home" type="Dictionary" setter="" getter="">
-			Default [InputEventAction] to go to the start position of a [Control] (e.g. first item in an [ItemList] or a [Tree]), matching the behavior of [constant KEY_HOME] on typical desktop UI systems.
+			Default [InputEventAction] to go to the start position of a [Control] (e.g. first item in an [ItemList] or a [Tree]), matching the behaviour of [constant KEY_HOME] on typical desktop UI systems.
 			[b]Note:[/b] Default [code]ui_*[/code] actions cannot be removed as they are necessary for the internal logic of several [Control]s. The events assigned to the action can however be modified.
 		</member>
 		<member name="input/ui_left" type="Dictionary" setter="" getter="">
@@ -1446,11 +1446,11 @@
 			[b]Note:[/b] Default [code]ui_*[/code] actions cannot be removed as they are necessary for the internal logic of several [Control]s. The events assigned to the action can however be modified.
 		</member>
 		<member name="input/ui_page_down" type="Dictionary" setter="" getter="">
-			Default [InputEventAction] to go down a page in a [Control] (e.g. in an [ItemList] or a [Tree]), matching the behavior of [constant KEY_PAGEDOWN] on typical desktop UI systems.
+			Default [InputEventAction] to go down a page in a [Control] (e.g. in an [ItemList] or a [Tree]), matching the behaviour of [constant KEY_PAGEDOWN] on typical desktop UI systems.
 			[b]Note:[/b] Default [code]ui_*[/code] actions cannot be removed as they are necessary for the internal logic of several [Control]s. The events assigned to the action can however be modified.
 		</member>
 		<member name="input/ui_page_up" type="Dictionary" setter="" getter="">
-			Default [InputEventAction] to go up a page in a [Control] (e.g. in an [ItemList] or a [Tree]), matching the behavior of [constant KEY_PAGEUP] on typical desktop UI systems.
+			Default [InputEventAction] to go up a page in a [Control] (e.g. in an [ItemList] or a [Tree]), matching the behaviour of [constant KEY_PAGEUP] on typical desktop UI systems.
 			[b]Note:[/b] Default [code]ui_*[/code] actions cannot be removed as they are necessary for the internal logic of several [Control]s. The events assigned to the action can however be modified.
 		</member>
 		<member name="input/ui_paste" type="Dictionary" setter="" getter="">
@@ -1697,7 +1697,7 @@
 		<member name="input_devices/compatibility/legacy_just_pressed_behavior" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], [method Input.is_action_just_pressed] and [method Input.is_action_just_released] will only return [code]true[/code] if the action is still in the respective state, i.e. an action that is pressed [i]and[/i] released on the same frame will be missed.
 			If [code]false[/code], no input will be lost.
-			[b]Note:[/b] You should in nearly all cases prefer the [code]false[/code] setting. The legacy behavior is to enable supporting old projects that rely on the old logic, without changes to script.
+			[b]Note:[/b] You should in nearly all cases prefer the [code]false[/code] setting. The legacy behaviour is to enable supporting old projects that rely on the old logic, without changes to script.
 		</member>
 		<member name="input_devices/joypads/ignore_joypad_on_unfocused_application" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], joypad input (including motion sensors) and LED light changes will be ignored and joypad vibration will be stopped when the application is not focused.
@@ -1771,16 +1771,16 @@
 		</member>
 		<member name="internationalization/locale/test" type="String" setter="" getter="" default="&quot;&quot;">
 			If non-empty, this locale will be used instead of the automatically detected system locale.
-			[b]Note:[/b] This setting also applies to the exported project. To only affect testing within the editor, override this setting with an [code]editor[/code] [url=$DOCS_URL/tutorials/export/feature_tags.html]feature tag[/url] for localization testing purposes.
+			[b]Note:[/b] This setting also applies to the exported project. To only affect testing within the editor, override this setting with an [code]editor[/code] [url=$DOCS_URL/tutorials/export/feature_tags.html]feature tag[/url] for localisation testing purposes.
 		</member>
 		<member name="internationalization/pseudolocalization/double_vowels" type="bool" setter="" getter="" default="false">
-			Double vowels in strings during pseudolocalization to simulate the lengthening of text due to localization.
+			Double vowels in strings during pseudolocalization to simulate the lengthening of text due to localisation.
 		</member>
 		<member name="internationalization/pseudolocalization/expansion_ratio" type="float" setter="" getter="" default="0.0">
 			The expansion ratio to use during pseudolocalization. A value of [code]0.3[/code] is sufficient for most practical purposes, and will increase the length of each string by 30%.
 		</member>
 		<member name="internationalization/pseudolocalization/fake_bidi" type="bool" setter="" getter="" default="false">
-			If [code]true[/code], emulate bidirectional (right-to-left) text when pseudolocalization is enabled. This can be used to spot issues with RTL layout and UI mirroring that will crop up if the project is localized to RTL languages such as Arabic or Hebrew. See also [member internationalization/rendering/force_right_to_left_layout_direction].
+			If [code]true[/code], emulate bidirectional (right-to-left) text when pseudolocalization is enabled. This can be used to spot issues with RTL layout and UI mirroring that will crop up if the project is localised to RTL languages such as Arabic or Hebrew. See also [member internationalization/rendering/force_right_to_left_layout_direction].
 		</member>
 		<member name="internationalization/pseudolocalization/override" type="bool" setter="" getter="" default="false">
 			Replace all characters in the string with [code]*[/code]. Useful for finding non-localizable strings.
@@ -1798,7 +1798,7 @@
 			Suffix that will be appended to the pseudolocalized string.
 		</member>
 		<member name="internationalization/pseudolocalization/use_pseudolocalization" type="bool" setter="" getter="" default="false">
-			If [code]true[/code], enables pseudolocalization for the project. This can be used to spot untranslatable strings or layout issues that may occur once the project is localized to languages that have longer strings than the source language.
+			If [code]true[/code], enables pseudolocalization for the project. This can be used to spot untranslatable strings or layout issues that may occur once the project is localised to languages that have longer strings than the source language.
 			[b]Note:[/b] This property is only read when the project starts. To toggle pseudolocalization at run-time, use [member TranslationServer.pseudolocalization_enabled] instead.
 		</member>
 		<member name="internationalization/rendering/force_right_to_left_layout_direction" type="bool" setter="" getter="" default="false">
@@ -2736,7 +2736,7 @@
 		</member>
 		<member name="physics/common/physics_ticks_per_second" type="int" setter="" getter="" default="60">
 			The number of fixed iterations per second. This controls how often physics simulation and the [method Node._physics_process] method are run.
-			CPU usage scales approximately with the physics tick rate. However, at very low tick rates (usually below 30), physics behavior can break down. Input can also become less responsive at low tick rates as there can be a gap between input being registered, and the response on the next physics tick. High tick rates give more accurate physics simulation, particularly for fast moving objects. For example, racing games may benefit from increasing the tick rate above the default 60.
+			CPU usage scales approximately with the physics tick rate. However, at very low tick rates (usually below 30), physics behaviour can break down. Input can also become less responsive at low tick rates as there can be a gap between input being registered, and the response on the next physics tick. High tick rates give more accurate physics simulation, particularly for fast moving objects. For example, racing games may benefit from increasing the tick rate above the default 60.
 			See also [member application/run/max_fps].
 			[b]Note:[/b] This property is only read when the project starts. To change the physics FPS at runtime, set [member Engine.physics_ticks_per_second] instead.
 			[b]Note:[/b] Only [member physics/common/max_physics_steps_per_frame] physics ticks may be simulated per rendered frame at most. If more physics ticks have to be simulated per rendered frame to keep up with rendering, the project will appear to slow down (even if [code]delta[/code] is used consistently in physics calculations). Therefore, it is recommended to also increase [member physics/common/max_physics_steps_per_frame] if increasing [member physics/common/physics_ticks_per_second] significantly above its default value.
@@ -2763,7 +2763,7 @@
 			This is mainly used as a fail-safe, to prevent the simulation from exploding, as fast-moving objects colliding with complex physics structures can otherwise cause them to go out of control. Fast-moving objects can also cause a lot of stress on the collision detection system, which can slow down the simulation considerably.
 		</member>
 		<member name="physics/jolt_physics_3d/limits/max_bodies" type="int" setter="" getter="" default="10240">
-			The maximum number of [PhysicsBody3D] to support at the same time, awake or sleeping. When this limit is exceeded, an error is reported and anything past that point is undefined behavior.
+			The maximum number of [PhysicsBody3D] to support at the same time, awake or sleeping. When this limit is exceeded, an error is reported and anything past that point is undefined behaviour.
 			[b]Note:[/b] This limit also applies within the editor.
 		</member>
 		<member name="physics/jolt_physics_3d/limits/max_body_pairs" type="int" setter="" getter="" default="65536">
@@ -2780,7 +2780,7 @@
 			The amount of memory to pre-allocate for the stack allocator used within Jolt, in MiB. This allocator is used within the physics step to store things that are only needed during it, like which bodies are in contact, how they form islands and the data needed to solve the contacts.
 		</member>
 		<member name="physics/jolt_physics_3d/limits/world_boundary_shape_size" type="float" setter="" getter="" default="2000.0">
-			The size of [WorldBoundaryShape3D] boundaries, for all three dimensions. The plane is effectively centered within a box of this size, and anything outside of the box will not collide with it. This is necessary as [WorldBoundaryShape3D] is not unbounded when using Jolt, in order to prevent precision issues.
+			The size of [WorldBoundaryShape3D] boundaries, for all three dimensions. The plane is effectively centred within a box of this size, and anything outside of the box will not collide with it. This is necessary as [WorldBoundaryShape3D] is not unbounded when using Jolt, in order to prevent precision issues.
 			[b]Note:[/b] Setting this value too high can make collision detection less accurate.
 			[b]Note:[/b] Collisions against the effective edges of a [WorldBoundaryShape3D] will be inconsistent.
 		</member>
@@ -2847,7 +2847,7 @@
 			The linear velocity of specific points on the bounding box of a [RigidBody3D], below which it can be put to sleep, in meters per second. These points help capture both the linear and angular motion of a [RigidBody3D].
 		</member>
 		<member name="physics/jolt_physics_3d/simulation/soft_body_point_radius" type="float" setter="" getter="" default="0.01">
-			How big the points of a [SoftBody3D] are, in meters. A higher value can prevent behavior such as cloth laying perfectly flush against other surfaces and causing Z-fighting.
+			How big the points of a [SoftBody3D] are, in meters. A higher value can prevent behaviour such as cloth laying perfectly flush against other surfaces and causing Z-fighting.
 		</member>
 		<member name="physics/jolt_physics_3d/simulation/speculative_contact_distance" type="float" setter="" getter="" default="0.02">
 			Radius around physics bodies, inside which speculative contact points will be detected, in meters. This is mainly used to prevent tunneling/penetration for [RigidBody3D] nodes during simulation.
@@ -2983,7 +2983,7 @@
 			[Environment] that will be used as a fallback environment in case a scene does not specify its own environment. The default environment is loaded in at scene load time regardless of whether you have set an environment or not. If you do not rely on the fallback environment, you do not need to set this property.
 		</member>
 		<member name="rendering/environment/fog/use_legacy_blending" type="bool" setter="" getter="" default="false">
-			Enables legacy fog blending behavior from version 4.5 and earlier. This is intended for users who are developing on pre-4.6 versions and want to upgrade to 4.6 with the smallest possible change to their visuals.
+			Enables legacy fog blending behaviour from version 4.5 and earlier. This is intended for users who are developing on pre-4.6 versions and want to upgrade to 4.6 with the smallest possible change to their visuals.
 		</member>
 		<member name="rendering/environment/glow/upscale_mode" type="int" setter="" getter="" default="1" keywords="bicubic">
 			Sets how the glow effect is upscaled before being copied onto the screen. Linear is faster, but looks blocky. Bicubic is slower but looks smooth.
@@ -3007,6 +3007,28 @@
 		<member name="rendering/environment/gtao/steps" type="int" setter="" getter="" default="3">
 			Number of depth samples per slice side used by GTAO. Only used when [member rendering/environment/ssao/backend] is [code]GTAO[/code].
 		</member>
+		<member name="rendering/environment/local_exposure/edge_range" type="float" setter="" getter="" default="1.0">
+			For the [code]Edge-Checked Blur[/code] method of [member rendering/environment/local_exposure/method]: the distance, in stops, between a pixel's own luminance and the blurred base at which the pixel starts to follow its own luminance instead of the base. At twice this distance the base is ignored. Lower values protect edges more and adapt less across them.
+		</member>
+		<member name="rendering/environment/local_exposure/method" type="int" setter="" getter="" default="0">
+			The filter that builds the regional luminance base used by [member Environment.local_exposure_enabled]. [code]Bilateral Grid[/code] splats log luminance into a low-resolution grid over screen position and luminance, blurs it and looks each pixel up at its own luminance, so the base follows edges. [code]Edge-Checked Blur[/code] uses one blurred value per screen region and falls back to the pixel's own luminance where the two differ by more than [member rendering/environment/local_exposure/edge_range].
+			[b]Note:[/b] Only used by the Forward+ rendering method, on viewports with a single view.
+		</member>
+		<member name="rendering/environment/local_exposure/pivot_source" type="int" setter="" getter="" default="0">
+			Where the level that local exposure leaves unchanged comes from. [code]Fixed[/code] uses middle grey offset by [member Environment.local_exposure_pivot]. [code]Frame Median[/code] uses the median log luminance of the current frame, taken from the regional luminance grid and offset by the same amount, so the frame's typical region keeps its global exposure and local exposure only moves light between regions. Falls back to [code]Fixed[/code] for a frame with no luminance.
+		</member>
+		<member name="rendering/environment/local_exposure/range_sigma" type="float" setter="" getter="" default="1.0">
+			Width, in stops, of the blur along the luminance axis of the bilateral grid. Higher values let regions of more different brightness share one base, which adapts more smoothly and protects edges less.
+		</member>
+		<member name="rendering/environment/local_exposure/spatial_sigma" type="float" setter="" getter="" default="1.0">
+			Width, in grid cells, of the blur across the screen. A grid cell covers 32 by 32 pixels of the internal resolution.
+		</member>
+		<member name="rendering/environment/local_exposure/temporal_seconds" type="float" setter="" getter="" default="0.0">
+			Time constant, in seconds, of an exponential filter that smooths the regional base over time. [code]0[/code] disables it and uses each frame's own base. The filter restarts after a history reset and after any frame in which local exposure did not run.
+		</member>
+		<member name="rendering/environment/local_exposure/wide_blend" type="float" setter="" getter="" default="0.0">
+			For the [code]Bilateral Grid[/code] method: how much of the per-region mean over all luminances is mixed into the edge-following base. [code]0[/code] uses the edge-following base alone.
+		</member>
 		<member name="rendering/environment/screen_space_lighting/legacy_last_frame_source" type="bool" setter="" getter="" default="true">
 			If [code]false[/code], screen-space indirect lighting samples a bounce source written by the opaque pass (direct diffuse light plus emission weighted by [code]EMISSION_BOUNCE_WEIGHT[/code]) and screen-space reflections sample a reflection source (the opaque radiance without the screen-space reflection term and without fog). Both effects compress samples relative to the exposure the tonemapper uses, so their strength does not depend on the scale of the stored HDR values. Both reproject their samples with the camera and reject a sample when the previous frame held a different surface there (the reflection source stores the linear view depth in its alpha, SSIL keeps the previous frame's depth mipmaps), so moving objects and newly exposed surfaces leave no trail; a rejected sample counts as a miss. If [code]true[/code], both effects sample a copy of the previous final frame and compress the stored values directly, as in earlier versions; the previous frame feeds their own output and fog back into the next frame.
 			[b]Note:[/b] Only used by the Forward+ rendering method. Viewports with MSAA always sample the previous final frame, with the exposure-relative compression unless this setting is enabled.
@@ -3015,7 +3037,7 @@
 			If [code]true[/code], screen-space indirect lighting and screen-space reflections compare each sample of the previous frame's bounce or reflection source against the previous frame's depth and treat a mismatch (a moved object or a newly exposed surface) as a miss, so the probe, sky or ambient fallback keeps that share. Static scenes are unaffected. Only used when [member rendering/environment/screen_space_lighting/legacy_last_frame_source] is [code]false[/code].
 		</member>
 		<member name="rendering/environment/screen_space_reflection/backend" type="int" setter="" getter="" default="0">
-			The screen-space reflection backend. [code]Mirror[/code] traces one mirror ray per pixel and blurs the result by roughness; it fades out between roughness 0.6 and 0.7. [code]Stochastic[/code] traces rays sampled from the GGX distribution of visible normals, reuses the hits of neighboring pixels weighted by the BRDF over the sampling probability, and accumulates the result over frames with hit-point reprojection; it reflects up to [member rendering/environment/screen_space_reflection/stochastic/roughness_cutoff]. Both write radiance with a confidence that replaces the reflection probe or sky reflection where the confidence is high.
+			The screen-space reflection backend. [code]Mirror[/code] traces one mirror ray per pixel and blurs the result by roughness; it fades out between roughness 0.6 and 0.7. [code]Stochastic[/code] traces rays sampled from the GGX distribution of visible normals, reuses the hits of neighbouring pixels weighted by the BRDF over the sampling probability, and accumulates the result over frames with hit-point reprojection; it reflects up to [member rendering/environment/screen_space_reflection/stochastic/roughness_cutoff]. Both write radiance with a confidence that replaces the reflection probe or sky reflection where the confidence is high.
 			[b]Note:[/b] Only used by the Forward+ rendering method. The trace resolution follows [member rendering/environment/screen_space_reflection/half_size].
 		</member>
 		<member name="rendering/environment/screen_space_reflection/half_size" type="bool" setter="" getter="" default="true" keywords="resolution">
@@ -3109,7 +3131,7 @@
 			Enables filtering of the volumetric fog effect prior to integration. This substantially blurs the fog which reduces fine details but also smooths out harsh edges and aliasing artifacts. Disable when more detail is required.
 		</member>
 		<member name="rendering/environment/volumetric_fog/use_temporal_clamp" type="bool" setter="" getter="" default="false">
-			If [code]true[/code] and [member Environment.volumetric_fog_temporal_reprojection_enabled] is [code]true[/code], the reprojected fog from previous frames is clamped to the range of the current frame's neighboring froxels before blending. This removes the trails that moving lights leave in the fog, while fog lit by static lights keeps its temporal smoothing. If [code]false[/code], the previous frames are blended in unclamped.
+			If [code]true[/code] and [member Environment.volumetric_fog_temporal_reprojection_enabled] is [code]true[/code], the reprojected fog from previous frames is clamped to the range of the current frame's neighbouring froxels before blending. This removes the trails that moving lights leave in the fog, while fog lit by static lights keeps its temporal smoothing. If [code]false[/code], the previous frames are blended in unclamped.
 		</member>
 		<member name="rendering/environment/volumetric_fog/volume_depth" type="int" setter="" getter="" default="64">
 			Number of slices to use along the depth of the froxel buffer for volumetric fog. A lower number will be more efficient but may result in artifacts appearing during camera movement. See also [member Environment.volumetric_fog_length].
@@ -3184,14 +3206,17 @@
 			If [code]true[/code], disables the threaded optimization feature from the NVIDIA drivers, which are known to cause stuttering in most OpenGL applications.
 			[b]Note:[/b] This setting only works on Windows, as threaded optimization is disabled by default on other platforms.
 		</member>
+		<member name="rendering/global_illumination/compositor/extra_provider" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], the global illumination compositor reads the extra provider slot: a diffuse radiance and coverage pair written by a ray-traced global illumination provider is blended over the ambient light after the DDGI, surfel and voxel stages. Nothing changes while no provider writes to the slot.
+		</member>
 		<member name="rendering/global_illumination/ddgi/bounce_energy" type="float" setter="" getter="" default="1.0">
 			How much of the probes' own light is fed back into the rays, which gives multiple bounces of indirect light. 0 gives a single bounce.
 		</member>
 		<member name="rendering/global_illumination/ddgi/change_threshold" type="float" setter="" getter="" default="0.25">
-			How far a probe texel's new ray result must differ from its stored value, as a fraction of the larger of the two, before the texel halves its history weight to follow the change faster. Ray noise crosses a low threshold at random, and the rule weights noisy samples more heavily, which biases the probe light by a few percent when one lamp changes brightness next to another. [code]1.0[/code] turns the rule off: the probe light is then unbiased but follows a changed lamp slowly (about 50 frames instead of 1 for a threefold step). The default [code]0.25[/code] keeps the old behavior; a higher value such as [code]0.75[/code] keeps the rule only for very large jumps, which ray noise rarely produces.
+			How far a probe texel's new ray result must differ from its stored value, as a fraction of the larger of the two, before the texel halves its history weight to follow the change faster. Ray noise crosses a low threshold at random, and the rule weights noisy samples more heavily, which biases the probe light by a few percent when one lamp changes brightness next to another. [code]1.0[/code] turns the rule off: the probe light is then unbiased but follows a changed lamp slowly (about 50 frames instead of 1 for a threefold step). The default [code]0.25[/code] keeps the old behaviour; a higher value such as [code]0.75[/code] keeps the rule only for very large jumps, which ray noise rarely produces.
 		</member>
 		<member name="rendering/global_illumination/ddgi/light_change_reset" type="bool" setter="" getter="" default="true">
-			When a local light is added, removed or changes by more than a tolerance, every probe on every level whose position lies within the light's old or new range has its update count set to zero. The next updates of those probes then replace the stored irradiance quickly and settle into a plain running average, so a light change shows at once without the history-weight rule of [member rendering/global_illumination/ddgi/change_threshold] having to guess it from noise. A light fires when its energy leaves the ratio band 0.8 to 1.25 against its value at its last reset, its color moves by more than 10 %, its range changes by more than 10 %, it moves by more than a quarter of the level 0 probe spacing, or (spot lights) it turns by more than 10 degrees. A light fires at most once every 8 frames; a change blocked by that limit fires when the limit allows. At most 32 boxes are processed per frame and the rest wait for later frames. Directional lights are not tracked. Off gives the old behavior, where a changed light is followed only by the history-weight rule.
+			When a local light is added, removed or changes by more than a tolerance, every probe on every level whose position lies within the light's old or new range has its update count set to zero. The next updates of those probes then replace the stored irradiance quickly and settle into a plain running average, so a light change shows at once without the history-weight rule of [member rendering/global_illumination/ddgi/change_threshold] having to guess it from noise. A light fires when its energy leaves the ratio band 0.8 to 1.25 against its value at its last reset, its color moves by more than 10 %, its range changes by more than 10 %, it moves by more than a quarter of the level 0 probe spacing, or (spot lights) it turns by more than 10 degrees. A light fires at most once every 8 frames; a change blocked by that limit fires when the limit allows. At most 32 boxes are processed per frame and the rest wait for later frames. Directional lights are not tracked. Off gives the old behaviour, where a changed light is followed only by the history-weight rule.
 		</member>
 		<member name="rendering/global_illumination/ddgi/light_change_reset_log" type="bool" setter="" getter="" default="false">
 			Prints one line every 100 DDGI frames with the number of lights that fired, boxes processed and waiting, reset passes, probes touched and their share of all probes. Has no effect on rendering.
@@ -3200,7 +3225,7 @@
 			Replaces the image with a view traced against the DDGI scene copy: [code]Irradiance[/code] shows probe irradiance at the first hit, [code]Ray Hits[/code] shows the light the probe rays see, [code]Normals[/code] shows surface normals with back faces in red, [code]Probe State[/code] colors each surface by its nearest probe (green active, blue idle, red inside geometry, black not traced yet) with dark lines on probe cell edges, and [code]Probe Visibility[/code] shows how much probe light passes the visibility test (green all, red little, magenta none).
 		</member>
 		<member name="rendering/global_illumination/ddgi/enabled" type="bool" setter="" getter="" default="false">
-			If [code]true[/code], turns on dynamic diffuse global illumination (DDGI): a camera-centered grid of irradiance probes updated every frame by tracing rays against a simplified copy of the scene. It feeds the same indirect-light buffer as SDFGI and VoxelGI.
+			If [code]true[/code], turns on dynamic diffuse global illumination (DDGI): a camera-centred grid of irradiance probes updated every frame by tracing rays against a simplified copy of the scene. It feeds the same indirect-light buffer as SDFGI and VoxelGI.
 		</member>
 		<member name="rendering/global_illumination/ddgi/energy" type="float" setter="" getter="" default="1.0">
 			Multiplier for the DDGI indirect light.
@@ -3232,12 +3257,192 @@
 		<member name="rendering/global_illumination/ddgi/view_bias" type="float" setter="" getter="" default="0.25">
 			Offset of the sample point towards the camera, in units of probe spacing, to reduce light leaking and self-shadowing.
 		</member>
+		<member name="rendering/global_illumination/direct/clamp_sigmas" type="float" setter="" getter="" default="3.0">
+			How far, in standard deviations of the rays nearby, a lamp's history may stay from those rays before it is pulled back, while that lamp or something in its range has moved recently. [code]0[/code] turns the clamp off.
+		</member>
+		<member name="rendering/global_illumination/direct/enabled" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], traces ray-traced direct shadows of local lights in the Forward+ renderer: omni and spot lights get stable slots and change events (see [method RenderingServer.light_set_direct_shadow]), the depth pre-pass writes normal and roughness, and each pixel gets shadow factors. It doesn't need [member rendering/global_illumination/ddgi/enabled]: the ray scene starts the first time either setting is on and stays on until the next start. Its region is sized from the DDGI grid settings even while DDGI is off. Owned lights with a ray entry use it in place of their shadow map and contact shadow in the opaque pass; transparent objects keep the shadow map.
+		</member>
+		<member name="rendering/global_illumination/direct/debug_cold_frames" type="int" setter="" getter="" default="0">
+			Debug: a test switch. A lamp's own entries get no rays and keep no history for this many frames after the lamp enters the light table or is reset, so they shade as unshadowed. [code]0[/code] turns it off. It has no effect while resampled direct lights own the entries or while [member rendering/global_illumination/direct/reference] is on.
+		</member>
+		<member name="rendering/global_illumination/direct/debug_view" type="int" setter="" getter="" default="0">
+			Shows the raw ray-traced direct shadow factors in place of the image. [code]1[/code] is the brightest lamp's factor, [code]2[/code] is the light kept over the light before shadows, [code]3[/code] colors each pixel by its brightest lamp, [code]4[/code] is the number of lamps reaching the pixel, [code]5[/code] is the brightest lamp's sample count, and [code]6[/code] is the brightest lamp's filtered factor.
+		</member>
+		<member name="rendering/global_illumination/direct/dump_request" type="String" setter="" getter="" default="&quot;&quot;">
+			If not empty, the next frame that has shadow factors writes them to raw files next to this path, a JSON summary at this path, and a [code].done[/code] file after it. Each new path is served once.
+		</member>
+		<member name="rendering/global_illumination/direct/filter" type="bool" setter="" getter="" default="true">
+			Runs the neighbourhood clamp and the spatial filter over the shadow factors. Off, the opaque pass reads the temporal factors as they are. Always off in the reference mode and with a history cap of [code]0[/code].
+		</member>
+		<member name="rendering/global_illumination/direct/filter_kernel_scale" type="float" setter="" getter="" default="1.0">
+			Scales the spatial filter's width against a lamp's size over the pixel's footprint.
+		</member>
+		<member name="rendering/global_illumination/direct/filter_range_sigmas" type="float" setter="" getter="" default="1.5">
+			How far a neighbour's shadow factor may sit from the pixel's own before the spatial filter stops using it, in standard errors of the two pixels' sample counts. Keeps hard shadow edges from bleeding. [code]0[/code] turns the test off.
+		</member>
+		<member name="rendering/global_illumination/direct/filter_second_pass" type="bool" setter="" getter="" default="false">
+			If [code]false[/code], the spatial filter runs only its first pass, which then writes the final shadow factors. Only used when [member rendering/global_illumination/direct/trace_resolution] is Quarter.
+		</member>
+		<member name="rendering/global_illumination/direct/force_factor_one" type="bool" setter="" getter="" default="false">
+			Debug: writes every shadow factor as [code]1[/code], so owned lamps with a matching entry shade as unshadowed.
+		</member>
+		<member name="rendering/global_illumination/direct/history_cap" type="int" setter="" getter="" default="32">
+			Samples kept in a lamp's history per pixel, cut to [member rendering/global_illumination/direct/dynamic_history_cap] while the lamp is dynamic. [code]0[/code] keeps every sample and uses the larger history format, for long-run measurements.
+		</member>
+		<member name="rendering/global_illumination/direct/dynamic_history_cap" type="int" setter="" getter="" default="2">
+			Samples kept in a lamp's history per pixel while the lamp has moved, or a shadow caster has moved in its range, within the last 30 frames. It counts rays, so a lamp that gets only a share of a pixel's rays takes longer to clear in frames.
+		</member>
+		<member name="rendering/global_illumination/direct/entries" type="int" setter="" getter="" default="6">
+			The number of shadow entries per pixel. One of them is shared by every lamp past the first ones.
+		</member>
+		<member name="rendering/global_illumination/direct/ray_bias" type="float" setter="" getter="" default="0.02">
+			How far shadow rays start from the surface along its normal, in meters.
+		</member>
+		<member name="rendering/global_illumination/direct/rays_per_pixel" type="int" setter="" getter="" default="1">
+			The number of shadow rays traced per pixel per frame, shared between its entries.
+		</member>
+		<member name="rendering/global_illumination/direct/reference" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], traces 16 stratified rays for every entry at every pixel every frame and accumulates them without a limit. This is for checking the shadow factors, not for playing.
+		</member>
+		<member name="rendering/global_illumination/direct/resampled/c_full" type="int" setter="" getter="" default="32">
+			Applies while [member rendering/global_illumination/direct/resampled/reservoirs] is [code]B1[/code] or [code]U1[/code] and [member rendering/global_illumination/direct/resampled/tail_samples] is [code]1[/code]. A pixel with more candidate tail lamps than this splits them into this many strata, draws one lamp from each stratum and picks one of those draws; pixels with fewer sample their tail lamps without a reservoir, as with reservoirs [code]Off[/code]. It is also the mass of that fresh pick when it is combined with the previous frame's pick. The combined mass, cut to [member rendering/global_illumination/direct/resampled/m_stored_cap], is what the spatial pass uses for the pixel's own pick. The range is [code]1[/code] to [code]255[/code].
+		</member>
+		<member name="rendering/global_illumination/direct/resampled/debug/head_swap_window" type="bool" setter="" getter="" default="false">
+			Debug: a test switch. Only used with [member rendering/global_illumination/direct/resampled/head_rank] set to [code]TV[/code] and [member rendering/global_illumination/direct/resampled/head] above [code]0[/code]. A lamp counts as new for the head swap when it entered the light table or was reset within the last [member rendering/global_illumination/direct/resampled/head_swap_frames] frames, not only in the current frame, so a new lamp can swap into or out of the head without waiting those frames in a row.
+		</member>
+		<member name="rendering/global_illumination/direct/resampled/debug/log" type="String" setter="" getter="" default="&quot;&quot;">
+			Debug: a test switch. If not empty, writes one line per frame to this text file: the frame number, the render size, the number of pixels that have tail lamps, and for each lamp slot with a non-zero count, [code]slot:count[/code], where the count is the number of pixels that kept the lamp in the head plus the number that used it as a tail sample, exactly or by a pick; picks made by a reservoir are not counted. The counts are read back from the GPU, which slows rendering. While it is set, a pixel whose tail lamps are all used exactly is drawn in magenta if a lamp that reaches it is in neither the head nor the tail, which marks a fault; no other pixel changes. Only written while resampling runs. A different path starts a new file.
+		</member>
+		<member name="rendering/global_illumination/direct/resampled/debug/stale_prior" type="bool" setter="" getter="" default="false">
+			Debug: a test switch. Reads the previous-frame shadow factor of every lamp with an even slot number as [code]0[/code], as if its history were stale, so those lamps take the [member rendering/global_illumination/direct/resampled/floor] weight when tail lamps are picked and, with [member rendering/global_illumination/direct/resampled/head_rank] set to [code]TV[/code], when head lamps are ranked. The tail weights of pixels handled by a [code]U1[/code] reservoir do not use history and are not affected.
+		</member>
+		<member name="rendering/global_illumination/direct/resampled/debug/tail_visibility" type="int" setter="" getter="" default="0">
+			Debug: a test switch. How the visibility of a tail lamp is found in the shadow trace. [code]Traced[/code] traces a ray to the lamp as usual. [code]Visible[/code] counts every tail lamp as visible and traces no ray for it. [code]Hashed[/code] also traces no ray and counts each tail lamp as visible at a pixel on a random share of frames, fixed per lamp slot and between 0.2 and 0.9.
+		</member>
+		<member name="rendering/global_illumination/direct/resampled/enabled" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], resamples the direct lights of each pixel: the [member rendering/global_illumination/direct/resampled/head] strongest lamps at the pixel keep their own shadow entries, and [member rendering/global_illumination/direct/resampled/tail_samples] of the remaining lamps are picked at random in proportion to their contribution, each shaded at the energy set by [member rendering/global_illumination/direct/resampled/energy_arm] and shadowed by a ray traced to it. The number of shadow entries and rays per pixel stays fixed however many lamps reach it. It builds on the ray-traced direct shadows, so it needs [member rendering/global_illumination/direct/enabled] and does nothing while that is off or while the viewport renders more than one view. While it is on, [member rendering/global_illumination/direct/entries] does not set the number of entries.
+		</member>
+		<member name="rendering/global_illumination/direct/resampled/energy_arm" type="int" setter="" getter="" default="1">
+			The energy a tail lamp is shaded at. [code]Mean[/code] uses the flicker-mean energy set with [method RenderingServer.light_set_direct_mean_energy], so a single sample does not carry the lamp's flicker; a lamp with no mean set is shaded at its live energy. [code]Live[/code], the default, shades it at its live energy in the current frame. In both, lamps are ranked and picked by their mean energy.
+		</member>
+		<member name="rendering/global_illumination/direct/resampled/floor" type="float" setter="" getter="" default="0.0625">
+			The lowest value a lamp's shadow factor from the previous frame takes when tail lamps are picked. A tail lamp is picked in proportion to its unshadowed contribution times that factor, held up to this floor, so a lamp found hidden can still be picked again and found visible. It also bounds that factor when [member rendering/global_illumination/direct/resampled/head_rank] is [code]TV[/code] and head lamps are ranked. [code]1[/code] ignores the history. The range is [code]0.0001[/code] to [code]1[/code].
+		</member>
+		<member name="rendering/global_illumination/direct/resampled/head" type="int" setter="" getter="" default="4">
+			The number of lamps per pixel that keep their own shadow entry with its own history: the lamps with the largest unshadowed contribution at the pixel, ranked as set by [member rendering/global_illumination/direct/resampled/head_rank]. The other lamps that reach the pixel are the tail. [code]0[/code] has no head, so every lamp is resampled. The range is [code]0[/code] to [code]6[/code], and this plus [member rendering/global_illumination/direct/resampled/tail_samples] is at most [code]7[/code], so the head is cut to [code]7[/code] minus the tail samples.
+		</member>
+		<member name="rendering/global_illumination/direct/resampled/head_rank" type="int" setter="" getter="" default="0">
+			How lamps compete for the head. [code]T[/code] ranks them by their unshadowed contribution at the pixel alone. [code]TV[/code] multiplies that by the lamp's shadow factor from the previous frame (at least [member rendering/global_illumination/direct/resampled/floor]) and keeps the previous frame's head lamps in place; a challenger takes the weakest head lamp's place only when its rank is at least [member rendering/global_illumination/direct/resampled/head_swap_margin] above that lamp's for [member rendering/global_illumination/direct/resampled/head_swap_frames] frames in a row, or when either lamp is new. [code]TV[/code] has an effect only while [member rendering/global_illumination/direct/resampled/head] is above [code]0[/code].
+		</member>
+		<member name="rendering/global_illumination/direct/resampled/head_swap_frames" type="int" setter="" getter="" default="4">
+			With [member rendering/global_illumination/direct/resampled/head_rank] set to [code]TV[/code], the number of frames in a row the same lamp must beat the weakest head lamp by [member rendering/global_illumination/direct/resampled/head_swap_margin] before it replaces it. [code]1[/code] swaps at once. The range is [code]1[/code] to [code]7[/code].
+		</member>
+		<member name="rendering/global_illumination/direct/resampled/head_swap_margin" type="float" setter="" getter="" default="0.25">
+			With [member rendering/global_illumination/direct/resampled/head_rank] set to [code]TV[/code], how much larger than the weakest head lamp's rank a challenger's rank must be, as a fraction of that rank, before it can replace that lamp. [code]0[/code] needs only a larger rank. The range is [code]0[/code] to [code]4[/code].
+		</member>
+		<member name="rendering/global_illumination/direct/resampled/m_stored_cap" type="int" setter="" getter="" default="255">
+			Applies while [member rendering/global_illumination/direct/resampled/reservoirs] is [code]B1[/code] or [code]U1[/code] and [member rendering/global_illumination/direct/resampled/tail_samples] is [code]1[/code]. The largest mass a pixel's stored pick can carry into later frames and into its neighbours' spatial pass. A pick's mass is the sum of the masses combined into it, cut to this value, and it sets how much the pick weighs against new ones, so a smaller value lets new picks outweigh stored ones sooner. The previous frame's pick is further cut to [member rendering/global_illumination/direct/resampled/m_temporal_cap] when reused. The range is [code]1[/code] to [code]255[/code].
+		</member>
+		<member name="rendering/global_illumination/direct/resampled/m_temporal_cap" type="int" setter="" getter="" default="20">
+			Applies while [member rendering/global_illumination/direct/resampled/reservoirs] is [code]B1[/code] or [code]U1[/code] and [member rendering/global_illumination/direct/resampled/tail_samples] is [code]1[/code], with [member rendering/global_illumination/direct/resampled/temporal_reuse] on. The largest mass the previous frame's pick for the pixel's surface can have when it is combined with the pixel's fresh pick, which has mass [member rendering/global_illumination/direct/resampled/c_full]. It is cut to [member rendering/global_illumination/direct/dynamic_history_cap] while the pick's lamp is dynamic. The range is [code]1[/code] to [code]255[/code].
+		</member>
+		<member name="rendering/global_illumination/direct/resampled/reservoirs" type="int" setter="" getter="" default="0">
+			How the lamp of a tail sample is picked once a pixel has more candidate tail lamps than [member rendering/global_illumination/direct/resampled/c_full]. [code]Off[/code] picks afresh every frame. [code]B1[/code] keeps a reservoir pick per pixel and combines it with the previous frame's pick and with neighbours' picks by mass alone, which is biased. [code]U1[/code] also weights each candidate by its contribution at the other pixel's surface, the unbiased combination; with [member rendering/global_illumination/direct/resampled/spatial_neighbors] above [code]0[/code], the spatial pass's result is what the next frame reuses. Reservoirs need [member rendering/global_illumination/direct/resampled/tail_samples] to be [code]1[/code]; with any other value this setting acts as [code]Off[/code].
+		</member>
+		<member name="rendering/global_illumination/direct/resampled/spatial_neighbors" type="int" setter="" getter="" default="2">
+			Applies while [member rendering/global_illumination/direct/resampled/reservoirs] is [code]B1[/code] or [code]U1[/code] and [member rendering/global_illumination/direct/resampled/tail_samples] is [code]1[/code]. The most other pixels each pixel takes a candidate pick from in a second pass, at random points within [member rendering/global_illumination/direct/resampled/spatial_radius] and only where that pixel holds a pick this frame and the surface has a similar depth and normal. The mass of a neighbour's pick is cut to [member rendering/global_illumination/direct/dynamic_history_cap] while its lamp is dynamic. [code]0[/code] turns the spatial pass off. The range is [code]0[/code] to [code]4[/code].
+		</member>
+		<member name="rendering/global_illumination/direct/resampled/spatial_radius" type="float" setter="" getter="" default="16.0">
+			Applies while [member rendering/global_illumination/direct/resampled/reservoirs] is [code]B1[/code] or [code]U1[/code] and [member rendering/global_illumination/direct/resampled/tail_samples] is [code]1[/code], and [member rendering/global_illumination/direct/resampled/spatial_neighbors] is above [code]0[/code]. The largest distance, in pixels, from a pixel to the neighbours its spatial pass takes picks from, at a render height of 1440 pixels. It scales with the render height. The range is [code]1[/code] to [code]64[/code].
+		</member>
+		<member name="rendering/global_illumination/direct/resampled/tail_samples" type="int" setter="" getter="" default="1">
+			The number of samples drawn per pixel from the tail, the lamps outside the head. Each sample picks a lamp with a probability proportional to its unshadowed contribution times its shadow factor from the previous frame (at least [member rendering/global_illumination/direct/resampled/floor]), and the picked lamp is shadowed by a ray traced to it. A pixel with no more tail lamps than samples uses all of them exactly. Pixels handled by a reservoir (see [member rendering/global_illumination/direct/resampled/reservoirs]) pick through it instead, and [code]U1[/code] ignores the history there. The range is [code]1[/code] to [code]7[/code], and [member rendering/global_illumination/direct/resampled/head] is cut so that head plus tail samples is at most [code]7[/code].
+		</member>
+		<member name="rendering/global_illumination/direct/resampled/temporal_reuse" type="bool" setter="" getter="" default="true">
+			Applies while [member rendering/global_illumination/direct/resampled/reservoirs] is [code]B1[/code] or [code]U1[/code] and [member rendering/global_illumination/direct/resampled/tail_samples] is [code]1[/code]. If [code]true[/code], a pixel combines its fresh pick with the pick stored for the same surface in the previous frame, found by reprojection where the previous frame's depth and normal match. If [code]false[/code], every frame's pick starts fresh and only the spatial pass reuses picks.
+		</member>
+		<member name="rendering/global_illumination/direct/trace_resolution" type="int" setter="" getter="" default="0">
+			Full traces and filters the shadow entries at every pixel. Quarter traces and filters one pixel of each 2×2 block, chosen from the block's depths and normals, and a resolve pass then writes every pixel's entries from the nearby blocks on the same surface. Quarter costs less and is softer on hard shadow edges. A change starts the shadow history over. Quarter is not used while [member rendering/global_illumination/direct/reference] is on or [member rendering/global_illumination/direct/history_cap] is [code]0[/code], or while [member rendering/global_illumination/direct/resampled/enabled] supplies the entries, since the Quarter trace has no variant that reads resampled entries.
+		</member>
 		<member name="rendering/global_illumination/gi/use_half_resolution" type="bool" setter="" getter="" default="false" keywords="size">
 			If [code]true[/code], renders [VoxelGI] and SDFGI ([member Environment.sdfgi_enabled]) buffers at halved resolution (e.g. 960×540 when the viewport size is 1920×1080). This improves performance significantly when VoxelGI or SDFGI is enabled, at the cost of artifacts that may be visible on polygon edges. The loss in quality becomes less noticeable as the viewport resolution increases. [LightmapGI] rendering is not affected by this setting.
 			[b]Note:[/b] This property is only read when the project starts. To set half-resolution GI at run-time, call [method RenderingServer.gi_set_use_half_resolution] instead.
 		</member>
+		<member name="rendering/global_illumination/ray_scene/alpha_fill_texels_per_frame" type="int" setter="" getter="" default="67108864">
+			Source texels the cut-out store may read in one frame when it fills or refills its coverage layers. At least one layer is filled every frame. Layers past the budget wait for a later frame, and their surfaces stay solid until then. Read on every ray scene update.
+		</member>
+		<member name="rendering/global_illumination/ray_scene/alpha_layer_size" type="int" setter="" getter="" default="256">
+			Side length in texels of each coverage layer of the cut-out store, 256 or 512. Each layer texel holds the share of source texels at or above the cutoff over its footprint, so 512 follows fine cut-outs more closely at four times the memory. Texture coordinates are traced as half floats, so a surface whose coordinates reach so far from the origin that their spacing is coarser than one layer texel stays solid. Read on every ray scene update; a change clears the store and fills every layer again.
+		</member>
+		<member name="rendering/global_illumination/ray_scene/alpha_mode" type="int" setter="" getter="" default="0">
+			How a cut-out hit is decided. [code]0[/code] (Stochastic) accepts a triangle where the layer coverage is larger than a random value per ray, which keeps the open share in expectation. [code]1[/code] (Threshold) accepts it where the coverage is at least one half, which is deterministic but can close holes narrower than about one layer texel. Read when the trace shaders are created, so a change needs a restart.
+		</member>
+		<member name="rendering/global_illumination/ray_scene/alpha_test" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], the rays of the DDGI, surfel and per-pixel ray-traced GI traces, including the shadow rays they trace, and the rays of the ReSTIR GI module read alpha-tested materials as cut-outs: each triangle of such a surface is hit or passed per ray, from a coverage layer made from its alpha texture. A material is alpha-tested when its shader declares [code]alpha_scissor_threshold[/code], or sets [code]alpha_test[/code] with [code]alpha_threshold[/code]. If [code]false[/code] (default), every surface is solid. The texture coordinates, the store and the alpha-capable trace shaders exist either way, so the setting can be changed while running: it is read on every ray scene update, the store keeps filling while it is off, and a change resets the DDGI and surfel histories. The software and hardware backends apply the same test. In Stochastic [member rendering/global_illumination/ray_scene/alpha_mode], a ray that tests a stored sample again draws a new random value on a partly covered texel unless it reuses the seed that made the sample. The ReSTIR GI module's re-tests (visibility, fresh radiance and replay) reuse it, so a sample that stopped on a partly covered texel is found again and cut-out edges are not darkened by the re-test. Threshold mode gives the same answer every time. The ray-traced direct shadows of [member rendering/global_illumination/direct/enabled] do not use cut-outs yet: their shadow rays treat every cut-out surface as solid.
+		</member>
+		<member name="rendering/global_illumination/ray_scene/backend" type="int" setter="" getter="" default="2">
+			Selects how GI rays (DDGI, surfel and shadow rays) find their hits in the ray scene. [b]Software[/b] walks the ray scene's own BVH in compute shaders and runs on every Vulkan, Direct3D 12 and Metal device. [b]Hardware[/b] traces the same triangles through Vulkan ray queries, building one bottom-level acceleration structure per mesh and one top-level structure per frame; it falls back to [b]Software[/b] with a warning when the device has no ray query support. [b]Auto[/b] (default) picks [b]Hardware[/b] when ray queries are available and [b]Software[/b] otherwise, without a warning. Both backends report the same hits, materials and shadow-caster rules. Read on every ray scene update, so a change applies on the next frame.
+		</member>
+		<member name="rendering/global_illumination/ray_scene/dirty_box_cap" type="int" setter="" getter="" default="32">
+			Most boxes the ray scene dirty-box feed publishes per frame after merging. When more merged boxes are needed, the feed keeps the first ones and sets its overflow flag, which readers treat as "anything may have changed". The ring readers query keeps at most 32 boxes per frame, so values above 32 gain nothing: a frame with more than 32 merged boxes reads as overflow. The feed exists only while a lighting system that needs it holds it, and the setting costs nothing otherwise.
+		</member>
+		<member name="rendering/global_illumination/ray_scene/dirty_merge_distance" type="float" setter="" getter="" default="0.5">
+			Dirty boxes of the ray scene feed that lie closer to each other than this distance, in meters, are merged into one box. Boxes are in world space.
+		</member>
+		<member name="rendering/global_illumination/ray_scene/light_keep_distance" type="float" setter="" getter="" default="-1.0">
+			In [b]Stable[/b] light pick mode ([member rendering/global_illumination/ray_scene/light_pick_mode]), how much nearer a light out of reach of the pick cell must be to take the place of a light the view already packs. The kept light's distance score is lowered by this many meters. A negative value uses the pick cell size ([member rendering/global_illumination/ray_scene/light_pick_cell]). Not used in [b]Camera[/b] mode. Read on every ray scene update.
+		</member>
+		<member name="rendering/global_illumination/ray_scene/light_keep_share" type="float" setter="" getter="" default="0.25">
+			In [b]Stable[/b] light pick mode ([member rendering/global_illumination/ray_scene/light_pick_mode]), how much more important a light must be to take the place of a light the view already packs. [code]0.25[/code] means more than 25% more importance at the pick cell. [code]0.0[/code] removes the margin, so the pick swaps whenever the order changes. Not used in [b]Camera[/b] mode. Read on every ray scene update.
+		</member>
+		<member name="rendering/global_illumination/ray_scene/light_pick_cell" type="int" setter="" getter="" default="16">
+			The size in meters of the pick cell in [b]Stable[/b] light pick mode ([member rendering/global_illumination/ray_scene/light_pick_mode]). The light pick is scored from the cell that holds the camera, not from the camera itself, so it changes only when the camera enters another cell. The ray scene's light region is snapped to the same cells, with half a cell of hysteresis, and grown by one cell on each side. Every value divides the 64 m ray scene anchor grid. Smaller cells follow the camera more closely in small interiors; larger cells pick by power over a wider area. Read on every ray scene update.
+		</member>
+		<member name="rendering/global_illumination/ray_scene/light_pick_mode" type="int" setter="" getter="" default="1">
+			How the ray scene picks the local lights it packs for GI rays when more lights reach it than [member rendering/global_illumination/ray_scene/max_lights]. [b]Camera[/b] keeps the lights nearest to the live camera, with the light region centred on the camera; the pick can change every frame the camera moves and between frames with equal scores. [b]Stable[/b] ranks lights by their importance at the camera's pick cell ([member rendering/global_illumination/ray_scene/light_pick_cell]), then by distance from the cell centre, then by a fixed light order, and keeps lights the view already packs unless a challenger beats them by a margin ([member rendering/global_illumination/ray_scene/light_keep_share], [member rendering/global_illumination/ray_scene/light_keep_distance]). The Stable pick does not depend on where the camera stands inside a cell or on the order the lights arrive in. Raster direct light is not affected by either mode. Read on every ray scene update.
+		</member>
+		<member name="rendering/global_illumination/ray_scene/max_alpha_layers" type="int" setter="" getter="" default="512">
+			Most coverage layers (one per alpha texture and cutoff pair) the cut-out store holds. The whole store is always allocated at this size, whether [member rendering/global_illumination/ray_scene/alpha_test] is on or off: 64 KiB per layer at the default layer size, so 32 MiB for 512 layers. A surface that needs a layer when the store is full stays solid, and the refusal is counted. Read on every ray scene update; a change clears the store and fills every layer again.
+		</member>
+		<member name="rendering/global_illumination/ray_scene/max_lights" type="int" setter="" getter="" default="1024">
+			The most lights, directional and local, the ray scene packs for GI rays. Every DDGI ray hit loops over every packed light, so the light cost of a GI ray grows linearly with this value; shadow rays per hit do not. When more local lights reach the ray scene, [member rendering/global_illumination/ray_scene/light_pick_mode] decides which are kept. The light buffer takes 96 bytes per light. Read on every ray scene update.
+		</member>
+		<member name="rendering/global_illumination/ray_scene/mover_frames" type="int" setter="" getter="" default="3">
+			An instance counts as a mover for the ray scene dirty-box feed when it changed in at least this many of the last 8 frames. Readers use the mover boxes to avoid placing long-lived samples on surfaces that will not stay.
+		</member>
+		<member name="rendering/global_illumination/ray_scene/reserved_area_lights" type="int" setter="" getter="" default="16">
+			When the ray scene has to cut lights, up to this many area lights are kept first, ahead of omni and spot lights, so that a room full of point lights cannot push out every area light. The remaining area lights compete with the other lights. Clamped to [member rendering/global_illumination/ray_scene/max_lights] less the directional lights. Read on every ray scene update.
+		</member>
 		<member name="rendering/global_illumination/ray_scene/skip_additive_surfaces" type="bool" setter="" getter="" default="true">
 			If [code]true[/code], surfaces whose spatial shader uses [code]blend_add[/code] are left out of the GI ray scene: DDGI, surfel and shadow rays pass through them, and they neither block nor bounce light. Additive surfaces add light to what is behind them and hide nothing, so they stand for light (glows, beams, screens), not matter. Their emission is not traced either. If [code]false[/code], they are opaque hits with their base color as albedo. Read on every ray scene update, so a change applies on the next frame.
+		</member>
+		<member name="rendering/global_illumination/rtgi/atrous_iterations" type="int" setter="" getter="" default="3">
+			Number of edge-aware filter passes the ray-traced global illumination runs on its temporally accumulated result. Each pass doubles the filter step. [code]0[/code] disables the filter.
+		</member>
+		<member name="rendering/global_illumination/rtgi/depth_sigma" type="float" setter="" getter="" default="1.0">
+			Scales the depth tolerance of the temporal reprojection and of the filter of the ray-traced global illumination. Smaller values reject more history across depth edges.
+		</member>
+		<member name="rendering/global_illumination/rtgi/enabled" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], a ray-traced diffuse global illumination pass traces one cosine-weighted ray per selected pixel at reduced resolution, where screen-space and probe lighting are unreliable, accumulates it over time and publishes it to the global illumination compositor as the extra provider. Needs [member rendering/global_illumination/ddgi/enabled], a single view and a ready ray scene. The result only reaches the image while [member rendering/global_illumination/compositor/extra_provider] is [code]true[/code].
+		</member>
+		<member name="rendering/global_illumination/rtgi/history_cap" type="int" setter="" getter="" default="6">
+			Highest number of frames the ray-traced global illumination accumulates per pixel. Lower values react faster to changes and are noisier.
+		</member>
+		<member name="rendering/global_illumination/rtgi/normal_sigma" type="float" setter="" getter="" default="32.0">
+			Sharpness of the normal edge-stopping weight of the ray-traced global illumination filter. Higher values stop the filter at smaller normal differences.
+		</member>
+		<member name="rendering/global_illumination/rtgi/rays_per_pixel" type="float" setter="" getter="" default="0.25">
+			Average number of rays traced per full resolution pixel. Values above what the trace resolution allows are capped; values below thin out the traced pixels.
+		</member>
+		<member name="rendering/global_illumination/rtgi/resolution_scale" type="float" setter="" getter="" default="0.5">
+			Resolution of the ray-traced global illumination relative to the internal resolution. [code]0.5[/code] traces one ray per two by two pixels.
+		</member>
+		<member name="rendering/global_illumination/rtgi/target_samples" type="int" setter="" getter="" default="6">
+			Number of accumulated frames at which the ray-traced global illumination counts as fully converged and reaches full coverage in the compositor.
+		</member>
+		<member name="rendering/global_illumination/rtgi/variance_sigma" type="float" setter="" getter="" default="4.0">
+			Sharpness of the luminance edge-stopping weight of the ray-traced global illumination filter, relative to the estimated noise. Lower values keep more detail and leave more noise.
 		</member>
 		<member name="rendering/global_illumination/sdfgi/frames_to_converge" type="int" setter="" getter="" default="5">
 			The number of frames to use for converging signed distance field global illumination. Higher values lead to a less noisy result, at the cost of taking a longer time to fully converge. This means the scene's global illumination will be too dark for a longer period of time, especially when the camera moves fast. The actual convergence speed depends on rendered framerate. For example, with the default setting of 30 frames, rendering at 60 FPS will make SDFGI fully converge after 0.5 seconds. See also [member rendering/global_illumination/sdfgi/frames_to_update_lights] and [member rendering/global_illumination/sdfgi/probe_ray_count].
@@ -3259,7 +3464,7 @@
 			Maximum number of surfels kept alive at once. Changing it reallocates the surfel buffers.
 		</member>
 		<member name="rendering/global_illumination/surfels/debug_view" type="int" setter="" getter="" default="0">
-			Shows surfel data in the GI buffer instead of the lit result. [code]0[/code] = disabled, [code]1[/code] = surfel irradiance, [code]2[/code] = surfels in random colors, [code]3[/code] = coverage (red where no surfel covers the pixel), [code]4[/code] = state of the nearest surfel (green settled, yellow new, red rays inside geometry, magenta marked for removal, blue grid cell over the lookup limit), [code]5[/code] = saturation (gray unsaturated, blue saturated cells, shading to red as the previous frame's kills of crowded surfels in saturated cells approach 64).
+			Shows surfel data in the GI buffer instead of the lit result. [code]0[/code] = disabled, [code]1[/code] = surfel irradiance, [code]2[/code] = surfels in random colors, [code]3[/code] = coverage (red where no surfel covers the pixel), [code]4[/code] = state of the nearest surfel (green settled, yellow new, red rays inside geometry, magenta marked for removal, blue grid cell over the lookup limit), [code]5[/code] = saturation (grey unsaturated, blue saturated cells, shading to red as the previous frame's kills of crowded surfels in saturated cells approach 64).
 		</member>
 		<member name="rendering/global_illumination/surfels/enabled" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], adaptive surfels add fine indirect light on top of DDGI near the camera. Requires [member rendering/global_illumination/ddgi/enabled].
@@ -3490,6 +3695,24 @@
 			If [code]true[/code], [OccluderInstance3D] nodes will be usable for occlusion culling in 3D in the root viewport. In custom viewports, [member Viewport.use_occlusion_culling] must be set to [code]true[/code] instead.
 			[b]Note:[/b] Enabling occlusion culling has a cost on the CPU. Only enable occlusion culling if you actually plan to use it. Large open scenes with few or no objects blocking the view will generally not benefit much from occlusion culling. Large open scenes generally benefit more from mesh LOD and visibility ranges ([member GeometryInstance3D.visibility_range_begin] and [member GeometryInstance3D.visibility_range_end]) compared to occlusion culling.
 			[b]Note:[/b] Due to memory constraints, occlusion culling is not supported by default in Web export templates. It can be enabled by compiling custom Web export templates with [code]module_raycast_enabled=yes[/code].
+		</member>
+		<member name="rendering/reflections/provider_mask" type="int" setter="" getter="" default="31">
+			Bit mask of the specular reflection providers that the Forward+ renderer combines in the main view. Bit 1 is the sky environment specular, bit 2 the global illumination rough specular fill, bit 4 the local reflection probes, bit 8 screen-space reflections and bit 16 specular occlusion. Clearing bit 2, 4 or 8 removes that provider so the next lower one shows through. Clearing bit 1 makes the environment specular black. Clearing bit 16 disables specular occlusion. The default value of 31 leaves the output unchanged. Reflection probe captures always use every provider.
+		</member>
+		<member name="rendering/reflections/unified_lookup" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], local reflection probes bend the reflection vector with [code]roughness^2[/code] like the sky does (instead of [code]roughness^4[/code]) and take the same horizon fade as the sky term.
+		</member>
+		<member name="rendering/reflections/horizon_geometric" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], the horizon fade of the sky, local probes and clear coat reflections uses the geometric surface normal instead of the shading normal, so normal-mapped surfaces do not reflect from below the surface.
+		</member>
+		<member name="rendering/reflections/ssr_coat_match" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], the clear coat lobe only takes the global illumination rough specular fill and screen-space reflections in proportion to how well the coat roughness matches the base roughness. Where the coat reflects the ground below the horizon, it takes them in full.
+		</member>
+		<member name="rendering/reflections/blend_fill_skip" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], alpha-blended surfaces do not read the global illumination rough specular fill, which holds the opaque surface behind them.
+		</member>
+		<member name="rendering/reflections/reflection_atlas/priority_fast_filter" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], a [ReflectionProbe] whose priority set with [method RenderingServer.reflection_probe_set_priority] is not zero filters all its roughness levels in a single frame the first time it is captured, so it appears about one frame after the capture instead of after one frame per roughness level. This makes that frame more expensive. Probes that are already in the atlas are not affected.
 		</member>
 		<member name="rendering/reflections/reflection_atlas/reflection_count" type="int" setter="" getter="" default="64">
 			Number of cubemaps to store in the reflection atlas. The number of [ReflectionProbe]s in a scene will be limited by this amount. A higher number requires more VRAM.
@@ -3725,7 +3948,7 @@
 			[b]Note:[/b] This property is only supported in the Forward+ and Mobile renderers, not Compatibility. In Compatibility, this property is always treated as if it was set to [code]0.0[/code].
 		</member>
 		<member name="rendering/textures/default_filters/use_nearest_mipmap_filter" type="bool" setter="" getter="" default="false">
-			If [code]true[/code], uses nearest-neighbor mipmap filtering when using mipmaps (also called "bilinear filtering"), which will result in visible seams appearing between mipmap stages. This may increase performance in mobile as less memory bandwidth is used. If [code]false[/code], linear mipmap filtering (also called "trilinear filtering") is used.
+			If [code]true[/code], uses nearest-neighbour mipmap filtering when using mipmaps (also called "bilinear filtering"), which will result in visible seams appearing between mipmap stages. This may increase performance in mobile as less memory bandwidth is used. If [code]false[/code], linear mipmap filtering (also called "trilinear filtering") is used.
 			[b]Note:[/b] This property is only read when the project starts. There is currently no way to change this setting at run-time.
 		</member>
 		<member name="rendering/textures/light_projectors/filter" type="int" setter="" getter="" default="3" keywords="nearest, linear, anisotropic">
@@ -3791,7 +4014,7 @@
 		</member>
 		<member name="rendering/visibility/dithered_instance_fade" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], an instance that is fading ([member GeometryInstance3D.transparency] above [code]0.0[/code], or a [member GeometryInstance3D.visibility_range_fade_mode] self fade) keeps its opaque materials in the opaque pass, the depth prepass and the shadow passes, and discards the pixels whose interleaved gradient noise [code]fract(52.9829189 * fract(dot(FRAGCOORD.xy + vec2(TEMPORAL_FRAME * 5.588238), vec2(0.06711056, 0.00583715))))[/code] is greater than or equal to the fade alpha (quantized to 1/255). [code]TEMPORAL_FRAME[/code] is the spatial shader built-in that holds the temporal antialiasing or upscaling jitter phase; it is [code]0.0[/code] without jitter and in shadow passes, so the pattern only changes from frame to frame under TAA or FSR 2, where it averages into a blend. A second representation that draws the complementary noise interval therefore cross-fades with it pixel for pixel. Shadows fade with the same alpha, measured from the main camera. Materials that use the transparent pass keep the alpha-blended fade. Instances that are not fading use the same pipelines as before.
-			[b]Note:[/b] Only supported when using the Forward+ and Mobile rendering methods. The Mobile rendering method has no alpha-blended instance fade, so there every material of a fading instance dithers, including materials that use the transparent pass. The Compatibility rendering method keeps its existing behavior.
+			[b]Note:[/b] Only supported when using the Forward+ and Mobile rendering methods. The Mobile rendering method has no alpha-blended instance fade, so there every material of a fading instance dithers, including materials that use the transparent pass. The Compatibility rendering method keeps its existing behaviour.
 		</member>
 		<member name="rendering/visibility/zoom_aware_ranges" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], visibility ranges follow the camera zoom: when a perspective camera's vertical field of view is narrower than [member rendering/visibility/zoom_reference_fov], the distance used for [member GeometryInstance3D.visibility_range_begin], [member GeometryInstance3D.visibility_range_end], their margins and the range fades is multiplied by [code]tan(fov / 2) / tan(zoom_reference_fov / 2)[/code], so an instance leaves its range at the same on-screen size as at the reference field of view. The factor is never below [code]1.0 / zoom_max_scale[/code]. Wider fields of view, orthogonal cameras and reflection probes use unscaled distances, and mesh LOD is not affected. Each viewport uses its own camera. Can be changed at run-time.
@@ -3867,7 +4090,7 @@
 		</member>
 		<member name="xr/openxr/extensions/hand_tracking" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], the hand tracking extension is enabled if available.
-			[b]Note:[/b] By default hand tracking will only work for data sources chosen by the XR runtime. For SteamVR this is the controller inferred data source, for most other runtimes this is the unobstructed data source. There is no way to query this. If a runtime supports the OpenXR data source extension you can use the [member xr/openxr/extensions/hand_tracking_controller_data_source] and/or [member xr/openxr/extensions/hand_tracking_unobstructed_data_source] to indicate you wish to enable these data sources. If neither is selected the data source extension is not enabled and the XR runtimes default behavior persists.
+			[b]Note:[/b] By default hand tracking will only work for data sources chosen by the XR runtime. For SteamVR this is the controller inferred data source, for most other runtimes this is the unobstructed data source. There is no way to query this. If a runtime supports the OpenXR data source extension you can use the [member xr/openxr/extensions/hand_tracking_controller_data_source] and/or [member xr/openxr/extensions/hand_tracking_unobstructed_data_source] to indicate you wish to enable these data sources. If neither is selected the data source extension is not enabled and the XR runtimes default behaviour persists.
 		</member>
 		<member name="xr/openxr/extensions/hand_tracking_controller_data_source" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], support for the controller inferred data source is requested. If supported, you will receive hand tracking data even if the user has a controller in hand, with finger positions automatically inferred from controller input and/or sensors.
@@ -3958,7 +4181,7 @@
 			If [code]true[/code], OpenXR will manage the depth buffer and use the depth buffer for advanced reprojection provided this is supported by the XR runtime. Note that some rendering features in Godot can't be used with this feature.
 		</member>
 		<member name="xr/openxr/target_api_version" type="String" setter="" getter="" default="&quot;&quot;">
-			Optionally sets a specific API version of OpenXR to initialize in [code]major.minor.patch[/code] notation. Some XR runtimes gate old behavior behind version checks. This is non-standard OpenXR behavior.
+			Optionally sets a specific API version of OpenXR to initialize in [code]major.minor.patch[/code] notation. Some XR runtimes gate old behaviour behind version checks. This is non-standard OpenXR behaviour.
 		</member>
 		<member name="xr/openxr/view_configuration" type="int" setter="" getter="" default="&quot;1&quot;" keywords="mono, stereo">
 			Specify the view configuration with which to configure OpenXR setting up either Mono or Stereo rendering.

@@ -1,0 +1,1739 @@
+#[compute]
+
+#version 450
+
+#VERSION_DEFINES
+
+#extension GL_EXT_samplerless_texture_functions : enable
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+#ifdef MODE_SKY_EPOCH
+#undef RESTIR_RAYS
+#endif
+
+#ifdef RESTIR_RAYS
+#if defined(MODE_FINAL) || defined(MODE_SOURCE) || defined(MODE_VALIDATE)
+#define RAY_SCENE_REPLAY
+#endif
+#define RAY_SCENE_SET 1
+#include "restir_core_ray_scene_inc.glsl"
+#endif
+#include "restir_core_rtgi_inc.glsl"
+
+#if defined(RESTIR_RAYS) && (defined(MODE_FINAL) || defined(MODE_SOURCE) || defined(MODE_VALIDATE))
+#define RESTIR_SHADE
+#endif
+
+#if defined(RESTIR_RAYS) && defined(SKY_REREAD) && (defined(MODE_TEMPORAL) || defined(MODE_SPATIAL))
+#define RS_SKY_REREAD
+#endif
+
+#if defined(RESTIR_RAYS) && defined(RAY_SCENE_ALPHA) && !defined(RAY_SCENE_ALPHA_THRESHOLD)
+#define RS_ALPHA_SEED
+#endif
+
+#if defined(RESTIR_SHADE) || defined(RS_SKY_REREAD)
+#define DDGI_SET 2
+#define DDGI_UBO_BINDING 0
+#ifdef RESTIR_SHADE
+#define DDGI_SAMPLING
+layout(set = 2, binding = 3) uniform utexture2DArray ddgi_probe_texture;
+layout(set = 2, binding = 4) uniform texture2DArray ddgi_irradiance_texture;
+layout(set = 2, binding = 5) uniform texture2DArray ddgi_distance_texture;
+layout(set = 2, binding = 6) uniform sampler ddgi_linear_sampler;
+#endif
+#ifdef USE_RADIANCE_OCTMAP_ARRAY
+layout(set = 2, binding = 7) uniform texture2DArray sky_radiance;
+#else
+layout(set = 2, binding = 7) uniform texture2D sky_radiance;
+#endif
+layout(set = 2, binding = 8) uniform sampler sky_sampler;
+#include "restir_core_ddgi_inc.glsl"
+#endif
+
+#include "restir_gi_inc.glsl"
+
+#ifdef RESTIR_SHADE
+float rs_shade_max_distance = 0.0;
+float rs_shade_bounce_energy = 0.0;
+float rs_shade_emission_exposure = 0.0;
+#define RAY_SCENE_SHADE_MAX_DISTANCE rs_shade_max_distance
+#define RAY_SCENE_SHADE_BOUNCE_ENERGY rs_shade_bounce_energy
+#define RAY_SCENE_SHADE_EMISSION_EXPOSURE rs_shade_emission_exposure
+#define RAY_SCENE_SHADE_MAX_RADIANCE RS_LO_CLAMP
+#include "restir_core_ray_scene_hit_shade_inc.glsl"
+
+void rs_shade_setup() {
+	ray_scene_replay = (rf.flags & F_REPLAY) != 0u;
+	bool ddgi_shade = (rf.flags & F_OWN_SAMPLER) == 0u && (rf.flags & F_SHADE_DDGI) != 0u;
+	rs_shade_max_distance = ddgi_shade ? ddgi.max_distance : rf.sky_distance;
+	rs_shade_bounce_energy = ddgi_shade ? rf.shade_bounce_energy : 0.0;
+	rs_shade_emission_exposure = ddgi_shade ? rf.shade_exposure : rf.emission_exposure;
+}
+#endif
+
+#if defined(RESTIR_SHADE) || defined(RS_SKY_REREAD) || defined(MODE_SKY_EPOCH)
+#define RS_SKY_COLOR 1u
+#define RS_SKY_SKY 2u
+#define RS_SKY_SIGN 4u
+#endif
+
+#if defined(RESTIR_SHADE) || defined(RS_SKY_REREAD)
+vec3 rs_sky_radiance(vec3 p_direction) {
+	if ((rf.flags & F_REAL_SKY) == 0u) {
+		return min(rf.test_sky.xyz, vec3(RS_LO_CLAMP));
+	}
+	vec3 radiance = vec3(0.0);
+	if ((rf.shade_sky_flags & RS_SKY_SKY) != 0u) {
+		float sky_sign = (rf.shade_sky_flags & RS_SKY_SIGN) != 0u ? 1.0 : -1.0;
+		vec4 sky_quat = vec4(rf.shade_sky, sky_sign * sqrt(max(0.0, 1.0 - dot(rf.shade_sky, rf.shade_sky))));
+		vec3 sky_dir = cross(sky_quat.xyz, p_direction);
+		sky_dir = p_direction + ((sky_dir * sky_quat.w) + cross(sky_quat.xyz, sky_dir)) * 2.0;
+#ifdef USE_RADIANCE_OCTMAP_ARRAY
+		radiance = textureLod(sampler2DArray(sky_radiance, sky_sampler), vec3(vec3_to_oct_with_border(sky_dir, rf.shade_sky_border), 0.0), rf.sky_blur_lod).rgb * rf.shade_sky_energy;
+#else
+		radiance = textureLod(sampler2D(sky_radiance, sky_sampler), vec3_to_oct_with_border(sky_dir, rf.shade_sky_border), rf.sky_blur_lod).rgb * rf.shade_sky_energy;
+#endif
+	} else if ((rf.shade_sky_flags & RS_SKY_COLOR) != 0u) {
+		radiance = rf.shade_sky * rf.shade_sky_energy;
+	}
+	return min(radiance, vec3(RS_LO_CLAMP));
+}
+#endif
+
+#if defined(MODE_TEMPORAL) || defined(MODE_SPATIAL) || defined(MODE_VALIDATE)
+
+void rs_stats_store(uint p_row) {
+	if ((rf.flags & F_PROBE_STATS) == 0u) {
+		return;
+	}
+	uint local = gl_LocalInvocationIndex;
+	for (int k = 0; k < PS_STRIDE; k++) {
+		partial_ps[local * uint(PS_STRIDE) + uint(k)] = g_stats[k];
+	}
+	barrier();
+	if (local == 0u) {
+		uint groups_x = (uint(rf.trace_size.x) + 7u) / 8u;
+		uint groups_y = (uint(rf.trace_size.y) + 7u) / 8u;
+		uint group = gl_WorkGroupID.y * groups_x + gl_WorkGroupID.x;
+		uint base = (p_row * groups_x * groups_y + group) * uint(PS_STRIDE);
+		for (int k = 0; k < PS_STRIDE; k++) {
+			float sum = 0.0;
+			for (uint t = 0u; t < 64u; t++) {
+				sum += partial_ps[t * uint(PS_STRIDE) + uint(k)];
+			}
+			pass_stats.data[base + uint(k)] = sum;
+		}
+	}
+}
+
+void rs_stats_clear() {
+	for (int k = 0; k < PS_STRIDE; k++) {
+		g_stats[k] = 0.0;
+	}
+}
+
+#endif
+
+#if defined(MODE_TEMPORAL) || defined(MODE_SPATIAL)
+
+#ifdef MODE_TEMPORAL
+bool rs_segment_hits_box(vec3 p_from, vec3 p_to, vec3 p_min, vec3 p_max) {
+	vec3 delta = p_to - p_from;
+	float t_enter = 0.0;
+	float t_exit = 1.0;
+	for (int axis = 0; axis < 3; axis++) {
+		if (abs(delta[axis]) < 1e-9) {
+			if (p_from[axis] < p_min[axis] || p_from[axis] > p_max[axis]) {
+				return false;
+			}
+		} else {
+			float inverse = 1.0 / delta[axis];
+			float ta = (p_min[axis] - p_from[axis]) * inverse;
+			float tb = (p_max[axis] - p_from[axis]) * inverse;
+			t_enter = max(t_enter, min(ta, tb));
+			t_exit = min(t_exit, max(ta, tb));
+			if (t_enter > t_exit) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+bool rs_dirty_hit(Receiver p_q, Reservoir p_h) {
+	vec3 from = p_q.pos;
+	vec3 to = from;
+	if ((p_h.flags & RF_VALID) != 0u) {
+		to = rs_is_sky(p_h) ? from + p_h.xs * rf.sky_distance : p_h.xs;
+	}
+	uint count = min(rf.dirty_count, 64u);
+	for (uint i = 0u; i < count; i++) {
+		vec3 lo = dirty.box_min[i].xyz - vec3(rf.dirty_margin);
+		vec3 hi = dirty.box_max[i].xyz + vec3(rf.dirty_margin);
+		if (rs_segment_hits_box(from, to, lo, hi)) {
+			return true;
+		}
+	}
+	return false;
+}
+#else
+bool rs_dirty_hit(Receiver p_q, Reservoir p_h) {
+	return false;
+}
+#endif
+
+void rs_fill_neighbour(Reservoir p_sample, float p_m, bool p_usable, uint p_dead_reason, bool p_dirty, Receiver p_q, Receiver p_r, Cand p_canonical, out Cand r_cand, out uint r_reason) {
+	r_cand = rs_cand_none();
+	r_reason = REJ_NONE;
+	bool unbiased = (rf.flags & F_UNBIASED) != 0u;
+	r_cand.present = true;
+	r_cand.s = p_sample;
+	r_cand.m = p_m;
+	g_stats[PS_PRESENT] += 1.0;
+	if (unbiased) {
+		float a_at_c = 0.0;
+		if (p_canonical.on && p_usable) {
+			uint reason_c;
+			uint kind_c;
+			float jac_c = rs_shift_jacobian(p_canonical.s, p_r.origin, p_q.origin, reason_c, kind_c);
+			if (jac_c > 0.0) {
+				float phat_q = rs_phat(p_canonical.s, p_q.origin, p_q.nrm);
+				if (phat_q > 0.0 && !rs_dirty_hit(p_q, p_canonical.s) && ((rf.flags & F_VIS) == 0u || rs_visible(p_q.origin, p_canonical.s))) {
+					a_at_c = p_m * phat_q * jac_c;
+				}
+			}
+		}
+		r_cand.a_at_c = a_at_c;
+	}
+	if (!p_usable) {
+		r_reason = p_dead_reason;
+		r_cand.keep = (rf.flags & F_KEEP_M) != 0u && (p_dead_reason == REJ_VIS || p_dead_reason == REJ_DIRTY);
+		g_stats[PS_ZERO_WEIGHT] += 1.0;
+		return;
+	}
+#ifdef RS_SKY_REREAD
+	if (rs_is_sky(p_sample)) {
+		p_sample.lo = rs_sky_radiance(normalize(p_sample.xs));
+		r_cand.s = p_sample;
+	}
+#endif
+	uint reason;
+	uint kind;
+	float jac = rs_shift_jacobian(p_sample, p_q.origin, p_r.origin, reason, kind);
+	float phat_r = rs_phat(p_sample, p_r.origin, p_r.nrm);
+	float energy = min(p_m * phat_r * p_sample.w * (jac > 0.0 ? jac : rs_jacobian_raw(p_sample, p_q.origin, p_r.origin)), 1e9);
+	if (isnan(energy) || isinf(energy)) {
+		energy = 0.0;
+	}
+	g_stats[PS_TESTED] += 1.0;
+	g_stats[PS_ENERGY_ALL] += energy;
+	if (!(jac > 0.0)) {
+		r_reason = reason;
+		g_stats[PS_ENERGY_TRUNC] += energy;
+		g_stats[kind == KIND_DIST ? PS_REJ_DIST : (kind == KIND_COS ? PS_REJ_COS : PS_REJ_JAC)] += 1.0;
+		return;
+	}
+	if (unbiased && p_dirty) {
+		r_reason = REJ_DIRTY;
+		return;
+	}
+	if (unbiased && (rf.flags & F_VIS) != 0u && !rs_visible(p_q.origin, p_sample)) {
+		r_reason = REJ_VIS;
+		return;
+	}
+	r_cand.on = true;
+	r_cand.jac = jac;
+	bool test_vis = (rf.flags & F_VIS) != 0u && ((rf.flags & F_VIS_REUSE) != 0u || unbiased);
+	if (phat_r > 0.0 && test_vis && !rs_visible(p_r.origin, p_sample)) {
+		phat_r = 0.0;
+		r_reason = REJ_VIS;
+		if (!unbiased) {
+			r_cand.on = false;
+			r_cand.keep = (rf.flags & F_KEEP_M) != 0u;
+		}
+	}
+	r_cand.phat_r = phat_r;
+	if (unbiased) {
+		r_cand.a_self = p_m * rs_phat(p_sample, p_q.origin, p_q.nrm) / jac;
+	}
+}
+
+bool rs_similar(Receiver p_r, Receiver p_n, out uint r_reason) {
+	r_reason = REJ_NONE;
+	if (!p_n.valid) {
+		r_reason = REJ_PLANE;
+		return false;
+	}
+	if (abs(dot(p_r.nrm, p_n.pos - p_r.pos)) / p_r.depth >= rf.tol_plane) {
+		r_reason = REJ_PLANE;
+		return false;
+	}
+	if (dot(p_r.nrm, p_n.nrm) <= rf.cos_normal) {
+		r_reason = REJ_NORMAL;
+		return false;
+	}
+	if (abs(p_r.rough - p_n.rough) > rf.class_tol) {
+		r_reason = REJ_CLASS;
+		return false;
+	}
+	return true;
+}
+
+Reservoir rs_finish(Reservoir p_result, int p_sel, float p_total_m, Receiver p_r, uint p_source_flag, uint p_age_inc) {
+	Reservoir result = p_result;
+	result.m = uint(min(p_total_m, float(rf.m_max)));
+	result.depth = p_r.depth;
+	result.rnormal = rtgi_pack_normal(p_r.nrm);
+	result.epoch = rf.epoch_tag;
+	if (p_sel > 0) {
+		result.flags |= p_source_flag;
+		result.age = min(result.age + p_age_inc, 65535u);
+	}
+	return result;
+}
+
+#endif
+
+#ifdef MODE_CLEAR
+
+void main() {
+	ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(px, rf.trace_size))) {
+		return;
+	}
+	rs_store(px, rs_empty());
+	imageStore(vis_state, px, uvec4(0u));
+	imageStore(info_image, px, uvec4(0u));
+}
+
+#endif
+
+#ifdef MODE_TEMPORAL
+
+Reservoir rs_from_candidate(ivec2 p_pixel, Receiver p_r) {
+	uvec4 first = texelFetch(cand_first, p_pixel, 0);
+	uvec4 second = texelFetch(cand_second, p_pixel, 0);
+	uint cflags = rtgi_candidate_flags(second);
+	Reservoir res = rs_empty();
+	if ((rf.flags & F_REVAL_FRAME) != 0u) {
+		return res;
+	}
+	if ((cflags & RTGI_FLAG_NO_CANDIDATE) != 0u) {
+		return res;
+	}
+	vec3 lo = rtgi_candidate_radiance(second);
+	float pdf = uintBitsToFloat(second.z);
+	if (!rs_finite3(lo)) {
+		g_stats[PS_LO_REFUSED] += 1.0;
+		res.m = 1u;
+		return res;
+	}
+	if (!(pdf > 0.0) || isinf(pdf)) {
+		g_stats[PS_PDF_REFUSED] += 1.0;
+		res.m = 1u;
+		return res;
+	}
+	res.lo = clamp(lo, vec3(0.0), vec3(RS_LO_CLAMP));
+	res.flags = RF_VALID;
+	if ((cflags & RTGI_FLAG_MISS_SKY) != 0u) {
+		res.flags |= RF_SKY;
+		res.xs = normalize(uintBitsToFloat(first.xyz));
+		res.ns = vec3(0.0, 0.0, 1.0);
+#ifdef RS_SKY_REREAD
+		res.lo = rs_sky_radiance(normalize(res.xs));
+#endif
+	} else {
+		res.xs = uintBitsToFloat(first.xyz);
+		res.ns = rtgi_unpack_normal(first.w);
+	}
+	if ((cflags & RTGI_FLAG_BACKFACE) != 0u) {
+		res.flags |= RF_BACKFACE;
+	}
+	if ((cflags & RTGI_FLAG_EMISSIVE) != 0u) {
+		res.flags |= RF_EMISSIVE;
+	}
+	res.w = 1.0 / pdf;
+	res.m = 1u;
+	res.age = 0u;
+	res.depth = p_r.depth;
+	res.rnormal = rtgi_pack_normal(p_r.nrm);
+	res.epoch = rf.epoch_tag;
+	res.tag = second.w;
+#ifdef RESTIR_RAYS
+#ifdef RS_ALPHA_SEED
+	bool rtgi_seed = (rf.flags & F_OWN_SAMPLER) == 0u;
+#else
+	bool rtgi_seed = (rf.flags & (F_REPLAY | F_OWN_SAMPLER)) == F_REPLAY;
+#endif
+	if (rtgi_seed) {
+		res.tag = ray_scene_hash(rtgi_shade_key(rtgi_anchor_pixel(p_pixel, rf.trace_scale, rf.screen_size), rf.frame));
+	}
+#endif
+	return res;
+}
+
+float rs_event_cap_history(Receiver p_r, Receiver p_q, Reservoir p_h, float p_m) {
+	float m = p_m;
+	float event_cap = float(ev.counts.z);
+	if (rs_event_caps(p_r.pos)) {
+		if (m > event_cap) {
+			g_stats[PS_EVENT_CAPPED] += 1.0;
+		}
+		m = min(m, event_cap);
+	} else if ((rf.flags & F_PROBE_STATS) != 0u && ev.counts.z == 0u && ev.gates.w == RS_EVENT_VALIDATE_EVENT && (p_h.flags & RF_VALID) != 0u && !rs_is_sky(p_h) && rs_event_holds(p_h.xs) && rs_event_caps(p_q.pos)) {
+		g_stats[PS_EDGE_STALE] += 1.0;
+	}
+	if (ev.gates.z != 0u) {
+		m = min(m, float(ev.counts.w));
+	}
+#ifdef RS_SKY_REREAD
+	if (sky_epoch.jump != 0u) {
+		m = min(m, float(ev.counts.w));
+	}
+#endif
+	return m;
+}
+
+#define RS_FOLD_CLOCK rf.shade_pad1
+#define RS_FOLD_K rf.shade_pad2
+#include "restir_fold_inc.glsl"
+
+bool rs_fold_refuses(uint p_h_s) {
+	uint bound = (rf.flags & F_PRE_FRAME) != 0u ? RS_FOLD_K - 1u : RS_FOLD_K;
+	return p_h_s + 1u >= bound;
+}
+
+uint rs_fold_bits(ivec2 p_pixel, ivec2 p_hp, bool p_had, bool p_cleared, uint p_h_s, bool p_h_mv) {
+	uint k = RS_FOLD_K;
+	uint half_k = k >> 1u;
+	uint v = RS_FOLD_CLOCK;
+	uvec2 pixel = uvec2(p_pixel);
+	bool still = all(equal(p_hp, p_pixel));
+	uint s;
+	bool mv;
+	if (p_had && !p_cleared) {
+		s = p_h_s + 1u;
+		mv = p_h_mv || !still;
+		g_stats[PS_FOLD_CARRIED] += 1.0;
+	} else {
+		if (p_cleared) {
+			uint u = (!p_h_mv && still) ? (v + rs_fold_phi(pixel)) % k : RS_FOLD_PSI_R(pixel, v) % k;
+			s = u <= half_k ? u : u - half_k;
+			mv = false;
+			g_stats[PS_FOLD_RENEWED] += 1.0;
+		} else {
+			s = rs_fold_draw(RS_FOLD_PSI_S(pixel, v), k);
+			mv = true;
+			g_stats[PS_FOLD_STARTED] += 1.0;
+		}
+		if ((rf.flags & F_PRE_FRAME) != 0u) {
+			s = min(s, k - 2u);
+		}
+	}
+	return ((s & RF_S_MASK) << RF_S_SHIFT) | (mv ? RF_MV : 0u);
+}
+
+#ifdef RS_FOLD_DUMP
+shared uint rs_fold_scan_max;
+shared uint rs_fold_scan_over;
+shared uint rs_fold_scan_texels;
+
+void rs_fold_dump_scan(ivec2 p_pixel) {
+	if (RS_FOLD_K == 0u) {
+		return;
+	}
+	if (gl_LocalInvocationIndex == 0u) {
+		rs_fold_scan_max = 0u;
+		rs_fold_scan_over = 0u;
+		rs_fold_scan_texels = 0u;
+	}
+	barrier();
+	if (all(lessThan(p_pixel, rf.trace_size))) {
+		uint hs = (rs_load(p_pixel).flags >> RF_S_SHIFT) & RF_S_MASK;
+		atomicMax(rs_fold_scan_max, hs);
+		if (hs > RS_FOLD_K - 1u) {
+			atomicAdd(rs_fold_scan_over, 1u);
+		}
+		atomicAdd(rs_fold_scan_texels, 1u);
+	}
+	barrier();
+	if (gl_LocalInvocationIndex == 0u) {
+		atomicMax(rs_fold_dump.s_max, rs_fold_scan_max);
+		atomicAdd(rs_fold_dump.n_over, rs_fold_scan_over);
+		atomicAdd(rs_fold_dump.texels, rs_fold_scan_texels);
+	}
+}
+
+uint rs_fold_start_class(uint p_reason) {
+	uint base = RS_FOLD_START_OTHER;
+	if (p_reason == REJ_CUT) {
+		base = RS_FOLD_START_CUT;
+	} else if (p_reason == REJ_FRAME) {
+		base = RS_FOLD_START_FRAME;
+	} else if (p_reason == REJ_PLANE) {
+		base = RS_FOLD_START_PLANE;
+	} else if (p_reason == REJ_NORMAL) {
+		base = RS_FOLD_START_NORMAL;
+	} else if (p_reason == REJ_CLASS) {
+		base = RS_FOLD_START_CLASS;
+	} else if (p_reason == REJ_NO_SAMPLE) {
+		base = RS_FOLD_START_NO_SAMPLE;
+	} else if (p_reason == REJ_VIS) {
+		base = RS_FOLD_START_VIS;
+	}
+	return base + ((rf.flags & F_PRE_FRAME) != 0u ? RS_FOLD_START_PRE : 0u);
+}
+
+void rs_fold_dump_start(ivec2 p_pixel, uint p_reason, uint p_flags) {
+	uint s = (p_flags >> RF_S_SHIFT) & RF_S_MASK;
+	uint u = (RS_FOLD_CLOCK + rs_fold_phi(uvec2(p_pixel))) % RS_FOLD_K;
+	uint c = rs_fold_start_class(p_reason);
+	atomicAdd(rs_fold_dump.starts[(c * RS_FOLD_START_S + s) * RS_FOLD_START_U + u], 1u);
+}
+
+void rs_fold_dump_relock(ivec2 p_pixel, ivec2 p_hp, bool p_had) {
+	if (RS_FOLD_K == 0u || !all(equal(p_hp, p_pixel))) {
+		return;
+	}
+	g_stats[PS_FOLD_HP_EQ_PX] += 1.0;
+	if ((RS_FOLD_CLOCK + rs_fold_phi(uvec2(p_pixel))) % RS_FOLD_K == 0u) {
+		if (p_had) {
+			g_stats[PS_FOLD_PHASE0] += 1.0;
+		} else {
+			g_stats[PS_FOLD_PHASE0_START] += 1.0;
+		}
+	}
+}
+
+#ifdef RS_FOLD_LINEAGE
+uint rs_fold_lineage_id(uvec2 p_word) {
+	if (p_word.x == 0u || p_word.x > RS_FOLD_LINEAGE_PIXEL_MASK) {
+		return RS_FOLD_LINEAGE_UNKNOWN;
+	}
+	return ((p_word.y & RS_FOLD_LINEAGE_CLOCK_MASK) << RS_FOLD_LINEAGE_CLOCK_SHIFT) | p_word.x;
+}
+
+void rs_fold_lineage_store(ivec2 p_pixel, ivec2 p_hp, bool p_valid, bool p_had, bool p_cleared) {
+	uvec2 word = uvec2(0u);
+	uint id = 0u;
+	if (p_valid && RS_FOLD_K != 0u) {
+		uvec2 born = uvec2(uint(p_pixel.y) * uint(rf.trace_size.x) + uint(p_pixel.x) + 1u, RS_FOLD_CLOCK);
+		if (p_had) {
+			uvec2 history = imageLoad(rs_fold_lineage_in, p_hp).xy;
+			if (p_cleared) {
+				id = rs_fold_lineage_id(history);
+				word = born;
+			} else {
+				word = history;
+			}
+		} else {
+			word = born;
+		}
+	}
+	imageStore(rs_fold_lineage_out, p_pixel, uvec4(word, 0u, 0u));
+	imageStore(rs_fold_refused_id, p_pixel, uvec4(id, 0u, 0u, 0u));
+}
+#endif
+
+#endif
+void rs_temporal_pixel(ivec2 px) {
+	Receiver r = rs_receiver_cur(px);
+	if (!r.valid) {
+		rs_store(px, rs_empty());
+		imageStore(info_image, px, uvec4(0u));
+#ifdef RS_FOLD_LINEAGE
+		rs_fold_lineage_store(px, px, false, false, false);
+#endif
+		return;
+	}
+	Reservoir fresh = rs_from_candidate(px, r);
+	for (int i = 0; i < MAX_CAND; i++) {
+		c[i] = rs_cand_none();
+	}
+	c[0].s = fresh;
+	c[0].m = float(fresh.m);
+	c[0].jac = 1.0;
+	c[0].on = fresh.m > 0u && (fresh.flags & RF_VALID) != 0u;
+	c[0].phat_r = c[0].on ? rs_phat(fresh, r.origin, r.nrm) : 0.0;
+	if (c[0].on) {
+		float energy_c = min(c[0].m * c[0].phat_r * fresh.w, 1e9);
+		g_stats[PS_ENERGY_ALL] += (isnan(energy_c) || isinf(energy_c)) ? 0.0 : energy_c;
+	} else {
+		g_stats[PS_NO_CANON] += 1.0;
+	}
+
+	uint reason = REJ_CUT;
+	uint info = INFO_VALID;
+	ivec2 hp = ivec2(-1);
+	uint h_s = 0u;
+	bool h_mv = false;
+	bool cleared = false;
+	if ((rf.flags & F_HISTORY) != 0u) {
+		reason = REJ_NONE;
+		vec4 clip = rf.view_to_prev_clip * vec4(r.view, 1.0);
+		if (clip.w > 1e-6) {
+			vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
+			hp = ivec2(floor(uv * vec2(rf.trace_size)));
+			if (uv.x < 0.0 || uv.y < 0.0 || any(greaterThanEqual(hp, rf.trace_size))) {
+				reason = REJ_FRAME;
+			}
+		} else {
+			reason = REJ_FRAME;
+		}
+		if (reason == REJ_NONE) {
+			Receiver q = rs_receiver_prev(hp);
+			uint similar_reason;
+			if (!rs_similar(r, q, similar_reason)) {
+				reason = similar_reason;
+			} else {
+				Reservoir h = rs_load(hp);
+				h_s = (h.flags >> RF_S_SHIFT) & RF_S_MASK;
+				h_mv = (h.flags & RF_MV) != 0u;
+				uint vis = imageLoad(vis_state, hp).x;
+				if (h.m == 0u) {
+					reason = REJ_NO_SAMPLE;
+				} else if (h.epoch != rf.prev_epoch_tag) {
+					reason = REJ_EPOCH;
+				} else {
+					info |= INFO_HAD_HISTORY;
+					bool unbiased = (rf.flags & F_UNBIASED) != 0u;
+					bool dirty = rs_dirty_hit(q, h);
+					bool keep_m = (rf.flags & F_KEEP_M) != 0u;
+					if (dirty && !unbiased && !keep_m) {
+						reason = REJ_DIRTY;
+					} else {
+						float m_h = float(min(h.m, rf.m_temporal_cap));
+						if ((rf.flags & F_EVENTS) != 0u) {
+							m_h = rs_event_cap_history(r, q, h, m_h);
+						}
+						bool usable = (h.flags & RF_VALID) != 0u;
+						uint dead_reason = REJ_NO_SAMPLE;
+						if (!unbiased && usable && ((vis & 0xFFu) > rf.vis_fail_limit || (vis & 0x100u) != 0u)) {
+							usable = false;
+							dead_reason = REJ_VIS;
+						}
+						if (dirty && !unbiased && (h.flags & RF_VALID) != 0u) {
+							usable = false;
+							dead_reason = REJ_DIRTY;
+						}
+						uint nb_reason;
+						rs_fill_neighbour(h, m_h, usable, dead_reason, dirty, q, r, c[0], c[1], nb_reason);
+						reason = nb_reason;
+						if (RS_FOLD_K != 0u && rs_fold_refuses(h_s)) {
+							c[1] = rs_cand_none();
+							cleared = true;
+							if (reason == REJ_NONE) {
+								reason = REJ_BOUND;
+							}
+							g_stats[PS_FOLD_REFUSED] += 1.0;
+#ifdef RS_FOLD_DUMP
+							if ((RS_FOLD_CLOCK + rs_fold_phi(uvec2(px))) % RS_FOLD_K != 0u) {
+								g_stats[PS_FOLD_REFUSED_OFF] += 1.0;
+							}
+#endif
+							if (!c[0].on) {
+								g_stats[PS_FOLD_REFUSED_EMPTY] += 1.0;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	bool had = c[1].present || cleared;
+#ifdef RS_FOLD_DUMP
+	rs_fold_dump_relock(px, hp, had);
+#endif
+
+	int sel;
+	float total_m;
+	Reservoir result = rs_combine(2, uvec2(px), sel, total_m);
+	result = rs_finish(result, sel, total_m, r, RF_TEMPORAL, 1u);
+	if (RS_FOLD_K != 0u) {
+		result.flags = (result.flags & ~RF_FOLD_BITS) | rs_fold_bits(px, hp, had, cleared, h_s, h_mv);
+#ifdef RS_FOLD_DUMP
+		if (!had) {
+			rs_fold_dump_start(px, reason, result.flags);
+		}
+#endif
+	}
+	if (sel == 1) {
+		info |= INFO_SEL_TEMPORAL;
+	}
+	info |= reason & INFO_TEMPORAL_REJECT_MASK;
+	rs_store(px, result);
+	imageStore(info_image, px, uvec4(info));
+#ifdef RS_FOLD_LINEAGE
+	rs_fold_lineage_store(px, hp, true, had, cleared);
+#endif
+}
+
+void main() {
+	rs_stats_clear();
+	ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+#ifdef RS_FOLD_DUMP
+	rs_fold_dump_scan(px);
+#endif
+	if (all(lessThan(px, rf.trace_size))) {
+		if (rs_tile_traced(px)) {
+			rs_temporal_pixel(px);
+		} else {
+			rs_store(px, rs_empty());
+			imageStore(info_image, px, uvec4(0u));
+#ifdef RS_FOLD_LINEAGE
+			rs_fold_lineage_store(px, px, false, false, false);
+#endif
+		}
+	}
+	rs_stats_store(rf.pass_index);
+}
+
+#endif
+
+#ifdef MODE_SPATIAL
+
+vec2 rs_spatial_offset(int p_index, uvec2 p_pixel) {
+	float radius = float(rf.spatial_radius);
+	float angle;
+	float length_fraction;
+	if ((rf.flags & F_DETERMINISTIC) != 0u) {
+		angle = float(p_index) * 2.39996323 + float(rf.pass_index) * 1.3;
+		length_fraction = sqrt((float(p_index) + 0.5) / float(max(rf.spatial_count, 1u)));
+	} else {
+		uint base = 128u + 16u * rf.pass_index;
+		angle = 6.2831853 * rs_rand(p_pixel, base + uint(p_index));
+		length_fraction = sqrt(rs_rand(p_pixel, base + 8u + uint(p_index)));
+	}
+	return vec2(cos(angle), sin(angle)) * (radius * max(length_fraction, 0.15));
+}
+
+#ifdef PASS_SPATIAL_COMPAT
+
+#define COMPAT_MAX_K 64
+#define COMPAT_MAX_M 8
+#define COMPAT_KEY_DIM 96u
+#define COMPAT_START_DIM 160u
+
+float rs_compat_score(Receiver p_r, Receiver p_q) {
+	float scale = length(p_r.true_view) * rf.compat_scale;
+	float hp = exp(-length(p_r.true_view - p_q.true_view) / scale);
+	float c = clamp(dot(p_r.nrm, p_q.nrm), 0.0, 1.0);
+	float c2 = c * c;
+	float c4 = c2 * c2;
+	float h = hp * (c4 * c4);
+	return h < 1.17549435e-38 ? 0.0 : h;
+}
+
+float rs_compat_weight(Receiver p_r, Receiver p_q, out float r_h) {
+	r_h = 0.0;
+	if (!p_q.valid) {
+		return 0.0;
+	}
+	r_h = rs_compat_score(p_r, p_q);
+	if ((rf.flags & F_COMPAT_NONE) != 0u) {
+		return abs(p_r.rough - p_q.rough) > rf.class_tol ? 0.0 : r_h;
+	}
+	uint reason;
+	if (!rs_similar(p_r, p_q, reason)) {
+		return 0.0;
+	}
+	return (rf.flags & F_COMPAT_BINARY) != 0u ? 1.0 : r_h;
+}
+
+int rs_round_away(float p_value) {
+	int r = int(floor(abs(p_value) + 0.5));
+	return p_value < 0.0 ? -r : r;
+}
+
+ivec2 rs_compat_offset(uint p_start, uint p_tap) {
+	uint index = p_start + p_tap;
+	float a = float(index * 0xC13FA9A9u) * 2.3283064365386963e-10;
+	float b = float(index * 0x91E10DA6u) * 2.3283064365386963e-10;
+	float u = 2.0 * a - 1.0;
+	float v = 2.0 * b - 1.0;
+	vec2 d = vec2(0.0);
+	if (u != 0.0 || v != 0.0) {
+		float radius;
+		float angle;
+		if (abs(u) > abs(v)) {
+			radius = u;
+			angle = 0.78539816 * (v / u);
+		} else {
+			radius = v;
+			angle = 1.57079633 - 0.78539816 * (u / v);
+		}
+		d = vec2(radius * cos(angle), radius * sin(angle));
+	}
+	vec2 f = float(rf.spatial_radius) * d;
+	return ivec2(rs_round_away(f.x), rs_round_away(f.y));
+}
+
+int rs_select_neighbours(Receiver p_r, ivec2 p_pixel, int p_wanted, out ivec2 r_picks[COMPAT_MAX_M]) {
+	int m = clamp(p_wanted, 1, COMPAT_MAX_M);
+	uint budget = min(rf.compat_k, uint(COMPAT_MAX_K));
+	bool early_stop = (rf.flags & F_COMPAT_STOP) != 0u;
+	uint start = uint(rs_rand(uvec2(p_pixel), COMPAT_START_DIM + rf.pass_index) * 16777216.0);
+	uint taps[COMPAT_MAX_K];
+	float keys[COMPAT_MAX_M];
+	float scores[COMPAT_MAX_M];
+	for (int i = 0; i < COMPAT_MAX_M; i++) {
+		keys[i] = 0.0;
+		scores[i] = 0.0;
+		r_picks[i] = ivec2(0);
+	}
+	int listed = 0;
+	int above = 0;
+	float scored = 0.0;
+	bool stopped = false;
+	for (uint t = 0u; t < budget; t++) {
+		ivec2 d = rs_compat_offset(start, t);
+		uint tap_key = uint(d.x & 0xFFFF) | (uint(d.y & 0xFFFF) << 16u);
+		taps[t] = tap_key;
+		if (d.x == 0 && d.y == 0) {
+			continue;
+		}
+		ivec2 np = p_pixel + d;
+		if (any(lessThan(np, ivec2(0))) || any(greaterThanEqual(np, rf.trace_size)) || !rs_tile_traced(np)) {
+			continue;
+		}
+		bool seen = false;
+		for (uint j = 0u; j < t; j++) {
+			if (taps[j] == tap_key) {
+				seen = true;
+				break;
+			}
+		}
+		if (seen) {
+			continue;
+		}
+		Receiver q = rs_receiver_cur(np);
+		float h;
+		float w = rs_compat_weight(p_r, q, h);
+		scored += 1.0;
+		if (!(w > 0.0)) {
+			continue;
+		}
+		float u = max(rs_rand(uvec2(p_pixel), COMPAT_KEY_DIM + t), 5.9604645e-8);
+		float key = log(u) / w;
+		if (listed == m && !(key > keys[m - 1])) {
+			if (h > rf.compat_stop_score) {
+				above++;
+			}
+			if (early_stop && above > m) {
+				stopped = true;
+				break;
+			}
+			continue;
+		}
+		int slot = min(listed, m - 1);
+		while (slot > 0 && key > keys[slot - 1]) {
+			keys[slot] = keys[slot - 1];
+			r_picks[slot] = r_picks[slot - 1];
+			scores[slot] = scores[slot - 1];
+			slot--;
+		}
+		keys[slot] = key;
+		r_picks[slot] = d;
+		scores[slot] = h;
+		if (listed < m) {
+			listed++;
+		}
+		if (h > rf.compat_stop_score) {
+			above++;
+		}
+		if (early_stop && above > m) {
+			stopped = true;
+			break;
+		}
+	}
+	float h_sum = 0.0;
+	for (int i = 0; i < listed; i++) {
+		h_sum += scores[i];
+	}
+	g_stats[PS_COMPAT_TAPS] += scored;
+	g_stats[PS_COMPAT_STOPS] += stopped ? 1.0 : 0.0;
+	g_stats[PS_COMPAT_EMPTY] += listed == 0 ? 1.0 : 0.0;
+	g_stats[PS_COMPAT_HSUM] += h_sum;
+	if ((rf.flags & F_PROBE_STATS) != 0u) {
+		uvec4 o0 = uvec4(uint(r_picks[0].x) & 0xFFu, uint(r_picks[0].y) & 0xFFu, uint(r_picks[1].x) & 0xFFu, uint(r_picks[1].y) & 0xFFu);
+		uvec2 o2 = uvec2(uint(r_picks[2].x) & 0xFFu, uint(r_picks[2].y) & 0xFFu);
+		uint word_x = uint(listed) | (o0.x << 8u) | (o0.y << 16u) | (o0.z << 24u);
+		uint word_y = o0.w | (o2.x << 8u) | (o2.y << 16u) | (min(uint(scored), 255u) << 24u);
+		imageStore(sel_image, ivec3(p_pixel, int(rf.pass_index) - 1), uvec4(word_x, word_y, 0u, 0u));
+	}
+	return listed;
+}
+
+#endif
+
+void rs_spatial_pixel(ivec2 px) {
+	Receiver r = rs_receiver_cur(px);
+	uint info = imageLoad(info_image, px).x;
+	if (!r.valid) {
+		rs_store(px, rs_empty());
+		return;
+	}
+	Reservoir own = rs_load(px);
+#ifdef RS_SKY_REREAD
+	if (own.m > 0u && (own.flags & RF_VALID) != 0u && rs_is_sky(own)) {
+		own.lo = rs_sky_radiance(normalize(own.xs));
+	}
+#endif
+	bool event_capped = (rf.flags & F_EVENTS) != 0u && rs_event_caps(r.pos);
+	bool hold_on = (rf.flags & F_SPATIAL_HOLD) != 0u;
+	bool hold_capped = hold_on && rs_hold_caps(r.pos);
+	for (int i = 0; i < MAX_CAND; i++) {
+		c[i] = rs_cand_none();
+	}
+	c[0].s = own;
+	c[0].m = float(own.m);
+	c[0].jac = 1.0;
+	c[0].phat_r = rs_phat(own, r.origin, r.nrm);
+	c[0].on = own.m > 0u && (own.flags & RF_VALID) != 0u;
+	if (c[0].on) {
+		float energy_c = min(c[0].m * c[0].phat_r * own.w, 1e9);
+		g_stats[PS_ENERGY_ALL] += (isnan(energy_c) || isinf(energy_c)) ? 0.0 : energy_c;
+	}
+
+	int count = 1;
+	uint spatial_reason = REJ_NONE;
+	int wanted = int(min(rf.spatial_count, uint(MAX_CAND - 1)));
+#ifdef PASS_SPATIAL_COMPAT
+	ivec2 picks[COMPAT_MAX_M];
+	int picked = rs_select_neighbours(r, px, wanted, picks);
+	if (picked == 0) {
+		spatial_reason = REJ_NO_COMPAT;
+	}
+	for (int k = 0; k < picked; k++) {
+		ivec2 np = px + picks[k];
+		Receiver q = rs_receiver_cur(np);
+		if ((rf.flags & F_COMPAT_NONE) != 0u) {
+			uint similar_reason;
+			if (!rs_similar(r, q, similar_reason)) {
+				spatial_reason = similar_reason;
+			}
+		}
+#else
+	for (int k = 0; k < wanted; k++) {
+		ivec2 np = px + ivec2(floor(rs_spatial_offset(k, uvec2(px)) + 0.5));
+		if (np == px || any(lessThan(np, ivec2(0))) || any(greaterThanEqual(np, rf.trace_size))) {
+			spatial_reason = REJ_FRAME;
+			continue;
+		}
+		if (!rs_tile_traced(np)) {
+			spatial_reason = REJ_UNTRACED;
+			continue;
+		}
+		Receiver q = rs_receiver_cur(np);
+		uint similar_reason;
+		if (!rs_similar(r, q, similar_reason)) {
+			spatial_reason = similar_reason;
+			continue;
+		}
+#endif
+		Reservoir n = rs_load(np);
+		if (n.m == 0u) {
+			spatial_reason = REJ_NO_SAMPLE;
+			continue;
+		}
+		Cand nc;
+		uint nb_reason;
+		float m_n = float(min(n.m, rf.m_max));
+		if ((event_capped || hold_capped) && !rs_event_caps(q.pos) && !(hold_on && rs_hold_caps(q.pos))) {
+			m_n = min(m_n, float(ev.counts.z));
+		}
+		rs_fill_neighbour(n, m_n, (n.flags & RF_VALID) != 0u, REJ_NO_SAMPLE, false, q, r, c[0], nc, nb_reason);
+		if (nb_reason != REJ_NONE && nb_reason != REJ_VIS) {
+			spatial_reason = nb_reason;
+		}
+		if (nc.present) {
+			c[count] = nc;
+			count++;
+		}
+	}
+
+	int sel;
+	float total_m;
+	Reservoir result;
+	if (count == 1) {
+		result = own;
+		sel = 0;
+		total_m = float(own.m);
+		result.m = uint(min(total_m, float(rf.m_max)));
+	} else {
+		result = rs_combine(count, uvec2(px), sel, total_m);
+		result = rs_finish(result, sel, total_m, r, RF_SPATIAL, 0u);
+		g_stats[PS_SPATIAL_COMBINES] += 1.0;
+	}
+	if (sel > 0) {
+		info |= INFO_SEL_SPATIAL;
+	}
+	info = (info & ~(15u << INFO_SPATIAL_REJECT_SHIFT)) | ((spatial_reason & 15u) << INFO_SPATIAL_REJECT_SHIFT);
+	rs_store(px, result);
+	imageStore(info_image, px, uvec4(info));
+}
+
+void main() {
+	rs_stats_clear();
+	ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+	if (all(lessThan(px, rf.trace_size))) {
+		if (rs_tile_traced(px)) {
+			rs_spatial_pixel(px);
+		} else {
+			rs_store(px, rs_empty());
+		}
+	}
+	rs_stats_store(rf.pass_index);
+}
+
+#endif
+
+#if defined(MODE_FINAL) || defined(MODE_VALIDATE)
+
+#ifdef RESTIR_RAYS
+vec3 rs_fresh_lo(vec3 p_origin, vec3 p_dir, float p_dist, uint p_seed, uint p_tag, out bool r_hit_here) {
+	RaySceneHit hit;
+	r_hit_here = false;
+	float eps = 0.02 + 0.002 * p_dist;
+#ifdef RS_ALPHA_SEED
+	uint trace_seed = p_tag;
+#else
+	uint trace_seed = ray_scene_hash(p_seed + 0xa54ff53bu);
+#endif
+	if (!ray_scene_trace(p_origin, p_dir, p_dist + eps, false, false, trace_seed, hit)) {
+		return vec3(0.0);
+	}
+	if (abs(hit.t - p_dist) > eps) {
+		return vec3(0.0);
+	}
+	r_hit_here = true;
+	RaySceneMaterial material = ray_scene_hit_material(hit);
+	bool two_sided = hit.blend || bool(material.flags & RAY_SCENE_MATERIAL_TWO_SIDED);
+	if (hit.backface && !two_sided) {
+		return vec3(0.0);
+	}
+	vec3 normal = ray_scene_hit_normal(hit);
+	if (hit.backface) {
+		normal = -normal;
+	}
+	vec3 position = p_origin + p_dir * hit.t;
+	float bias = 0.01 + hit.t * 0.001;
+	bool ddgi_shade = (rf.flags & F_OWN_SAMPLER) == 0u && (rf.flags & F_SHADE_DDGI) != 0u;
+	if (!ddgi_shade) {
+		vec3 irradiance = gi_hit_direct_light(position, normal, bias, rf.sky_distance, p_seed);
+		return min(material.emission * rf.emission_exposure + material.albedo * irradiance, vec3(RS_LO_CLAMP));
+	}
+	vec3 irradiance = gi_hit_direct_light(position, normal, bias, ddgi.max_distance, p_seed);
+	if (rf.shade_bounce_energy > 0.0) {
+		vec3 bounce = ddgi_sample_direction(position - ray_scene.camera_to_anchor, normal, -p_dir, normal, 0.0, hit.t * 0.5).rgb;
+		irradiance += bounce * rf.shade_bounce_energy;
+	}
+	return min(material.emission * rf.shade_exposure + material.albedo * irradiance, vec3(RS_LO_CLAMP));
+}
+
+vec3 rs_fresh_lo_replay(vec3 p_origin, vec3 p_dir, float p_dist, uint p_seed, out bool r_hit_here) {
+	RaySceneHit hit;
+	r_hit_here = false;
+	float eps = 0.02 + 0.002 * p_dist;
+	if (!ray_scene_trace(p_origin, p_dir, p_dist + eps, false, false, p_seed, hit)) {
+		return vec3(0.0);
+	}
+	if (abs(hit.t - p_dist) > eps) {
+		return vec3(0.0);
+	}
+	r_hit_here = true;
+	rs_shade_setup();
+	return clamp(shade_hit(p_origin, p_dir, hit, p_seed).rgb, vec3(0.0), vec3(RS_LO_CLAMP));
+}
+
+#define RS_REHIT_OK 0u
+#define RS_REHIT_MISS 1u
+#define RS_REHIT_MISMATCH 2u
+
+uint rs_replay_rehit(vec3 p_xs, vec3 p_ns, float p_dist, uint p_seed, out RaySceneHit r_hit) {
+	float eps = 0.02 + 0.002 * p_dist;
+	if (!ray_scene_trace(p_xs + p_ns * eps, -p_ns, 2.0 * eps, false, false, p_seed, r_hit)) {
+		return RS_REHIT_MISS;
+	}
+	vec3 normal = ray_scene_hit_normal(r_hit);
+	vec3 facing = r_hit.backface ? -normal : normal;
+	if (!(abs(r_hit.t - eps) < 0.5 * eps) || !(dot(facing, p_ns) > 0.99)) {
+		return RS_REHIT_MISMATCH;
+	}
+	return RS_REHIT_OK;
+}
+
+vec4 rs_replay_shade(vec3 p_origin, vec3 p_xs, RaySceneHit p_hit, uint p_seed) {
+	vec3 delta = p_xs - p_origin;
+	float dist = length(delta);
+	RaySceneHit hit = p_hit;
+	hit.t = dist;
+	rs_shade_setup();
+	vec4 shaded = shade_hit(p_origin, delta / dist, hit, p_seed);
+	return vec4(clamp(shaded.rgb, vec3(0.0), vec3(RS_LO_CLAMP)), shaded.a);
+}
+#endif
+
+#endif
+
+#ifdef MODE_FINAL
+
+shared float partial[64 * STATS_STRIDE];
+
+float rs_median_w(ivec2 p_pixel, out int r_count) {
+	float values[9];
+	int count = 0;
+	for (int dy = -1; dy <= 1; dy++) {
+		for (int dx = -1; dx <= 1; dx++) {
+			ivec2 np = p_pixel + ivec2(dx, dy);
+			if (any(lessThan(np, ivec2(0))) || any(greaterThanEqual(np, rf.trace_size))) {
+				continue;
+			}
+			uvec4 b = texelFetch(res_in, ivec3(np, 1), 0);
+			float w = uintBitsToFloat(b.z);
+			uint m = b.w & 0xFFFFu;
+			if (m > 0u && w > 0.0 && !isinf(w)) {
+				values[count] = w;
+				count++;
+			}
+		}
+	}
+	for (int i = 1; i < count; i++) {
+		float key = values[i];
+		int j = i - 1;
+		while (j >= 0 && values[j] > key) {
+			values[j + 1] = values[j];
+			j--;
+		}
+		values[j + 1] = key;
+	}
+	r_count = count;
+	return count > 0 ? values[count / 2] : 0.0;
+}
+
+void main() {
+	ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+	uint local = gl_LocalInvocationIndex;
+	for (int k = 0; k < STATS_STRIDE; k++) {
+		partial[local * uint(STATS_STRIDE) + uint(k)] = 0.0;
+	}
+	bool in_range = all(lessThan(px, rf.trace_size));
+	bool traced = in_range && rs_tile_traced(px);
+	if (in_range && !traced) {
+		imageStore(vis_state, px, uvec4(0u));
+		imageStore(out_radiance, px, vec4(0.0, 0.0, 0.0, 1.0));
+		imageStore(out_coverage, px, vec4(0.0));
+		if ((rf.flags & F_DEBUG_OUT) != 0u) {
+			imageStore(out_debug, px, vec4(0.0));
+		}
+	}
+	if (traced) {
+		Receiver r = rs_receiver_cur(px);
+		uint info = imageLoad(info_image, px).x;
+		vec3 radiance = vec3(0.0);
+		float coverage = 0.0;
+		vec4 debug = vec4(0.0);
+		float debug_value = 0.0;
+		if (r.valid) {
+			Reservoir s = rs_load(px);
+			float w = s.w;
+			bool held = s.m > 0u && (s.flags & RF_VALID) != 0u && !isinf(w) && !isnan(w);
+			bool has = held && w > 0.0;
+			bool clamped = false;
+			if (has && (rf.flags & F_UNBIASED) == 0u) {
+				int count;
+				float median = rs_median_w(px, count);
+				if (count >= 3 && w > rf.w_clamp * median) {
+					w = rf.w_clamp * median;
+					clamped = true;
+				}
+			}
+			bool visible = true;
+			bool tested = false;
+			vec3 lo = s.lo;
+#ifdef RESTIR_SHADE
+			bool sky_reread = has && (rf.flags & F_SKY_REREAD) != 0u && rs_is_sky(s);
+			if (sky_reread) {
+				lo = rs_sky_radiance(normalize(s.xs));
+			}
+#endif
+			if (has && (rf.flags & F_VIS) != 0u) {
+				tested = true;
+#ifdef RESTIR_RAYS
+				if ((rf.flags & F_FRESH_LO) != 0u && !rs_is_sky(s)) {
+					vec3 origin = r.origin;
+					vec3 delta = s.xs - origin;
+					float dist = length(delta);
+					bool hit_here;
+					vec3 fresh;
+					if ((rf.flags & F_REPLAY) != 0u) {
+						fresh = rs_fresh_lo_replay(origin, delta / max(dist, 1e-6), dist, s.tag, hit_here);
+					} else {
+						fresh = rs_fresh_lo(origin, delta / max(dist, 1e-6), dist, uint(px.y) * 65537u + uint(px.x) + rf.frame * 6271u, s.tag, hit_here);
+					}
+					visible = hit_here;
+					if (hit_here) {
+						lo = fresh;
+					}
+				} else {
+					visible = rs_visible(r.origin, s);
+					if (visible && (rf.flags & F_FRESH_LO) != 0u && !sky_reread) {
+						lo = rs_sky_radiance(normalize(s.xs));
+					}
+				}
+#endif
+				uint old_state = imageLoad(vis_state, px).x;
+				if (!visible) {
+					imageStore(vis_state, px, uvec4(min((old_state & 0xFFu) + 1u, 255u) | 0x100u));
+				} else {
+					imageStore(vis_state, px, uvec4(0u));
+				}
+			}
+			if (has && !visible) {
+				w = 0.0;
+				info |= INFO_VIS_BLOCKED;
+			}
+			if (tested) {
+				info |= INFO_VIS_TESTED;
+			}
+			if (clamped) {
+				info |= INFO_CLAMPED;
+			}
+			float cos_r = has ? max(dot(r.nrm, rs_dir_to(s, r.origin)), 0.0) : 0.0;
+			radiance = lo * (cos_r * w / RS_PI);
+			if (!rs_finite3(radiance)) {
+				radiance = vec3(0.0);
+				w = 0.0;
+			}
+			coverage = (held && (!(has && !visible) || (rf.flags & F_KEEP_BLOCKED) != 0u)) ? clamp(float(s.m) / float(max(rf.n_target, 1u)), 0.0, 1.0) : 0.0;
+
+			uint view = rf.debug_view;
+			vec3 colour = vec3(0.0);
+			if (view == 57u) {
+				debug_value = float(s.m);
+				colour = rs_heat(debug_value / float(max(rf.m_max, 1u)));
+			} else if (view == 58u) {
+				debug_value = float(s.age);
+				colour = rs_heat(debug_value / 32.0);
+			} else if (view == 59u) {
+				debug_value = float((info & INFO_SEL_TEMPORAL) != 0u ? 1u : 0u) + float((info & INFO_SEL_SPATIAL) != 0u ? 2u : 0u);
+				colour = vec3(float((info & INFO_SEL_TEMPORAL) != 0u), float((info & INFO_SEL_SPATIAL) != 0u), 0.2);
+			} else if (view == 60u) {
+				uint rej_t = info & INFO_TEMPORAL_REJECT_MASK;
+				debug_value = float(rej_t);
+				colour = rej_t == 0u ? vec3(0.0, 0.5, 0.0) : rs_heat(float(rej_t) / 11.0);
+			} else if (view == 61u) {
+				debug_value = w;
+				colour = rs_heat((log2(max(w, 1e-6)) + 8.0) / 16.0);
+			} else if (view == 62u) {
+				debug_value = !has ? 2.0 : (visible ? 1.0 : 0.0);
+				colour = !has ? vec3(0.3) : (visible ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0));
+			} else if (view == 63u) {
+				debug_value = float(rf.mode_code);
+				colour = rs_heat(float(rf.mode_code) / 7.0);
+			}
+			debug = vec4(colour, debug_value);
+
+			float base[STATS_STRIDE];
+			for (int k = 0; k < STATS_STRIDE; k++) {
+				base[k] = 0.0;
+			}
+			base[0] = 1.0;
+			base[1] = coverage > 0.0 ? 1.0 : 0.0;
+			if (coverage > 0.0) {
+				base[2] = radiance.r;
+				base[3] = radiance.g;
+				base[4] = radiance.b;
+			}
+			uvec4 cs = texelFetch(cand_second, px, 0);
+			uint cflags = rtgi_candidate_flags(cs);
+			if ((cflags & RTGI_FLAG_NO_CANDIDATE) == 0u) {
+				vec3 clo = rtgi_candidate_radiance(cs);
+				if (rs_finite3(clo)) {
+					base[5] = 1.0;
+					base[6] = clo.r;
+					base[7] = clo.g;
+					base[8] = clo.b;
+				}
+			}
+			base[9] = float(s.m);
+			base[10] = clamped ? 1.0 : 0.0;
+			base[11] = (has && !visible) ? 1.0 : 0.0;
+			base[12] = (info & INFO_SEL_TEMPORAL) != 0u ? 1.0 : 0.0;
+			base[13] = (info & INFO_SEL_SPATIAL) != 0u ? 1.0 : 0.0;
+			bool violation = !(coverage >= 0.0 && coverage <= 1.0) || !rs_finite3(radiance) || any(lessThan(radiance, vec3(0.0))) || any(greaterThan(radiance, vec3(RS_LO_CLAMP)));
+			base[14] = violation ? 1.0 : 0.0;
+			base[15] = has ? 1.0 : 0.0;
+			for (int k = 0; k < STATS_STRIDE; k++) {
+				partial[local * uint(STATS_STRIDE) + uint(k)] = base[k];
+			}
+			if ((rf.flags & F_PROBE_PIXELS) != 0u && (cflags & RTGI_FLAG_NO_CANDIDATE) == 0u) {
+				vec3 clo = rtgi_candidate_radiance(cs);
+				if (rs_finite3(clo)) {
+					info |= (1u << 15u) | ((packHalf2x16(vec2(min(rs_luma(clo), 60000.0), 0.0)) & 0xFFFFu) << 16u);
+				}
+			}
+			imageStore(info_image, px, uvec4(info));
+		}
+		imageStore(out_radiance, px, vec4(radiance, 1.0));
+		imageStore(out_coverage, px, vec4(coverage));
+		if ((rf.flags & F_DEBUG_OUT) != 0u) {
+			imageStore(out_debug, px, debug);
+		}
+	}
+	barrier();
+	if (local == 0u) {
+		uint groups_x = (uint(rf.trace_size.x) + 7u) / 8u;
+		uint group = gl_WorkGroupID.y * groups_x + gl_WorkGroupID.x;
+		for (int k = 0; k < STATS_STRIDE; k++) {
+			float sum = 0.0;
+			for (uint t = 0u; t < 64u; t++) {
+				sum += partial[t * uint(STATS_STRIDE) + uint(k)];
+			}
+			stats.data[group * uint(STATS_STRIDE) + uint(k)] = sum;
+		}
+	}
+}
+
+#endif
+
+#ifdef MODE_SOURCE
+
+void main() {
+	ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(px, rf.trace_size))) {
+		return;
+	}
+	uint tag = uint(px.y * rf.trace_size.x + px.x) ^ rf.frame;
+	Receiver r = rs_receiver_cur(px);
+	if (!r.valid) {
+		imageStore(src_first, px, uvec4(0u));
+		imageStore(src_second, px, uvec4(0u, (RTGI_FLAG_NO_CANDIDATE | RTGI_FLAG_NOT_TRACED) << 16u, 0u, tag));
+		return;
+	}
+#ifdef RESTIR_RAYS
+	vec3 origin = r.origin;
+	vec2 u = rtgi_rand2(uvec2(px), rf.frame, RTGI_RNG_DIRECTION, rf.seed);
+	vec3 direction = rtgi_cosine_direction(r.nrm, u);
+	float pdf = max(dot(direction, r.nrm), 1e-4) * 0.31830988;
+	RaySceneHit hit;
+	vec3 radiance;
+	vec3 point;
+	uint normal_packed = 0u;
+	uint flags = 0u;
+	uint shade_seed = ray_scene_hash(uint(px.y) * 65537u + uint(px.x) + rf.frame * 6271u);
+	bool replay = (rf.flags & F_REPLAY) != 0u;
+	uint trace_seed = replay ? shade_seed : ray_scene_hash(uint(px.y) * 65537u + uint(px.x) + rf.frame * 6271u + 0x510e527fu);
+#ifdef RS_ALPHA_SEED
+	tag = trace_seed;
+#else
+	if (replay) {
+		tag = shade_seed;
+	}
+#endif
+	if (ray_scene_trace(origin, direction, rf.sky_distance, false, false, trace_seed, hit)) {
+		RaySceneMaterial material = ray_scene_hit_material(hit);
+		point = origin + direction * hit.t;
+		vec3 normal = ray_scene_hit_normal(hit);
+		normal = hit.backface ? -normal : normal;
+		normal_packed = rtgi_pack_normal(normal);
+		bool two_sided = hit.blend || bool(material.flags & RAY_SCENE_MATERIAL_TWO_SIDED);
+		if (replay) {
+			rs_shade_setup();
+			vec4 shaded = shade_hit(origin, direction, hit, shade_seed);
+			radiance = shaded.rgb;
+			if (shaded.a < 0.0) {
+				flags |= RTGI_FLAG_BACKFACE;
+			}
+		} else if (hit.backface && !two_sided) {
+			radiance = vec3(0.0);
+			flags |= RTGI_FLAG_BACKFACE;
+		} else {
+			float bias = 0.01 + hit.t * 0.001;
+			vec3 irradiance = gi_hit_direct_light(point, normal, bias, rf.sky_distance, shade_seed);
+			radiance = min(material.emission * rf.emission_exposure + material.albedo * irradiance, vec3(RS_LO_CLAMP));
+		}
+		if (dot(material.emission, vec3(1.0)) > 0.0) {
+			flags |= RTGI_FLAG_EMISSIVE;
+		}
+	} else {
+		radiance = rs_sky_radiance(direction);
+		point = direction;
+		flags |= RTGI_FLAG_MISS_SKY;
+	}
+	uvec4 first;
+	uvec4 second;
+	rtgi_pack_candidate(point, normal_packed, radiance, flags, pdf, tag, first, second);
+	imageStore(src_first, px, first);
+	imageStore(src_second, px, second);
+#else
+	imageStore(src_first, px, uvec4(0u));
+	imageStore(src_second, px, uvec4(0u, (RTGI_FLAG_NO_CANDIDATE | RTGI_FLAG_NOT_TRACED) << 16u, 0u, tag));
+#endif
+}
+
+#endif
+
+#ifdef MODE_PACK
+
+void main() {
+	ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(px, rf.trace_size))) {
+		return;
+	}
+	vec3 radiance = vec3(0.0);
+	uint flags = RTGI_FLAG_NO_CANDIDATE;
+	float m_word = 0.0;
+	if (!rs_tile_traced(px)) {
+		flags = RTGI_FLAG_NO_CANDIDATE | RTGI_FLAG_NOT_TRACED;
+	} else if (texelFetch(geo_pos_cur, px, 0).w > 0.5) {
+		uint info = imageLoad(info_image, px).x;
+		if ((info & INFO_VIS_BLOCKED) != 0u) {
+			flags = 0u;
+		} else if (texelFetch(pk_coverage, px, 0).x > 0.0) {
+			radiance = texelFetch(pk_radiance, px, 0).rgb;
+			flags = 0u;
+		} else {
+			flags = RTGI_FLAG_THINNED;
+		}
+		if (flags == 0u && (rf.flags & F_PACK_M) != 0u) {
+			m_word = float(texelFetch(res_in, ivec3(px, 1), 0).w & 0xFFFFu);
+		}
+	}
+	uvec4 first;
+	uvec4 second;
+	rtgi_pack_candidate(vec3(0.0), 0u, radiance, flags, m_word, 0u, first, second);
+	imageStore(pk_second, px, second);
+}
+
+#endif
+
+#ifdef MODE_CAPTURE
+
+void main() {
+	ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(px, rf.trace_size))) {
+		return;
+	}
+	imageStore(cap_pos, px, texelFetch(geo_pos_cur, px, 0));
+	imageStore(cap_nrm, px, texelFetch(geo_nrm_cur, px, 0));
+	imageStore(cap_ppos, px, texelFetch(geo_pos_prev, px, 0));
+	imageStore(cap_pnrm, px, texelFetch(geo_nrm_prev, px, 0));
+	imageStore(cap_first, px, texelFetch(cand_first, px, 0));
+	imageStore(cap_second, px, texelFetch(cand_second, px, 0));
+}
+
+#endif
+
+#ifdef MODE_SKY_EPOCH
+
+#define RS_SKY_EPOCH_SPAN 64
+
+shared float rs_epoch_sum[RS_SKY_EPOCH_SPAN];
+shared uint rs_epoch_count[RS_SKY_EPOCH_SPAN];
+
+float rs_sky_flat_luma() {
+	if ((rf.flags & F_REAL_SKY) == 0u) {
+		return rs_luma(min(rf.test_sky.xyz, vec3(RS_LO_CLAMP)));
+	}
+	if ((rf.shade_sky_flags & RS_SKY_COLOR) != 0u) {
+		return rs_luma(min(rf.shade_sky * rf.shade_sky_energy, vec3(RS_LO_CLAMP)));
+	}
+	return 0.0;
+}
+
+void rs_sky_row_luma(uint p_row, out float r_sum, out uint r_count) {
+	r_sum = 0.0;
+	r_count = 0u;
+#ifdef USE_RADIANCE_OCTMAP_ARRAY
+	int lod = textureQueryLevels(sampler2DArray(epoch_sky, epoch_sampler)) - 1;
+	ivec2 size = textureSize(sampler2DArray(epoch_sky, epoch_sampler), lod).xy;
+#else
+	int lod = textureQueryLevels(sampler2D(epoch_sky, epoch_sampler)) - 1;
+	ivec2 size = textureSize(sampler2D(epoch_sky, epoch_sampler), lod);
+#endif
+	ivec2 stride = max((size + (RS_SKY_EPOCH_SPAN - 1)) / RS_SKY_EPOCH_SPAN, ivec2(1));
+	int y = int(p_row) * stride.y;
+	if (y >= size.y) {
+		return;
+	}
+	for (int x = 0; x < size.x; x += stride.x) {
+#ifdef USE_RADIANCE_OCTMAP_ARRAY
+		vec3 texel = texelFetch(sampler2DArray(epoch_sky, epoch_sampler), ivec3(x, y, 0), lod).rgb;
+#else
+		vec3 texel = texelFetch(sampler2D(epoch_sky, epoch_sampler), ivec2(x, y), lod).rgb;
+#endif
+		r_sum += rs_luma(min(texel * rf.shade_sky_energy, vec3(RS_LO_CLAMP)));
+		r_count += 1u;
+	}
+}
+
+void main() {
+	uint lid = gl_LocalInvocationIndex;
+	bool texture_sky = (rf.flags & F_REAL_SKY) != 0u && (rf.shade_sky_flags & RS_SKY_SKY) != 0u;
+	float row_sum = 0.0;
+	uint row_count = 0u;
+	if (texture_sky) {
+		rs_sky_row_luma(lid, row_sum, row_count);
+	}
+	rs_epoch_sum[lid] = row_sum;
+	rs_epoch_count[lid] = row_count;
+	memoryBarrierShared();
+	barrier();
+	for (uint half_span = uint(RS_SKY_EPOCH_SPAN) / 2u; half_span > 0u; half_span >>= 1u) {
+		if (lid < half_span) {
+			rs_epoch_sum[lid] += rs_epoch_sum[lid + half_span];
+			rs_epoch_count[lid] += rs_epoch_count[lid + half_span];
+		}
+		memoryBarrierShared();
+		barrier();
+	}
+	if (lid != 0u) {
+		return;
+	}
+	float luma = texture_sky ? (rs_epoch_count[0] > 0u ? rs_epoch_sum[0] / float(rs_epoch_count[0]) : 0.0) : rs_sky_flat_luma();
+	sky_epoch.jump = 0u;
+	if (isnan(luma) || isinf(luma)) {
+		return;
+	}
+	if (sky_epoch.epochs == 0u || (rf.flags & F_HISTORY) == 0u) {
+		sky_epoch.luma = luma;
+		sky_epoch.epochs += 1u;
+		return;
+	}
+	float epoch = sky_epoch.luma;
+	if (luma < rf.sky_epoch_low * epoch || luma > rf.sky_epoch_high * epoch) {
+		sky_epoch.jump = 1u;
+		sky_epoch.luma = luma;
+		sky_epoch.epochs += 1u;
+		sky_epoch.jumps += 1u;
+		if ((rf.flags & F_EVENTS) != 0u && ev.gates.z == 0u && ev.counts.w < rf.m_temporal_cap) {
+			sky_epoch.capped += 1u;
+		}
+	}
+}
+
+#endif
+
+#ifdef MODE_VALIDATE
+
+#if defined(RESTIR_RAYS) && defined(RESTIR_SHADE)
+void rs_validate_replay(ivec2 px, uvec4 a, uvec4 b, uvec4 c, Receiver q) {
+	uint flags = b.y >> 16u;
+	vec3 xs = uintBitsToFloat(a.xyz);
+	vec3 ns = rtgi_unpack_normal(a.w);
+	float dist = length(xs - q.origin);
+	if (dist < 1e-3) {
+		return;
+	}
+	RaySceneHit hit;
+	uint status = rs_replay_rehit(xs, ns, dist, c.w, hit);
+	vec3 lo = vec3(0.0);
+	if (status == RS_REHIT_OK) {
+		vec4 shaded = rs_replay_shade(q.origin, xs, hit, c.w);
+		lo = rs_finite3(shaded.rgb) ? shaded.rgb : vec3(0.0);
+		flags = shaded.a < 0.0 ? (flags | RF_BACKFACE) : (flags & ~RF_BACKFACE);
+		vec3 normal = ray_scene_hit_normal(hit);
+		a.w = rtgi_pack_normal(hit.backface ? -normal : normal);
+		imageStore(res_io, ivec3(px, 0), a);
+	} else {
+		g_stats[status == RS_REHIT_MISS ? PS_REHIT_MISS : PS_REHIT_MISMATCH] += 1.0;
+	}
+	b.x = packHalf2x16(lo.rg);
+	b.y = (packHalf2x16(vec2(lo.b, 0.0)) & 0xFFFFu) | (flags << 16u);
+	imageStore(res_io, ivec3(px, 1), b);
+}
+
+bool rs_event_load(ivec2 px, out uvec4 r_a, out uvec4 r_b, out uvec4 r_c, out Receiver r_q) {
+	r_a = imageLoad(res_io, ivec3(px, 0));
+	r_b = imageLoad(res_io, ivec3(px, 1));
+	r_c = imageLoad(res_io, ivec3(px, 2));
+	r_q = rs_receiver_prev(px);
+	uint flags = r_b.y >> 16u;
+	uint m = r_b.w & 0xFFFFu;
+	if (m == 0u || (flags & RF_VALID) == 0u || (flags & RF_SKY) != 0u || r_c.z != rf.prev_epoch_tag || !r_q.valid) {
+		return false;
+	}
+	return length(uintBitsToFloat(r_a.xyz) - r_q.origin) >= 1e-3;
+}
+
+bool rs_event_flagged(uvec4 p_a, Receiver p_q) {
+	if (!rs_event_holds(uintBitsToFloat(p_a.xyz))) {
+		return false;
+	}
+	return ev.counts.z != 0u || !rs_event_caps(p_q.pos);
+}
+
+uint rs_event_bin(ivec2 px) {
+	return min(uint(rs_rand_frame(uvec2(px), RS_EVENT_KEY_DIM) * float(RS_EVENT_BINS)), RS_EVENT_BINS - 1u);
+}
+
+void rs_event_count_pixel(ivec2 px) {
+	if ((rf.flags & F_HISTORY) == 0u || ev.gates.w != RS_EVENT_VALIDATE_EVENT) {
+		return;
+	}
+	uvec4 a;
+	uvec4 b;
+	uvec4 c;
+	Receiver q;
+	if (!rs_event_load(px, a, b, c, q) || !rs_event_flagged(a, q)) {
+		return;
+	}
+	atomicAdd(event_bins.bins[rs_event_bin(px)], 1u);
+}
+
+void rs_validate_events(ivec2 px) {
+	bool share = false;
+	if ((rf.flags & F_REVAL_SHARE) != 0u) {
+		share = rs_rand_frame(uvec2(px), 40u) * float(max(rf.reval_share_denom, 1u)) < 1.0;
+	}
+	uint selection = ev.gates.w;
+	if (!share && selection != RS_EVENT_VALIDATE_EVENT && selection != RS_EVENT_VALIDATE_ALL) {
+		return;
+	}
+	uvec4 a;
+	uvec4 b;
+	uvec4 c;
+	Receiver q;
+	if (!rs_event_load(px, a, b, c, q)) {
+		return;
+	}
+	bool taken = false;
+	if (selection == RS_EVENT_VALIDATE_ALL) {
+		taken = true;
+	} else if (selection == RS_EVENT_VALIDATE_EVENT && rs_event_flagged(a, q)) {
+		if (rs_event_bin(px) < rs_event_cut) {
+			taken = true;
+		} else if (!share) {
+			g_stats[PS_RESHADE_OVERFLOW] += 1.0;
+		}
+	}
+	if (!taken && !share) {
+		return;
+	}
+	if (taken) {
+		g_stats[PS_RESHADED] += 1.0;
+	}
+	rs_validate_replay(px, a, b, c, q);
+}
+
+uint rs_event_cut_bin() {
+	uint total = 0u;
+	for (uint t = 0u; t < RS_EVENT_BINS; t++) {
+		uint n = event_bins.bins[t];
+		if (total + n > ev.gates.y) {
+			return t;
+		}
+		total += n;
+	}
+	return RS_EVENT_BINS;
+}
+#endif
+
+void rs_validate_pixel(ivec2 px) {
+#if defined(RESTIR_RAYS) && defined(RESTIR_SHADE)
+	if ((rf.flags & F_HISTORY) == 0u) {
+		return;
+	}
+	if ((rf.flags & F_EVENTS) != 0u) {
+		rs_validate_events(px);
+		return;
+	}
+	bool replay = (rf.flags & F_REPLAY) != 0u;
+	if ((rf.flags & F_REVAL_SHARE) != 0u) {
+		float pick = replay ? rs_rand_frame(uvec2(px), 40u) : rs_rand(uvec2(px), 40u);
+		if (pick * float(max(rf.reval_share_denom, 1u)) >= 1.0) {
+			return;
+		}
+	} else if ((rtgi_candidate_flags(texelFetch(cand_second, px, 0)) & RTGI_FLAG_NO_CANDIDATE) != 0u) {
+		return;
+	}
+	uvec4 a = imageLoad(res_io, ivec3(px, 0));
+	uvec4 b = imageLoad(res_io, ivec3(px, 1));
+	uvec4 c = imageLoad(res_io, ivec3(px, 2));
+	uint flags = b.y >> 16u;
+	uint m = b.w & 0xFFFFu;
+	if (m == 0u || (flags & RF_VALID) == 0u || c.z != rf.prev_epoch_tag) {
+		return;
+	}
+	Receiver q = rs_receiver_prev(px);
+	if (!q.valid) {
+		return;
+	}
+	Reservoir h = rs_empty();
+	h.xs = uintBitsToFloat(a.xyz);
+	h.flags = flags;
+	h.tag = c.w;
+	if (replay) {
+		if (!rs_is_sky(h)) {
+			rs_validate_replay(px, a, b, c, q);
+		}
+		return;
+	}
+	vec2 rg = unpackHalf2x16(b.x);
+	vec2 bz = unpackHalf2x16(b.y & 0xFFFFu);
+	vec3 lo_old = vec3(rg.x, rg.y, bz.x);
+	vec3 fresh = vec3(0.0);
+	bool landed = false;
+	if (rs_is_sky(h)) {
+		landed = rs_visible(q.origin, h);
+		if (landed && (rf.flags & F_SKY_REREAD) != 0u) {
+			return;
+		}
+		if (landed) {
+			fresh = rs_sky_radiance(normalize(h.xs));
+		}
+	} else {
+		vec3 delta = h.xs - q.origin;
+		float dist = length(delta);
+		if (dist < 1e-3) {
+			return;
+		}
+		fresh = rs_fresh_lo(q.origin, delta / dist, dist, uint(px.y) * 65537u + uint(px.x) + rf.frame * 6271u, c.w, landed);
+	}
+	float l_old = rs_luma(lo_old);
+	float l_new = rs_luma(fresh);
+	if (!landed) {
+		b.y = b.y & 0xFFFFu;
+		b.w = b.w & 0xFFFF0000u;
+	} else {
+		float limit = rf.reval_growth * max(l_old, rf.reval_floor);
+		vec3 updated = l_new > limit ? fresh * (limit / l_new) : fresh;
+		updated = clamp(updated, vec3(0.0), vec3(RS_LO_CLAMP));
+		float change = abs(l_new - l_old) / max(max(l_old, l_new), rf.reval_floor);
+		b.x = packHalf2x16(updated.rg);
+		b.y = (packHalf2x16(vec2(updated.b, 0.0)) & 0xFFFFu) | (flags << 16u);
+		if (change > rf.reval_threshold) {
+			b.w = (b.w & 0xFFFF0000u) | min(m, rf.reval_cut_m);
+		}
+	}
+	imageStore(res_io, ivec3(px, 1), b);
+#endif
+}
+
+void main() {
+	rs_stats_clear();
+	ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+#if defined(RESTIR_RAYS) && defined(RESTIR_SHADE)
+	if (rf.pass_index == RS_PASS_EVENT_COUNT) {
+		if (all(lessThan(px, rf.trace_size))) {
+			rs_event_count_pixel(px);
+		}
+		return;
+	}
+	if ((rf.flags & F_EVENTS) != 0u) {
+		if (gl_LocalInvocationIndex == 0u) {
+			rs_event_cut = ev.gates.w == RS_EVENT_VALIDATE_EVENT ? rs_event_cut_bin() : 0u;
+		}
+		barrier();
+	}
+#endif
+	if (all(lessThan(px, rf.trace_size))) {
+		rs_validate_pixel(px);
+	}
+	rs_stats_store(PS_ROW_VALIDATE);
+}
+
+#endif

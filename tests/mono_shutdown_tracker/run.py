@@ -47,6 +47,8 @@ LONG_GATE_TIMEOUT = 90
 STRESS_CASE = "race"
 STRESS_CASE_ELAPSED_LIMIT = 300
 STRESS_CASE_TIMEOUT = 360
+WARMUP_TIMEOUT = 60
+WARMUP_LINE = "WARMUP started and quit."
 
 LEGACY = {
     "queued-held": [],
@@ -230,6 +232,38 @@ def judge(version, case, result, elapsed, output, engine):
     return passed, diagnostics, assembly_lines
 
 
+def as_text(stream):
+    if stream is None:
+        return ""
+    return stream.decode("utf-8", "replace") if isinstance(stream, bytes) else stream
+
+
+def warm_up(engine, project, output, flags):
+    """One untimed start and quit of the candidate on the probe project, before the timed cases."""
+    started = time.monotonic()
+    try:
+        result = subprocess.run(
+            [str(engine), "--headless", "--verbose", "--path", str(project), "--", "--warmup"],
+            capture_output=True,
+            text=True,
+            timeout=WARMUP_TIMEOUT,
+            creationflags=flags,
+        )
+        code, text = result.returncode, result.stdout + result.stderr
+    except subprocess.TimeoutExpired as expired:
+        code, text = None, as_text(expired.stdout) + as_text(expired.stderr)
+    elapsed = time.monotonic() - started
+    (output / "warmup.log").write_text(text, encoding="utf-8")
+    lowered = text.lower()
+    passed = (
+        code == 0
+        and elapsed < WARMUP_TIMEOUT
+        and WARMUP_LINE in text
+        and not any(token in lowered for token in ["crashed", "fatal:"])
+    )
+    return {"exit": code, "elapsed_seconds": elapsed, "passed": passed}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--baseline", type=Path)
@@ -297,6 +331,9 @@ def main():
     ]:
         identities.append(identity(feed / file_name))
         identities.append(identity(packages / package_id / sdk_version / f"{package_id}.{sdk_version}.nupkg"))
+    warmup = warm_up(candidate, project, args.output, flags)
+    verdict = "PASS" if warmup["passed"] else "FAIL"
+    print(f"candidate-warmup {verdict} ({warmup['elapsed_seconds']:.1f}s, exit {warmup['exit']})", flush=True)
     engines = [("baseline", args.baseline), ("candidate", candidate), ("control", args.control)]
     for version, engine in engines:
         if engine is None:
@@ -337,12 +374,15 @@ def main():
                 "resolved_packages": resolved,
                 "nuget_packages": str(packages),
                 "identities": identities,
+                "warmup": warmup,
                 "runs": runs,
             },
             indent=2,
         ),
         encoding="utf-8",
     )
+    if not warmup["passed"]:
+        raise RuntimeError("Shutdown tracker warm-up failed; see warmup.log and results.json.")
     if not all(run["passed"] for run in runs):
         raise RuntimeError("Shutdown tracker comparison failed; see results.json.")
 

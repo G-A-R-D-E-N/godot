@@ -63,6 +63,9 @@ namespace Godot.Collections
 
         public void Dispose(bool disposing)
         {
+            if (!disposing && DisposablesTracker.ShuttingDown)
+                return;
+
             // Always dispose `NativeValue` even if disposing is true
             NativeValue.DangerousSelfRef.Dispose();
 

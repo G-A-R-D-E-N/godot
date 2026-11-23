@@ -523,3 +523,13 @@
 
 /thirdparty/                                  @godotengine/buildsystem
 /thirdparty/jolt_physics/                     @godotengine/buildsystem @godotengine/jolt-physics
+
+# Buildsystem (After everything to catch all)
+
+/*.*                                          @godotengine/buildsystem
+*.py                                          @godotengine/buildsystem
+SConstruct                                    @godotengine/buildsystem
+SCsub                                         @godotengine/buildsystem
+/modules/gi_restir/                             @NomadsReach
+/modules/gi_restir_di/                          @NomadsReach
+/docs/code-notes/                               @NomadsReach

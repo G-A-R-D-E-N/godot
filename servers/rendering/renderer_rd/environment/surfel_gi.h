@@ -131,6 +131,7 @@ public:
 		uint32_t bucket_count = 0;
 		uint32_t cell_capacity = 0;
 		uint32_t frame = 0;
+		uint32_t alpha_generation = 0;
 		Vector3 anchor;
 		bool anchor_valid = false;
 

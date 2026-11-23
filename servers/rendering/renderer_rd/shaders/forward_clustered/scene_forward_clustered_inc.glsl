@@ -159,11 +159,19 @@ bool sc_dithered_instance_fade() {
 }
 
 uint sc_debug_lighting_component() {
-	return (sc_packed_1() >> 9) & 15U;
+	return (sc_packed_1() >> 9) & 31U;
 }
 
 bool sc_use_far_shadow() {
 	return ((sc_packed_1() >> 13) & 1U) != 0;
+}
+
+bool sc_use_direct_shadow() {
+	return ((sc_packed_1() >> 14) & 1U) != 0;
+}
+
+bool sc_use_direct_resampled() {
+	return ((sc_packed_1() >> 15) & 1U) != 0;
 }
 
 float sc_luminance_multiplier() {
@@ -217,6 +225,16 @@ layout(set = 0, binding = 2) uniform sampler shadow_sampler;
 #define SCREEN_SPACE_EFFECTS_FLAGS_USE_BENT_NORMALS (1 << 5)
 #define SCREEN_SPACE_EFFECTS_FLAGS_STOCHASTIC_SSR (1 << 6)
 #define SCREEN_SPACE_EFFECTS_FLAGS_LIGHTING_SOURCES (1 << 7)
+#define SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SKY (1 << 8)
+#define SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_GI_FILL (1 << 9)
+#define SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_PROBES (1 << 10)
+#define SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SSR (1 << 11)
+#define SCREEN_SPACE_EFFECTS_FLAGS_REFLECT_SPECULAR_OCCLUSION (1 << 12)
+#define SCREEN_SPACE_EFFECTS_FLAGS_UNIFIED_LOOKUP (1 << 13)
+#define SCREEN_SPACE_EFFECTS_FLAGS_HORIZON_GEOMETRIC (1 << 14)
+#define SCREEN_SPACE_EFFECTS_FLAGS_COAT_MATCH (1 << 15)
+#define SCREEN_SPACE_EFFECTS_FLAGS_BLEND_FILL_SKIP (1 << 16)
+#define SCREEN_SPACE_EFFECTS_FLAGS_TRANSPARENT_PASS (1 << 17)
 
 layout(set = 0, binding = 3, std430) restrict readonly buffer OmniLights {
 	LightData data[];
@@ -542,6 +560,34 @@ layout(set = 1, binding = 48) uniform texture2DArray far_shadow_heights[FAR_SHAD
 layout(set = 1, binding = 49) uniform texture2DArray far_shadow_bands[FAR_SHADOW_SLOTS];
 layout(set = 1, binding = 50) uniform texture2DArray far_shadow_near[FAR_SHADOW_SLOTS];
 layout(set = 1, binding = 51) uniform texture2DArray far_shadow_terrain[FAR_SHADOW_SLOTS];
+
+layout(set = 1, binding = 52) uniform texture2DArray direct_shadow_slots;
+layout(set = 1, binding = 53) uniform texture2DArray direct_shadow_factors;
+layout(set = 1, binding = 54) uniform utexture2DArray direct_resampled;
+
+struct DirectSlotData {
+	uint caster_mask;
+	float size;
+	uint reset_frame;
+	uint dynamic;
+	float clearance;
+	uint exclude;
+	float anchor_offset_x;
+	float anchor_offset_y;
+	float anchor_offset_z;
+	float mean_r;
+	float mean_g;
+	float mean_b;
+};
+
+layout(set = 1, binding = 55, std430) restrict readonly buffer DirectSlots {
+	DirectSlotData data[];
+}
+direct_slots;
+
+int direct_head_layer = -1;
+int direct_tail_layer = -1;
+vec3 direct_tail_color = vec3(0.0);
 
 layout(set = 1, binding = 43, std430) buffer restrict readonly SkySHBuffer {
 	vec4 coefficients[9];

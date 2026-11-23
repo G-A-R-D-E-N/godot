@@ -147,6 +147,14 @@ void RenderGeometryInstanceBase::set_cast_double_sided_shadows(bool p_enable) {
 	_mark_dirty();
 }
 
+void RenderGeometryInstanceBase::set_cast_shadows_setting(RSE::ShadowCastingSetting p_setting) {
+	data->cast_shadows = p_setting;
+}
+
+void RenderGeometryInstanceBase::set_ray_scene_occluder(bool p_enable) {
+	data->ray_scene_occluder = p_enable;
+}
+
 void RenderGeometryInstanceBase::reset_motion_vectors() {
 }
 

@@ -45,6 +45,7 @@ class XRInterface;
 #endif // XR_DISABLED
 
 class Image;
+class RenderGeometryInstance;
 class RenderSceneBuffers;
 
 class RenderingMethod {
@@ -126,6 +127,7 @@ public:
 	virtual void instance_geometry_get_shader_parameter_list(RID p_instance, List<PropertyInfo> *p_parameters) const = 0;
 	virtual Variant instance_geometry_get_shader_parameter(RID p_instance, const StringName &p_parameter) const = 0;
 	virtual Variant instance_geometry_get_shader_parameter_default_value(RID p_instance, const StringName &p_parameter) const = 0;
+	virtual RenderGeometryInstance *instance_get_geometry_instance(RID p_instance) const = 0;
 
 	/* PIPELINES */
 
@@ -235,6 +237,7 @@ public:
 
 	virtual void environment_set_aerial_perspective(RID p_env, bool p_enable, RID p_texture, float p_max_distance) = 0;
 	virtual void environment_set_night_vision(RID p_env, bool p_enable, float p_mesopic_min, float p_mesopic_max, float p_blue_shift, const Vector2 &p_blue_shift_chromaticity, float p_desaturation, float p_acuity_radius, float p_highlight_range) = 0;
+	virtual void environment_set_local_exposure(RID p_env, bool p_enable, float p_strength, float p_shadow_contrast, float p_highlight_contrast, float p_max_shadow_lift, float p_max_highlight_drop, float p_pivot) = 0;
 
 	// Volumetric Fog
 	virtual void environment_set_volumetric_fog(RID p_env, bool p_enable, float p_density, const Color &p_albedo, const Color &p_emission, float p_emission_energy, float p_anisotropy, float p_length, float p_detail_spread, float p_gi_inject, bool p_temporal_reprojection, float p_temporal_reprojection_amount, float p_ambient_inject, float p_sky_affect) = 0;

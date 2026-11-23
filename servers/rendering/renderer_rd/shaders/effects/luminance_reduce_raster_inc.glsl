@@ -9,7 +9,7 @@ layout(push_constant, std430) uniform PushConstant {
 	float adaptation;
 	float adaptation_pivot;
 	uint final_level;
-	float pad0;
-	float pad1;
+	float light_limit;
+	uint hold;
 }
 settings;

@@ -6,7 +6,7 @@
 
 #extension GL_EXT_samplerless_texture_functions : enable
 
-#ifdef MODE_DEBUG_RAYS
+#if defined(MODE_DEBUG_RAYS) || defined(MODE_RTGI)
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 #else
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
@@ -32,6 +32,9 @@ probe_list;
 
 layout(rgba16f, set = 0, binding = 2) uniform restrict writeonly image2D ray_image;
 
+#ifdef MODE_RTGI
+#define RAY_SCENE_REPLAY
+#endif
 #define RAY_SCENE_SET 1
 #include "ray_scene_inc.glsl"
 
@@ -124,46 +127,15 @@ vec3 origin_surfel_position = vec3(0.0);
 vec3 origin_surfel_normal = vec3(0.0, 1.0, 0.0);
 #endif
 
-vec4 shade_hit(vec3 p_origin, vec3 p_direction, RaySceneHit hit, uint p_seed) {
-	RaySceneMaterial material = ray_scene_hit_material(hit);
-	bool two_sided = bool(material.flags & RAY_SCENE_MATERIAL_TWO_SIDED);
-	if (hit.backface && !two_sided) {
-		return vec4(0.0, 0.0, 0.0, -hit.t);
-	}
-
-	vec3 normal = ray_scene_hit_normal(hit);
-	if (hit.backface) {
-		normal = -normal;
-	}
-	vec3 position = p_origin + p_direction * hit.t;
-	float bias = 0.01 + hit.t * 0.001;
-	vec3 irradiance = ray_scene_direct_light(position, normal, bias, ddgi.max_distance, p_seed);
-	if (params.bounce_energy > 0.0) {
-		vec3 bounce = vec3(0.0);
-		float near_origin = 0.0;
-#ifdef MODE_SURFEL_TRACE
-		float spacing = ddgi.levels[0].spacing;
-		near_origin = (1.0 - smoothstep(spacing, spacing * 2.0, hit.t)) * (1.0 - smoothstep(spacing * 0.4, spacing, max(dot(position - origin_surfel_position, origin_surfel_normal), 0.0)));
-		if (near_origin > 0.0) {
-			bounce = near_origin * ddgi_sample_direction(origin_surfel_position - ray_scene.camera_to_anchor, origin_surfel_normal, origin_surfel_normal, normal, 0.0, DDGI_NO_VIEW_LIMIT).rgb;
-		}
-#endif
-		if (near_origin < 1.0) {
-			bounce += (1.0 - near_origin) * ddgi_sample_direction(position - ray_scene.camera_to_anchor, normal, -p_direction, normal, 0.0, hit.t * 0.5).rgb;
-		}
-#ifdef MODE_SURFEL_TRACE
-		SurfelLookup lookup = surfel_lookup(position, normal, SURFEL_INVALID);
-		bounce = mix(bounce, surfel_eval_irradiance(lookup.sh_r, lookup.sh_g, lookup.sh_b, normal), surfel_blend(lookup));
-#endif
-		irradiance += bounce * params.bounce_energy;
-	}
-	vec3 radiance = material.emission * params.emission_exposure + material.albedo * irradiance;
-	return vec4(min(radiance, vec3(DDGI_MAX_RADIANCE)), hit.t);
-}
+#define RAY_SCENE_SHADE_MAX_DISTANCE ddgi.max_distance
+#define RAY_SCENE_SHADE_BOUNCE_ENERGY params.bounce_energy
+#define RAY_SCENE_SHADE_EMISSION_EXPOSURE params.emission_exposure
+#define RAY_SCENE_SHADE_MAX_RADIANCE DDGI_MAX_RADIANCE
+#include "ray_scene_hit_shade_inc.glsl"
 
 vec4 shade_ray(vec3 p_origin, vec3 p_direction, float p_max_distance, uint p_seed) {
 	RaySceneHit hit;
-	if (!ray_scene_trace(p_origin, p_direction, p_max_distance, false, hit)) {
+	if (!ray_scene_trace(p_origin, p_direction, p_max_distance, false, false, p_seed, hit)) {
 		return vec4(min(sky_radiance_in(p_direction), vec3(DDGI_MAX_RADIANCE)), DDGI_MISS_DISTANCE);
 	}
 	return shade_hit(p_origin, p_direction, hit, p_seed);
@@ -186,7 +158,27 @@ void main() {
 	uint state = ddgi_state(data, level, local);
 	vec3 offset = state == DDGI_STATE_NONE ? vec3(0.0) : ddgi_offset(data);
 	vec3 origin = ddgi_probe_position(level, local, offset) + ray_scene.camera_to_anchor;
-	imageStore(ray_image, ivec2(ray_index, list_index), shade_ray(origin, ddgi_ray_direction(ray_index), ddgi.max_distance, ray_scene_hash(entry * 9781u + ddgi.frame * 6271u) + ray_index * 0x2c1b3c6du));
+	vec3 direction = ddgi_ray_direction(ray_index);
+	uint seed = ray_scene_hash(entry * 9781u + ddgi.frame * 6271u) + ray_index * 0x2c1b3c6du;
+	RaySceneHit hit;
+	vec4 ray;
+	float geometry = DDGI_MISS_DISTANCE;
+	if (!ray_scene_trace(origin, direction, ddgi.max_distance, false, false, seed, hit)) {
+		ray = vec4(min(sky_radiance_in(direction), vec3(DDGI_MAX_RADIANCE)), DDGI_MISS_DISTANCE);
+	} else {
+		ray = shade_hit(origin, direction, hit, seed);
+		geometry = ray.a;
+		if (hit.blend) {
+			RaySceneHit opaque;
+			geometry = DDGI_MISS_DISTANCE;
+			if (ray_scene_trace_opaque(origin, direction, ddgi.max_distance, seed, opaque)) {
+				bool back = opaque.backface && !bool(ray_scene_hit_material(opaque).flags & RAY_SCENE_MATERIAL_TWO_SIDED);
+				geometry = back ? -opaque.t : opaque.t;
+			}
+		}
+	}
+	imageStore(ray_image, ivec2(ray_index, list_index), ray);
+	imageStore(ray_image, ivec2(ddgi.rays_per_probe + ray_index, list_index), vec4(0.0, 0.0, 0.0, geometry));
 }
 
 #endif
@@ -230,11 +222,11 @@ void main() {
 		refresh_clip = surfels.data[index].samples == 0u || ((surfel_hash(index) + surfel_data.frame) & 63u) == 0u;
 		if (refresh_clip) {
 			vec2 clip_direction = surfel_clip_directions[ray];
-			if (ray_scene_trace(origin, tangent * clip_direction.x + bitangent * clip_direction.y, clip_length, false, hit)) {
+			if (ray_scene_trace(origin, tangent * clip_direction.x + bitangent * clip_direction.y, clip_length, false, false, seed ^ 0x5bd1e995u, hit)) {
 				clip = min(14u, uint(ceil(hit.t / clip_length * 14.0)));
 			}
 		}
-		if (ray_scene_trace(origin, direction, surfel_data.ray_distance, false, hit)) {
+		if (ray_scene_trace(origin, direction, surfel_data.ray_distance, false, false, seed, hit)) {
 			vec4 shaded = shade_hit(origin, direction, hit, seed * 0x2c1b3c6du + 0x297a2d39u);
 			radiance = shaded.rgb;
 			backface = shaded.a < 0.0 ? 1.0 : 0.0;
@@ -348,7 +340,7 @@ void main() {
 	vec3 color;
 	if (params.debug_mode == 1u) {
 		RaySceneHit hit;
-		if (ray_scene_trace(ray_scene.camera_to_anchor, direction, ddgi.max_distance, false, hit)) {
+		if (ray_scene_trace(ray_scene.camera_to_anchor, direction, ddgi.max_distance, false, false, uint(pixel.y) * 65537u + uint(pixel.x), hit)) {
 			vec3 normal = ray_scene_hit_normal(hit);
 			vec4 irradiance = ddgi_sample(direction * hit.t, hit.backface ? -normal : normal, -direction);
 			color = irradiance.a > 0.0 ? irradiance.rgb : vec3(1.0, 0.0, 1.0);
@@ -360,7 +352,7 @@ void main() {
 	} else if (params.debug_mode == 4u || params.debug_mode == 5u) {
 		RaySceneHit hit;
 		color = vec3(0.0);
-		if (ray_scene_trace(ray_scene.camera_to_anchor, direction, ddgi.max_distance, false, hit)) {
+		if (ray_scene_trace(ray_scene.camera_to_anchor, direction, ddgi.max_distance, false, false, uint(pixel.y) * 65537u + uint(pixel.x), hit)) {
 			vec3 position = direction * hit.t;
 			vec3 normal = ray_scene_hit_normal(hit);
 			normal = hit.backface ? -normal : normal;
@@ -391,13 +383,187 @@ void main() {
 		color = color / max(vec3(1.0) - color, vec3(1e-4));
 	} else {
 		RaySceneHit hit;
-		if (ray_scene_trace(ray_scene.camera_to_anchor, direction, ddgi.max_distance, false, hit)) {
+		if (ray_scene_trace(ray_scene.camera_to_anchor, direction, ddgi.max_distance, false, false, uint(pixel.y) * 65537u + uint(pixel.x), hit)) {
 			color = hit.backface ? vec3(1.0, 0.0, 0.0) : ray_scene_hit_normal(hit) * 0.5 + 0.5;
 		} else {
 			color = vec3(0.0);
 		}
 	}
 	imageStore(ray_image, pixel, vec4(color / (1.0 + color), 1.0));
+}
+
+#endif
+
+#ifdef MODE_RTGI
+
+#include "rtgi_inc.glsl"
+
+layout(set = 3, binding = 0, std140) uniform RtgiData {
+	mat4 inv_projection;
+	mat4 cam_transform;
+	ivec2 screen_size;
+	ivec2 trace_size;
+	uint frame;
+	uint seed;
+	int scale;
+	uint flags;
+	float origin_scale;
+	float ray_fraction;
+	float origin_floor;
+	uint mirror_below_surface;
+}
+rtgi;
+
+layout(set = 3, binding = 1) uniform texture2D rtgi_depth;
+layout(set = 3, binding = 2) uniform texture2D rtgi_normal_roughness;
+layout(set = 3, binding = 3) uniform utexture2D rtgi_tiles;
+layout(rgba32ui, set = 3, binding = 4) uniform restrict writeonly uimage2D rtgi_candidate_first;
+layout(rgba32ui, set = 3, binding = 5) uniform restrict writeonly uimage2D rtgi_candidate_second;
+
+#define RTGI_ORIGIN_VIEW_ULPS 4.0
+#define RTGI_ORIGIN_ANCHOR_ULPS 4.0
+#define RTGI_ORIGIN_RASTER 0.00390625
+#define RTGI_FLOAT_EPSILON 1.1920929e-7
+
+vec3 rtgi_view_position_at(ivec2 p_pixel, float p_depth) {
+	vec2 uv = (vec2(p_pixel) + 0.5) / vec2(rtgi.screen_size);
+	vec4 clip = rtgi.inv_projection * vec4(uv * 2.0 - 1.0, p_depth, 1.0);
+	return clip.xyz / clip.w;
+}
+
+vec3 rtgi_geometric_normal(ivec2 p_pixel, vec3 p_view_position, vec3 p_fallback, out float r_footprint) {
+	r_footprint = length(rtgi_view_position_at(p_pixel + ivec2(1, 0), texelFetch(rtgi_depth, p_pixel, 0).x) - p_view_position);
+	ivec2 limit = rtgi.screen_size - 1;
+	vec3 best[2];
+	float best_gap[2];
+	for (int axis = 0; axis < 2; axis++) {
+		best[axis] = vec3(0.0);
+		best_gap[axis] = 1e30;
+		for (int side = -1; side <= 1; side += 2) {
+			ivec2 tap = clamp(p_pixel + (axis == 0 ? ivec2(side, 0) : ivec2(0, side)), ivec2(0), limit);
+			float tap_depth = texelFetch(rtgi_depth, tap, 0).x;
+			if (tap_depth == 0.0 || tap == p_pixel) {
+				continue;
+			}
+			vec3 delta = (rtgi_view_position_at(tap, tap_depth) - p_view_position) * float(side);
+			float gap = abs(dot(delta, normalize(p_view_position)));
+			if (gap < best_gap[axis]) {
+				best_gap[axis] = gap;
+				best[axis] = delta;
+			}
+		}
+	}
+	if (best_gap[0] > 1e29 || best_gap[1] > 1e29) {
+		return p_fallback;
+	}
+	r_footprint = max(length(best[0]), length(best[1]));
+	vec3 n = cross(best[0], best[1]);
+	float n_length = length(n);
+	if (n_length <= 0.0) {
+		return p_fallback;
+	}
+	n /= n_length;
+	return dot(n, p_view_position) > 0.0 ? -n : n;
+}
+
+float rtgi_origin_offset(float p_view_distance, vec3 p_anchor_position, float p_footprint) {
+	float anchor_extent = max(abs(p_anchor_position.x), max(abs(p_anchor_position.y), abs(p_anchor_position.z)));
+	float error = RTGI_FLOAT_EPSILON * (RTGI_ORIGIN_VIEW_ULPS * p_view_distance + RTGI_ORIGIN_ANCHOR_ULPS * anchor_extent) + p_footprint * RTGI_ORIGIN_RASTER;
+	return max(rtgi.origin_scale * error, rtgi.origin_floor * p_view_distance);
+}
+
+void store_dropped(ivec2 p_pixel, uint p_flags, uint p_tag) {
+	imageStore(rtgi_candidate_first, p_pixel, uvec4(0u));
+	imageStore(rtgi_candidate_second, p_pixel, uvec4(0u, p_flags << 16u, 0u, p_tag));
+	imageStore(ray_image, p_pixel, vec4(0.0, 0.0, 0.0, -1.0));
+}
+
+void main() {
+	ivec2 trace_pixel = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(trace_pixel, rtgi.trace_size))) {
+		return;
+	}
+	ray_scene_replay = (rtgi.flags & RTGI_FRAME_FLAG_REPLAY) != 0u;
+
+	uint tag = uint(trace_pixel.y * rtgi.trace_size.x + trace_pixel.x) ^ rtgi.frame;
+	uint tile = texelFetch(rtgi_tiles, trace_pixel / RTGI_TILE, 0).r;
+	ivec2 pixel = rtgi_anchor_pixel(trace_pixel, rtgi.scale, rtgi.screen_size);
+	float depth = texelFetch(rtgi_depth, pixel, 0).x;
+
+	bool candidate = (tile & RTGI_TILE_TRACE) != 0u && depth != 0.0;
+	bool traced = candidate && rtgi_thin_keeps(uvec2(trace_pixel), rtgi.frame, rtgi.seed, rtgi.ray_fraction);
+	if (!traced) {
+		store_dropped(trace_pixel, RTGI_FLAG_NO_CANDIDATE | RTGI_FLAG_NOT_TRACED | (candidate ? RTGI_FLAG_THINNED : 0u), tag);
+		return;
+	}
+
+	vec4 normal_roughness = texelFetch(rtgi_normal_roughness, pixel, 0);
+	vec2 uv = (vec2(pixel) + 0.5) / vec2(rtgi.screen_size);
+	vec4 clip = rtgi.inv_projection * vec4(uv * 2.0 - 1.0, depth, 1.0);
+	vec3 view_position = clip.xyz / clip.w;
+	mat3 to_world = mat3(rtgi.cam_transform);
+	vec3 normal = normalize(to_world * normalize(normal_roughness.xyz * 2.0 - 1.0));
+	float view_distance = length(view_position);
+	vec3 shading_normal_view = normalize(normal_roughness.xyz * 2.0 - 1.0);
+	float footprint;
+	vec3 geometric_view = rtgi_geometric_normal(pixel, view_position, shading_normal_view, footprint);
+	vec3 offset_normal = dot(geometric_view, shading_normal_view) > 0.7 ? normalize(to_world * geometric_view) : normal;
+	vec3 anchor_position = to_world * view_position + ray_scene.camera_to_anchor;
+	vec3 origin = anchor_position + offset_normal * rtgi_origin_offset(view_distance, anchor_position, footprint);
+
+	vec2 u = rtgi_rand2(uvec2(trace_pixel), rtgi.frame, RTGI_RNG_DIRECTION, rtgi.seed);
+	vec3 direction = rtgi_cosine_direction(normal, u);
+	bool mirror = rtgi.mirror_below_surface != 0u && dot(offset_normal, normal) > 0.999;
+	if (mirror) {
+		direction -= 2.0 * min(dot(direction, offset_normal), 0.0) * offset_normal;
+	}
+	float pdf = max(dot(direction, normal), 1e-4) * 0.31830988;
+	if (ray_scene_replay && mirror) {
+		pdf += max(dot(direction - 2.0 * dot(direction, offset_normal) * offset_normal, normal), 1e-4) * 0.31830988;
+	}
+
+	RaySceneHit hit;
+	vec3 radiance;
+	vec3 point;
+	uint normal_packed = 0u;
+	uint flags = 0u;
+	float hit_distance = DDGI_MISS_DISTANCE;
+	uint seed = ray_scene_hash(rtgi_shade_key(pixel, rtgi.frame));
+	if (!rtgi_is_finite(origin) || !rtgi_is_finite(direction)) {
+		flags |= RTGI_FLAG_NONFINITE_ORIGIN;
+	}
+	if (ray_scene_trace(origin, direction, ddgi.max_distance, false, false, seed, hit)) {
+		vec3 hit_normal = ray_scene_hit_normal(hit);
+		if ((rtgi.flags & RTGI_FRAME_FLAG_DEBUG_NONFINITE_NORMAL) != 0u) {
+			hit_normal = vec3(uintBitsToFloat(0x7fc00000u));
+		}
+		if (!rtgi_is_finite(hit_normal)) {
+			store_dropped(trace_pixel, flags | RTGI_FLAG_NONFINITE_NORMAL | RTGI_FLAG_NO_CANDIDATE | RTGI_FLAG_THINNED, tag);
+			return;
+		}
+		vec4 shaded = shade_hit(origin, direction, hit, seed);
+		radiance = shaded.rgb;
+		hit_distance = hit.t;
+		point = origin + direction * hit.t;
+		normal_packed = rtgi_pack_normal(hit.backface ? -hit_normal : hit_normal);
+		if (shaded.a < 0.0) {
+			flags |= RTGI_FLAG_BACKFACE;
+		}
+		if (dot(ray_scene_hit_material(hit).emission, vec3(1.0)) > 0.0) {
+			flags |= RTGI_FLAG_EMISSIVE;
+		}
+	} else {
+		radiance = min(sky_radiance_in(direction), vec3(DDGI_MAX_RADIANCE));
+		point = direction;
+		flags |= RTGI_FLAG_MISS_SKY;
+	}
+
+	uvec4 first;
+	uvec4 second;
+	rtgi_pack_candidate(point, normal_packed, radiance, flags, pdf, tag, first, second);
+	imageStore(rtgi_candidate_first, trace_pixel, first);
+	imageStore(rtgi_candidate_second, trace_pixel, second);
+	imageStore(ray_image, trace_pixel, vec4(radiance, hit_distance));
 }
 
 #endif
