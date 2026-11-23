@@ -55,10 +55,10 @@ layout(set = 3, binding = 0) uniform sampler2D source_color_correction;
 layout(set = 3, binding = 0) uniform sampler3D source_color_correction;
 #endif
 
-layout(set = 4, binding = 0) uniform sampler3D source_local_grid;
-layout(set = 4, binding = 1) uniform sampler2D source_local_wide;
-layout(set = 4, binding = 3) uniform sampler2D source_local_median;
-layout(set = 4, binding = 2, std140) uniform LocalExposure {
+layout(set = 3, binding = 1) uniform sampler3D source_local_grid;
+layout(set = 3, binding = 2) uniform sampler2D source_local_wide;
+layout(set = 3, binding = 4) uniform sampler2D source_local_median;
+layout(set = 3, binding = 3, std140) uniform LocalExposure {
 	float strength;
 	float shadow_slope;
 	float highlight_slope;

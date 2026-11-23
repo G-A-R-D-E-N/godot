@@ -732,8 +732,8 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 			histogram_policy.highlight_rise = AutoExposureGuard::highlight_rate(RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_adaptation_time(p_render_data->camera_attributes), time_step, set_immediate);
 			histogram_policy.highlight_fall = AutoExposureGuard::highlight_rate(RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_release_time(p_render_data->camera_attributes), time_step, set_immediate);
 			if (histogram_policy.exponential) {
-				histogram_policy.light_adjust = 1.0 - Math::exp(-time_step / MAX(RSG::camera_attributes->camera_attributes_get_auto_exposure_light_adaptation_time(p_render_data->camera_attributes), 0.001));
-				histogram_policy.dark_adjust = 1.0 - Math::exp(-time_step / MAX(RSG::camera_attributes->camera_attributes_get_auto_exposure_dark_adaptation_time(p_render_data->camera_attributes), 0.001));
+				histogram_policy.light_adjust = MIN(MAX(1.0 - Math::exp(-time_step / MAX(RSG::camera_attributes->camera_attributes_get_auto_exposure_light_adaptation_time(p_render_data->camera_attributes), 0.001)), 0.0), 1.0);
+				histogram_policy.dark_adjust = MIN(MAX(1.0 - Math::exp(-time_step / MAX(RSG::camera_attributes->camera_attributes_get_auto_exposure_dark_adaptation_time(p_render_data->camera_attributes), 0.001)), 0.0), 1.0);
 			}
 			luminance->luminance_histogram_meter(rb->get_internal_texture(), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate,
 					RSG::camera_attributes->camera_attributes_get_auto_exposure_clip_low(p_render_data->camera_attributes),
@@ -887,7 +887,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 			local_exposure_quality.spatial_sigma = GLOBAL_GET_CACHED(float, "rendering/environment/local_exposure/spatial_sigma");
 			local_exposure_quality.range_sigma = GLOBAL_GET_CACHED(float, "rendering/environment/local_exposure/range_sigma");
 			const float local_exposure_seconds = GLOBAL_GET_CACHED(float, "rendering/environment/local_exposure/temporal_seconds");
-			local_exposure_quality.temporal_alpha = local_exposure_seconds > 0.0 ? 1.0 - Math::exp(-time_step / local_exposure_seconds) : 1.0;
+			local_exposure_quality.temporal_alpha = local_exposure_seconds > 0.0 ? MIN(MAX(1.0 - Math::exp(-time_step / local_exposure_seconds), 0.0), 1.0) : 1.0;
 			local_exposure_quality.reset_history = rb->get_history_reset();
 			local_exposure_quality.frame = RSG::rasterizer->get_frame_number();
 			local_exposure_frame_median = GLOBAL_GET_CACHED(uint32_t, "rendering/environment/local_exposure/pivot_source") == 1;
