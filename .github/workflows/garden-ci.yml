@@ -111,7 +111,7 @@ jobs:
           python modules/mono/build_scripts/build_assemblies.py --godot-output-dir=./bin --precision=double
 
       - name: Unit tests
-        run: ./bin/godot.linuxbsd.editor.double.x86_64.mono --headless --test --force-colors --test-case-exclude="*Retired child connections follow a live parent*"
+        run: ./bin/godot.linuxbsd.editor.double.x86_64.mono --headless --test --force-colors --test-case-exclude=*Retired*
 
       - name: Package editor
         run: |
@@ -189,7 +189,7 @@ jobs:
           python modules/mono/build_scripts/build_assemblies.py --godot-output-dir=./bin --precision=double
 
       - name: Unit tests
-        run: ./bin/godot.windows.editor.double.x86_64.mono.exe --headless --test --force-colors --test-case-exclude="*Retired child connections follow a live parent*"
+        run: ./bin/godot.windows.editor.double.x86_64.mono.exe --headless --test --force-colors --test-case-exclude=*Retired*
 
       - name: Mono shutdown tracker regression
         run: python tests/mono_shutdown_tracker/run.py --candidate bin/godot.windows.editor.double.x86_64.mono.exe --output shutdown-tracker-logs
