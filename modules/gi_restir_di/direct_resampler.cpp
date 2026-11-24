@@ -336,6 +336,14 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	sampler_lab.serve();
 #endif
 	const Settings settings = get_project_settings();
+	{
+		static bool rdi_settings_printed = false;
+		if (!rdi_settings_printed) {
+			rdi_settings_printed = true;
+			print_line(vformat("DIRECT_EMITTERS settings: master %s resampled %s emitters %s", GLOBAL_GET("rendering/global_illumination/direct/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/enabled")));
+		}
+	}
+
 	const Ref<RenderSceneBuffersRD> &rb = p_input.render_buffers;
 	if (!settings.enabled || rb.is_null() || !_ensure_device()) {
 		return false;
@@ -593,6 +601,12 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 			const RID build_shader = shader->version_get_shader(shader_version, build_variants[pass]);
 			RD::ComputeListID build_list = rd->compute_list_begin();
 			rd->compute_list_bind_compute_pipeline(build_list, build_pipelines[pass]->get_rid());
+			{
+				const RID set0 = UniformSetCacheRD::get_singleton()->get_cache_vec(build_shader, 0, uniforms); 
+				const RID set1 = UniformSetCacheRD::get_singleton()->get_cache_vec(build_shader, 1, ray_uniforms);
+				if (set0.is_null() || set1.is_null()) { print_line(vformat("DIRECT_EMITTERS set null: set0 %s set1 %s uniforms %d ray_uniforms %d emitters %d", set0.is_null() ? "NULL" : "ok", set1.is_null() ? "NULL" : "ok", uniforms.size(), ray_uniforms.size(), int(ray_scene->get_triangle_emitter_count()))); }
+				print_line(vformat("DIRECT_EMITTERS dispatch pass %d emitters %d", pass, int(ray_scene->get_triangle_emitter_count())));
+			}
 			rd->compute_list_bind_uniform_set(build_list, UniformSetCacheRD::get_singleton()->get_cache_vec(build_shader, 0, uniforms), 0);
 			rd->compute_list_bind_uniform_set(build_list, UniformSetCacheRD::get_singleton()->get_cache_vec(build_shader, 1, ray_uniforms), 1);
 			rd->compute_list_dispatch(build_list, build_groups[pass], 1, 1);
