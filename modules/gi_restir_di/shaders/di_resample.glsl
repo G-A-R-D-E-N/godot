@@ -1,4 +1,4 @@
-#[compute]
+﻿#[compute]
 
 #version 450
 
@@ -225,7 +225,7 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 	vec3 v2 = di_emitter_to_view(emitter.v2);
 	vec3 e1 = v1 - v0;
 	vec3 e2 = v2 - v0;
-	vec3 cross_e1e2 = cross(e1, e2);
+	vec3 cross_e1e2 = cross(e2, e1);
 	float normal_length = length(cross_e1e2);
 	float area = 0.5 * normal_length;
 	vec3 emission = ray_scene_triangle_emitter_emission(emitter.material);
