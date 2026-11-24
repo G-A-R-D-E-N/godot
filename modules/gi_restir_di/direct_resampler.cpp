@@ -646,6 +646,10 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 			const Vector<uint8_t> data = rd->buffer_get_data(emitter_samples);
 			const uint32_t pixels = uint32_t(size.x) * uint32_t(size.y);
 			uint32_t nonzero = 0;
+			uint32_t rejected_area = 0;
+			uint32_t rejected_cos = 0;
+			uint32_t rejected_shadow = 0;
+			uint32_t rejected_other = 0;
 			float best = 0.0f;
 			Vector3 best_color;
 			const float *floats = reinterpret_cast<const float *>(data.ptr());
@@ -661,9 +665,19 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 							best_color = Vector3(floats[o + 4], floats[o + 5], floats[o + 6]);
 						}
 					}
+					const uint32_t reason = uint32_t(floats[o + 7]);
+					if (reason == 1) {
+						rejected_area++;
+					} else if (reason == 2) {
+						rejected_shadow++;
+					} else if (reason == 3) {
+						rejected_cos++;
+					} else if (reason != 0) {
+						rejected_other++;
+					}
 				}
 			}
-			print_line(vformat("DIRECT_EMITTERS samples: pixels %d nonzero %d best_lum %.4f best_rgb %.3f %.3f %.3f", int(pixels), int(nonzero), best, best_color.x, best_color.y, best_color.z));
+			print_line(vformat("DIRECT_EMITTERS samples: pixels %d nonzero %d best_lum %.4f best_rgb %.3f %.3f %.3f rejected_area %d rejected_cos %d rejected_shadow %d rejected_other %d", int(pixels), int(nonzero), best, best_color.x, best_color.y, best_color.z, int(rejected_area), int(rejected_cos), int(rejected_shadow), int(rejected_other)));
 		}
 	}
 	if (spatial) {
