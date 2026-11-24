@@ -344,7 +344,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		static bool rdi_settings_printed = false;
 		if (!rdi_settings_printed) {
 			rdi_settings_printed = true;
-			print_line(vformat("DIRECT_EMITTERS settings: master %s resampled %s emitters %s", GLOBAL_GET("rendering/global_illumination/direct/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/enabled")));
+			print_line(vformat("DIRECT_EMITTERS settings: master %s resampled %s emitters %s temporal %s", GLOBAL_GET("rendering/global_illumination/direct/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/temporal")));
 		}
 	}
 
@@ -448,6 +448,14 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		}
 		rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_ENTRIES, RD::DATA_FORMAT_R32_UINT, RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, size, settings.head + 3 * settings.tail_samples, 1, true);
 		rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_RECORD, RD::DATA_FORMAT_R32G32_UINT, RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT, RD::TEXTURE_SAMPLES_1, size, settings.tail_samples + 1 + (emitter_active ? 1 : 0), 1, true);
+	{
+		static bool rdi_temporal_printed = false;
+		if (!rdi_temporal_printed) {
+			rdi_temporal_printed = true;
+			const bool want_temporal = GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/temporal");
+			print_line(vformat("DIRECT_EMITTERS temporal: setting %s history %s", want_temporal, want_temporal ? "allocated" : "off"));
+		}
+	}
 		if (emitter_temporal) {
 			rd->texture_clear(rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_EMITTER_HISTORY, RD::DATA_FORMAT_R32G32B32A32_UINT, private_usage, RD::TEXTURE_SAMPLES_1, size, 4, 1, true), Color(0, 0, 0, 0), 0, 1, 0, 4);
 		}
