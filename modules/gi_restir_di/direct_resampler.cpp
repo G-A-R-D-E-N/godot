@@ -684,6 +684,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 			print_line(vformat("DIRECT_EMITTERS samples: pixels %d nonzero %d best_lum %.4f best_rgb %.3f %.3f %.3f rejected_area %d rejected_cos %d rejected_shadow %d rejected_other %d", int(pixels), int(nonzero), best, best_color.x, best_color.y, best_color.z, int(rejected_area), int(rejected_cos), int(rejected_shadow), int(rejected_other)));
 		}
 	}
+		print_line(vformat("DIRECT_EMITTERS spatial gate: emitter_active %d setting %d pipeline %d", int(emitter_active), int(settings.emitter_spatial), int(emitter_spatial_pipeline.get_rid().is_valid())));
 	if (emitter_active && settings.emitter_spatial && emitter_spatial_pipeline.get_rid().is_valid()) {
 		const RID emitter_spatial_rid = shader->version_get_shader(shader_version, VARIANT_EMITTER_SPATIAL);
 		RENDER_TIMESTAMP("Direct Resample Emitter Spatial");
