@@ -105,10 +105,6 @@ struct RaySceneTriangleEmitter {
 
 #define RAY_SCENE_EMITTER_PROXIED 1u
 
-bool ray_scene_triangle_emitter_proxied(uint p_index) {
-	return (ray_scene_triangle_emitters.data[p_index].flags & RAY_SCENE_EMITTER_PROXIED) != 0u;
-}
-
 #ifndef RAY_SCENE_HW
 layout(set = RAY_SCENE_SET, binding = 0, std430) restrict readonly buffer RaySceneBlasNodes {
 	RaySceneNode data[];
@@ -219,6 +215,10 @@ struct RaySceneHit {
 
 RaySceneTriangleEmitter ray_scene_triangle_emitter(uint p_index) {
 	return ray_scene_triangle_emitters.data[p_index];
+}
+
+bool ray_scene_triangle_emitter_proxied(uint p_index) {
+	return (ray_scene_triangle_emitters.data[p_index].flags & RAY_SCENE_EMITTER_PROXIED) != 0u;
 }
 
 vec3 ray_scene_triangle_emitter_emission(uint p_material) {
