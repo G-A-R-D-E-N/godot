@@ -3613,7 +3613,7 @@ void fragment_shader(in SceneData scene_data) {
 			vec4 emitter_geometry = direct_emitter_samples.data[emitter_index * 2u];
 			vec4 emitter_color = direct_emitter_samples.data[emitter_index * 2u + 1u];
 			if (emitter_geometry.w > 0.0) {
-				int emitter_layer = direct_record_heads + direct_record_tails - 1;
+				int emitter_layer = direct_record_heads + direct_record_tails;
 				float emitter_visible = texelFetch(sampler2DArray(direct_shadow_factors, SAMPLER_NEAREST_CLAMP), ivec3(emitter_pixel, emitter_layer), 0).r;
 				float emitter_scale = emitter_visible * emitter_weight / float(direct_record_tails);
 				if (emitter_scale > 0.0) {
