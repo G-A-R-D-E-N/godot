@@ -283,10 +283,12 @@ public:
 		uint32_t light_count;
 		uint32_t triangle_emitter_count;
 		uint32_t triangle_emitters_capped;
-		uint32_t pad;
+		float emissive_exposure_normalization;
+		uint32_t triangle_emitter_generation;
+		uint32_t pad[3];
 	};
 
-	static_assert(sizeof(SceneData) == 32);
+	static_assert(sizeof(SceneData) == 48);
 
 	struct BuildPrimitive {
 		float bmin[3];
@@ -514,8 +516,10 @@ private:
 	uint32_t triangle_uv_capacity = 0;
 	uint32_t triangle_emitter_capacity = 0;
 	uint32_t triangle_emitter_count = 0;
+	uint32_t triangle_emitter_generation = 0;
 	uint32_t triangle_emitter_state = 0;
 	uint32_t triangles_logged = 0;
+	uint32_t triangle_emitter_emission_state = 0;
 	bool triangle_emitters_capped = false;
 	bool triangle_emitters_built = false;
 	LocalVector<TriangleEmitter> triangle_emitters;
@@ -619,6 +623,7 @@ public:
 	RID get_triangle_emitters() const { return triangle_emitter_buffer; }
 	uint32_t get_triangle_emitter_count() const { return triangle_emitter_count; }
 	bool get_triangle_emitters_capped() const { return triangle_emitters_capped; }
+	uint32_t get_triangle_emitter_generation() const { return triangle_emitter_generation; }
 	bool is_alpha_enabled() const { return alpha_enabled; }
 	uint32_t get_alpha_generation() const { return alpha_generation; }
 	static String alpha_shader_defines();

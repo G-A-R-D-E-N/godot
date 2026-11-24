@@ -133,6 +133,10 @@ layout(set = RAY_SCENE_SET, binding = 6, std140) uniform RaySceneData {
 	uint light_count;
 	uint triangle_emitter_count;
 	uint triangle_emitters_capped;
+	float emissive_exposure_normalization;
+	uint triangle_emitter_generation;
+	uint pad0;
+	uint pad1;
 	uint pad2;
 }
 ray_scene;
@@ -198,12 +202,24 @@ vec3 ray_scene_triangle_emitter_emission(uint p_material) {
 	return ray_scene_materials.data[p_material].emission;
 }
 
+float ray_scene_emissive_exposure_normalization() {
+	return ray_scene.emissive_exposure_normalization;
+}
+
+vec3 ray_scene_triangle_emitter_emission_light_space(uint p_material) {
+	return ray_scene_triangle_emitter_emission(p_material) * ray_scene.emissive_exposure_normalization;
+}
+
 uint ray_scene_triangle_emitter_count() {
 	return ray_scene.triangle_emitter_count;
 }
 
 bool ray_scene_triangle_emitters_capped() {
 	return ray_scene.triangle_emitters_capped != 0u;
+}
+
+uint ray_scene_triangle_emitter_generation() {
+	return ray_scene.triangle_emitter_generation;
 }
 
 uint ray_scene_hash(uint p_value) {
