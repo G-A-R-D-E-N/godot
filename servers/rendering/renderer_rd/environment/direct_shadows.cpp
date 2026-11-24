@@ -554,6 +554,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 				if (counters.size() >= int(COUNTER_BYTES)) {
 					const uint32_t *values = reinterpret_cast<const uint32_t *>(counters.ptr());
 					print_line(vformat("DIRECT_SHADOWS counters: frames %d emitter_pixels %d emitter_rays %d emitter_blocked %d", int(p_input.frame), int(values[13]), int(values[14]), int(values[15])));
+					print_line(vformat("DIRECT_EMITTERS blocked: backface %d front %d hist005 %d hist030 %d hist200 %d histfar %d", int(values[16]), int(values[17]), int(values[18]), int(values[19]), int(values[20]), int(values[21])));
 			if (emitter_hit_hist.is_valid()) {
 				const Vector<uint8_t> hist = rd->buffer_get_data(emitter_hit_hist);
 				const int hist_bytes = int((EMITTER_HIT_INSTANCES + 1) * 4 * uint32_t(sizeof(uint32_t)));
