@@ -1,4 +1,4 @@
-/**************************************************************************/
+**************************************************************************/
 /*  direct_resampler.cpp                                                  */
 /**************************************************************************/
 /*                         This file is part of:                          */
@@ -42,6 +42,7 @@ void DirectResamplerRD::register_settings() {
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("enabled"), false);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/enabled"), false);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/temporal"), false);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/spatial"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("head"), PROPERTY_HINT_RANGE, "0,6,1"), 4);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("tail_samples"), PROPERTY_HINT_RANGE, "1,7,1"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, DI_RESAMPLED_SETTING("floor"), PROPERTY_HINT_RANGE, "0.0001,1,0.0001"), 0.0625);
@@ -104,6 +105,7 @@ DirectResamplerRD::Settings DirectResamplerRD::get_project_settings() {
 	settings.tail_visibility = uint32_t(CLAMP(int(GLOBAL_GET(DI_RESAMPLED_SETTING("debug/tail_visibility"))), 0, 2));
 	settings.emitters = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/enabled"));
 	settings.emitter_temporal = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/temporal"));
+	settings.emitter_spatial = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/spatial"));
 	settings.stale_prior = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/stale_prior"));
 	settings.debug_log = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/log"));
 #ifdef DI_RESAMPLER_LAB
@@ -176,6 +178,7 @@ bool DirectResamplerRD::_ensure_device() {
 	Vector<String> modes;
 	modes.push_back("\n");
 	modes.push_back("\n#define MODE_SPATIAL\n");
+	modes.push_back("\n#define DI_EMITTERS\n#define MODE_EMITTER_SPATIAL\n");
 	modes.push_back("\n#define DI_EMITTERS\n");
 	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TABLE\n#define MODE_EMITTER_SUM\n");
 	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TABLE\n#define MODE_EMITTER_SCAN\n");
@@ -198,6 +201,7 @@ bool DirectResamplerRD::_ensure_device() {
 	emitter_scan_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_EMITTER_SCAN));
 	emitter_prefix_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_EMITTER_PREFIX));
 	emitter_temporal_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_MAIN_EMITTER_TEMPORAL));
+	emitter_spatial_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_EMITTER_SPATIAL));
 	emitter_device_ready = emitter_main_pipeline.get_rid().is_valid() && emitter_sum_pipeline.get_rid().is_valid() && emitter_scan_pipeline.get_rid().is_valid() && emitter_prefix_pipeline.get_rid().is_valid();
 	if (!emitter_device_ready) {
 		WARN_PRINT("The direct resampler's emitter shaders could not be made, so traced emitters stay off.");
@@ -680,7 +684,18 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 			print_line(vformat("DIRECT_EMITTERS samples: pixels %d nonzero %d best_lum %.4f best_rgb %.3f %.3f %.3f rejected_area %d rejected_cos %d rejected_shadow %d rejected_other %d", int(pixels), int(nonzero), best, best_color.x, best_color.y, best_color.z, int(rejected_area), int(rejected_cos), int(rejected_shadow), int(rejected_other)));
 		}
 	}
-	if (spatial) {
+	if (emitter_active && settings.emitter_spatial && emitter_spatial_pipeline.get_rid().is_valid()) {
+		const RID emitter_spatial_rid = shader->version_get_shader(shader_version, VARIANT_EMITTER_SPATIAL);
+		RENDER_TIMESTAMP("Direct Resample Emitter Spatial");
+		rd->draw_command_begin_label("Direct Resample Emitter Spatial");
+		list = rd->compute_list_begin();
+		rd->compute_list_bind_compute_pipeline(list, emitter_spatial_pipeline.get_rid());
+		rd->compute_list_bind_uniform_set(list, UniformSetCacheRD::get_singleton()->get_cache_vec(emitter_spatial_rid, 0, uniforms), 0);
+		rd->compute_list_bind_uniform_set(list, UniformSetCacheRD::get_singleton()->get_cache_vec(emitter_spatial_rid, 1, ray_uniforms), 1);
+		rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
+		rd->compute_list_end();
+		rd->draw_command_end_label();
+	}	if (spatial) {
 		const RID spatial_rid = shader->version_get_shader(shader_version, spatial_variant);
 		RENDER_TIMESTAMP("Direct Resample Spatial");
 		rd->draw_command_begin_label("Direct Resample Spatial");
@@ -748,6 +763,7 @@ void DirectResamplerRD::free_device_resources() {
 	spatial_pipeline.free();
 	emitter_main_pipeline.free();
 	emitter_temporal_pipeline.free();
+	emitter_spatial_pipeline.free();
 	emitter_sum_pipeline.free();
 	emitter_scan_pipeline.free();
 	emitter_prefix_pipeline.free();

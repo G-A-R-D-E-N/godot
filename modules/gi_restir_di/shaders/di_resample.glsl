@@ -160,7 +160,11 @@ layout(set = 0, binding = 23, std430) buffer EmitterScan {
 }
 emitter_scan;
 
+#if defined(MODE_EMITTER_SPATIAL)
+layout(set = 0, binding = 24, std430) restrict buffer EmitterSamples {
+#else
 layout(set = 0, binding = 24, std430) restrict writeonly buffer EmitterSamples {
+#endif
 	vec4 data[];
 }
 emitter_samples;
@@ -1004,7 +1008,78 @@ void main() {
 }
 #endif
 #else
-#ifndef MODE_SPATIAL
+#if defined(MODE_EMITTER_SPATIAL)
+float di_emitter_sample_mass(vec4 p_color, vec4 p_point) {
+	return luminance(max(p_color.rgb, vec3(0.0))) * max(p_point.w, 0.0);
+}
+
+void main() {
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(pixel, params.size))) {
+		return;
+	}
+	if (imageLoad(tile_flags, pixel >> 3).r != params.counter) {
+		return;
+	}
+	vec3 vertex = vec3(0.0);
+	vec3 normal = vec3(0.0, 0.0, 1.0);
+	float roughness = 0.0;
+	uint packed_normal = 0u;
+	float depth = 0.0;
+	if (!surface_at(pixel, vertex, normal, roughness, packed_normal, depth)) {
+		return;
+	}
+	uint index = uint(pixel.y) * uint(params.size.x) + uint(pixel.x);
+	vec4 selected_point = emitter_samples.data[index * 2u];
+	vec4 selected_color = emitter_samples.data[index * 2u + 1u];
+	float total_mass = di_emitter_sample_mass(selected_color, selected_point);
+	vec3 total_weighted = max(selected_color.rgb, vec3(0.0)) * total_mass;
+	float view_depth = max(-vertex.z, 0.001);
+	float tolerance = view_depth * 0.05;
+	uint seed = di_hash(uint(pixel.y) * 65537u + uint(pixel.x)) ^ di_hash(params.frame ^ 0x51ed270bu);
+	uint neighbours = uint(params.spatial_neighbors);
+	for (uint i = 0u; i < neighbours; i++) {
+		float angle = (float(i) + di_emitter_hash(seed, i * 2u + 1u)) * 6.2831853 / float(max(neighbours, 1u));
+		float radius = sqrt(di_emitter_hash(seed, i * 2u + 2u)) * params.spatial_radius;
+		ivec2 other = pixel + ivec2(round(cos(angle) * radius), round(sin(angle) * radius));
+		if (any(lessThan(other, ivec2(0))) || any(greaterThanEqual(other, params.size))) {
+			continue;
+		}
+		vec3 other_vertex = vec3(0.0);
+		vec3 other_normal = vec3(0.0, 0.0, 1.0);
+		float other_roughness = 0.0;
+		uint other_packed = 0u;
+		float other_depth = 0.0;
+		if (!surface_at(other, other_vertex, other_normal, other_roughness, other_packed, other_depth)) {
+			continue;
+		}
+		if (abs(other_depth - depth) > tolerance) {
+			continue;
+		}
+		if (dot(normal, other_normal) < 0.9) {
+			continue;
+		}
+		uint other_index = uint(other.y) * uint(params.size.x) + uint(other.x);
+		vec4 other_point = emitter_samples.data[other_index * 2u];
+		vec4 other_color = emitter_samples.data[other_index * 2u + 1u];
+		float other_mass = di_emitter_sample_mass(other_color, other_point);
+		if (!(other_mass > 0.0)) {
+			continue;
+		}
+		total_mass += other_mass;
+		total_weighted += max(other_color.rgb, vec3(0.0)) * other_mass;
+		if (di_emitter_hash(seed, i * 2u + 3u) * total_mass < other_mass) {
+			selected_point = other_point;
+			selected_color = other_color;
+		}
+	}
+	if (!(total_mass > 0.0)) {
+		return;
+	}
+	emitter_samples.data[index * 2u] = selected_point;
+	emitter_samples.data[index * 2u + 1u] = vec4(total_weighted / total_mass, 0.0);
+}
+#elif !defined(MODE_SPATIAL)
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 	if (any(greaterThanEqual(pixel, params.size))) {
