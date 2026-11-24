@@ -1743,6 +1743,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	uint32_t signature = HASH_MURMUR3_SEED;
 	uint64_t scene_signature = 0;
 	uint32_t emitter_state = HASH_MURMUR3_SEED;
+	uint32_t emission_state = HASH_MURMUR3_SEED;
 	LocalVector<TriangleEmitterSource> emitter_sources;
 	scene_members.clear();
 	for (uint32_t i = 0; i < p_instances.size(); i++) {
@@ -1830,6 +1831,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			const bool emissive = surface_material.emission[0] > 0.0f || surface_material.emission[1] > 0.0f || surface_material.emission[2] > 0.0f;
 			instance_emissive = instance_emissive || emissive;
 			emitter_state = hash_murmur3_one_32(emissive ? 1u : 0u, emitter_state);
+			emission_state = hash_murmur3_buffer(surface_material.emission, sizeof(surface_material.emission), emission_state);
 		}
 		if (instance_emissive) {
 			TriangleEmitterSource emitter_source;
@@ -1929,6 +1931,10 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		_update_triangle_emitters(emitter_sources, instance_order);
 		triangle_emitter_state = emitter_state;
 		triangle_emitters_built = true;
+	}
+	if (emitters_dirty || emission_state != triangle_emitter_emission_state) {
+		triangle_emitter_emission_state = emission_state;
+		triangle_emitter_generation++;
 	}
 
 	const int64_t additive_state = skip_additive ? int64_t(additive_skipped) : -1;
@@ -2072,6 +2078,9 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	scene_data.light_count = lights.size();
 	scene_data.triangle_emitter_count = triangle_emitter_count;
 	scene_data.triangle_emitters_capped = triangle_emitters_capped ? 1u : 0u;
+	const float emissive_exposure_normalization = p_camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes) : 1.0f;
+	scene_data.emissive_exposure_normalization = emissive_exposure_normalization > 0.0f ? emissive_exposure_normalization : 1.0f;
+	scene_data.triangle_emitter_generation = triangle_emitter_generation;
 	if (scene_data_buffer.is_null()) {
 		scene_data_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(SceneData));
 		RD::get_singleton()->set_resource_name(scene_data_buffer, "Ray Scene Data");
