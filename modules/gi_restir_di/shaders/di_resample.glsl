@@ -166,6 +166,9 @@ layout(set = 0, binding = 24, std430) restrict writeonly buffer EmitterSamples {
 emitter_samples;
 
 float di_emitter_weight(uint p_index) {
+	if (ray_scene_triangle_emitter_proxied(p_index)) {
+		return 0.0;
+	}
 	RaySceneTriangleEmitter emitter = ray_scene_triangle_emitter(p_index);
 	vec3 e1 = emitter.v1 - emitter.v0;
 	vec3 e2 = emitter.v2 - emitter.v0;

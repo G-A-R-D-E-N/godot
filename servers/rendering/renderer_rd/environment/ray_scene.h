@@ -173,7 +173,7 @@ public:
 		float pad;
 	};
 
-	// Ray scene space is world position minus the anchor. Layout must match ray_scene_inc.glsl: v0 at offset 0, instance at 12, v1 at 16, material at 28, v2 at 32, uv_index at 44, stride 48.
+	// Ray scene space is world position minus the anchor. Layout must match ray_scene_inc.glsl: v0 at offset 0, instance at 12, v1 at 16, material at 28, v2 at 32, uv_index at 44, flags at 48, stride 64 (std430 rounds the 52-byte tail up to the 16-byte alignment of vec3).
 	struct TriangleEmitter {
 		float v0[3];
 		uint32_t instance;
@@ -181,7 +181,11 @@ public:
 		uint32_t material;
 		float v2[3];
 		uint32_t uv_index;
+		uint32_t flags;
+		uint32_t pad[3];
 	};
+
+	static constexpr uint32_t TRIANGLE_EMITTER_PROXIED = 1u;
 
 	struct Light {
 		float color[3];
@@ -202,7 +206,7 @@ public:
 
 	static_assert(sizeof(Light) == 96);
 	static_assert(sizeof(Material) == 80);
-	static_assert(sizeof(TriangleEmitter) == 48);
+	static_assert(sizeof(TriangleEmitter) == 64, "TriangleEmitter must match the std430 64-byte stride");
 	static_assert(sizeof(Instance) == 64);
 	static_assert(sizeof(TriangleUv) == 16);
 	static_assert((uint64_t(TLAS_LEAF_SIZE) << TLAS_MAX_DEPTH) <= (uint64_t(1) << 24), "A hardware instance custom index is 24 bits.");
@@ -382,6 +386,7 @@ private:
 		uint32_t instance = 0;
 		uint32_t material_offset = 0;
 		uint32_t surface_count = 0;
+		bool proxied = false;
 	};
 
 	Mutex mesh_mutex;
