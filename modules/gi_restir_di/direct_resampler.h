@@ -1,4 +1,4 @@
-/**************************************************************************/
+**************************************************************************/
 /*  direct_resampler.h                                                    */
 /**************************************************************************/
 /*                         This file is part of:                          */
@@ -198,6 +198,7 @@ private:
 		VARIANT_EMITTER_SCAN = 4,
 		VARIANT_EMITTER_PREFIX = 5,
 		VARIANT_MAIN_EMITTER_TEMPORAL = 6,
+		VARIANT_EMITTER_SPATIAL = 9,
 #ifdef DI_RESAMPLER_LAB
 		VARIANT_MAIN_LAB = 7,
 		VARIANT_SPATIAL_LAB = 8,
@@ -210,6 +211,7 @@ private:
 	PipelineDeferredRD spatial_pipeline;
 	PipelineDeferredRD emitter_main_pipeline;
 	PipelineDeferredRD emitter_temporal_pipeline;
+	PipelineDeferredRD emitter_spatial_pipeline;
 	PipelineDeferredRD emitter_sum_pipeline;
 	PipelineDeferredRD emitter_scan_pipeline;
 	PipelineDeferredRD emitter_prefix_pipeline;
