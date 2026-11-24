@@ -166,7 +166,7 @@ layout(set = 0, binding = 24, std430) restrict writeonly buffer EmitterSamples {
 emitter_samples;
 
 float di_emitter_weight(uint p_index) {
-	if (ray_scene_triangle_emitter_proxied(p_index)) {
+	if (ray_scene_triangle_emitter_proxied(p_index) && ray_scene.proxy_emitters_traced == 0u) {
 		return 0.0;
 	}
 	RaySceneTriangleEmitter emitter = ray_scene_triangle_emitter(p_index);

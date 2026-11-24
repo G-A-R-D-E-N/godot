@@ -3988,6 +3988,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ray_scene/dirty_merge_distance", PROPERTY_HINT_RANGE, "0,16,0.01,suffix:m"), 0.5);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/mover_frames", PROPERTY_HINT_RANGE, "1,8,1"), 3);
 	GLOBAL_DEF("rendering/global_illumination/ray_scene/alpha_test", false);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/proxy_emitters", PROPERTY_HINT_ENUM, "Skip,Trace"), 0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/max_alpha_layers", PROPERTY_HINT_RANGE, "16,2048,1"), 512);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/alpha_mode", PROPERTY_HINT_ENUM, "Stochastic,Threshold"), 0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/alpha_layer_size", PROPERTY_HINT_RANGE, "256,512,256"), 256);

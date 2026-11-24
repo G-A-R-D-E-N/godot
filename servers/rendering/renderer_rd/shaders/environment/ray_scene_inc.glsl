@@ -153,7 +153,7 @@ layout(set = RAY_SCENE_SET, binding = 6, std140) uniform RaySceneData {
 	float emissive_exposure_normalization;
 	uint triangle_emitter_generation;
 	uint emission_texture_count;
-	uint pad1;
+	uint proxy_emitters_traced;
 	uint pad2;
 }
 ray_scene;
