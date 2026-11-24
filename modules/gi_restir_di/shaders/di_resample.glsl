@@ -1010,7 +1010,7 @@ void main() {
 #else
 #if defined(MODE_EMITTER_SPATIAL)
 float di_emitter_sample_mass(vec4 p_color, vec4 p_point) {
-	return luminance(max(p_color.rgb, vec3(0.0))) * max(p_point.w, 0.0);
+	return dot(max(p_color.rgb, vec3(0.0)), di_luminance_weights) * max(p_point.w, 0.0);
 }
 
 void main() {
