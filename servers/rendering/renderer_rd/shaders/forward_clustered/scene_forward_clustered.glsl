@@ -1346,9 +1346,9 @@ float specular_occlusion_cone(float p_ao, float p_roughness, vec3 p_bent_normal,
 	float cos_a_s = exp2((-log(10.0) / log(2.0)) * limited_roughness * limited_roughness);
 	float cos_b = dot(p_bent_normal, p_reflection);
 
-	float r1 = acos(cos_a_v);
-	float r2 = acos(cos_a_s);
-	float d = acos(cos_b);
+	float r1 = acos(clamp(cos_a_v, -1.0, 1.0));
+	float r2 = acos(clamp(cos_a_s, -1.0, 1.0));
+	float d = acos(clamp(cos_b, -1.0, 1.0));
 	float area = 0.0;
 
 	if (d <= max(r1, r2) - min(r1, r2)) {
