@@ -147,7 +147,11 @@ DirectShadows::DirectShadows() {
 		const int hist_bytes = int((EMITTER_HIT_INSTANCES + 1) * 4 * uint32_t(sizeof(uint32_t)));
 		Vector<uint8_t> hist_init;
 		hist_init.resize(hist_bytes);
-		memset(hist_init.ptrw(), 0xFF, hist_bytes);
+		for (int i = 0; i <= int(EMITTER_HIT_INSTANCES); i++) {
+			const int base = i * 4;
+			memset(hist_init.ptrw() + base * int(sizeof(uint32_t)), 0, 3 * int(sizeof(uint32_t)));
+			memset(hist_init.ptrw() + (base + 2) * int(sizeof(uint32_t)), 0xFF, int(sizeof(uint32_t)));
+		}
 		RD::get_singleton()->buffer_update(emitter_hit_hist, 0, hist_init.size(), hist_init.ptr());
 	}
 	RD::TextureFormat format;
