@@ -59,10 +59,11 @@ DirectShadows::Settings DirectShadows::get_project_settings() {
 	settings.range_sigmas = GLOBAL_GET("rendering/global_illumination/direct/filter_range_sigmas");
 	settings.quarter = int(GLOBAL_GET("rendering/global_illumination/direct/trace_resolution")) == 1;
 	settings.second_pass = GLOBAL_GET("rendering/global_illumination/direct/filter_second_pass");
+	settings.emitter_shorten = GLOBAL_GET("rendering/global_illumination/direct/emitter_ray_shorten");
 	static bool direct_settings_printed = false;
 	if (!direct_settings_printed) {
 		direct_settings_printed = true;
-		print_line(vformat("DIRECT_SHADOWS settings: force_factor_one %s block_resolve %s entries %d quarter %s", settings.force_one ? "true" : "false", GLOBAL_GET("rendering/global_illumination/direct/block_resolve") ? "true" : "false", int(settings.entries), settings.quarter ? "true" : "false"));
+		print_line(vformat("DIRECT_SHADOWS settings: force_factor_one %s block_resolve %s entries %d quarter %s bias %.4f", settings.force_one ? "true" : "false", GLOBAL_GET("rendering/global_illumination/direct/block_resolve") ? "true" : "false", int(settings.entries), settings.quarter ? "true" : "false", settings.emitter_shorten + float(GLOBAL_GET("rendering/global_illumination/direct/ray_bias"))));
 	}
 	return settings;
 }
@@ -485,7 +486,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 		params.camera_basis[r * 4 + 2] = float(p_input.camera.basis.rows[r][2]);
 		params.region_half[r] = float(p_input.region_half[r]);
 	}
-	params.bias = float(GLOBAL_GET("rendering/global_illumination/direct/ray_bias"));
+	params.bias = float(GLOBAL_GET("rendering/global_illumination/direct/ray_bias")) + settings.emitter_shorten;
 	params.size[0] = viewport->grid.x;
 	params.size[1] = viewport->grid.y;
 	params.full_size[0] = size.x;
