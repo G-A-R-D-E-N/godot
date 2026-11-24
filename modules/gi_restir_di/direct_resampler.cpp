@@ -182,7 +182,7 @@ bool DirectResamplerRD::_ensure_device() {
 	modes.push_back("\n#define LAB_COUNTS\n");
 	modes.push_back("\n#define MODE_SPATIAL\n#define LAB_COUNTS\n");
 #endif
-	const String defines = vformat("\n#define RAY_SCENE_BLAS_STACK_SIZE %d\n#define RAY_SCENE_TLAS_STACK_SIZE %d\n", int(RendererRD::RayScene::BLAS_MAX_DEPTH), int(RendererRD::RayScene::TLAS_MAX_DEPTH));
+	const String defines = vformat("\n#define RAY_SCENE_BLAS_STACK_SIZE %d\n#define RAY_SCENE_TLAS_STACK_SIZE %d\n%s", int(RendererRD::RayScene::BLAS_MAX_DEPTH), int(RendererRD::RayScene::TLAS_MAX_DEPTH), RendererRD::RayScene::get_singleton()->uses_hardware() ? "#define RAY_SCENE_HW\n" : "");
 	shader->initialize(modes, defines);
 	shader_version = shader->version_create();
 	if (!shader->version_is_valid(shader_version)) {
