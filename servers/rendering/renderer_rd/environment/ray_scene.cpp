@@ -2187,6 +2187,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	scene_data.emissive_exposure_normalization = emissive_exposure_normalization > 0.0f ? emissive_exposure_normalization : 1.0f;
 	scene_data.triangle_emitter_generation = triangle_emitter_generation;
 	scene_data.emission_texture_count = emission_texture_count;
+	scene_data.proxy_emitters_traced = int(GLOBAL_GET("rendering/global_illumination/ray_scene/proxy_emitters")) != 0 ? 1u : 0u;
 	if (scene_data_buffer.is_null()) {
 		scene_data_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(SceneData));
 		RD::get_singleton()->set_resource_name(scene_data_buffer, "Ray Scene Data");
