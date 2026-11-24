@@ -743,18 +743,32 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 	const Variant gi_value = material_storage->material_get_param(p_material, SNAME("gi_emission"));
 	Color gi_emission;
 	const bool gi_present = _param_color(gi_value, gi_emission);
+	const Variant color_value = material_storage->material_get_declared_param(p_material, SNAME("emission_color"));
+	Color authored_color;
+	const bool color_present = _param_color(color_value, authored_color);
+	const float authored_luminance = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_luminance")), 0.0f);
+	int branch = 0;
 	if (RayScene::emission_has_value(gi_present ? gi_emission : Color())) {
+		branch = 1;
 		_store_color(r_material.emission, gi_emission, emission_scale);
 	} else if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("emission_color")), emission)) {
+		branch = 2;
 		const float luminance = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_luminance")), 0.0f);
 		const float bounce = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_bounce_weight")), 1.0f);
 		emission = emission.srgb_to_linear();
 		const float multiplier = luminance * bounce * emission_scale;
 		_store_color(r_material.emission, emission, multiplier);
 	} else if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("emission")), emission)) {
+		branch = 3;
 		const float multiplier = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_energy")), 1.0f);
 		emission = emission.srgb_to_linear();
 		_store_color(r_material.emission, emission, multiplier);
+	}
+	const String scan_mesh = MeshStorage::get_singleton()->mesh_get_path(p_mesh);
+	if (pipboy_scan_logged < 64 && scan_mesh.contains("npcpipboygroundtake01")) {
+		pipboy_scan_logged++;
+		const bool mask_flag = material_storage->material_get_declared_param(p_material, SNAME("use_emission_mask_texture")).booleanize();
+		print_line(vformat("Ray scene scan: surface %d mesh \"%s\" gi_present %s gi_type %d gi_value %s color_present %s color_value %s luminance %.4f mask %s branch %d stored %.4f %.4f %.4f", int(p_surface), scan_mesh, gi_present ? "yes" : "no", int(gi_value.get_type()), String(gi_value), color_present ? "yes" : "no", String(color_value), authored_luminance, mask_flag ? "yes" : "no", branch, r_material.emission[0], r_material.emission[1], r_material.emission[2]));
 	}
 	if (emission_debug_logged < 32 && gi_present && !RayScene::emission_has_value(gi_emission) && RayScene::emission_has_value(Color(r_material.emission[0], r_material.emission[1], r_material.emission[2]))) {
 		emission_debug_logged++;
