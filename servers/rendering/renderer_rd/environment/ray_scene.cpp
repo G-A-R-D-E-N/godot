@@ -1801,6 +1801,8 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 
 	MeshStorage *mesh_storage = MeshStorage::get_singleton();
 	instances.clear();
+	instance_mesh_names.clear();
+	instance_mesh_positions.clear();
 	materials.clear();
 	material_cache.clear();
 	memset(albedo_sources, 0, sizeof(albedo_sources));
@@ -1980,11 +1982,8 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			_feed_observe(geometry, geometry->transform, mesh_rid, *mesh, hw_instance_usable, feed_state);
 		}
 		primitives.push_back(primitive);
-		if (!ray_scene_instance_table_printed && GLOBAL_GET("rendering/global_illumination/ray_scene/print_instances")) {
-			ray_scene_instance_table_printed = true;
-			const Vector3 origin = geometry->transform.origin;
-			print_line(vformat("Ray scene instance table: %d mesh \"%s\" position %.2f %.2f %.2f", int(instances.size()), MeshStorage::get_singleton()->mesh_get_path(mesh_rid), origin.x, origin.y, origin.z));
-		}
+		instance_mesh_names.push_back(MeshStorage::get_singleton()->mesh_get_path(mesh_rid));
+		instance_mesh_positions.push_back(geometry->transform.origin);
 		instances.push_back(instance);
 		signature = hash_murmur3_buffer(&instance, sizeof(Instance), signature);
 
@@ -2028,6 +2027,17 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		ordered.resize(MAX(1u, instances.size()));
 		for (uint32_t i = 0; i < primitives.size(); i++) {
 			ordered[i] = instances[primitives[i].index];
+		}
+		if (!ray_scene_instance_table_printed && GLOBAL_GET("rendering/global_illumination/ray_scene/print_instances")) {
+			ray_scene_instance_table_printed = true;
+			for (uint32_t order_index = 0; order_index < primitives.size(); order_index++) {
+				const uint32_t source_index = primitives[order_index].index;
+				if (source_index >= instance_mesh_names.size()) {
+					continue;
+				}
+				const Vector3 origin = instance_mesh_positions[source_index];
+				print_line(vformat("Ray scene instance table: %d mesh \"%s\" position %.2f %.2f %.2f", int(order_index), instance_mesh_names[source_index], origin.x, origin.y, origin.z));
+			}
 		}
 		if (instances.is_empty()) {
 			ordered[0] = Instance();
