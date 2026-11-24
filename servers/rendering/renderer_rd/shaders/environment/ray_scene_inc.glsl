@@ -570,6 +570,29 @@ bool ray_scene_sampled_visibility(vec3 p_from, vec3 p_to, uint p_instance_mask, 
 	RaySceneHit hit;
 	return !ray_scene_trace_masked_near(p_from, offset / distance, distance, true, true, 0u, p_instance_mask, p_seed, 0.0, hit);
 }
+bool ray_scene_sampled_visibility_skipping(vec3 p_from, vec3 p_to, uint p_instance_mask, uint p_seed, int p_skip_instance) {
+	vec3 offset = p_to - p_from;
+	float distance = length(offset);
+	if (distance <= 0.0) {
+		return true;
+	}
+	vec3 direction = offset / distance;
+	float travelled = 0.0;
+	for (int i = 0; i < 4; i++) {
+		RaySceneHit hit;
+		if (!ray_scene_trace_masked_near(p_from + direction * travelled, direction, distance - travelled, true, true, 0u, p_instance_mask, p_seed, 0.0, hit)) {
+			return true;
+		}
+		if (p_skip_instance < 0 || int(hit.instance) != p_skip_instance) {
+			return false;
+		}
+		travelled += hit.t + 1e-4;
+		if (travelled >= distance) {
+			return true;
+		}
+	}
+	return true;
+}
 
 bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, bool p_shadow, uint p_skip, uint p_caster_mask, uint p_seed, out RaySceneHit r_hit) {
 	return ray_scene_trace_masked_near(p_origin, p_direction, p_t_max, p_any, p_shadow, p_skip, p_caster_mask, p_seed, 0.0, r_hit);
@@ -714,3 +737,4 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 }
 
 #define gi_hit_direct_light ray_scene_direct_light
+

@@ -60,10 +60,11 @@ DirectShadows::Settings DirectShadows::get_project_settings() {
 	settings.quarter = int(GLOBAL_GET("rendering/global_illumination/direct/trace_resolution")) == 1;
 	settings.second_pass = GLOBAL_GET("rendering/global_illumination/direct/filter_second_pass");
 	settings.emitter_shorten = GLOBAL_GET("rendering/global_illumination/direct/emitter_ray_shorten");
+	settings.emitter_skip_instance = int(GLOBAL_GET("rendering/global_illumination/direct/emitter_skip_instance"));
 	static bool direct_settings_printed = false;
 	if (!direct_settings_printed) {
 		direct_settings_printed = true;
-		print_line(vformat("DIRECT_SHADOWS settings: force_factor_one %s block_resolve %s entries %d quarter %s bias %.4f", settings.force_one ? "true" : "false", GLOBAL_GET("rendering/global_illumination/direct/block_resolve") ? "true" : "false", int(settings.entries), settings.quarter ? "true" : "false", settings.emitter_shorten + float(GLOBAL_GET("rendering/global_illumination/direct/ray_bias"))));
+		print_line(vformat("DIRECT_SHADOWS settings: force_factor_one %s block_resolve %s entries %d quarter %s bias %.4f emitter_skip %d", settings.force_one ? "true" : "false", GLOBAL_GET("rendering/global_illumination/direct/block_resolve") ? "true" : "false", int(settings.entries), settings.quarter ? "true" : "false", settings.emitter_shorten + float(GLOBAL_GET("rendering/global_illumination/direct/ray_bias")), int(settings.emitter_skip_instance)));
 	}
 	return settings;
 }
@@ -509,6 +510,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	params.head_entries = external ? p_input.head_entries : settings.entries - 1;
 	params.tail_visibility = external ? p_input.tail_visibility : 0;
 	params.pad[0] = emitters ? 1u : 0u;
+	params.pad[1] = uint32_t(settings.emitter_skip_instance + 1);
 	params.rays = settings.rays;
 	params.reference = settings.reference ? 1 : 0;
 	params.debug_view = settings.debug_view;
