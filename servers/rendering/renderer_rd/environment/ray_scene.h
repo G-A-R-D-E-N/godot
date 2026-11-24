@@ -159,16 +159,22 @@ public:
 		float coverage;
 		float emission[3];
 		uint32_t flags;
+		uint32_t emission_texture;
+		uint32_t emission_uv_set;
+		float emission_uv_scale[2];
+		float emission_uv_offset[2];
+		float emission_mean_luminance;
+		float pad;
 	};
 
-	// Ray scene space is world position minus the anchor. Layout must match ray_scene_inc.glsl: v0 at offset 0, instance at 12, v1 at 16, material at 28, v2 at 32, stride 48.
+	// Ray scene space is world position minus the anchor. Layout must match ray_scene_inc.glsl: v0 at offset 0, instance at 12, v1 at 16, material at 28, v2 at 32, uv_index at 44, stride 48.
 	struct TriangleEmitter {
 		float v0[3];
 		uint32_t instance;
 		float v1[3];
 		uint32_t material;
 		float v2[3];
-		uint32_t pad;
+		uint32_t uv_index;
 	};
 
 	struct Light {
@@ -189,6 +195,7 @@ public:
 	};
 
 	static_assert(sizeof(Light) == 96);
+	static_assert(sizeof(Material) == 64);
 	static_assert(sizeof(TriangleEmitter) == 48);
 	static_assert(sizeof(Instance) == 64);
 	static_assert(sizeof(TriangleUv) == 16);
@@ -285,7 +292,8 @@ public:
 		uint32_t triangle_emitters_capped;
 		float emissive_exposure_normalization;
 		uint32_t triangle_emitter_generation;
-		uint32_t pad[3];
+		uint32_t emission_texture_count;
+		uint32_t pad[2];
 	};
 
 	static_assert(sizeof(SceneData) == 48);
@@ -511,6 +519,9 @@ private:
 	RID scene_data_buffer;
 	RID triangle_uv_buffer;
 	RID triangle_emitter_buffer;
+	RID emission_dummy;
+	RID emission_texture_array;
+	uint32_t emission_texture_count = 0;
 	uint32_t blas_node_capacity = 0;
 	uint32_t triangle_capacity = 0;
 	uint32_t triangle_uv_capacity = 0;
@@ -621,6 +632,8 @@ public:
 	RID get_scene_data_buffer() const { return scene_data_buffer; }
 	RID get_triangle_uv_buffer() const { return triangle_uv_buffer; }
 	RID get_triangle_emitters() const { return triangle_emitter_buffer; }
+	RID get_emission_textures() const { return emission_texture_array.is_valid() ? emission_texture_array : emission_dummy; }
+	uint32_t get_emission_texture_count() const { return emission_texture_count; }
 	uint32_t get_triangle_emitter_count() const { return triangle_emitter_count; }
 	bool get_triangle_emitters_capped() const { return triangle_emitters_capped; }
 	uint32_t get_triangle_emitter_generation() const { return triangle_emitter_generation; }
