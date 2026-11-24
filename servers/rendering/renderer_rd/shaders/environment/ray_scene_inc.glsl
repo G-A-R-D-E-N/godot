@@ -63,9 +63,14 @@ struct RaySceneMaterial {
 	uint emission_uv_set;
 	vec2 emission_uv_scale;
 	vec2 emission_uv_offset;
+	vec2 emission_nits_range;
+	float emission_texel_scale;
+	uint emission_flags;
 	float emission_mean_luminance;
 	float pad;
 };
+
+#define RAY_SCENE_EMISSION_TEXTURE_RANGES 1
 
 struct RaySceneLight {
 	vec3 color;
@@ -158,17 +163,17 @@ ray_scene_triangle_emitters;
 
 layout(set = RAY_SCENE_SET, binding = 15) uniform sampler2DArray ray_scene_emission_textures;
 
+layout(set = RAY_SCENE_SET, binding = 9, std430) restrict readonly buffer RaySceneTriangleUvs {
+	uint data[];
+}
+ray_scene_triangle_uvs;
+
 #ifdef RAY_SCENE_ALPHA
 #define RAY_SCENE_ALPHA_SHIFT 8u
 #define RAY_SCENE_ALPHA_STATE_READY 2u
 #define RAY_SCENE_MATERIAL_SHADOW_TWO_SIDED 32u
 #define RAY_SCENE_ALPHA_CULL_MASK 3u
 #define RAY_SCENE_ALPHA_CULL_BACK 2u
-
-layout(set = RAY_SCENE_SET, binding = 9, std430) restrict readonly buffer RaySceneTriangleUvs {
-	uint data[];
-}
-ray_scene_triangle_uvs;
 
 layout(set = RAY_SCENE_SET, binding = 10) uniform sampler2DArray ray_scene_alpha_mean;
 
@@ -218,11 +223,13 @@ vec2 ray_scene_triangle_emitter_uv(uint p_uv_index, vec3 p_bary) {
 
 vec3 ray_scene_triangle_emitter_emission_texel(uint p_material, vec2 p_uv) {
 	RaySceneMaterial material = ray_scene_materials.data[p_material];
-	if (material.emission_texture == 0u || material.emission_texture >= ray_scene.emission_texture_count) {
+	if (material.emission_texture == 0u || material.emission_texture > ray_scene.emission_texture_count) {
 		return material.emission;
 	}
 	vec2 uv = p_uv * material.emission_uv_scale + material.emission_uv_offset;
-	return textureLod(ray_scene_emission_textures, vec3(uv, float(material.emission_texture)), 0.0).rgb * material.emission;
+	vec4 texel = textureLod(ray_scene_emission_textures, vec3(uv, float(material.emission_texture - 1u)), 0.0);
+	float nits = (material.emission_flags & RAY_SCENE_EMISSION_TEXTURE_RANGES) != 0u ? mix(material.emission_nits_range.x, material.emission_nits_range.y, texel.a) : texel.a;
+	return texel.rgb * nits * material.emission_texel_scale;
 }
 
 float ray_scene_triangle_emitter_mean_luminance(uint p_material) {
