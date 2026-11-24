@@ -811,6 +811,7 @@ private:
 	RID direct_shadow_slots;
 	RID direct_shadow_factors;
 	RID direct_resampled;
+	RID direct_emitter_samples;
 
 #ifdef METAL_MFXTEMPORAL_ENABLED
 	RendererRD::MFXTemporalEffect *mfx_temporal_effect = nullptr;

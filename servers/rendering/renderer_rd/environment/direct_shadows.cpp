@@ -158,6 +158,8 @@ DirectShadows::DirectShadows() {
 	RD::get_singleton()->set_resource_name(lamp_buffer, "Direct Shadows Lamps");
 	lamp_dummy = RD::get_singleton()->storage_buffer_create(sizeof(DirectLightTable::GpuSlot));
 	RD::get_singleton()->set_resource_name(lamp_dummy, "Direct Shadows Lamps Dummy");
+	emitter_dummy = RD::get_singleton()->storage_buffer_create(8 * sizeof(float));
+	RD::get_singleton()->set_resource_name(emitter_dummy, "Direct Shadows Emitter Samples Dummy");
 	tier_unused = unused_storage_texture(RD::DATA_FORMAT_R8_UINT, "Direct Shadows Unused Tier");
 	depth_unused = unused_storage_texture(RD::DATA_FORMAT_R32_SFLOAT, "Direct Shadows Unused Depth");
 	normal_unused = unused_storage_texture(RD::DATA_FORMAT_R32_UINT, "Direct Shadows Unused Normal");
@@ -224,6 +226,9 @@ DirectShadows::~DirectShadows() {
 	}
 	if (lamp_dummy.is_valid()) {
 		rd->free_rid(lamp_dummy);
+	}
+	if (emitter_dummy.is_valid()) {
+		rd->free_rid(emitter_dummy);
 	}
 }
 
@@ -426,8 +431,9 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	RD *rd = RD::get_singleton();
 	Settings settings = get_project_settings();
 	const bool external = p_input.entries.is_valid();
+	const bool emitters = external && p_input.emitter_samples.is_valid();
 	if (external) {
-		const uint32_t entries = p_input.head_entries + p_input.tail_samples + 1;
+		const uint32_t entries = p_input.head_entries + p_input.tail_samples + 1 + (emitters ? 1 : 0);
 		ERR_FAIL_COND_V_MSG(p_input.tail_samples == 0 || entries > 8, false, "External direct entries need at least one tail sample and at most 7 head and tail entries.");
 		settings.entries = entries;
 	}
@@ -496,6 +502,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	params.entries = settings.entries;
 	params.head_entries = external ? p_input.head_entries : settings.entries - 1;
 	params.tail_visibility = external ? p_input.tail_visibility : 0;
+	params.pad[0] = emitters ? 1u : 0u;
 	params.rays = settings.rays;
 	params.reference = settings.reference ? 1 : 0;
 	params.debug_view = settings.debug_view;
@@ -555,6 +562,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 19, exclude_buffer));
 	if (external) {
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 20, p_input.entries));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 21, emitters ? p_input.emitter_samples : emitter_dummy));
 	}
 
 	LocalVector<RD::Uniform> scene_uniforms;

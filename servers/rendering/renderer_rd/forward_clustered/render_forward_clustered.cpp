@@ -2122,6 +2122,7 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 	direct_shadow_slots = RID();
 	direct_shadow_factors = RID();
 	direct_resampled = RID();
+	direct_emitter_samples = RID();
 	RendererRD::DirectResampler *resampler = RendererRD::DirectResampler::get_singleton();
 	if (rb_data.is_valid() && !(p_use_direct_lights && p_render_data->scene_data->view_count == 1 && p_render_data->cluster_buffer.is_valid())) {
 		direct_shadows->release(rb);
@@ -2159,6 +2160,7 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 				input.head_entries = resample_output.head_entries;
 				input.tail_samples = resample_output.tail_samples;
 				input.tail_visibility = resample_output.tail_visibility;
+				input.emitter_samples = resample_output.emitter_samples;
 				record = resample_output.record;
 				RENDER_TIMESTAMP("Direct Shadows Trace");
 				RD::get_singleton()->draw_command_begin_label("Direct Shadows Trace");
@@ -2170,6 +2172,7 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 			direct_shadow_slots = direct_shadows->get_slots(rb);
 			direct_shadow_factors = direct_shadows->get_factors(rb);
 			direct_resampled = input.entries.is_valid() ? record : RID();
+			direct_emitter_samples = direct_resampled.is_valid() ? input.emitter_samples : RID();
 		}
 		RD::get_singleton()->draw_command_end_label();
 	}
@@ -2725,6 +2728,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	base_specialization.use_far_shadow = light_storage->has_far_shadow();
 	base_specialization.use_direct_shadow = direct_shadow_factors.is_valid();
 	base_specialization.use_direct_resampled = direct_resampled.is_valid();
+	base_specialization.use_direct_emitters = direct_emitter_samples.is_valid();
 	if (current_cluster_builder) {
 		base_specialization.cluster_has_area_light = current_cluster_builder->get_cluster_count_by_type(ClusterBuilderRD::ELEMENT_TYPE_AREA_LIGHT) != 0;
 	}
@@ -4513,6 +4517,8 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		const bool resampled_bound = direct_bound && direct_resampled.is_valid();
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 54, resampled_bound ? direct_resampled : direct_shadows->get_resampled_dummy()));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 55, resampled_bound ? direct_shadows->get_lamp_buffer() : direct_shadows->get_lamp_dummy()));
+		const bool emitter_bound = resampled_bound && direct_emitter_samples.is_valid();
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 57, emitter_bound ? direct_emitter_samples : direct_shadows->get_lamp_dummy()));
 	}
 
 	return UniformSetCacheRD::get_singleton()->get_cache_vec(scene_shader.get_default_shader_rd(is_multiview), RENDER_PASS_UNIFORM_SET, uniforms);
