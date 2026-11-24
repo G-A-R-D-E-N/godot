@@ -143,6 +143,13 @@ DirectShadows::DirectShadows() {
 	params_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(Params));
 	counter_buffer = RD::get_singleton()->storage_buffer_create(COUNTER_BYTES);
 	emitter_hit_hist = RD::get_singleton()->storage_buffer_create((EMITTER_HIT_INSTANCES + 1) * 4 * uint32_t(sizeof(uint32_t)));
+	{
+		const int hist_bytes = int((EMITTER_HIT_INSTANCES + 1) * 4 * uint32_t(sizeof(uint32_t)));
+		Vector<uint8_t> hist_init;
+		hist_init.resize(hist_bytes);
+		memset(hist_init.ptrw(), 0xFF, hist_bytes);
+		RD::get_singleton()->buffer_update(emitter_hit_hist, 0, hist_init.size(), hist_init.ptr());
+	}
 	RD::TextureFormat format;
 	format.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
 	format.width = 1;
@@ -554,7 +561,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 				if (counters.size() >= int(COUNTER_BYTES)) {
 					const uint32_t *values = reinterpret_cast<const uint32_t *>(counters.ptr());
 					print_line(vformat("DIRECT_SHADOWS counters: frames %d emitter_pixels %d emitter_rays %d emitter_blocked %d", int(p_input.frame), int(values[13]), int(values[14]), int(values[15])));
-					print_line(vformat("DIRECT_EMITTERS blocked: backface %d front %d unblocked_front %d hist005 %d hist030 %d hist200 %d histfar %d", int(values[16]), int(values[17]), int(values[22]), int(values[18]), int(values[19]), int(values[20]), int(values[21])));
+					print_line(vformat("DIRECT_EMITTERS blocked: backface %d front %d unblocked_front %d hist005 %d hist030 %d hist200 %d histfar %d emitter_end 005 %d 030 %d 200 %d far %d", int(values[16]), int(values[17]), int(values[22]), int(values[18]), int(values[19]), int(values[20]), int(values[21]), int(values[23]), int(values[24]), int(values[25]), int(values[26])));
 			if (emitter_hit_hist.is_valid()) {
 				const Vector<uint8_t> hist = rd->buffer_get_data(emitter_hit_hist);
 				const int hist_bytes = int((EMITTER_HIT_INSTANCES + 1) * 4 * uint32_t(sizeof(uint32_t)));
@@ -581,9 +588,9 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 							break;
 						}
 						printed[pass] = best;
-						const float mean_distance = float(hits[best * 4 + 1]) / 1024.0f / float(best_count);
-						const float min_distance = float(hits[best * 4 + 2]) / 1024.0f;
-						const float max_distance = float(hits[best * 4 + 3]) / 1024.0f;
+						const float mean_distance = float(hits[best * 4 + 1]) / 4.0f / float(best_count);
+						const float min_distance = float(hits[best * 4 + 2]) / 4.0f;
+						const float max_distance = float(hits[best * 4 + 3]) / 4.0f;
 						if (best == int(EMITTER_HIT_INSTANCES)) {
 							print_line(vformat("DIRECT_EMITTERS blocker: unknown hits %d distance %.3f..%.3f mean %.3f", int(best_count), min_distance, max_distance, mean_distance));
 						} else {
