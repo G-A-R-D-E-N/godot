@@ -1903,13 +1903,19 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 				candidates |= surface_candidates(s, materials[materials.size() - 1].flags);
 				alpha_split |= alpha_split_bits(s, cached->entry.flags, cached->alpha_flags);
 			}
-			const float factor = MAX(_instance_float(geometry->shader_uniforms_offset, cached->scale_index), 0.0f) * MAX(_instance_float(geometry->shader_uniforms_offset, cached->bounce_index), 0.0f);
+			const float instance_scale = _instance_float(geometry->shader_uniforms_offset, cached->scale_index);
+			const float instance_bounce = _instance_float(geometry->shader_uniforms_offset, cached->bounce_index);
+			const float factor = MAX(instance_scale, 0.0f);
 			if (factor != 1.0f) {
 				Material &instance_material = materials[materials.size() - 1];
 				for (int k = 0; k < 3; k++) {
 					instance_material.emission[k] *= factor;
 				}
 				instance_material.emission_mean_luminance *= factor;
+			}
+			if (pipboy_scan_logged < 96 && mesh_storage->mesh_get_path(mesh_rid).contains("npcpipboygroundtake01")) {
+				pipboy_scan_logged++;
+				print_line(vformat("Ray scene instance: surface %d instance %d scale %.4f bounce %.4f factor %.4f emission %.4f %.4f %.4f", int(s), int(p_instances[i]), instance_scale, instance_bounce, factor, materials[materials.size() - 1].emission[0], materials[materials.size() - 1].emission[1], materials[materials.size() - 1].emission[2]));
 			}
 		}
 		bool instance_emissive = false;
