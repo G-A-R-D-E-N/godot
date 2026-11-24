@@ -626,6 +626,33 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
 	rd->compute_list_end();
 	rd->draw_command_end_label();
+	if (emitter_active && p_input.frame >= 30) {
+		static bool rdi_samples_printed = false;
+		if (!rdi_samples_printed) {
+			rdi_samples_printed = true;
+			const Vector<uint8_t> data = rd->buffer_get_data(emitter_samples);
+			const uint32_t pixels = uint32_t(size.x) * uint32_t(size.y);
+			uint32_t nonzero = 0;
+			float best = 0.0f;
+			Vector3 best_color;
+			const float *floats = reinterpret_cast<const float *>(data.ptr());
+			if (data.size() >= int(pixels) * 32) {
+				for (uint32_t i = 0; i < pixels; i++) {
+					const int o = int(i) * 8;
+					const float geometric = floats[o + 3];
+					const float lum = floats[o + 4] + floats[o + 5] + floats[o + 6];
+					if (geometric > 0.0f && lum > 0.0f) {
+						nonzero++;
+						if (lum > best) {
+							best = lum;
+							best_color = Vector3(floats[o + 4], floats[o + 5], floats[o + 6]);
+						}
+					}
+				}
+			}
+			print_line(vformat("DIRECT_EMITTERS samples: pixels %d nonzero %d best_lum %.4f best_rgb %.3f %.3f %.3f", int(pixels), int(nonzero), best, best_color.x, best_color.y, best_color.z));
+		}
+	}
 	if (spatial) {
 		const RID spatial_rid = shader->version_get_shader(shader_version, spatial_variant);
 		RENDER_TIMESTAMP("Direct Resample Spatial");
