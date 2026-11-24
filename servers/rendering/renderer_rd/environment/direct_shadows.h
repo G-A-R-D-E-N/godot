@@ -99,7 +99,7 @@ public:
 	};
 
 	static Settings get_project_settings();
-	static uint32_t factor_layers(uint32_t p_entries) { return p_entries + 2; }
+	static uint32_t factor_layers(uint32_t p_entries) { return p_entries + 3; }
 	static uint32_t accum_layers(uint32_t p_entries, bool p_precise) { return MAX(2u, p_precise ? p_entries : p_entries - 1); }
 	static Size2i block_grid(const Size2i &p_size) { return Size2i((p_size.x + 1) / 2, (p_size.y + 1) / 2); }
 
@@ -280,3 +280,4 @@ public:
 };
 
 } // namespace RendererRD
+

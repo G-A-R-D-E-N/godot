@@ -267,7 +267,7 @@ void read_entries(ivec2 p_pixel) {
 	if (emitter_tail) {
 		atomicAdd(counters.emitter_pixels, 1u);
 		tail_count--;
-		emitter_tail_factor = params.entries + 1u;
+		emitter_tail_factor = params.entries + 2u;
 		uint sample_index = uint(p_pixel.y) * uint(params.full_size[0]) + uint(p_pixel.x);
 		emitter_geometry = direct_emitter_samples.data[sample_index * 2u];
 		emitter_color = direct_emitter_samples.data[sample_index * 2u + 1u];
@@ -578,7 +578,7 @@ void main() {
 	}
 	own_limit = params.head_entries;
 	rest_layer = params.entries - 1u;
-	uint factor_layers = rest_layer + 3u;
+	uint factor_layers = rest_layer + 4u;
 
 #ifdef TRACE_QUARTER
 	ivec2 pixel;
@@ -929,9 +929,9 @@ void main() {
 	}
 	if (emitter_tail) {
 		float visible = emitter_traces > 0u ? emitter_visible / float(emitter_traces) : 1.0;
-		imageStore(slot_image, ivec3(at, int(emitter_tail_factor)), vec4(0.0));
-		imageStore(accum_image, ivec3(at, int(emitter_tail_factor)), vec4(visible, 1.0, 0.0, 0.0));
 		imageStore(factor_image, ivec3(at, int(emitter_tail_factor)), vec4(params.force_one != 0u ? 1.0 : visible));
+	} else if (params.pad0 != 0u) {
+		imageStore(factor_image, ivec3(at, int(params.entries + 2u)), vec4(1.0));
 	}
 #endif
 	imageStore(slot_image, ivec3(at, int(rest_layer)), vec4(has_rest ? float(rest_key_value) / 65535.0 : 0.0));
@@ -965,4 +965,6 @@ void main() {
 		imageStore(debug_image, at, vec4(color, 1.0));
 	}
 }
+
+
 
