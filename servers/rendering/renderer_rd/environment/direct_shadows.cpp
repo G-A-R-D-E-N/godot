@@ -59,6 +59,11 @@ DirectShadows::Settings DirectShadows::get_project_settings() {
 	settings.range_sigmas = GLOBAL_GET("rendering/global_illumination/direct/filter_range_sigmas");
 	settings.quarter = int(GLOBAL_GET("rendering/global_illumination/direct/trace_resolution")) == 1;
 	settings.second_pass = GLOBAL_GET("rendering/global_illumination/direct/filter_second_pass");
+	static bool direct_settings_printed = false;
+	if (!direct_settings_printed) {
+		direct_settings_printed = true;
+		print_line(vformat("DIRECT_SHADOWS settings: force_factor_one %s block_resolve %s entries %d quarter %s", settings.force_one ? "true" : "false", GLOBAL_GET("rendering/global_illumination/direct/block_resolve") ? "true" : "false", int(settings.entries), settings.quarter ? "true" : "false"));
+	}
 	return settings;
 }
 
