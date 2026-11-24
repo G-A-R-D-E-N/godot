@@ -931,9 +931,7 @@ void main() {
 		float visible = emitter_traces > 0u ? emitter_visible / float(emitter_traces) : 1.0;
 		imageStore(slot_image, ivec3(at, int(emitter_tail_factor)), vec4(0.0));
 		imageStore(accum_image, ivec3(at, int(emitter_tail_factor)), vec4(visible, 1.0, 0.0, 0.0));
-		if (params.filter_on == 0u) {
-			imageStore(factor_image, ivec3(at, int(emitter_tail_factor)), vec4(params.force_one != 0u ? 1.0 : visible));
-		}
+		imageStore(factor_image, ivec3(at, int(emitter_tail_factor)), vec4(params.force_one != 0u ? 1.0 : visible));
 	}
 #endif
 	imageStore(slot_image, ivec3(at, int(rest_layer)), vec4(has_rest ? float(rest_key_value) / 65535.0 : 0.0));
@@ -967,3 +965,4 @@ void main() {
 		imageStore(debug_image, at, vec4(color, 1.0));
 	}
 }
+
