@@ -1980,6 +1980,11 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			_feed_observe(geometry, geometry->transform, mesh_rid, *mesh, hw_instance_usable, feed_state);
 		}
 		primitives.push_back(primitive);
+		if (!ray_scene_instance_table_printed && GLOBAL_GET("rendering/global_illumination/ray_scene/print_instances")) {
+			ray_scene_instance_table_printed = true;
+			const Vector3 origin = geometry->transform.origin;
+			print_line(vformat("Ray scene instance table: %d mesh \"%s\" position %.2f %.2f %.2f", int(instances.size()), MeshStorage::get_singleton()->mesh_get_path(mesh_rid), origin.x, origin.y, origin.z));
+		}
 		instances.push_back(instance);
 		signature = hash_murmur3_buffer(&instance, sizeof(Instance), signature);
 

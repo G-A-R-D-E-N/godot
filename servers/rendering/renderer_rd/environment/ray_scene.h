@@ -544,6 +544,7 @@ private:
 	uint32_t triangle_emitter_generation = 0;
 	uint32_t triangle_emitter_state = 0;
 	uint32_t triangles_logged = 0;
+	bool ray_scene_instance_table_printed = false;
 	uint32_t triangle_emitter_emission_state = 0;
 	bool triangle_emitters_capped = false;
 	bool triangle_emitters_built = false;
