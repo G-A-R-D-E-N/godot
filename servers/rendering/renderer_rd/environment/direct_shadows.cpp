@@ -142,6 +142,7 @@ DirectShadows::DirectShadows() {
 	}
 	params_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(Params));
 	counter_buffer = RD::get_singleton()->storage_buffer_create(COUNTER_BYTES);
+	emitter_hit_hist = RD::get_singleton()->storage_buffer_create((EMITTER_HIT_INSTANCES + 1) * 4 * uint32_t(sizeof(uint32_t)));
 	RD::TextureFormat format;
 	format.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
 	format.width = 1;
@@ -218,6 +219,9 @@ DirectShadows::~DirectShadows() {
 	}
 	if (counter_buffer.is_valid()) {
 		rd->free_rid(counter_buffer);
+	if (emitter_hit_hist.is_valid()) {
+		rd->free_rid(emitter_hit_hist);
+	}
 	}
 	if (lamp_buffer.is_valid()) {
 		rd->free_rid(lamp_buffer);
@@ -550,6 +554,43 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 				if (counters.size() >= int(COUNTER_BYTES)) {
 					const uint32_t *values = reinterpret_cast<const uint32_t *>(counters.ptr());
 					print_line(vformat("DIRECT_SHADOWS counters: frames %d emitter_pixels %d emitter_rays %d emitter_blocked %d", int(p_input.frame), int(values[13]), int(values[14]), int(values[15])));
+			if (emitter_hit_hist.is_valid()) {
+				const Vector<uint8_t> hist = rd->buffer_get_data(emitter_hit_hist);
+				const int hist_bytes = int((EMITTER_HIT_INSTANCES + 1) * 4 * uint32_t(sizeof(uint32_t)));
+				if (hist.size() >= hist_bytes) {
+					const uint32_t *hits = reinterpret_cast<const uint32_t *>(hist.ptr());
+					print_line(vformat("DIRECT_EMITTERS blocker: instance 1225 hits %d", int(hits[1225 * 4])));
+					int printed[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
+					for (int pass = 0; pass < 8; pass++) {
+						int best = -1;
+						uint32_t best_count = 0;
+						for (int i = 0; i <= int(EMITTER_HIT_INSTANCES); i++) {
+							bool seen = false;
+							for (int p = 0; p < pass; p++) {
+								if (printed[p] == i) {
+									seen = true;
+								}
+							}
+							if (!seen && hits[i * 4] > best_count) {
+								best = i;
+								best_count = hits[i * 4];
+							}
+						}
+						if (best < 0 || best_count == 0u) {
+							break;
+						}
+						printed[pass] = best;
+						const float mean_distance = float(hits[best * 4 + 1]) / 1024.0f / float(best_count);
+						const float min_distance = float(hits[best * 4 + 2]) / 1024.0f;
+						const float max_distance = float(hits[best * 4 + 3]) / 1024.0f;
+						if (best == int(EMITTER_HIT_INSTANCES)) {
+							print_line(vformat("DIRECT_EMITTERS blocker: unknown hits %d distance %.3f..%.3f mean %.3f", int(best_count), min_distance, max_distance, mean_distance));
+						} else {
+							print_line(vformat("DIRECT_EMITTERS blocker: instance %d hits %d distance %.3f..%.3f mean %.3f", best, int(best_count), min_distance, max_distance, mean_distance));
+						}
+					}
+				}
+			}
 				}
 			}
 		}
@@ -584,6 +625,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_REST_OTHER : RB_DIRECT_REST)));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 11, _debug_target(rb, settings)));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 12, counter_buffer));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 27, emitter_hit_hist));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 13, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_SLOTS : RB_DIRECT_SLOTS_OTHER)));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 14, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_ACCUM : RB_DIRECT_ACCUM_OTHER)));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 15, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_REST : RB_DIRECT_REST_OTHER)));

@@ -54,6 +54,13 @@ layout(rg32ui, set = 0, binding = 16) uniform restrict readonly uimage2D history
 layout(rg32ui, set = 0, binding = 17) uniform restrict writeonly uimage2D guide_image;
 layout(r32ui, set = 0, binding = 18) uniform restrict writeonly uimage2D ray_image;
 
+#define EMITTER_HIT_INSTANCES 4096u
+
+layout(set = 0, binding = 27, std430) restrict buffer EmitterHitHist {
+	uint hits[];
+}
+emitter_hit_hist;
+
 layout(set = 0, binding = 12, std430) restrict buffer Counters {
 	uint lit_pixels;
 	uint rest_pixels;
@@ -745,7 +752,19 @@ void main() {
 			uint emitter_rays = params.reference != 0u ? REFERENCE_RAYS : 1u;
 			for (uint r = 0u; r < emitter_rays; r++) {
 				int skip_instance = params.pad1 != 0u ? int(params.pad1) - 1 : -1;
-				emitter_visible += ray_scene_sampled_visibility_skipping(emitter_from, emitter_to, RAY_SCENE_ALL_CASTERS, rng_state + r, skip_instance) ? 1.0 : 0.0;
+				uint blocker = 0xFFFFFFFFu;
+				float blocker_distance = 0.0;
+				bool emitter_unblocked = ray_scene_sampled_visibility_blocker(emitter_from, emitter_to, RAY_SCENE_ALL_CASTERS, rng_state + r, skip_instance, blocker, blocker_distance);
+				emitter_visible += emitter_unblocked ? 1.0 : 0.0;
+				if (!emitter_unblocked) {
+					uint hist_id = blocker < EMITTER_HIT_INSTANCES ? blocker : EMITTER_HIT_INSTANCES;
+					uint hist_base = hist_id * 4u;
+					uint hist_distance = uint(max(blocker_distance, 0.0) * 1024.0);
+					atomicAdd(emitter_hit_hist.hits[hist_base], 1u);
+					atomicAdd(emitter_hit_hist.hits[hist_base + 1u], hist_distance);
+					atomicMin(emitter_hit_hist.hits[hist_base + 2u], hist_distance);
+					atomicMax(emitter_hit_hist.hits[hist_base + 3u], hist_distance);
+				}
 				emitter_traces++;
 			}
 		}
@@ -966,6 +985,9 @@ void main() {
 		imageStore(debug_image, at, vec4(color, 1.0));
 	}
 }
+
+
+
 
 
 

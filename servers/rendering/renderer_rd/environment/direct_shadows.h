@@ -169,6 +169,7 @@ private:
 	static_assert(sizeof(Params) == 400);
 
 	static constexpr uint32_t COUNTER_WORDS = 16;
+	static constexpr uint32_t EMITTER_HIT_INSTANCES = 4096;
 	static constexpr uint32_t COUNTER_BYTES = COUNTER_WORDS * 4;
 
 	enum TraceMode {
@@ -228,6 +229,7 @@ private:
 	RID exclude_buffer;
 	uint32_t exclude_buffer_capacity = 0;
 	RID counter_buffer;
+	RID emitter_hit_hist;
 	RID debug_unused;
 	RID resampled_dummy;
 	RID lamp_dummy;
