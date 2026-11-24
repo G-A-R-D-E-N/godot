@@ -78,6 +78,10 @@ direct_excludes;
 
 #ifdef EXTERNAL_ENTRIES
 layout(r32ui, set = 0, binding = 20) uniform restrict readonly uimage2DArray entry_image;
+layout(set = 0, binding = 21, std430) restrict readonly buffer DirectEmitterSamples {
+	vec4 data[];
+}
+direct_emitter_samples;
 #endif
 
 #define RAY_SCENE_EXCLUDE
@@ -119,6 +123,10 @@ vec3 tail_position[MAX_ENTRIES];
 bool tail_seen[MAX_ENTRIES];
 float tail_hits[MAX_ENTRIES];
 float tail_rays[MAX_ENTRIES];
+uint emitter_tail_factor = 0u;
+bool emitter_tail = false;
+vec4 emitter_geometry = vec4(0.0);
+vec4 emitter_color = vec4(0.0);
 #endif
 
 float rest_total = 0.0;
@@ -252,6 +260,14 @@ void read_entries(ivec2 p_pixel) {
 		head_slots[i] = imageLoad(entry_image, ivec3(p_pixel, int(i))).r & 0xFFFFu;
 	}
 	tail_count = rest_layer - own_limit;
+	emitter_tail = params.pad0 != 0u && tail_count > 0u;
+	if (emitter_tail) {
+		tail_count--;
+		emitter_tail_factor = own_limit + tail_count;
+		uint sample_index = uint(p_pixel.y) * uint(params.full_size[0]) + uint(p_pixel.x);
+		emitter_geometry = direct_emitter_samples.data[sample_index * 2u];
+		emitter_color = direct_emitter_samples.data[sample_index * 2u + 1u];
+	}
 	for (uint k = 0u; k < tail_count; k++) {
 		uint base = own_limit + 3u * k;
 		uint packed = imageLoad(entry_image, ivec3(p_pixel, int(base))).r;
@@ -617,7 +633,8 @@ void main() {
 	for (uint k = 0u; k < tail_count; k++) {
 		tail_lit = tail_lit || tail_seen[k];
 	}
-	if (own_count + rest_count == 0u && !tail_lit) {
+	bool emitter_lit = emitter_tail && emitter_geometry.w > 0.0;
+	if (own_count + rest_count == 0u && !tail_lit && !emitter_lit) {
 #else
 	if (own_count + rest_count == 0u) {
 #endif
@@ -707,6 +724,29 @@ void main() {
 	vec3 anchored = relative + ray_scene.camera_to_anchor;
 	uint traced_rays = 0u;
 	uint ray_record = 0u;
+
+#ifdef EXTERNAL_ENTRIES
+	float emitter_visible = 0.0;
+	uint emitter_traces = 0u;
+	if (emitter_tail && emitter_geometry.w > 0.0) {
+		vec3 emitter_point = to_world(emitter_geometry.xyz) + ray_scene.camera_to_anchor;
+		vec3 emitter_from = anchored + to_world(normal) * params.bias;
+		vec3 emitter_offset = emitter_point - emitter_from;
+		float emitter_reach = length(emitter_offset);
+		if (emitter_reach <= params.bias) {
+			emitter_visible = 1.0;
+			emitter_traces = 1u;
+		} else {
+			vec3 emitter_to = emitter_from + emitter_offset * (1.0 - params.bias / emitter_reach);
+			uint emitter_rays = params.reference != 0u ? REFERENCE_RAYS : 1u;
+			for (uint r = 0u; r < emitter_rays; r++) {
+				emitter_visible += ray_scene_sampled_visibility(emitter_from, emitter_to, RAY_SCENE_ALL_CASTERS, rng_state + r) ? 1.0 : 0.0;
+				emitter_traces++;
+			}
+		}
+		traced_rays += emitter_traces;
+	}
+#endif
 
 	if (params.reference != 0u) {
 		for (uint i = 0u; i < own_count; i++) {
@@ -879,6 +919,14 @@ void main() {
 		imageStore(accum_image, ivec3(at, int(own_limit + k)), vec4(visible, 1.0, 0.0, 0.0));
 		if (params.filter_on == 0u) {
 			imageStore(factor_image, ivec3(at, int(own_limit + k)), vec4(params.force_one != 0u && params.tail_visibility != 2u ? 1.0 : visible));
+		}
+	}
+	if (emitter_tail) {
+		float visible = emitter_traces > 0u ? emitter_visible / float(emitter_traces) : 1.0;
+		imageStore(slot_image, ivec3(at, int(emitter_tail_factor)), vec4(0.0));
+		imageStore(accum_image, ivec3(at, int(emitter_tail_factor)), vec4(visible, 1.0, 0.0, 0.0));
+		if (params.filter_on == 0u) {
+			imageStore(factor_image, ivec3(at, int(emitter_tail_factor)), vec4(params.force_one != 0u ? 1.0 : visible));
 		}
 	}
 #endif

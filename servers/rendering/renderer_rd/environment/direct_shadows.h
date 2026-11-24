@@ -69,6 +69,7 @@ public:
 	struct FrameInput : DirectFrameView {
 		uint64_t table_generation = 0;
 		RID entries;
+		RID emitter_samples;
 		uint32_t head_entries = 0;
 		uint32_t tail_samples = 0;
 		uint32_t tail_visibility = 0;
@@ -228,6 +229,7 @@ private:
 	RID debug_unused;
 	RID resampled_dummy;
 	RID lamp_dummy;
+	RID emitter_dummy;
 	bool lamps_prepared = false;
 	String lamps_dump_request;
 	RID tier_unused;
