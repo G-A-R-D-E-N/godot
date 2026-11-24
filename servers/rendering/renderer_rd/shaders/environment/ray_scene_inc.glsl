@@ -78,6 +78,16 @@ struct RaySceneLight {
 	uint pad;
 };
 
+// Ray scene space is world minus the anchor; layout must match RayScene::TriangleEmitter: v0 at offset 0, instance at 12, v1 at 16, material at 28, v2 at 32.
+struct RaySceneTriangleEmitter {
+	vec3 v0;
+	uint instance;
+	vec3 v1;
+	uint material;
+	vec3 v2;
+	uint pad;
+};
+
 #ifndef RAY_SCENE_HW
 layout(set = RAY_SCENE_SET, binding = 0, std430) restrict readonly buffer RaySceneBlasNodes {
 	RaySceneNode data[];
@@ -121,8 +131,8 @@ layout(set = RAY_SCENE_SET, binding = 6, std140) uniform RaySceneData {
 	vec3 camera_to_anchor;
 	uint instance_count;
 	uint light_count;
-	uint pad0;
-	uint pad1;
+	uint triangle_emitter_count;
+	uint triangle_emitters_capped;
 	uint pad2;
 }
 ray_scene;
@@ -130,6 +140,11 @@ ray_scene;
 #ifdef RAY_SCENE_HW
 layout(set = RAY_SCENE_SET, binding = 7) uniform accelerationStructureEXT ray_scene_tlas;
 #endif
+
+layout(set = RAY_SCENE_SET, binding = 8, std430) restrict readonly buffer RaySceneTriangleEmitters {
+	RaySceneTriangleEmitter data[];
+}
+ray_scene_triangle_emitters;
 
 #ifdef RAY_SCENE_ALPHA
 #define RAY_SCENE_ALPHA_SHIFT 8u
@@ -174,6 +189,22 @@ struct RaySceneHit {
 	bool backface;
 	bool blend;
 };
+
+RaySceneTriangleEmitter ray_scene_triangle_emitter(uint p_index) {
+	return ray_scene_triangle_emitters.data[p_index];
+}
+
+vec3 ray_scene_triangle_emitter_emission(uint p_material) {
+	return ray_scene_materials.data[p_material].emission;
+}
+
+uint ray_scene_triangle_emitter_count() {
+	return ray_scene.triangle_emitter_count;
+}
+
+bool ray_scene_triangle_emitters_capped() {
+	return ray_scene.triangle_emitters_capped != 0u;
+}
 
 uint ray_scene_hash(uint p_value) {
 	p_value ^= p_value >> 16u;
@@ -468,6 +499,17 @@ bool ray_scene_trace_masked_near(vec3 p_origin, vec3 p_direction, float p_t_max,
 #else
 #include "ray_scene_hw_inc.glsl"
 #endif
+
+// Ray scene space only; the caller biases p_from off the emitter surface. Requires the ray scene TLAS bindings when RAY_SCENE_HW is set.
+bool ray_scene_sampled_visibility(vec3 p_from, vec3 p_to, uint p_instance_mask, uint p_seed) {
+	vec3 offset = p_to - p_from;
+	float distance = length(offset);
+	if (distance <= 0.0) {
+		return true;
+	}
+	RaySceneHit hit;
+	return !ray_scene_trace_masked_near(p_from, offset / distance, distance, true, true, 0u, p_instance_mask, p_seed, 0.0, hit);
+}
 
 bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, bool p_shadow, uint p_skip, uint p_caster_mask, uint p_seed, out RaySceneHit r_hit) {
 	return ray_scene_trace_masked_near(p_origin, p_direction, p_t_max, p_any, p_shadow, p_skip, p_caster_mask, p_seed, 0.0, r_hit);
