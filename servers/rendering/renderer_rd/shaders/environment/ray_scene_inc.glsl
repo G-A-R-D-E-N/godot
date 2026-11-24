@@ -97,7 +97,17 @@ struct RaySceneTriangleEmitter {
 	uint material;
 	vec3 v2;
 	uint uv_index;
+	uint flags;
+	uint pad0;
+	uint pad1;
+	uint pad2;
 };
+
+#define RAY_SCENE_EMITTER_PROXIED 1u
+
+bool ray_scene_triangle_emitter_proxied(uint p_index) {
+	return (ray_scene_triangle_emitters.data[p_index].flags & RAY_SCENE_EMITTER_PROXIED) != 0u;
+}
 
 #ifndef RAY_SCENE_HW
 layout(set = RAY_SCENE_SET, binding = 0, std430) restrict readonly buffer RaySceneBlasNodes {

@@ -503,6 +503,7 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 			emitter.instance = p_order[source.instance];
 			emitter.material = source.material_offset + surface;
 			emitter.uv_index = mesh->triangle_offset + t;
+			emitter.flags = source.proxied ? TRIANGLE_EMITTER_PROXIED : 0u;
 			triangle_emitters.push_back(emitter);
 		}
 		if (capped) {
@@ -512,6 +513,7 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 	triangle_emitter_count = triangle_emitters.size();
 	triangle_emitters_capped = capped;
 	uint32_t emitter_instances = 0;
+	uint32_t emitter_proxied_instances = 0;
 	{
 		HashSet<uint32_t> unique_instances;
 		for (const TriangleEmitter &emitter : triangle_emitters) {
@@ -520,12 +522,15 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 			}
 			unique_instances.insert(emitter.instance);
 			emitter_instances++;
+			if ((emitter.flags & TRIANGLE_EMITTER_PROXIED) != 0u) {
+				emitter_proxied_instances++;
+			}
 		}
 	}
 	if (triangle_emitters.is_empty()) {
 		triangle_emitters.push_back(TriangleEmitter());
 	}
-	print_line(vformat("Ray scene triangle emitters: %d triangles across %d instances%s", triangle_emitter_count, emitter_instances, triangle_emitters_capped ? " (capped)" : ""));
+	print_line(vformat("Ray scene triangle emitters: %d triangles across %d instances (%d proxied)%s", triangle_emitter_count, emitter_instances, emitter_proxied_instances, triangle_emitters_capped ? " (capped)" : ""));
 	if (triangles_logged < 64) {
 		triangles_logged++;
 		for (const TriangleEmitterSource &source : p_sources) {
@@ -558,7 +563,7 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 				}
 				surface_list += vformat("%d(layer %d scale %.4f flat %.3f)", surface, int(material.emission_texture), material.emission_texel_scale, material.emission_mean_luminance);
 			}
-			print_line(vformat("Ray scene emitter: mesh \"%s\" instance %d triangles %d surfaces %s", MeshStorage::get_singleton()->mesh_get_path(source.mesh), int(p_order[source.instance]), int(instance_triangles), surface_list));
+			print_line(vformat("Ray scene emitter: mesh \"%s\" instance %d triangles %d surfaces %s proxied %s", MeshStorage::get_singleton()->mesh_get_path(source.mesh), int(p_order[source.instance]), int(instance_triangles), surface_list, source.proxied ? "yes" : "no"));
 		}
 	}
 	_ensure_buffer(triangle_emitter_buffer, triangle_emitter_capacity, triangle_emitters.size(), sizeof(TriangleEmitter), "Ray Scene Triangle Emitters");
@@ -1869,6 +1874,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		uint64_t candidates = 0;
 		uint64_t alpha_split = 0;
 		uint32_t feed_state = hash_murmur3_one_32(geometry->layer_mask);
+		bool instance_proxied = false;
 
 		for (uint32_t s = 0; s < mesh->surface_count; s++) {
 			RID material = geometry->data->material_override;
@@ -1905,6 +1911,9 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			}
 			const float instance_scale = _instance_float(geometry->shader_uniforms_offset, cached->scale_index);
 			const float instance_bounce = _instance_float(geometry->shader_uniforms_offset, cached->bounce_index);
+			if (instance_bounce <= 0.0f) {
+				instance_proxied = true;
+			}
 			const float factor = MAX(instance_scale, 0.0f);
 			if (factor != 1.0f) {
 				Material &instance_material = materials[materials.size() - 1];
@@ -1935,6 +1944,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			emitter_source.instance = instances.size();
 			emitter_source.material_offset = instance.material_offset;
 			emitter_source.surface_count = mesh->surface_count;
+			emitter_source.proxied = instance_proxied;
 			emitter_sources.push_back(emitter_source);
 		}
 		bool hw_instance_usable = true;
