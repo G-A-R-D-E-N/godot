@@ -247,7 +247,7 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 		return;
 	}
 	vec3 to_light = rel / distance;
-	vec3 light_normal = cross_e1e2 / normal_length;
+	vec3 light_normal = -cross_e1e2 / normal_length;
 	float cos_light = dot(light_normal, -to_light);
 	if ((ray_scene_materials.data[emitter.material].flags & RAY_SCENE_MATERIAL_TWO_SIDED) != 0u) {
 		cos_light = abs(cos_light);
