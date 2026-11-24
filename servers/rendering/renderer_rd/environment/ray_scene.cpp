@@ -566,6 +566,27 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 			print_line(vformat("Ray scene emitter: mesh \"%s\" instance %d triangles %d surfaces %s proxied %s", MeshStorage::get_singleton()->mesh_get_path(source.mesh), int(p_order[source.instance]), int(instance_triangles), surface_list, source.proxied ? "yes" : "no"));
 		}
 	}
+	{
+		int rdi_unproxied = 0;
+		for (uint32_t i = 0; i < triangle_emitters.size(); i++) {
+			if ((triangle_emitters[i].flags & TRIANGLE_EMITTER_PROXIED) == 0) {
+				rdi_unproxied++;
+			}
+		}
+		print_line(vformat("DIRECT_EMITTERS flags: emitters %d unproxied %d", int(triangle_emitters.size()), rdi_unproxied));
+		int rdi_shown_un = 0;
+		int rdi_shown_px = 0;
+		for (uint32_t i = 0; i < triangle_emitters.size() && (rdi_shown_un < 4 || rdi_shown_px < 3); i++) {
+			const TriangleEmitter &rdi_e = triangle_emitters[i];
+			const bool rdi_px = (rdi_e.flags & TRIANGLE_EMITTER_PROXIED) != 0;
+			if (rdi_px ? (rdi_shown_px >= 3) : (rdi_shown_un >= 4)) {
+				continue;
+			}
+			const Material &rdi_m = materials[rdi_e.material];
+			print_line(vformat("DIRECT_EMITTERS flags: index %d instance %d flags %d proxied %s emission %.3f %.3f %.3f", int(i), int(rdi_e.instance), int(rdi_e.flags), rdi_px ? "yes" : "no", rdi_m.emission[0], rdi_m.emission[1], rdi_m.emission[2]));
+			if (rdi_px) { rdi_shown_px++; } else { rdi_shown_un++; }
+		}
+	}
 	_ensure_buffer(triangle_emitter_buffer, triangle_emitter_capacity, triangle_emitters.size(), sizeof(TriangleEmitter), "Ray Scene Triangle Emitters");
 	RD::get_singleton()->buffer_update(triangle_emitter_buffer, 0, triangle_emitters.size() * sizeof(TriangleEmitter), triangle_emitters.ptr());
 }
