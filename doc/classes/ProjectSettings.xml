@@ -3378,6 +3378,9 @@
 		<member name="rendering/global_illumination/ray_scene/alpha_mode" type="int" setter="" getter="" default="0">
 			How a cut-out hit is decided. [code]0[/code] (Stochastic) accepts a triangle where the layer coverage is larger than a random value per ray, which keeps the open share in expectation. [code]1[/code] (Threshold) accepts it where the coverage is at least one half, which is deterministic but can close holes narrower than about one layer texel. Read when the trace shaders are created, so a change needs a restart.
 		</member>
+		<member name="rendering/global_illumination/ray_scene/emitter_instance" type="int" setter="" getter="" default="-1">
+		Debug filter for the traced emissive triangles: when negative (default) every emitter instance is kept, and when zero or more only the emitters of that instance reach the consumers of the ray scene, so a single bulb can be isolated for a shadow test. The kept triangle count is printed with the census. Read on every ray scene update.
+		</member>
 		<member name="rendering/global_illumination/ray_scene/proxy_emitters" type="int" setter="" getter="" default="0">
 		Selects how the traced emissive triangles of instances that carry a derived-light proxy are offered to a sampling consumer. [b]Skip[/b] (default) stamps them with the proxied flag and the consumer skips them, so the derived proxy light is the only representation. [b]Trace[/b] keeps the flag but tells the consumer to sample them anyway: the high-tier state where the proxy lights are off and the shadowed traced emitter is the only representation. Read on every ray scene update.
 		</member>
