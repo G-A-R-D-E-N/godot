@@ -496,8 +496,55 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 	}
 	triangle_emitter_count = triangle_emitters.size();
 	triangle_emitters_capped = capped;
+	uint32_t emitter_instances = 0;
+	{
+		HashSet<uint32_t> unique_instances;
+		for (const TriangleEmitter &emitter : triangle_emitters) {
+			if (unique_instances.has(emitter.instance)) {
+				continue;
+			}
+			unique_instances.insert(emitter.instance);
+			emitter_instances++;
+		}
+	}
 	if (triangle_emitters.is_empty()) {
 		triangle_emitters.push_back(TriangleEmitter());
+	}
+	print_line(vformat("Ray scene triangle emitters: %d triangles across %d instances%s", triangle_emitter_count, emitter_instances, triangle_emitters_capped ? " (capped)" : ""));
+	if (triangles_logged < 64) {
+		triangles_logged++;
+		for (const TriangleEmitterSource &source : p_sources) {
+			const MeshEntry *mesh = meshes.getptr(source.mesh);
+			if (!mesh || !mesh->built || source.instance >= p_order.size()) {
+				continue;
+			}
+			uint32_t instance_triangles = 0;
+			HashSet<uint32_t> surfaces;
+			for (uint32_t t = 0; t < uint32_t(mesh->triangle_surface.size()); t++) {
+				const uint32_t surface = mesh->triangle_surface[t];
+				if (surface >= source.surface_count || source.material_offset + surface >= materials.size()) {
+					continue;
+				}
+				const Material &material = materials[source.material_offset + surface];
+				if (!(material.emission[0] > 0.0f || material.emission[1] > 0.0f || material.emission[2] > 0.0f)) {
+					continue;
+				}
+				instance_triangles++;
+				surfaces.insert(surface);
+			}
+			if (instance_triangles == 0) {
+				continue;
+			}
+			String surface_list;
+			for (const uint32_t &surface : surfaces) {
+				const Material &material = materials[source.material_offset + surface];
+				if (!surface_list.is_empty()) {
+					surface_list += ",";
+				}
+				surface_list += vformat("%d(flat %.4f %.4f %.4f)", surface, material.emission[0], material.emission[1], material.emission[2]);
+			}
+			print_line(vformat("Ray scene emitter: mesh \"%s\" instance %d triangles %d surfaces %s", MeshStorage::get_singleton()->mesh_get_path(source.mesh), int(p_order[source.instance]), int(instance_triangles), surface_list));
+		}
 	}
 	_ensure_buffer(triangle_emitter_buffer, triangle_emitter_capacity, triangle_emitters.size(), sizeof(TriangleEmitter), "Ray Scene Triangle Emitters");
 	RD::get_singleton()->buffer_update(triangle_emitter_buffer, 0, triangle_emitters.size() * sizeof(TriangleEmitter), triangle_emitters.ptr());
