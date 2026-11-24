@@ -1,4 +1,4 @@
-**************************************************************************/
+/**************************************************************************/
 /*  direct_resampler.h                                                    */
 /**************************************************************************/
 /*                         This file is part of:                          */
@@ -63,7 +63,8 @@ public:
 	struct Settings {
 		bool enabled = false;
 		bool emitters = false;
-		bool emitter_temporal = false;
+			bool emitter_temporal = false;
+		bool emitter_spatial = false;
 		uint32_t head = 4;
 		uint32_t tail_samples = 1;
 		float floor_value = 0.0625f;
@@ -178,7 +179,8 @@ private:
 		bool reservoir_sets = false;
 		bool head_state = false;
 		bool emitters = false;
-		bool emitter_temporal = false;
+			bool emitter_temporal = false;
+		bool emitter_spatial = false;
 		uint32_t counter = 1;
 		uint32_t history_set = 0;
 		uint32_t head_state_set = 0;
