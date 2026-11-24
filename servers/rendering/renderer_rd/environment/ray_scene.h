@@ -74,6 +74,8 @@ public:
 	static constexpr uint32_t PICK_CELL_SLOTS = 4;
 	static constexpr double ANCHOR_GRID = 64.0;
 
+	static bool emission_has_value(const Color &p_emission);
+
 	enum FeedConsumer : uint32_t {
 		FEED_MODULE = 16,
 		FEED_DEBUG = 32,
@@ -479,6 +481,7 @@ private:
 	float emission_scale = 1.0f;
 	bool skip_additive = true;
 	uint32_t additive_skipped = 0;
+	uint32_t emission_debug_logged = 0;
 	int64_t reported_additive_state = -2;
 	LocalVector<Light> lights;
 	LocalVector<Light> local_lights;
