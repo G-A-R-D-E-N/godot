@@ -473,6 +473,7 @@ void RayScene::_ensure_buffer(RID &r_buffer, uint32_t &r_capacity, uint32_t p_co
 
 void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource> &p_sources, const LocalVector<uint32_t> &p_order) {
 	triangle_emitters.clear();
+	const int64_t emitter_filter = int64_t(GLOBAL_GET("rendering/global_illumination/ray_scene/emitter_instance"));
 	bool capped = false;
 	for (const TriangleEmitterSource &source : p_sources) {
 		const MeshEntry *mesh = meshes.getptr(source.mesh);
@@ -501,6 +502,9 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 				corners[v][2] = position.z;
 			}
 			emitter.instance = p_order[source.instance];
+			if (emitter_filter >= 0 && int64_t(emitter.instance) != emitter_filter) {
+				continue;
+			}
 			emitter.material = source.material_offset + surface;
 			emitter.uv_index = mesh->triangle_offset + t;
 			emitter.flags = source.proxied ? TRIANGLE_EMITTER_PROXIED : 0u;
@@ -531,6 +535,9 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 		triangle_emitters.push_back(TriangleEmitter());
 	}
 	print_line(vformat("Ray scene triangle emitters: %d triangles across %d instances (%d proxied)%s", triangle_emitter_count, emitter_instances, emitter_proxied_instances, triangle_emitters_capped ? " (capped)" : ""));
+	if (emitter_filter >= 0) {
+		print_line(vformat("Ray scene emitter filter: instance %d, %d triangles kept", int(emitter_filter), int(triangle_emitter_count)));
+	}
 	if (triangles_logged < 64) {
 		triangles_logged++;
 		for (const TriangleEmitterSource &source : p_sources) {
