@@ -56,12 +56,14 @@
 #define RB_DI_SET_VALUES_1 SNAME("set_values_1")
 #define RB_DI_HEAD_STATE_0 SNAME("head_state_0")
 #define RB_DI_HEAD_STATE_1 SNAME("head_state_1")
+#define RB_DI_EMITTER_HISTORY SNAME("emitter_history")
 
 class DirectResamplerRD : public RendererRD::DirectResampler {
 public:
 	struct Settings {
 		bool enabled = false;
 		bool emitters = false;
+		bool emitter_temporal = false;
 		uint32_t head = 4;
 		uint32_t tail_samples = 1;
 		float floor_value = 0.0625f;
@@ -176,6 +178,7 @@ private:
 		bool reservoir_sets = false;
 		bool head_state = false;
 		bool emitters = false;
+		bool emitter_temporal = false;
 		uint32_t counter = 1;
 		uint32_t history_set = 0;
 		uint32_t head_state_set = 0;
@@ -194,9 +197,10 @@ private:
 		VARIANT_EMITTER_SUM = 3,
 		VARIANT_EMITTER_SCAN = 4,
 		VARIANT_EMITTER_PREFIX = 5,
+		VARIANT_MAIN_EMITTER_TEMPORAL = 6,
 #ifdef DI_RESAMPLER_LAB
-		VARIANT_MAIN_LAB = 6,
-		VARIANT_SPATIAL_LAB = 7,
+		VARIANT_MAIN_LAB = 7,
+		VARIANT_SPATIAL_LAB = 8,
 #endif
 	};
 
@@ -205,6 +209,7 @@ private:
 	PipelineDeferredRD pipeline;
 	PipelineDeferredRD spatial_pipeline;
 	PipelineDeferredRD emitter_main_pipeline;
+	PipelineDeferredRD emitter_temporal_pipeline;
 	PipelineDeferredRD emitter_sum_pipeline;
 	PipelineDeferredRD emitter_scan_pipeline;
 	PipelineDeferredRD emitter_prefix_pipeline;
