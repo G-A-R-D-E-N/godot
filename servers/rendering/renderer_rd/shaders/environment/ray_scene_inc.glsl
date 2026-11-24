@@ -59,6 +59,12 @@ struct RaySceneMaterial {
 	float coverage;
 	vec3 emission;
 	uint flags;
+	uint emission_texture;
+	uint emission_uv_set;
+	vec2 emission_uv_scale;
+	vec2 emission_uv_offset;
+	float emission_mean_luminance;
+	float pad;
 };
 
 struct RaySceneLight {
@@ -78,14 +84,14 @@ struct RaySceneLight {
 	uint pad;
 };
 
-// Ray scene space is world minus the anchor; layout must match RayScene::TriangleEmitter: v0 at offset 0, instance at 12, v1 at 16, material at 28, v2 at 32.
+// Ray scene space is world minus the anchor; layout must match RayScene::TriangleEmitter: v0 at offset 0, instance at 12, v1 at 16, material at 28, v2 at 32, uv_index at 44.
 struct RaySceneTriangleEmitter {
 	vec3 v0;
 	uint instance;
 	vec3 v1;
 	uint material;
 	vec3 v2;
-	uint pad;
+	uint uv_index;
 };
 
 #ifndef RAY_SCENE_HW
@@ -135,7 +141,7 @@ layout(set = RAY_SCENE_SET, binding = 6, std140) uniform RaySceneData {
 	uint triangle_emitters_capped;
 	float emissive_exposure_normalization;
 	uint triangle_emitter_generation;
-	uint pad0;
+	uint emission_texture_count;
 	uint pad1;
 	uint pad2;
 }
@@ -149,6 +155,8 @@ layout(set = RAY_SCENE_SET, binding = 8, std430) restrict readonly buffer RaySce
 	RaySceneTriangleEmitter data[];
 }
 ray_scene_triangle_emitters;
+
+layout(set = RAY_SCENE_SET, binding = 15) uniform sampler2DArray ray_scene_emission_textures;
 
 #ifdef RAY_SCENE_ALPHA
 #define RAY_SCENE_ALPHA_SHIFT 8u
@@ -200,6 +208,25 @@ RaySceneTriangleEmitter ray_scene_triangle_emitter(uint p_index) {
 
 vec3 ray_scene_triangle_emitter_emission(uint p_material) {
 	return ray_scene_materials.data[p_material].emission;
+}
+
+vec2 ray_scene_triangle_emitter_uv(uint p_uv_index, vec3 p_bary) {
+	uint base = p_uv_index * 4u;
+	float w0 = 1.0 - p_bary.x - p_bary.y;
+	return unpackHalf2x16(ray_scene_triangle_uvs.data[base]) * w0 + unpackHalf2x16(ray_scene_triangle_uvs.data[base + 1u]) * p_bary.x + unpackHalf2x16(ray_scene_triangle_uvs.data[base + 2u]) * p_bary.y;
+}
+
+vec3 ray_scene_triangle_emitter_emission_texel(uint p_material, vec2 p_uv) {
+	RaySceneMaterial material = ray_scene_materials.data[p_material];
+	if (material.emission_texture == 0u || material.emission_texture >= ray_scene.emission_texture_count) {
+		return material.emission;
+	}
+	vec2 uv = p_uv * material.emission_uv_scale + material.emission_uv_offset;
+	return textureLod(ray_scene_emission_textures, vec3(uv, float(material.emission_texture)), 0.0).rgb * material.emission;
+}
+
+float ray_scene_triangle_emitter_mean_luminance(uint p_material) {
+	return ray_scene_materials.data[p_material].emission_mean_luminance;
 }
 
 float ray_scene_emissive_exposure_normalization() {

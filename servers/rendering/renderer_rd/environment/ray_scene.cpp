@@ -79,12 +79,23 @@ RayScene::RayScene() {
 	singleton = this;
 	alpha_enabled = GLOBAL_GET("rendering/global_illumination/ray_scene/alpha_test");
 	alpha_store.set_liveness(&_alpha_texture_live);
+	RD::TextureFormat emission_format;
+	emission_format.format = RD::DATA_FORMAT_R8G8B8A8_UNORM;
+	emission_format.width = 1;
+	emission_format.height = 1;
+	emission_format.array_layers = 1;
+	emission_format.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_UPDATE_BIT;
+	emission_dummy = RD::get_singleton()->texture_create(emission_format, RD::TextureView());
+	RD::get_singleton()->set_resource_name(emission_dummy, "Ray Scene Emission Dummy");
+	if (emission_dummy.is_valid()) {
+		RD::get_singleton()->texture_update(emission_dummy, 0, Vector<uint8_t>({ 255, 255, 255, 255 }));
+	}
 }
 
 RayScene::~RayScene() {
 	_print_tlas_rebuilds(true);
 	_hw_free();
-	RID *owned[] = { &blas_node_buffer, &triangle_buffer, &instance_buffer, &tlas_node_buffer, &material_buffer, &light_buffer, &scene_data_buffer, &triangle_uv_buffer, &triangle_emitter_buffer };
+	RID *owned[] = { &blas_node_buffer, &triangle_buffer, &instance_buffer, &tlas_node_buffer, &material_buffer, &light_buffer, &scene_data_buffer, &triangle_uv_buffer, &triangle_emitter_buffer, &emission_dummy, &emission_texture_array };
 	for (RID *rid : owned) {
 		if (rid->is_valid()) {
 			RD::get_singleton()->free_rid(*rid);
@@ -488,6 +499,7 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 			}
 			emitter.instance = p_order[source.instance];
 			emitter.material = source.material_offset + surface;
+			emitter.uv_index = mesh->triangle_offset + t;
 			triangle_emitters.push_back(emitter);
 		}
 		if (capped) {
@@ -669,6 +681,8 @@ void RayScene::_warn_albedo_fallback(RID p_material, RID p_texture, RID p_mesh, 
 void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, Material &r_material, float &r_alpha_threshold, uint32_t &r_cull) {
 	r_material = {};
 	r_material.albedo[0] = r_material.albedo[1] = r_material.albedo[2] = 0.48f;
+	r_material.emission_uv_scale[0] = 1.0f;
+	r_material.emission_uv_scale[1] = 1.0f;
 	r_alpha_threshold = -1.0f;
 	r_cull = uint32_t(RSE::CULL_MODE_DISABLED);
 	if (p_material.is_null()) {
@@ -732,6 +746,7 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 		emission = emission.srgb_to_linear();
 		_store_color(r_material.emission, emission, multiplier);
 	}
+	r_material.emission_mean_luminance = 0.2126f * r_material.emission[0] + 0.7152f * r_material.emission[1] + 0.0722f * r_material.emission[2];
 
 	const RSE::CullMode cull_mode = material_storage->material_get_cull_mode(p_material);
 	r_cull = uint32_t(cull_mode);
@@ -1823,6 +1838,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 				for (int k = 0; k < 3; k++) {
 					instance_material.emission[k] *= factor;
 				}
+				instance_material.emission_mean_luminance *= factor;
 			}
 		}
 		bool instance_emissive = false;
@@ -2081,6 +2097,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	const float emissive_exposure_normalization = p_camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes) : 1.0f;
 	scene_data.emissive_exposure_normalization = emissive_exposure_normalization > 0.0f ? emissive_exposure_normalization : 1.0f;
 	scene_data.triangle_emitter_generation = triangle_emitter_generation;
+	scene_data.emission_texture_count = emission_texture_count;
 	if (scene_data_buffer.is_null()) {
 		scene_data_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(SceneData));
 		RD::get_singleton()->set_resource_name(scene_data_buffer, "Ray Scene Data");
