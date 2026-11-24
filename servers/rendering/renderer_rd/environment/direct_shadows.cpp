@@ -154,6 +154,7 @@ DirectShadows::DirectShadows() {
 			memset(hist_init.ptrw() + (base + 6) * int(sizeof(uint32_t)), 0xFF, int(sizeof(uint32_t)));
 		}
 		RD::get_singleton()->buffer_update(emitter_hit_hist, 0, hist_init.size(), hist_init.ptr());
+	}
 	RD::TextureFormat format;
 	format.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
 	format.width = 1;
@@ -566,6 +567,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 					const uint32_t *values = reinterpret_cast<const uint32_t *>(counters.ptr());
 					print_line(vformat("DIRECT_SHADOWS counters: frames %d emitter_pixels %d emitter_rays %d emitter_blocked %d", int(p_input.frame), int(values[13]), int(values[14]), int(values[15])));
 					print_line(vformat("DIRECT_EMITTERS blocked: backface %d front %d unblocked_front %d hist005 %d hist030 %d hist200 %d histfar %d emitter_end 005 %d 030 %d 200 %d far %d", int(values[16]), int(values[17]), int(values[22]), int(values[18]), int(values[19]), int(values[20]), int(values[21]), int(values[23]), int(values[24]), int(values[25]), int(values[26])));
+					print_line(vformat("DIRECT_EMITTERS length: <1 u %d b %d | 1-3 u %d b %d | 3-10 u %d b %d | >10 u %d b %d", int(values[27]), int(values[28]), int(values[29]), int(values[30]), int(values[31]), int(values[32]), int(values[33]), int(values[34])));
 			if (emitter_hit_hist.is_valid()) {
 				const Vector<uint8_t> hist = rd->buffer_get_data(emitter_hit_hist);
 				const int hist_bytes = int((EMITTER_HIT_INSTANCES + 1) * 16 * uint32_t(sizeof(uint32_t)));

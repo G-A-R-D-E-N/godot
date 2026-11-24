@@ -89,6 +89,14 @@ layout(set = 0, binding = 12, std430) restrict buffer Counters {
 	uint emitter_end_030;
 	uint emitter_end_200;
 	uint emitter_end_far;
+	uint len_u_1;
+	uint len_b_1;
+	uint len_u_3;
+	uint len_b_3;
+	uint len_u_10;
+	uint len_b_10;
+	uint len_u_far;
+	uint len_b_far;
 }
 counters;
 
@@ -772,7 +780,16 @@ void main() {
 				uint blocker = 0xFFFFFFFFu;
 				float blocker_distance = 0.0;
 				bool emitter_unblocked = ray_scene_sampled_visibility_blocker(emitter_from, emitter_to, RAY_SCENE_ALL_CASTERS, rng_state + r, skip_instance, blocker, blocker_distance);
-				emitter_visible += emitter_unblocked ? 1.0 : 0.0;
+								emitter_visible += emitter_unblocked ? 1.0 : 0.0;
+				if (emitter_ray_length < 1.0) {
+					if (emitter_unblocked) { atomicAdd(counters.len_u_1, 1u); } else { atomicAdd(counters.len_b_1, 1u); }
+				} else if (emitter_ray_length < 3.0) {
+					if (emitter_unblocked) { atomicAdd(counters.len_u_3, 1u); } else { atomicAdd(counters.len_b_3, 1u); }
+				} else if (emitter_ray_length < 10.0) {
+					if (emitter_unblocked) { atomicAdd(counters.len_u_10, 1u); } else { atomicAdd(counters.len_b_10, 1u); }
+				} else {
+					if (emitter_unblocked) { atomicAdd(counters.len_u_far, 1u); } else { atomicAdd(counters.len_b_far, 1u); }
+				}
 				if (emitter_unblocked) {
 					atomicAdd(counters.emitter_unblocked_front, 1u);
 				}
@@ -1036,6 +1053,7 @@ void main() {
 		imageStore(debug_image, at, vec4(color, 1.0));
 	}
 }
+
 
 
 
