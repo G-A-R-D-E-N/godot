@@ -131,6 +131,9 @@ void main() {
 	}
 
 	for (uint q = 0u; q < 4u; q++) {
+		if (params.block_resolve != 0u && q != 0u) {
+			break;
+		}
 		ivec2 pixel = direct_block_pixel(block, q);
 		if (any(greaterThanEqual(pixel, params.full_size))) {
 			continue;

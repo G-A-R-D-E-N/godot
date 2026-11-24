@@ -58,6 +58,7 @@ DirectShadows::Settings DirectShadows::get_project_settings() {
 	settings.kernel_scale = GLOBAL_GET("rendering/global_illumination/direct/filter_kernel_scale");
 	settings.range_sigmas = GLOBAL_GET("rendering/global_illumination/direct/filter_range_sigmas");
 	settings.quarter = int(GLOBAL_GET("rendering/global_illumination/direct/trace_resolution")) == 1;
+	settings.block_resolve = GLOBAL_GET("rendering/global_illumination/direct/block_resolve");
 	settings.second_pass = GLOBAL_GET("rendering/global_illumination/direct/filter_second_pass");
 	return settings;
 }
@@ -134,6 +135,11 @@ DirectShadows::DirectShadows() {
 		WARN_PRINT("Direct shadows: the quarter-resolution shaders could not be made, so trace_resolution Quarter runs at Full.");
 	}
 	params_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(Params));
+	uint32_t block_resolve_data[4] = { 1, 0, 0, 0 };
+	const Span<uint8_t> block_resolve_span(reinterpret_cast<uint8_t *>(block_resolve_data), sizeof(block_resolve_data));
+	block_resolve_on = RD::get_singleton()->uniform_buffer_create(sizeof(block_resolve_data), block_resolve_span);
+	block_resolve_data[0] = 0;
+	block_resolve_off = RD::get_singleton()->uniform_buffer_create(sizeof(block_resolve_data), block_resolve_span);
 	counter_buffer = RD::get_singleton()->storage_buffer_create(COUNTER_BYTES);
 	RD::TextureFormat format;
 	format.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
@@ -206,6 +212,12 @@ DirectShadows::~DirectShadows() {
 	}
 	if (params_buffer.is_valid()) {
 		rd->free_rid(params_buffer);
+	}
+	if (block_resolve_on.is_valid()) {
+		rd->free_rid(block_resolve_on);
+	}
+	if (block_resolve_off.is_valid()) {
+		rd->free_rid(block_resolve_off);
 	}
 	if (counter_buffer.is_valid()) {
 		rd->free_rid(counter_buffer);
@@ -285,6 +297,7 @@ void DirectShadows::_ensure_textures(const Ref<RenderSceneBuffersRD> &p_render_b
 	p_viewport->size = size;
 	p_viewport->precise = p_settings.precise();
 	p_viewport->quarter = p_quarter;
+	p_viewport->block_resolve = false;
 	p_viewport->grid = p_quarter ? block_grid(size) : size;
 	p_viewport->flip = false;
 	p_viewport->last_frame = 0;
@@ -351,6 +364,7 @@ void DirectShadows::release(const Ref<RenderSceneBuffersRD> &p_render_buffers) {
 	viewport->entries = 0;
 	viewport->size = Size2i();
 	viewport->quarter = false;
+	viewport->block_resolve = false;
 	viewport->grid = Size2i();
 	viewport->last_frame = 0;
 }
@@ -455,6 +469,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 		lamps_prepared = false;
 	}
 	viewport->counted = !lamps_dump_request.is_empty() && lamps_dump_request != served_request;
+	viewport->block_resolve = quarter && settings.block_resolve && !viewport->counted;
 
 	const Size2i size = p_input.render_buffers->get_internal_size();
 	const Projection inverse = p_input.projection.inverse();
@@ -512,6 +527,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	params.range_scale = settings.range_sigmas > 0.0f ? 0.5f / (settings.range_sigmas * settings.range_sigmas) : 0.0f;
 	params.world_per_pixel = (quarter ? 4.0f : 2.0f) * Math::abs(float(inverse.columns[1][1])) / float(size.y);
 	params.count = viewport->counted ? 1 : 0;
+	params.block_resolve = viewport->block_resolve ? 1 : 0;
 	rd->buffer_update(params_buffer, 0, sizeof(Params), &params);
 	if (viewport->counted) {
 		rd->buffer_clear(counter_buffer, 0, COUNTER_BYTES);
@@ -690,6 +706,18 @@ RID DirectShadows::get_slots(const Ref<RenderSceneBuffersRD> &p_render_buffers) 
 
 RID DirectShadows::get_factors(const Ref<RenderSceneBuffersRD> &p_render_buffers) const {
 	return p_render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_FACTORS);
+}
+
+bool DirectShadows::get_block_resolve(const Ref<RenderSceneBuffersRD> &p_render_buffers) const {
+	if (p_render_buffers.is_null() || !p_render_buffers->has_custom_data(RB_SCOPE_DIRECT_SHADOWS)) {
+		return false;
+	}
+	Ref<ViewportData> viewport = p_render_buffers->get_custom_data(RB_SCOPE_DIRECT_SHADOWS);
+	return viewport->block_resolve;
+}
+
+RID DirectShadows::get_block_resolve_buffer(bool p_block_resolve) const {
+	return p_block_resolve ? block_resolve_on : block_resolve_off;
 }
 
 bool DirectShadows::get_history(const Ref<RenderSceneBuffersRD> &p_render_buffers, uint64_t p_table_generation, RID &r_slots, RID &r_factors, Transform3D &r_camera, Projection &r_projection, RID &r_guide) const {

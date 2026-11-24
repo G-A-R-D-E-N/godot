@@ -878,6 +878,11 @@ void main() {
 #include "../half_inc.glsl"
 #include "scene_forward_clustered_inc.glsl"
 
+layout(set = 1, binding = 56, std140) uniform DirectShadowBlock {
+	uint block_resolve;
+}
+direct_shadow_block;
+
 /* Varyings */
 
 #if defined(TEXTURE_STREAMING) && !defined(MODE_RENDER_DEPTH) && (defined(UV_USED) || defined(STREAMING_LOD_USED))
@@ -1256,7 +1261,7 @@ void direct_record_begin(in SceneData scene_data, vec3 p_vertex) {
 	if (!sc_use_direct_resampled()) {
 		return;
 	}
-	ivec2 pixel = ivec2(gl_FragCoord.xy);
+	ivec2 pixel = direct_block_texel(ivec2(gl_FragCoord.xy));
 	int layers = textureSize(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), 0).z;
 	if (layers < 2) {
 		return;
@@ -1290,7 +1295,7 @@ int direct_route(uint p_flags, vec3 p_position, float p_inv_radius) {
 	if (dot(rel, rel) * p_inv_radius * p_inv_radius >= 1.0 || dot(direct_record_normal, rel) <= 0.0) {
 		return -1;
 	}
-	ivec2 pixel = ivec2(gl_FragCoord.xy);
+	ivec2 pixel = direct_block_texel(ivec2(gl_FragCoord.xy));
 	if (!direct_route_loaded) {
 		direct_own_load(pixel);
 		for (int k = 0; k < 7; k++) {
@@ -1320,7 +1325,7 @@ int direct_route(uint p_flags, vec3 p_position, float p_inv_radius) {
 
 float direct_tail_pass(uint p_flags, vec3 p_live_color, int p_pass) {
 	uint slot = (p_flags >> 1) & 0xFFFFu;
-	ivec2 pixel = ivec2(gl_FragCoord.xy);
+	ivec2 pixel = direct_block_texel(ivec2(gl_FragCoord.xy));
 	int seen = 0;
 	for (int k = 0; k < 7; k++) {
 		if (k >= direct_record_tails || direct_tail_slots[k] != slot) {

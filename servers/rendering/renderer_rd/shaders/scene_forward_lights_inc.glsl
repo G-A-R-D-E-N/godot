@@ -537,10 +537,15 @@ bool direct_has_rest = false;
 bool direct_ratio_loaded = false;
 vec3 direct_ratio = vec3(1.0);
 
+ivec2 direct_block_texel(ivec2 p_pixel) {
+	return direct_shadow_block.block_resolve != 0u ? (p_pixel >> 1) << 1 : p_pixel;
+}
+
 void direct_own_load(ivec2 p_pixel) {
 	if (direct_own >= 0) {
 		return;
 	}
+	p_pixel = direct_block_texel(p_pixel);
 	direct_own = min(textureSize(sampler2DArray(direct_shadow_slots, SAMPLER_NEAREST_CLAMP), 0).z - 1, 7);
 	for (int i = 0; i < 7; i++) {
 		direct_own_slots[i] = 0u;
@@ -552,7 +557,7 @@ void direct_own_load(ivec2 p_pixel) {
 }
 
 bool direct_shadow_factor(uint p_flags, vec3 p_color, bool p_use_rest, inout half r_shadow) {
-	ivec2 pixel = ivec2(gl_FragCoord.xy);
+	ivec2 pixel = direct_block_texel(ivec2(gl_FragCoord.xy));
 	if (sc_use_direct_resampled()) {
 		int matched = direct_head_layer >= 0 ? direct_head_layer : direct_tail_layer;
 		if (matched >= 0) {

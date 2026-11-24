@@ -3254,6 +3254,9 @@
 		<member name="rendering/global_illumination/ddgi/view_bias" type="float" setter="" getter="" default="0.25">
 			Offset of the sample point towards the camera, in units of probe spacing, to reduce light leaking and self-shadowing.
 		</member>
+		<member name="rendering/global_illumination/direct/block_resolve" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], the resolve pass writes the shadow entries of a Quarter trace at one pixel of each 2×2 block, the block's top-left pixel, and the opaque pass reads that pixel for the whole block, instead of writing and reading every pixel. Only used when [member rendering/global_illumination/direct/trace_resolution] is Quarter. It costs less and quantises shadow-factor edges to the trace's block size.
+		</member>
 		<member name="rendering/global_illumination/direct/clamp_sigmas" type="float" setter="" getter="" default="3.0">
 			How far, in standard deviations of the rays nearby, a lamp's history may stay from those rays before it is pulled back, while that lamp or something in its range has moved recently. [code]0[/code] turns the clamp off.
 		</member>

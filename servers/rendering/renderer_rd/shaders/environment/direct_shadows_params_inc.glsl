@@ -50,7 +50,7 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	uint cold_frames;
 	ivec2 full_size;
 	vec2 jitter_delta;
-	uint pad0;
+	uint block_resolve;
 	uint pad1;
 }
 params;
