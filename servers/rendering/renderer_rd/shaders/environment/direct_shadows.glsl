@@ -85,6 +85,10 @@ layout(set = 0, binding = 12, std430) restrict buffer Counters {
 	uint emitter_hist_200;
 	uint emitter_hist_far;
 	uint emitter_unblocked_front;
+	uint emitter_end_005;
+	uint emitter_end_030;
+	uint emitter_end_200;
+	uint emitter_end_far;
 }
 counters;
 
@@ -762,6 +766,7 @@ void main() {
 		} else {
 			vec3 emitter_to = emitter_from + emitter_offset * (1.0 - params.bias / emitter_reach);
 			uint emitter_rays = params.reference != 0u ? REFERENCE_RAYS : 1u;
+			float emitter_ray_length = length(emitter_to - emitter_from);
 			for (uint r = 0u; r < emitter_rays; r++) {
 				int skip_instance = params.pad1 != 0u ? int(params.pad1) - 1 : -1;
 				uint blocker = 0xFFFFFFFFu;
@@ -774,7 +779,7 @@ void main() {
 				if (!emitter_unblocked) {
 					uint hist_id = blocker < EMITTER_HIT_INSTANCES ? blocker : EMITTER_HIT_INSTANCES;
 					uint hist_base = hist_id * 4u;
-					uint hist_distance = uint(max(blocker_distance, 0.0) * 1024.0);
+					uint hist_distance = uint(clamp(blocker_distance, 0.0, 250.0) * 4.0);
 					atomicAdd(emitter_hit_hist.hits[hist_base], 1u);
 					atomicAdd(emitter_hit_hist.hits[hist_base + 1u], hist_distance);
 					atomicMin(emitter_hit_hist.hits[hist_base + 2u], hist_distance);
@@ -788,6 +793,16 @@ void main() {
 						atomicAdd(counters.emitter_hist_200, 1u);
 					} else {
 						atomicAdd(counters.emitter_hist_far, 1u);
+					}
+					float emitter_end_distance = max(emitter_ray_length - blocker_distance, 0.0);
+					if (emitter_end_distance < 0.05) {
+						atomicAdd(counters.emitter_end_005, 1u);
+					} else if (emitter_end_distance < 0.3) {
+						atomicAdd(counters.emitter_end_030, 1u);
+					} else if (emitter_end_distance < 2.0) {
+						atomicAdd(counters.emitter_end_200, 1u);
+					} else {
+						atomicAdd(counters.emitter_end_far, 1u);
 					}
 				}
 				emitter_traces++;
@@ -1012,6 +1027,7 @@ void main() {
 		imageStore(debug_image, at, vec4(color, 1.0));
 	}
 }
+
 
 
 
