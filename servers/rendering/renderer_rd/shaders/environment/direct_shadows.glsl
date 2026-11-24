@@ -778,7 +778,7 @@ void main() {
 				}
 				if (!emitter_unblocked) {
 					uint hist_id = blocker < EMITTER_HIT_INSTANCES ? blocker : EMITTER_HIT_INSTANCES;
-					uint hist_base = hist_id * 4u;
+					uint hist_base = hist_id * 16u;
 					uint hist_distance = uint(clamp(blocker_distance, 0.0, 250.0) * 4.0);
 					atomicAdd(emitter_hit_hist.hits[hist_base], 1u);
 					atomicAdd(emitter_hit_hist.hits[hist_base + 1u], hist_distance);
@@ -795,6 +795,15 @@ void main() {
 						atomicAdd(counters.emitter_hist_far, 1u);
 					}
 					float emitter_end_distance = max(emitter_ray_length - blocker_distance, 0.0);
+					uint hist_end_distance = uint(clamp(emitter_end_distance, 0.0, 250.0) * 4.0);
+					atomicAdd(emitter_hit_hist.hits[hist_base + 4u], 1u);
+					atomicAdd(emitter_hit_hist.hits[hist_base + 5u], hist_end_distance);
+					atomicMin(emitter_hit_hist.hits[hist_base + 6u], hist_end_distance);
+					atomicMax(emitter_hit_hist.hits[hist_base + 7u], hist_end_distance);
+					uint hist_rb = blocker_distance < 0.05 ? 8u : blocker_distance < 0.3 ? 9u : blocker_distance < 2.0 ? 10u : 11u;
+					uint hist_eb = emitter_end_distance < 0.05 ? 12u : emitter_end_distance < 0.3 ? 13u : emitter_end_distance < 2.0 ? 14u : 15u;
+					atomicAdd(emitter_hit_hist.hits[hist_base + hist_rb], 1u);
+					atomicAdd(emitter_hit_hist.hits[hist_base + hist_eb], 1u);
 					if (emitter_end_distance < 0.05) {
 						atomicAdd(counters.emitter_end_005, 1u);
 					} else if (emitter_end_distance < 0.3) {
@@ -1027,6 +1036,7 @@ void main() {
 		imageStore(debug_image, at, vec4(color, 1.0));
 	}
 }
+
 
 
 

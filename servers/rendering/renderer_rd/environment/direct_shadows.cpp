@@ -142,18 +142,18 @@ DirectShadows::DirectShadows() {
 	}
 	params_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(Params));
 	counter_buffer = RD::get_singleton()->storage_buffer_create(COUNTER_BYTES);
-	emitter_hit_hist = RD::get_singleton()->storage_buffer_create((EMITTER_HIT_INSTANCES + 1) * 4 * uint32_t(sizeof(uint32_t)));
+	emitter_hit_hist = RD::get_singleton()->storage_buffer_create((EMITTER_HIT_INSTANCES + 1) * 16 * uint32_t(sizeof(uint32_t)));
 	{
-		const int hist_bytes = int((EMITTER_HIT_INSTANCES + 1) * 4 * uint32_t(sizeof(uint32_t)));
+		const int hist_bytes = int((EMITTER_HIT_INSTANCES + 1) * 16 * uint32_t(sizeof(uint32_t)));
 		Vector<uint8_t> hist_init;
 		hist_init.resize(hist_bytes);
 		for (int i = 0; i <= int(EMITTER_HIT_INSTANCES); i++) {
-			const int base = i * 4;
-			memset(hist_init.ptrw() + base * int(sizeof(uint32_t)), 0, 3 * int(sizeof(uint32_t)));
+			const int base = i * 16;
+			memset(hist_init.ptrw() + base * int(sizeof(uint32_t)), 0, 16 * int(sizeof(uint32_t)));
 			memset(hist_init.ptrw() + (base + 2) * int(sizeof(uint32_t)), 0xFF, int(sizeof(uint32_t)));
+			memset(hist_init.ptrw() + (base + 6) * int(sizeof(uint32_t)), 0xFF, int(sizeof(uint32_t)));
 		}
 		RD::get_singleton()->buffer_update(emitter_hit_hist, 0, hist_init.size(), hist_init.ptr());
-	}
 	RD::TextureFormat format;
 	format.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
 	format.width = 1;
@@ -568,10 +568,10 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 					print_line(vformat("DIRECT_EMITTERS blocked: backface %d front %d unblocked_front %d hist005 %d hist030 %d hist200 %d histfar %d emitter_end 005 %d 030 %d 200 %d far %d", int(values[16]), int(values[17]), int(values[22]), int(values[18]), int(values[19]), int(values[20]), int(values[21]), int(values[23]), int(values[24]), int(values[25]), int(values[26])));
 			if (emitter_hit_hist.is_valid()) {
 				const Vector<uint8_t> hist = rd->buffer_get_data(emitter_hit_hist);
-				const int hist_bytes = int((EMITTER_HIT_INSTANCES + 1) * 4 * uint32_t(sizeof(uint32_t)));
+				const int hist_bytes = int((EMITTER_HIT_INSTANCES + 1) * 16 * uint32_t(sizeof(uint32_t)));
 				if (hist.size() >= hist_bytes) {
 					const uint32_t *hits = reinterpret_cast<const uint32_t *>(hist.ptr());
-					print_line(vformat("DIRECT_EMITTERS blocker: instance 1225 hits %d", int(hits[1225 * 4])));
+					print_line(vformat("DIRECT_EMITTERS blocker: instance 1225 hits %d", int(hits[1225 * 16])));
 					int printed[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 					for (int pass = 0; pass < 8; pass++) {
 						int best = -1;
@@ -583,23 +583,23 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 									seen = true;
 								}
 							}
-							if (!seen && hits[i * 4] > best_count) {
+							if (!seen && hits[i * 16] > best_count) {
 								best = i;
-								best_count = hits[i * 4];
+								best_count = hits[i * 16];
 							}
 						}
 						if (best < 0 || best_count == 0u) {
 							break;
 						}
 						printed[pass] = best;
-						const float mean_distance = float(hits[best * 4 + 1]) / 4.0f / float(best_count);
-						const float min_distance = float(hits[best * 4 + 2]) / 4.0f;
-						const float max_distance = float(hits[best * 4 + 3]) / 4.0f;
-						if (best == int(EMITTER_HIT_INSTANCES)) {
-							print_line(vformat("DIRECT_EMITTERS blocker: unknown hits %d distance %.3f..%.3f mean %.3f", int(best_count), min_distance, max_distance, mean_distance));
-						} else {
-							print_line(vformat("DIRECT_EMITTERS blocker: instance %d hits %d distance %.3f..%.3f mean %.3f", best, int(best_count), min_distance, max_distance, mean_distance));
-						}
+						const uint32_t end_count = MAX(hits[best * 16 + 4], 1u);
+						const float r_mean = float(hits[best * 16 + 1]) / 4.0f / float(best_count);
+						const float r_min = float(hits[best * 16 + 2]) / 4.0f;
+						const float r_max = float(hits[best * 16 + 3]) / 4.0f;
+						const float e_mean = float(hits[best * 16 + 5]) / 4.0f / float(end_count);
+						const float e_min = float(hits[best * 16 + 6]) / 4.0f;
+						const float e_max = float(hits[best * 16 + 7]) / 4.0f;
+						print_line(vformat("DIRECT_EMITTERS blocker: instance %d hits %d receiver %.2f..%.2f mean %.2f buckets %d/%d/%d/%d emitter %.2f..%.2f mean %.2f buckets %d/%d/%d/%d", best, int(best_count), r_min, r_max, r_mean, int(hits[best * 16 + 8]), int(hits[best * 16 + 9]), int(hits[best * 16 + 10]), int(hits[best * 16 + 11]), e_min, e_max, e_mean, int(hits[best * 16 + 12]), int(hits[best * 16 + 13]), int(hits[best * 16 + 14]), int(hits[best * 16 + 15])));
 					}
 				}
 			}
