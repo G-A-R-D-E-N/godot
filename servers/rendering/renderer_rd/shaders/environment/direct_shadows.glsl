@@ -84,6 +84,7 @@ layout(set = 0, binding = 12, std430) restrict buffer Counters {
 	uint emitter_hist_030;
 	uint emitter_hist_200;
 	uint emitter_hist_far;
+	uint emitter_unblocked_front;
 }
 counters;
 
@@ -767,6 +768,9 @@ void main() {
 				float blocker_distance = 0.0;
 				bool emitter_unblocked = ray_scene_sampled_visibility_blocker(emitter_from, emitter_to, RAY_SCENE_ALL_CASTERS, rng_state + r, skip_instance, blocker, blocker_distance);
 				emitter_visible += emitter_unblocked ? 1.0 : 0.0;
+				if (emitter_unblocked) {
+					atomicAdd(counters.emitter_unblocked_front, 1u);
+				}
 				if (!emitter_unblocked) {
 					uint hist_id = blocker < EMITTER_HIT_INSTANCES ? blocker : EMITTER_HIT_INSTANCES;
 					uint hist_base = hist_id * 4u;
@@ -791,7 +795,9 @@ void main() {
 		}
 		traced_rays += emitter_traces;
 		atomicAdd(counters.emitter_rays, emitter_traces);
-		atomicAdd(counters.emitter_blocked, emitter_traces - uint(emitter_visible + 0.5));
+		if (emitter_traces > 0u) {
+			atomicAdd(counters.emitter_blocked, emitter_traces - uint(emitter_visible + 0.5));
+		}
 	}
 #endif
 
