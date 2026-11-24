@@ -166,7 +166,7 @@ private:
 	};
 	static_assert(sizeof(Params) == 400);
 
-	static constexpr uint32_t COUNTER_WORDS = 13;
+	static constexpr uint32_t COUNTER_WORDS = 16;
 	static constexpr uint32_t COUNTER_BYTES = COUNTER_WORDS * 4;
 
 	enum TraceMode {
