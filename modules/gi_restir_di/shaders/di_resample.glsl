@@ -206,10 +206,10 @@ void di_emitter_write(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geometr
 	emitter_samples.data[index * 2u + 1u] = vec4(p_color, 0.0);
 }
 
-void di_emitter_clear(ivec2 p_pixel) {
+void di_emitter_clear(ivec2 p_pixel, uint p_reason) {
 	uint index = uint(p_pixel.y) * uint(params.size.x) + uint(p_pixel.x);
 	emitter_samples.data[index * 2u] = vec4(0.0);
-	emitter_samples.data[index * 2u + 1u] = vec4(0.0);
+	emitter_samples.data[index * 2u + 1u] = vec4(0.0, 0.0, 0.0, float(p_reason));
 	imageStore(record_image, ivec3(p_pixel, int(params.tail_samples + 1u)), uvec4(0u, 0u, 0u, 0u));
 }
 
@@ -233,7 +233,7 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 	uint count = ray_scene_triangle_emitter_count();
 	float total = count == 0u ? 0.0 : emitter_scan.data[DI_EMITTER_TOTAL];
 	if (!(total > 0.0)) {
-		di_emitter_clear(p_pixel);
+		di_emitter_clear(p_pixel, 1u);
 		return;
 	}
 	float target = di_emitter_hash(p_seed, 0x27d4eb2fu) * total;
@@ -259,7 +259,7 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 	vec3 emission = ray_scene_triangle_emitter_emission(emitter.material);
 	float luminance = dot(max(emission, vec3(0.0)), luminance_weights);
 	if (!(area > 0.0) || !(luminance > 0.0)) {
-		di_emitter_clear(p_pixel);
+		di_emitter_clear(p_pixel, 1u);
 		return;
 	}
 	float r1 = di_emitter_hash(p_seed, 0x68e31da4u);
@@ -271,7 +271,7 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 	vec3 rel = sample_point - p_vertex;
 	float distance = length(rel);
 	if (!(distance > 1e-5)) {
-		di_emitter_clear(p_pixel);
+		di_emitter_clear(p_pixel, 2u);
 		return;
 	}
 	vec3 to_light = rel / distance;
@@ -281,13 +281,13 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 		cos_light = abs(cos_light);
 	}
 	if (!(cos_light > 0.0)) {
-		di_emitter_clear(p_pixel);
+		di_emitter_clear(p_pixel, 3u);
 		return;
 	}
 	float geometric = min(cos_light / max(distance * distance, 1e-8), 60000.0);
 	vec3 color = emission * (total / luminance);
 	if (any(isinf(color)) || any(isnan(color))) {
-		di_emitter_clear(p_pixel);
+		di_emitter_clear(p_pixel, 4u);
 		return;
 	}
 	di_emitter_commit(p_pixel, sample_point, color, geometric, emitter.instance, emitter.uv_index, low);
@@ -903,7 +903,7 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 
 void write_empty(ivec2 p_pixel) {
 #ifdef DI_EMITTERS
-	di_emitter_clear(p_pixel);
+	di_emitter_clear(p_pixel, 0u);
 #ifdef DI_EMITTER_TEMPORAL
 	di_emitter_history_store(p_pixel, uvec4(0u), vec4(0.0), vec4(0.0), vec4(0.0));
 #endif
