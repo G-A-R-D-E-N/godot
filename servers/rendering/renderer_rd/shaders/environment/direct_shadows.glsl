@@ -744,7 +744,8 @@ void main() {
 			vec3 emitter_to = emitter_from + emitter_offset * (1.0 - params.bias / emitter_reach);
 			uint emitter_rays = params.reference != 0u ? REFERENCE_RAYS : 1u;
 			for (uint r = 0u; r < emitter_rays; r++) {
-				emitter_visible += ray_scene_sampled_visibility(emitter_from, emitter_to, RAY_SCENE_ALL_CASTERS, rng_state + r) ? 1.0 : 0.0;
+				int skip_instance = params.pad1 != 0u ? int(params.pad1) - 1 : -1;
+				emitter_visible += ray_scene_sampled_visibility_skipping(emitter_from, emitter_to, RAY_SCENE_ALL_CASTERS, rng_state + r, skip_instance) ? 1.0 : 0.0;
 				emitter_traces++;
 			}
 		}
@@ -965,6 +966,7 @@ void main() {
 		imageStore(debug_image, at, vec4(color, 1.0));
 	}
 }
+
 
 
 

@@ -78,6 +78,7 @@ public:
 
 	struct Settings {
 		float emitter_shorten = 0.0f;
+		int emitter_skip_instance = -1;
 		uint32_t entries = 6;
 		uint32_t rays = 1;
 		bool reference = false;

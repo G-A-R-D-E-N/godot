@@ -3803,7 +3803,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF_RST("rendering/driver/depth_prepass/disable_for_vendors", "PowerVR,Mali,Adreno,Apple");
 
 	GLOBAL_DEF_RST("rendering/textures/default_filters/use_nearest_mipmap_filter", false);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/textures/default_filters/anisotropic_filtering_level", PROPERTY_HINT_ENUM, String::utf8("Disabled (Fastest),2Ã— (Faster),4Ã— (Fast),8Ã— (Average),16Ã— (Slow)")), 2);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/textures/default_filters/anisotropic_filtering_level", PROPERTY_HINT_ENUM, String::utf8("Disabled (Fastest),2Ãƒâ€” (Faster),4Ãƒâ€” (Fast),8Ãƒâ€” (Average),16Ãƒâ€” (Slow)")), 2);
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/camera/depth_of_field/depth_of_field_bokeh_shape", PROPERTY_HINT_ENUM, "Box (Fast),Hexagon (Average),Circle (Slowest)"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/camera/depth_of_field/depth_of_field_bokeh_quality", PROPERTY_HINT_ENUM, "Very Low (Fastest),Low (Fast),Medium (Average),High (Slow)"), 1);
@@ -3854,8 +3854,8 @@ void RenderingServer::init() {
 	// Move the project setting definitions here so they are available when we init the rendering internals.
 	GLOBAL_DEF_BASIC("rendering/viewport/hdr_2d", false);
 
-	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "rendering/anti_aliasing/quality/msaa_2d", PROPERTY_HINT_ENUM, String::utf8("Disabled (Fastest),2Ã— (Average),4Ã— (Slow),8Ã— (Slowest)")), 0);
-	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "rendering/anti_aliasing/quality/msaa_3d", PROPERTY_HINT_ENUM, String::utf8("Disabled (Fastest),2Ã— (Average),4Ã— (Slow),8Ã— (Slowest)")), 0);
+	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "rendering/anti_aliasing/quality/msaa_2d", PROPERTY_HINT_ENUM, String::utf8("Disabled (Fastest),2Ãƒâ€” (Average),4Ãƒâ€” (Slow),8Ãƒâ€” (Slowest)")), 0);
+	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "rendering/anti_aliasing/quality/msaa_3d", PROPERTY_HINT_ENUM, String::utf8("Disabled (Fastest),2Ãƒâ€” (Average),4Ãƒâ€” (Slow),8Ãƒâ€” (Slowest)")), 0);
 
 	GLOBAL_DEF("rendering/anti_aliasing/screen_space_roughness_limiter/enabled", true);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/anti_aliasing/screen_space_roughness_limiter/amount", PROPERTY_HINT_RANGE, "0.01,4.0,0.01"), 0.25);
@@ -4009,6 +4009,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/rays_per_pixel", PROPERTY_HINT_RANGE, "1,2,1"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/direct/ray_bias", PROPERTY_HINT_RANGE, "0,0.2,0.001"), 0.02);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/direct/emitter_ray_shorten", PROPERTY_HINT_RANGE, "0,0.2,0.001"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/emitter_skip_instance", PROPERTY_HINT_RANGE, "-1,1048575,1"), -1);
 	GLOBAL_DEF("rendering/global_illumination/direct/reference", false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/debug_view", PROPERTY_HINT_ENUM, "Off,First Entry,All Lamps,First Slot,Lamp Count,Samples,Filtered First Entry"), 0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/history_cap", PROPERTY_HINT_RANGE, "0,256,1"), 32);
