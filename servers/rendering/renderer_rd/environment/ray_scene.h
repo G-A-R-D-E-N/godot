@@ -535,6 +535,7 @@ private:
 	uint32_t triangle_emitter_state = 0;
 	uint32_t triangles_logged = 0;
 	uint32_t triangle_emitter_emission_state = 0;
+	uint32_t triangles_logged = 0;
 	bool triangle_emitters_capped = false;
 	bool triangle_emitters_built = false;
 	LocalVector<TriangleEmitter> triangle_emitters;

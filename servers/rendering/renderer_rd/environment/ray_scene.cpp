@@ -541,7 +541,7 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 					continue;
 				}
 				const Material &material = materials[source.material_offset + surface];
-				if (!(material.emission[0] > 0.0f || material.emission[1] > 0.0f || material.emission[2] > 0.0f)) {
+				if (!(material.emission[0] > 0.0f || material.emission[1] > 0.0f || material.emission[2] > 0.0f) && material.emission_texture == 0) {
 					continue;
 				}
 				instance_triangles++;
@@ -556,7 +556,7 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 				if (!surface_list.is_empty()) {
 					surface_list += ",";
 				}
-				surface_list += vformat("%d(flat %.4f %.4f %.4f)", surface, material.emission[0], material.emission[1], material.emission[2]);
+				surface_list += vformat("%d(layer %d scale %.4f flat %.3f)", surface, int(material.emission_texture), material.emission_texel_scale, material.emission_mean_luminance);
 			}
 			print_line(vformat("Ray scene emitter: mesh \"%s\" instance %d triangles %d surfaces %s", MeshStorage::get_singleton()->mesh_get_path(source.mesh), int(p_order[source.instance]), int(instance_triangles), surface_list));
 		}
