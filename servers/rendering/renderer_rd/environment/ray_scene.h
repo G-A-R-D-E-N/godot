@@ -482,6 +482,7 @@ private:
 	bool skip_additive = true;
 	uint32_t additive_skipped = 0;
 	uint32_t emission_debug_logged = 0;
+	uint32_t pipboy_scan_logged = 0;
 	int64_t reported_additive_state = -2;
 	LocalVector<Light> lights;
 	LocalVector<Light> local_lights;
