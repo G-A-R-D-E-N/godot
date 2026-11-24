@@ -84,7 +84,7 @@ RayScene::RayScene() {
 RayScene::~RayScene() {
 	_print_tlas_rebuilds(true);
 	_hw_free();
-	RID *owned[] = { &blas_node_buffer, &triangle_buffer, &instance_buffer, &tlas_node_buffer, &material_buffer, &light_buffer, &scene_data_buffer, &triangle_uv_buffer };
+	RID *owned[] = { &blas_node_buffer, &triangle_buffer, &instance_buffer, &tlas_node_buffer, &material_buffer, &light_buffer, &scene_data_buffer, &triangle_uv_buffer, &triangle_emitter_buffer };
 	for (RID *rid : owned) {
 		if (rid->is_valid()) {
 			RD::get_singleton()->free_rid(*rid);
@@ -455,6 +455,52 @@ void RayScene::_ensure_buffer(RID &r_buffer, uint32_t &r_capacity, uint32_t p_co
 	r_capacity = MAX(MAX(p_count, r_capacity * 2), 64u);
 	r_buffer = RD::get_singleton()->storage_buffer_create(r_capacity * p_stride);
 	RD::get_singleton()->set_resource_name(r_buffer, p_name);
+}
+
+void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource> &p_sources, const LocalVector<uint32_t> &p_order) {
+	triangle_emitters.clear();
+	bool capped = false;
+	for (const TriangleEmitterSource &source : p_sources) {
+		const MeshEntry *mesh = meshes.getptr(source.mesh);
+		if (!mesh || !mesh->built || source.instance >= p_order.size()) {
+			continue;
+		}
+		for (uint32_t t = 0; t < uint32_t(mesh->triangle_surface.size()); t++) {
+			const uint32_t surface = mesh->triangle_surface[t];
+			if (surface >= source.surface_count || source.material_offset + surface >= materials.size()) {
+				continue;
+			}
+			const Material &material = materials[source.material_offset + surface];
+			if (!(material.emission[0] > 0.0f || material.emission[1] > 0.0f || material.emission[2] > 0.0f)) {
+				continue;
+			}
+			if (triangle_emitters.size() >= MAX_TRIANGLE_EMITTERS) {
+				capped = true;
+				break;
+			}
+			TriangleEmitter emitter = {};
+			float *const corners[3] = { emitter.v0, emitter.v1, emitter.v2 };
+			for (uint32_t v = 0; v < 3; v++) {
+				const Vector3 position = source.transform.xform(mesh->positions[mesh->indices[t * 3 + v]]);
+				corners[v][0] = position.x;
+				corners[v][1] = position.y;
+				corners[v][2] = position.z;
+			}
+			emitter.instance = p_order[source.instance];
+			emitter.material = source.material_offset + surface;
+			triangle_emitters.push_back(emitter);
+		}
+		if (capped) {
+			break;
+		}
+	}
+	triangle_emitter_count = triangle_emitters.size();
+	triangle_emitters_capped = capped;
+	if (triangle_emitters.is_empty()) {
+		triangle_emitters.push_back(TriangleEmitter());
+	}
+	_ensure_buffer(triangle_emitter_buffer, triangle_emitter_capacity, triangle_emitters.size(), sizeof(TriangleEmitter), "Ray Scene Triangle Emitters");
+	RD::get_singleton()->buffer_update(triangle_emitter_buffer, 0, triangle_emitters.size() * sizeof(TriangleEmitter), triangle_emitters.ptr());
 }
 
 void RayScene::_assemble(const LocalVector<RID> &p_meshes) {
@@ -1649,6 +1695,8 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	LocalVector<BuildPrimitive> primitives;
 	uint32_t signature = HASH_MURMUR3_SEED;
 	uint64_t scene_signature = 0;
+	uint32_t emitter_state = HASH_MURMUR3_SEED;
+	LocalVector<TriangleEmitterSource> emitter_sources;
 	scene_members.clear();
 	for (uint32_t i = 0; i < p_instances.size(); i++) {
 		RenderGeometryInstanceBase *geometry = static_cast<RenderGeometryInstanceBase *>(p_instances[i]);
@@ -1729,6 +1777,22 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 				}
 			}
 		}
+		bool instance_emissive = false;
+		for (uint32_t s = instance.material_offset; s < materials.size(); s++) {
+			const Material &surface_material = materials[s];
+			const bool emissive = surface_material.emission[0] > 0.0f || surface_material.emission[1] > 0.0f || surface_material.emission[2] > 0.0f;
+			instance_emissive = instance_emissive || emissive;
+			emitter_state = hash_murmur3_one_32(emissive ? 1u : 0u, emitter_state);
+		}
+		if (instance_emissive) {
+			TriangleEmitterSource emitter_source;
+			emitter_source.transform = transform;
+			emitter_source.mesh = mesh_rid;
+			emitter_source.instance = instances.size();
+			emitter_source.material_offset = instance.material_offset;
+			emitter_source.surface_count = mesh->surface_count;
+			emitter_sources.push_back(emitter_source);
+		}
 		bool hw_instance_usable = true;
 		if (accel) {
 			if (hw_split_stale(mesh->hw_generation, mesh->hw_alpha_on, alpha_enabled, alpha_split)) {
@@ -1806,6 +1870,18 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		_ensure_buffer(instance_buffer, instance_capacity, ordered.size(), sizeof(Instance), "Ray Scene Instances");
 		RD::get_singleton()->buffer_update(tlas_node_buffer, 0, tlas_nodes.size() * sizeof(Node), tlas_nodes.ptr());
 		RD::get_singleton()->buffer_update(instance_buffer, 0, ordered.size() * sizeof(Instance), ordered.ptr());
+	}
+
+	const bool emitters_dirty = !triangle_emitters_built || rebuilt || emitter_state != triangle_emitter_state;
+	if (emitters_dirty) {
+		LocalVector<uint32_t> instance_order;
+		instance_order.resize(instances.size());
+		for (uint32_t i = 0; i < primitives.size(); i++) {
+			instance_order[primitives[i].index] = i;
+		}
+		_update_triangle_emitters(emitter_sources, instance_order);
+		triangle_emitter_state = emitter_state;
+		triangle_emitters_built = true;
 	}
 
 	const int64_t additive_state = skip_additive ? int64_t(additive_skipped) : -1;
@@ -1947,6 +2023,8 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	scene_data.camera_to_anchor[2] = camera_to_anchor.z;
 	scene_data.instance_count = instances.size();
 	scene_data.light_count = lights.size();
+	scene_data.triangle_emitter_count = triangle_emitter_count;
+	scene_data.triangle_emitters_capped = triangle_emitters_capped ? 1u : 0u;
 	if (scene_data_buffer.is_null()) {
 		scene_data_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(SceneData));
 		RD::get_singleton()->set_resource_name(scene_data_buffer, "Ray Scene Data");
