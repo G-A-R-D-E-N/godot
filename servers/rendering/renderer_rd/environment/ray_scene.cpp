@@ -81,21 +81,24 @@ RayScene::RayScene() {
 	alpha_store.set_liveness(&_alpha_texture_live);
 	RD::TextureFormat emission_format;
 	emission_format.format = RD::DATA_FORMAT_R8G8B8A8_UNORM;
+	emission_format.texture_type = RD::TEXTURE_TYPE_2D_ARRAY;
 	emission_format.width = 1;
 	emission_format.height = 1;
-	emission_format.array_layers = 1;
+	emission_format.array_layers = 2;
 	emission_format.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_UPDATE_BIT;
 	emission_dummy = RD::get_singleton()->texture_create(emission_format, RD::TextureView());
 	RD::get_singleton()->set_resource_name(emission_dummy, "Ray Scene Emission Dummy");
 	if (emission_dummy.is_valid()) {
-		RD::get_singleton()->texture_update(emission_dummy, 0, Vector<uint8_t>({ 255, 255, 255, 255 }));
+		for (int64_t layer = 0; layer < 2; layer++) {
+			RD::get_singleton()->texture_update(emission_dummy, layer, Vector<uint8_t>({ 255, 255, 255, 255 }));
+		}
 	}
 }
 
 RayScene::~RayScene() {
 	_print_tlas_rebuilds(true);
 	_hw_free();
-	RID *owned[] = { &blas_node_buffer, &triangle_buffer, &instance_buffer, &tlas_node_buffer, &material_buffer, &light_buffer, &scene_data_buffer, &triangle_uv_buffer, &triangle_emitter_buffer, &emission_dummy, &emission_texture_array };
+	RID *owned[] = { &blas_node_buffer, &triangle_buffer, &instance_buffer, &tlas_node_buffer, &material_buffer, &light_buffer, &scene_data_buffer, &triangle_uv_buffer, &triangle_emitter_buffer, &emission_dummy };
 	for (RID *rid : owned) {
 		if (rid->is_valid()) {
 			RD::get_singleton()->free_rid(*rid);
@@ -482,7 +485,7 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 				continue;
 			}
 			const Material &material = materials[source.material_offset + surface];
-			if (!(material.emission[0] > 0.0f || material.emission[1] > 0.0f || material.emission[2] > 0.0f)) {
+			if (!(material.emission[0] > 0.0f || material.emission[1] > 0.0f || material.emission[2] > 0.0f) && material.emission_texture == 0) {
 				continue;
 			}
 			if (triangle_emitters.size() >= MAX_TRIANGLE_EMITTERS) {
@@ -747,6 +750,36 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 		_store_color(r_material.emission, emission, multiplier);
 	}
 	r_material.emission_mean_luminance = 0.2126f * r_material.emission[0] + 0.7152f * r_material.emission[1] + 0.0722f * r_material.emission[2];
+	if (material_storage->material_get_declared_param(p_material, SNAME("use_emission_mask_texture")).booleanize()) {
+		const Variant atlas_index = material_storage->material_get_declared_param(p_material, SNAME("oc_emission_atlas_index"));
+		if (atlas_index.get_type() == Variant::INT) {
+			r_material.emission_texture = uint32_t(MAX(int(atlas_index), 0));
+		}
+		const Variant scale_value = material_storage->material_get_declared_param(p_material, SNAME("uv_scale"));
+		if (scale_value.get_type() == Variant::VECTOR2) {
+			const Vector2 scale = scale_value;
+			r_material.emission_uv_scale[0] = scale.x;
+			r_material.emission_uv_scale[1] = scale.y;
+		}
+		const Variant offset_value = material_storage->material_get_declared_param(p_material, SNAME("uv_offset"));
+		if (offset_value.get_type() == Variant::VECTOR2) {
+			const Vector2 offset = offset_value;
+			r_material.emission_uv_offset[0] = offset.x;
+			r_material.emission_uv_offset[1] = offset.y;
+		}
+		r_material.emission_nits_range[0] = 0.0f;
+		r_material.emission_nits_range[1] = 1.0f;
+		const Variant nits_value = material_storage->material_get_declared_param(p_material, SNAME("emission_luminance_texture_range"));
+		if (nits_value.get_type() == Variant::VECTOR2) {
+			const Vector2 nits = nits_value;
+			r_material.emission_nits_range[0] = nits.x;
+			r_material.emission_nits_range[1] = nits.y;
+		}
+		if (material_storage->material_get_declared_param(p_material, SNAME("use_texture_ranges")).booleanize()) {
+			r_material.emission_flags |= EMISSION_FLAG_TEXTURE_RANGES;
+		}
+		r_material.emission_texel_scale = emission_scale;
+	}
 
 	const RSE::CullMode cull_mode = material_storage->material_get_cull_mode(p_material);
 	r_cull = uint32_t(cull_mode);
@@ -808,7 +841,7 @@ void RayScene::_alpha_entry(RID p_material, Material &r_material, float p_alpha_
 		if (offset_value.get_type() == Variant::VECTOR2) {
 			offset = offset_value;
 		}
-		if (_param_bool(material_storage->material_get_declared_param(p_material, SNAME("use_texture_ranges")))) {
+		if (material_storage->material_get_declared_param(p_material, SNAME("use_texture_ranges")).booleanize()) {
 			Vector2 range(0.0f, 1.0f);
 			const Variant range_value = material_storage->material_get_declared_param(p_material, SNAME("geometry_opacity_texture_range"));
 			if (range_value.get_type() == Variant::VECTOR2) {
@@ -1736,6 +1769,18 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	memset(albedo_sources, 0, sizeof(albedo_sources));
 	additive_skipped = 0;
 	emission_scale = _param_float(MaterialStorage::get_singleton()->global_shader_parameter_get_internal(SNAME("openpbr_emission_scale")), 1.0f);
+	const Variant atlas_value = MaterialStorage::get_singleton()->global_shader_parameter_get_internal(SNAME("ray_emission_atlas"));
+	const Variant::Type atlas_type = atlas_value.get_type();
+	const RID atlas_rid = (atlas_type == Variant::RID || atlas_type == Variant::OBJECT) ? RID(atlas_value) : RID();
+	const RID atlas = atlas_rid.is_valid() ? TextureStorage::get_singleton()->texture_get_rd_texture(atlas_rid) : RID();
+	if (atlas != emission_texture_array) {
+		emission_texture_array = atlas;
+		emission_texture_count = 0;
+		if (atlas.is_valid()) {
+			emission_texture_count = RD::get_singleton()->texture_get_format(atlas).array_layers;
+		}
+		print_line(vformat("Ray scene emission atlas: %d layers", emission_texture_count));
+	}
 	skip_additive = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ray_scene/skip_additive_surfaces");
 	shell_ranges.clear();
 	HashMap<RenderGeometryInstance *, RID> shell_geometry;
@@ -1844,10 +1889,12 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		bool instance_emissive = false;
 		for (uint32_t s = instance.material_offset; s < materials.size(); s++) {
 			const Material &surface_material = materials[s];
-			const bool emissive = surface_material.emission[0] > 0.0f || surface_material.emission[1] > 0.0f || surface_material.emission[2] > 0.0f;
+			const bool emissive = surface_material.emission[0] > 0.0f || surface_material.emission[1] > 0.0f || surface_material.emission[2] > 0.0f || surface_material.emission_texture != 0;
 			instance_emissive = instance_emissive || emissive;
 			emitter_state = hash_murmur3_one_32(emissive ? 1u : 0u, emitter_state);
 			emission_state = hash_murmur3_buffer(surface_material.emission, sizeof(surface_material.emission), emission_state);
+			emission_state = hash_murmur3_one_32(surface_material.emission_texture, emission_state);
+			emission_state = hash_murmur3_one_32(surface_material.emission_flags, emission_state);
 		}
 		if (instance_emissive) {
 			TriangleEmitterSource emitter_source;

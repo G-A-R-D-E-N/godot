@@ -111,6 +111,7 @@ public:
 
 	static constexpr uint32_t MATERIAL_ALPHA_SHIFT = 8;
 	static constexpr uint32_t MATERIAL_ALPHA_MASK = 0xFFFFFF00;
+	static constexpr uint32_t EMISSION_FLAG_TEXTURE_RANGES = 1;
 	static constexpr uint32_t CANDIDATE_FLAGS = MATERIAL_FLAG_SKIP | MATERIAL_FLAG_BLEND | MATERIAL_FLAG_SHADOW_PASS | MATERIAL_FLAG_SHADOW_ONLY | MATERIAL_ALPHA_MASK;
 	static constexpr uint32_t ALPHA_ON_SALT = 0x9e3779b9u;
 
@@ -163,6 +164,9 @@ public:
 		uint32_t emission_uv_set;
 		float emission_uv_scale[2];
 		float emission_uv_offset[2];
+		float emission_nits_range[2];
+		float emission_texel_scale;
+		uint32_t emission_flags;
 		float emission_mean_luminance;
 		float pad;
 	};
@@ -195,7 +199,7 @@ public:
 	};
 
 	static_assert(sizeof(Light) == 96);
-	static_assert(sizeof(Material) == 64);
+	static_assert(sizeof(Material) == 80);
 	static_assert(sizeof(TriangleEmitter) == 48);
 	static_assert(sizeof(Instance) == 64);
 	static_assert(sizeof(TriangleUv) == 16);
