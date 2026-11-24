@@ -534,8 +534,8 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 			factor_layers_printed = true;
 			const uint32_t own_limit = external ? p_input.head_entries : settings.entries - 1;
 			const uint32_t rest_layer = settings.entries - 1;
-			const uint32_t emitter_write = settings.entries + 1;
-			const uint32_t forward_read = factor_layers(settings.entries) - 1;
+			const uint32_t emitter_write = settings.entries + 2;
+			const uint32_t forward_read = settings.entries + 2;
 			print_line(vformat("DIRECT_SHADOW_FACTOR layers: entries %d head %d rest %d tail %d emitter_write %d forward_read %d pad0 %d", int(settings.entries), int(own_limit), int(rest_layer), int(rest_layer > own_limit ? rest_layer - own_limit : 0), int(emitter_write), int(forward_read), emitters ? 1 : 0));
 			ERR_FAIL_COND_V_MSG(emitter_write != forward_read, false, "The emitter factor write layer must equal the layer the forward shader reads.");
 		}
