@@ -77,6 +77,7 @@ public:
 	};
 
 	struct Settings {
+		float emitter_shorten = 0.0f;
 		uint32_t entries = 6;
 		uint32_t rays = 1;
 		bool reference = false;
@@ -280,4 +281,5 @@ public:
 };
 
 } // namespace RendererRD
+
 
