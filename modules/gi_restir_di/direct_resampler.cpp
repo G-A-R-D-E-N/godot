@@ -695,7 +695,13 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
 		rd->compute_list_end();
 		rd->draw_command_end_label();
-	}	if (spatial) {
+		const Vector<uint8_t> spatial_counts = rd->buffer_get_data(debug_buffer);
+		if (spatial_counts.size() >= 12) {
+			const uint32_t *words = reinterpret_cast<const uint32_t *>(spatial_counts.ptr());
+			print_line(vformat("DIRECT_EMITTERS spatial: pixels %d merged %d accepted %d", int(words[0]), int(words[1]), int(words[2])));
+		}
+	}
+	if (spatial) {
 		const RID spatial_rid = shader->version_get_shader(shader_version, spatial_variant);
 		RENDER_TIMESTAMP("Direct Resample Spatial");
 		rd->draw_command_begin_label("Direct Resample Spatial");

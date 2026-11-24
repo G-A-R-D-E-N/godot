@@ -161,6 +161,12 @@ layout(set = 0, binding = 23, std430) buffer EmitterScan {
 emitter_scan;
 
 #if defined(MODE_EMITTER_SPATIAL)
+layout(set = 0, binding = 12, std430) restrict buffer EmitterSpatialCounts {
+	uint words[4];
+}
+emitter_spatial_counts;
+#endif
+#if defined(MODE_EMITTER_SPATIAL)
 layout(set = 0, binding = 24, std430) restrict buffer EmitterSamples {
 #else
 layout(set = 0, binding = 24, std430) restrict writeonly buffer EmitterSamples {
@@ -1032,6 +1038,8 @@ void main() {
 	uint index = uint(pixel.y) * uint(params.size.x) + uint(pixel.x);
 	vec4 selected_point = emitter_samples.data[index * 2u];
 	vec4 selected_color = emitter_samples.data[index * 2u + 1u];
+	uint accepted = 0u;
+	uint merged = 0u;
 	float total_mass = di_emitter_sample_mass(selected_color, selected_point);
 	vec3 total_weighted = max(selected_color.rgb, vec3(0.0)) * total_mass;
 	float view_depth = max(-vertex.z, 0.001);
@@ -1066,6 +1074,7 @@ void main() {
 		if (!(other_mass > 0.0)) {
 			continue;
 		}
+		accepted += 1u;
 		total_mass += other_mass;
 		total_weighted += max(other_color.rgb, vec3(0.0)) * other_mass;
 		if (di_emitter_hash(seed, i * 2u + 3u) * total_mass < other_mass) {
@@ -1076,8 +1085,12 @@ void main() {
 	if (!(total_mass > 0.0)) {
 		return;
 	}
+	merged = 1u;
 	emitter_samples.data[index * 2u] = selected_point;
 	emitter_samples.data[index * 2u + 1u] = vec4(total_weighted / total_mass, 0.0);
+	atomicAdd(emitter_spatial_counts.words[0], 1u);
+	atomicAdd(emitter_spatial_counts.words[1], merged);
+	atomicAdd(emitter_spatial_counts.words[2], accepted);
 }
 #elif !defined(MODE_SPATIAL)
 void main() {
