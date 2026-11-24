@@ -68,6 +68,9 @@ layout(set = 0, binding = 12, std430) restrict buffer Counters {
 	uint resolve_tier2;
 	uint resolve_tier3;
 	uint resolve_cut;
+	uint emitter_pixels;
+	uint emitter_rays;
+	uint emitter_blocked;
 }
 counters;
 
@@ -262,8 +265,9 @@ void read_entries(ivec2 p_pixel) {
 	tail_count = rest_layer - own_limit;
 	emitter_tail = params.pad0 != 0u && tail_count > 0u;
 	if (emitter_tail) {
+		atomicAdd(counters.emitter_pixels, 1u);
 		tail_count--;
-		emitter_tail_factor = own_limit + tail_count;
+		emitter_tail_factor = params.entries + 1u;
 		uint sample_index = uint(p_pixel.y) * uint(params.full_size[0]) + uint(p_pixel.x);
 		emitter_geometry = direct_emitter_samples.data[sample_index * 2u];
 		emitter_color = direct_emitter_samples.data[sample_index * 2u + 1u];
@@ -745,6 +749,8 @@ void main() {
 			}
 		}
 		traced_rays += emitter_traces;
+		atomicAdd(counters.emitter_rays, emitter_traces);
+		atomicAdd(counters.emitter_blocked, emitter_traces - uint(emitter_visible + 0.5));
 	}
 #endif
 

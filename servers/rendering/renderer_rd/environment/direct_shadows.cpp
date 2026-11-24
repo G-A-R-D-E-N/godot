@@ -523,6 +523,29 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	if (viewport->counted) {
 		rd->buffer_clear(counter_buffer, 0, COUNTER_BYTES);
 	}
+	{
+		static bool factor_layers_printed = false;
+		if (!factor_layers_printed) {
+			factor_layers_printed = true;
+			const uint32_t own_limit = external ? p_input.head_entries : settings.entries - 1;
+			const uint32_t rest_layer = settings.entries - 1;
+			const uint32_t emitter_write = settings.entries + 1;
+			const uint32_t forward_read = factor_layers(settings.entries) - 1;
+			print_line(vformat("DIRECT_SHADOW_FACTOR layers: entries %d head %d rest %d tail %d emitter_write %d forward_read %d pad0 %d", int(settings.entries), int(own_limit), int(rest_layer), int(rest_layer > own_limit ? rest_layer - own_limit : 0), int(emitter_write), int(forward_read), emitters ? 1 : 0));
+			ERR_FAIL_COND_V_MSG(emitter_write != forward_read, false, "The emitter factor write layer must equal the layer the forward shader reads.");
+		}
+		if (p_input.frame >= 31) {
+			static bool emitter_counters_printed = false;
+			if (!emitter_counters_printed) {
+				emitter_counters_printed = true;
+				const Vector<uint8_t> counters = rd->buffer_get_data(counter_buffer);
+				if (counters.size() >= int(COUNTER_BYTES)) {
+					const uint32_t *values = reinterpret_cast<const uint32_t *>(counters.ptr());
+					print_line(vformat("DIRECT_SHADOWS counters: frames %d emitter_pixels %d emitter_rays %d emitter_blocked %d", int(p_input.frame), int(values[13]), int(values[14]), int(values[15])));
+				}
+			}
+		}
+	}
 
 	RID sampler = MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 	const int trace_mode = external ? (viewport->precise ? TRACE_PRECISE_EXTERNAL : TRACE_CAPPED_EXTERNAL) : (viewport->precise ? TRACE_PRECISE : TRACE_CAPPED);
