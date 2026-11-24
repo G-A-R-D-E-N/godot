@@ -681,6 +681,10 @@ void RayScene::_warn_albedo_fallback(RID p_material, RID p_texture, RID p_mesh, 
 	WARN_PRINT(vformat("Ray scene: a material without gi_albedo takes the texture-mean albedo fallback (mesh \"%s\", surface %d, texture \"%s\").", MeshStorage::get_singleton()->mesh_get_path(p_mesh), p_surface, TextureStorage::get_singleton()->texture_get_path(p_texture)));
 }
 
+bool RayScene::emission_has_value(const Color &p_emission) {
+	return p_emission.r > 0.0f || p_emission.g > 0.0f || p_emission.b > 0.0f;
+}
+
 void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, Material &r_material, float &r_alpha_threshold, uint32_t &r_cull) {
 	r_material = {};
 	r_material.albedo[0] = r_material.albedo[1] = r_material.albedo[2] = 0.48f;
@@ -736,8 +740,11 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 		albedo_sources[ALBEDO_DEFAULT]++;
 	}
 
-	if (_param_color(material_storage->material_get_param(p_material, SNAME("gi_emission")), emission) && emission.r >= 0.0f && emission.g >= 0.0f && emission.b >= 0.0f) {
-		_store_color(r_material.emission, emission, emission_scale);
+	const Variant gi_value = material_storage->material_get_param(p_material, SNAME("gi_emission"));
+	Color gi_emission;
+	const bool gi_present = _param_color(gi_value, gi_emission);
+	if (RayScene::emission_has_value(gi_present ? gi_emission : Color())) {
+		_store_color(r_material.emission, gi_emission, emission_scale);
 	} else if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("emission_color")), emission)) {
 		const float luminance = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_luminance")), 0.0f);
 		const float bounce = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_bounce_weight")), 1.0f);
@@ -748,6 +755,10 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 		const float multiplier = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_energy")), 1.0f);
 		emission = emission.srgb_to_linear();
 		_store_color(r_material.emission, emission, multiplier);
+	}
+	if (emission_debug_logged < 32 && gi_present && !RayScene::emission_has_value(gi_emission) && RayScene::emission_has_value(Color(r_material.emission[0], r_material.emission[1], r_material.emission[2]))) {
+		emission_debug_logged++;
+		print_line(vformat("Ray scene emission debug: mesh \"%s\" surface %d gi_emission type %d value %s -> authored fallback %.3f %.3f %.3f", MeshStorage::get_singleton()->mesh_get_path(p_mesh), int(p_surface), int(gi_value.get_type()), String(gi_value), r_material.emission[0], r_material.emission[1], r_material.emission[2]));
 	}
 	r_material.emission_mean_luminance = 0.2126f * r_material.emission[0] + 0.7152f * r_material.emission[1] + 0.0722f * r_material.emission[2];
 	if (material_storage->material_get_declared_param(p_material, SNAME("use_emission_mask_texture")).booleanize()) {
@@ -1768,6 +1779,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	material_cache.clear();
 	memset(albedo_sources, 0, sizeof(albedo_sources));
 	additive_skipped = 0;
+	emission_debug_logged = 0;
 	emission_scale = _param_float(MaterialStorage::get_singleton()->global_shader_parameter_get_internal(SNAME("openpbr_emission_scale")), 1.0f);
 	const Variant atlas_value = MaterialStorage::get_singleton()->global_shader_parameter_get_internal(SNAME("ray_emission_atlas"));
 	const Variant::Type atlas_type = atlas_value.get_type();
