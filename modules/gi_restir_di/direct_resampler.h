@@ -225,6 +225,7 @@ private:
 	RID emitter_cdf;
 	RID emitter_scan;
 	RID emitter_samples;
+	Vector<uint8_t> emitter_samples_before;
 	uint32_t emitter_cdf_capacity = 0;
 	uint32_t emitter_samples_bytes = 0;
 	bool emitter_device_ready = false;
@@ -261,3 +262,4 @@ private:
 #endif
 	RID _dummy(RD::DataFormat p_format, RD::TextureType p_type, const char *p_name);
 };
+

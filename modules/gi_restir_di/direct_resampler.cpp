@@ -252,12 +252,16 @@ bool DirectResamplerRD::_ensure_emitter_samples(uint32_t p_pixels) {
 	emitter_samples = rd->storage_buffer_create(bytes);
 	rd->set_resource_name(emitter_samples, "Direct Resampler Emitter Samples");
 	emitter_samples_bytes = emitter_samples.is_valid() ? bytes : 0;
+	if (!emitter_reuse_counters.is_valid()) {
+		emitter_reuse_counters = rd->storage_buffer_create(8u);
+		rd->set_resource_name(emitter_reuse_counters, "Direct Resampler Emitter Reuse Counters");
+	}
 	return emitter_samples.is_valid();
 }
 
 void DirectResamplerRD::_free_emitter_buffers() {
 	RD *rd = RD::get_singleton();
-	RID *owned[] = { &emitter_cdf, &emitter_scan, &emitter_samples };
+	RID *owned[] = { &emitter_cdf, &emitter_scan, &emitter_samples, &emitter_reuse_counters };
 	for (RID *rid : owned) {
 		if (rid->is_valid()) {
 			rd->free_rid(*rid);
@@ -597,6 +601,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	}
 	if (emitter_temporal) {
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 25, emitter_history));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 26, emitter_reuse_counters));
 	}
 
 	int main_variant = VARIANT_MAIN;
@@ -690,6 +695,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 				}
 			}
 			print_line(vformat("DIRECT_EMITTERS samples: pixels %d nonzero %d best_lum %.4f best_rgb %.3f %.3f %.3f rejected_area %d rejected_cos %d rejected_shadow %d rejected_other %d", int(pixels), int(nonzero), best, best_color.x, best_color.y, best_color.z, int(rejected_area), int(rejected_cos), int(rejected_shadow), int(rejected_other)));
+			emitter_samples_before = data;
 		}
 	}
 	if (emitter_active && settings.emitter_spatial && emitter_spatial_pipeline.get_rid().is_valid()) {
@@ -703,7 +709,49 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
 		rd->compute_list_end();
 		rd->draw_command_end_label();
-	}	if (spatial) {
+	}
+	if (emitter_active && settings.emitter_spatial && p_input.frame >= 30) {
+		static bool spatial_change_printed = false;
+		if (!spatial_change_printed && emitter_samples_before.size() >= int(uint32_t(size.x) * uint32_t(size.y)) * 32) {
+			spatial_change_printed = true;
+			const Vector<uint8_t> after = rd->buffer_get_data(emitter_samples);
+			const uint32_t pixels = uint32_t(size.x) * uint32_t(size.y);
+			uint32_t changed = 0;
+			if (after.size() >= int(pixels) * 32) {
+				const float *before_floats = reinterpret_cast<const float *>(emitter_samples_before.ptr());
+				const float *after_floats = reinterpret_cast<const float *>(after.ptr());
+				for (uint32_t i = 0; i < pixels; i++) {
+					const int o = int(i) * 8;
+					for (int k = 0; k < 8; k++) {
+						if (before_floats[o + k] != after_floats[o + k]) {
+							changed++;
+							break;
+						}
+					}
+				}
+			}
+			uint32_t temporal_merged = 0;
+		if (emitter_reuse_counters.is_valid()) {
+			const Vector<uint8_t> reuse = rd->buffer_get_data(emitter_reuse_counters);
+			if (reuse.size() >= 8) {
+				temporal_merged = reinterpret_cast<const uint32_t *>(reuse.ptr())[0];
+			}
+		}
+		print_line(vformat("DIRECT_EMITTERS reuse: temporal_merged %d spatial_pixels_rewritten %d", int(temporal_merged), int(changed)));
+		}
+	}
+	if (emitter_active && emitter_temporal && p_input.frame >= 31) {
+		static bool temporal_reuse_printed = false;
+		if (!temporal_reuse_printed && emitter_reuse_counters.is_valid()) {
+			temporal_reuse_printed = true;
+			const Vector<uint8_t> reuse = rd->buffer_get_data(emitter_reuse_counters);
+			if (reuse.size() >= 8) {
+				const uint32_t temporal_merged = reinterpret_cast<const uint32_t *>(reuse.ptr())[0];
+				print_line(vformat("DIRECT_EMITTERS reuse: temporal_merged %d spatial_pixels_rewritten -1", int(temporal_merged)));
+			}
+		}
+	}
+	if (spatial) {
 		const RID spatial_rid = shader->version_get_shader(shader_version, spatial_variant);
 		RENDER_TIMESTAMP("Direct Resample Spatial");
 		rd->draw_command_begin_label("Direct Resample Spatial");
@@ -816,3 +864,6 @@ void DirectResamplerRD::free_device_resources() {
 DirectResamplerRD::~DirectResamplerRD() {
 	ERR_FAIL_COND_MSG(device_ready, "The direct resampler's device resources were not freed before shutdown.");
 }
+
+
+

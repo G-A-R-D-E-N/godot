@@ -171,6 +171,11 @@ emitter_samples;
 
 #ifdef DI_EMITTER_TEMPORAL
 layout(rgba32ui, set = 0, binding = 25) uniform restrict uimage2DArray emitter_history;
+layout(set = 0, binding = 26, std430) restrict buffer EmitterReuseCounters {
+	uint temporal_merged;
+	uint pad0;
+}
+emitter_reuse_counters;
 
 bool di_emitter_pending = false;
 vec3 di_emitter_point = vec3(0.0);
@@ -893,6 +898,7 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 		bool normal_ok = dot(mat3(params.prev_view_from_view) * p_normal, di_oct_decode(held_surface.xy)) > 0.9;
 		if (valid && depth_ok && normal_ok) {
 			age = min((held.y & 0xFFu) + 1u, 0xFFu);
+			atomicAdd(emitter_reuse_counters.temporal_merged, 1u);
 			float ratio = min(float(age) / 8.0, 0.9);
 			point.xyz = mix(di_emitter_point, (inverse(params.prev_view_from_view) * vec4(held_point.xyz, 1.0)).xyz, ratio);
 			color.rgb = mix(di_emitter_color, held_color.rgb, ratio);
