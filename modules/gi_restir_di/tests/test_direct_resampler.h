@@ -99,10 +99,10 @@ TEST_CASE("[DirectResampler] Params match the entry pass's std140 block") {
 	CHECK(offsetof(DirectResamplerRD::Params, counter) == 408);
 	CHECK(offsetof(DirectResamplerRD::Params, head_rank) == 412);
 	CHECK(offsetof(DirectResamplerRD::Params, head_swap_margin) == 416);
-	CHECK(offsetof(DirectResamplerRD::Params, spatial_normal_dot) == 420);
-	CHECK(offsetof(DirectResamplerRD::Params, head_swap_frames) == 424);
-	CHECK(offsetof(DirectResamplerRD::Params, temporal_reuse) == 428);
-	CHECK(offsetof(DirectResamplerRD::Params, head_window) == 432);
+	CHECK(offsetof(DirectResamplerRD::Params, head_swap_frames) == 420);
+	CHECK(offsetof(DirectResamplerRD::Params, temporal_reuse) == 424);
+	CHECK(offsetof(DirectResamplerRD::Params, head_window) == 428);
+	CHECK(offsetof(DirectResamplerRD::Params, spatial_normal_dot) == 432);
 	CHECK(offsetof(DirectResamplerRD::Params, std140_pad) == 436);
 	CHECK(sizeof(DirectResamplerRD::Params) == 448);
 	CHECK(DirectResamplerRD::DEBUG_BYTES == (4 + 65536) * 4);
@@ -259,10 +259,10 @@ TEST_CASE("[DirectResampler] Params field order matches di_resample.glsl") {
 		{ "counter", offsetof(DirectResamplerRD::Params, counter) },
 		{ "head_rank", offsetof(DirectResamplerRD::Params, head_rank) },
 		{ "head_swap_margin", offsetof(DirectResamplerRD::Params, head_swap_margin) },
-		{ "spatial_normal_dot", offsetof(DirectResamplerRD::Params, spatial_normal_dot) },
 		{ "head_swap_frames", offsetof(DirectResamplerRD::Params, head_swap_frames) },
 		{ "temporal_reuse", offsetof(DirectResamplerRD::Params, temporal_reuse) },
 		{ "head_window", offsetof(DirectResamplerRD::Params, head_window) },
+		{ "spatial_normal_dot", offsetof(DirectResamplerRD::Params, spatial_normal_dot) },
 	};
 	const int count = int(sizeof(fields) / sizeof(fields[0]));
 

@@ -82,10 +82,10 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	uint counter;
 	uint head_rank;
 	float head_swap_margin;
-	float spatial_normal_dot;
 	uint head_swap_frames;
 	uint temporal_reuse;
 	uint head_window;
+	float spatial_normal_dot;
 }
 params;
 

@@ -123,11 +123,11 @@ public:
 		uint32_t counter;
 		uint32_t head_rank;
 		float head_swap_margin;
-		float spatial_normal_dot;
-		float std140_pad[3];
 		uint32_t head_swap_frames;
 		uint32_t temporal_reuse;
 		uint32_t head_window;
+		float spatial_normal_dot;
+		float std140_pad[3];
 	};
 	static_assert(sizeof(Params) == 448);
 	static_assert(sizeof(Params) % 16 == 0);
