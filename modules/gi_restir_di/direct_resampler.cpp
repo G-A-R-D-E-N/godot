@@ -706,12 +706,12 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		emitter_census_printed = true;
 		const uint32_t census_count = ray_scene->get_triangle_emitter_count();
 		const Vector<uint8_t> census_data = rd->buffer_get_data(ray_scene->get_triangle_emitters());
-		if (census_data.size() >= int(census_count) * int(sizeof(RayScene::TriangleEmitter))) {
+		if (census_data.size() >= int(census_count) * int(sizeof(RendererRD::RayScene::TriangleEmitter))) {
 			HashMap<uint32_t, uint32_t> per_instance;
 			HashMap<uint32_t, AABB> per_bounds;
 			const uint8_t *census_bytes = census_data.ptr();
 			for (uint32_t i = 0; i < census_count; i++) {
-				const RayScene::TriangleEmitter *emitter = reinterpret_cast<const RayScene::TriangleEmitter *>(census_bytes + i * sizeof(RayScene::TriangleEmitter));
+				const RendererRD::RayScene::TriangleEmitter *emitter = reinterpret_cast<const RendererRD::RayScene::TriangleEmitter *>(census_bytes + i * sizeof(RendererRD::RayScene::TriangleEmitter));
 				per_instance[emitter->instance] = per_instance.has(emitter->instance) ? per_instance[emitter->instance] + 1u : 1u;
 				AABB box;
 				box.position = Vector3(emitter->v0[0], emitter->v0[1], emitter->v0[2]);
