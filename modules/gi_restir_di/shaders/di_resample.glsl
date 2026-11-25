@@ -1055,6 +1055,7 @@ void main() {
 		float angle = (float(i) + di_emitter_hash(seed, i * 2u + 1u)) * 6.2831853 / float(max(neighbours, 1u));
 		float radius = sqrt(di_emitter_hash(seed, i * 2u + 2u)) * params.spatial_radius;
 		ivec2 other = pixel + ivec2(round(cos(angle) * radius), round(sin(angle) * radius));
+		atomicAdd(emitter_spatial_counts.words[10], 1u);
 		if (any(lessThan(other, ivec2(0))) || any(greaterThanEqual(other, params.size))) {
 			continue;
 		}
@@ -1066,9 +1067,11 @@ void main() {
 		if (!surface_at(other, other_vertex, other_normal, other_roughness, other_packed, other_depth)) {
 			continue;
 		}
+		atomicAdd(emitter_spatial_counts.words[11], 1u);
 		if (abs(other_depth - depth) > tolerance) {
 			continue;
 		}
+		atomicAdd(emitter_spatial_counts.words[12], 1u);
 		if (dot(normal, other_normal) < 0.9) {
 			continue;
 		}
@@ -1079,6 +1082,7 @@ void main() {
 			continue;
 		}
 		float other_mass = di_emitter_sample_mass(other_color, other_point);
+		atomicAdd(emitter_spatial_counts.words[13], 1u);
 		if (!(other_mass > 0.0)) {
 			continue;
 		}

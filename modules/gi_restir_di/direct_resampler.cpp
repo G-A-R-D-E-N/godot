@@ -204,7 +204,7 @@ bool DirectResamplerRD::_ensure_device() {
 				end++;
 			}
 			const String token = entry.substr(at, end - at);
-			if (token != "DI_EMITTERS" && token != "DI_EMITTER_TABLE") {
+			if (token != "DI_EMITTER_TABLE") {
 				name += name.is_empty() ? token : "+" + token;
 			}
 		}
@@ -379,7 +379,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 					const String name = v < variant_mode_names.size() ? variant_mode_names[v] : String("unmapped");
 					variant_line += vformat("%s%d:%s", v == 0 ? "" : " ", v, name);
 				}
-				print_line(vformat("DIRECT_EMITTERS variants: count %d last %d emitter_spatial %d modes %s", int(VARIANT_LAST), int(VARIANT_LAST - 1), int(VARIANT_EMITTER_SPATIAL), variant_line));
+				print_line(vformat("DIRECT_EMITTERS variants: count %d modes_count %d match %d last %d emitter_spatial %d modes %s", int(VARIANT_LAST), int(variant_mode_names.size()), int(VARIANT_LAST) == int(variant_mode_names.size()) ? 1 : 0, int(VARIANT_LAST - 1), int(VARIANT_EMITTER_SPATIAL), variant_line));
 			}
 			print_line(vformat("DIRECT_EMITTERS settings: master %s resampled %s emitters %s temporal %s spatial %s source_match %s", GLOBAL_GET("rendering/global_illumination/direct/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/temporal"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial_source_match")));
 		}
@@ -787,6 +787,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 			const uint32_t *words = reinterpret_cast<const uint32_t *>(spatial_counts.ptr());
 			print_line(vformat("DIRECT_EMITTERS spatial: invocations %d tilegate %d surface %d neighbours %d merges %d pixels %d merged %d accepted %d", int(words[3]), int(words[4]), int(words[5]), int(words[6]), int(words[7]), int(words[0]), int(words[1]), int(words[2])));
 			print_line(vformat("DIRECT_EMITTERS spatial tile: value %d counter %d", int(words[8]), int(words[9])));
+			print_line(vformat("DIRECT_EMITTERS spatial gates: off_frame %d depth %d normal %d zero_mass %d neighbours %d merges %d", int(words[10]), int(words[11]), int(words[12]), int(words[13]), int(words[6]), int(words[7])));
 		}
 		spatial_counts_due = false;
 	}
