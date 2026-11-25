@@ -124,8 +124,12 @@ public:
 		uint32_t head_swap_frames;
 		uint32_t temporal_reuse;
 		uint32_t head_window;
+		uint32_t emitter_half;
+		uint32_t pad_emitter_a;
+		uint32_t pad_emitter_b;
+		uint32_t pad_emitter_c;
 	};
-	static_assert(sizeof(Params) == 432);
+	static_assert(sizeof(Params) == 448);
 
 	static constexpr uint32_t RESERVOIRS_OFF = 0;
 	static constexpr uint32_t RESERVOIRS_B1 = 1;

@@ -85,6 +85,10 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	uint head_swap_frames;
 	uint temporal_reuse;
 	uint head_window;
+	uint emitter_half;
+	uint pad_emitter_a;
+	uint pad_emitter_b;
+	uint pad_emitter_c;
 }
 params;
 
@@ -238,6 +242,34 @@ void di_emitter_clear(ivec2 p_pixel, uint p_reason) {
 	imageStore(record_image, ivec3(p_pixel, int(params.tail_samples + 1u)), uvec4(0u, 0u, 0u, 0u));
 }
 
+void di_emitter_clear_block(ivec2 p_pixel, uint p_reason) {
+	if (params.emitter_half == 0u) {
+		di_emitter_clear(p_pixel, p_reason);
+		return;
+	}
+	for (int dy = 0; dy < 2; dy++) {
+		for (int dx = 0; dx < 2; dx++) {
+			di_emitter_clear(min(p_pixel + ivec2(dx, dy), params.size - ivec2(1)), p_reason);
+		}
+	}
+}
+
+void di_emitter_write_block(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geometric) {
+	uint layer = params.tail_samples + 1u;
+	if (params.emitter_half == 0u) {
+		di_emitter_write(p_pixel, p_point, p_color, p_geometric);
+		imageStore(record_image, ivec3(p_pixel, int(layer)), uvec4(DI_EMITTER_MARK, floatBitsToUint(float(layer)), 0u, 0u));
+		return;
+	}
+	for (int dy = 0; dy < 2; dy++) {
+		for (int dx = 0; dx < 2; dx++) {
+			ivec2 q = min(p_pixel + ivec2(dx, dy), params.size - ivec2(1));
+			di_emitter_write(q, p_point, p_color, p_geometric);
+			imageStore(record_image, ivec3(q, int(layer)), uvec4(DI_EMITTER_MARK, floatBitsToUint(float(layer)), 0u, 0u));
+		}
+	}
+}
+
 #ifdef DI_EMITTER_TEMPORAL
 void di_emitter_commit(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geometric, uint p_instance, uint p_triangle, uint p_index) {
 	di_emitter_pending = true;
@@ -251,7 +283,7 @@ void di_emitter_commit(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geomet
 #else
 void di_emitter_commit(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geometric, uint p_instance, uint p_triangle, uint p_index) {
 	atomicAdd(emitter_reuse_counters.plain_writes, 1u);
-	di_emitter_write(p_pixel, p_point, p_color, p_geometric);
+	di_emitter_write_block(p_pixel, p_point, p_color, p_geometric);
 }
 #endif
 
@@ -259,7 +291,7 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 	uint count = ray_scene_triangle_emitter_count();
 	float total = count == 0u ? 0.0 : emitter_scan.data[DI_EMITTER_TOTAL];
 	if (!(total > 0.0)) {
-		di_emitter_clear(p_pixel, 1u);
+		di_emitter_clear_block(p_pixel, 1u);
 		return;
 	}
 	float target = di_emitter_hash(p_seed, 0x27d4eb2fu) * total;
@@ -284,7 +316,7 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 	float area = 0.5 * normal_length;
 	float luminance = di_emitter_selection_luminance(emitter.material);
 	if (!(area > 0.0) || !(luminance > 0.0)) {
-		di_emitter_clear(p_pixel, 1u);
+		di_emitter_clear_block(p_pixel, 1u);
 		return;
 	}
 	float r1 = di_emitter_hash(p_seed, 0x68e31da4u);
@@ -298,7 +330,7 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 	vec3 rel = sample_point - p_vertex;
 	float distance = length(rel);
 	if (!(distance > 1e-5)) {
-		di_emitter_clear(p_pixel, 2u);
+		di_emitter_clear_block(p_pixel, 2u);
 		return;
 	}
 	vec3 to_light = rel / distance;
@@ -308,13 +340,13 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 		cos_light = abs(cos_light);
 	}
 	if (!(cos_light > 0.0)) {
-		di_emitter_clear(p_pixel, 3u);
+		di_emitter_clear_block(p_pixel, 3u);
 		return;
 	}
 	float geometric = min(cos_light / max(distance * distance, 1e-8), 60000.0);
 	vec3 color = texel_emission * (total / luminance);
 	if (any(isinf(color)) || any(isnan(color))) {
-		di_emitter_clear(p_pixel, 4u);
+		di_emitter_clear_block(p_pixel, 4u);
 		return;
 	}
 	di_emitter_commit(p_pixel, sample_point, color, geometric, emitter.instance, emitter.uv_index, low);
@@ -1081,7 +1113,7 @@ bool di_emitter_hold(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 
 void write_empty(ivec2 p_pixel) {
 #ifdef DI_EMITTERS
-	di_emitter_clear(p_pixel, 0u);
+	di_emitter_clear_block(p_pixel, 0u);
 #ifdef DI_EMITTER_TEMPORAL
 	di_emitter_history_store(p_pixel, uvec4(0u), vec4(0.0), vec4(0.0), uvec4(0u));
 #endif
@@ -1276,7 +1308,14 @@ void main() {
 	}
 	stream_seed = di_hash(uint(pixel.y) * 65537u + uint(pixel.x)) ^ di_hash(params.frame ^ 0x68e31da4u);
 #ifdef DI_EMITTERS
+#ifndef DI_EMITTER_TEMPORAL
+	bool di_emitter_origin = params.emitter_half == 0u || (((pixel.x & 1) == 0) && ((pixel.y & 1) == 0));
+	if (di_emitter_origin) {
+		di_emitter_pick(pixel, vertex, stream_seed ^ 0x2545f491u);
+	}
+#else
 	di_emitter_pick(pixel, vertex, stream_seed ^ 0x2545f491u);
+#endif
 #ifdef DI_EMITTER_TEMPORAL
 	if (di_emitter_pending) {
 		di_emitter_accumulate(pixel, vertex, normal);
