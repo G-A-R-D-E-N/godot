@@ -1027,6 +1027,7 @@ void main() {
 	if (imageLoad(tile_flags, pixel >> 3).r != params.counter) {
 		return;
 	}
+	atomicAdd(emitter_spatial_counts.words[3], 12345u);
 	vec3 vertex = vec3(0.0);
 	vec3 normal = vec3(0.0, 0.0, 1.0);
 	float roughness = 0.0;
