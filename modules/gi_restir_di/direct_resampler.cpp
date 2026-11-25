@@ -356,7 +356,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		static bool rdi_settings_printed = false;
 		if (!rdi_settings_printed) {
 			rdi_settings_printed = true;
-			print_line(vformat("DIRECT_EMITTERS settings: master %s resampled %s emitters %s temporal %s spatial %s", GLOBAL_GET("rendering/global_illumination/direct/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/temporal"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial")));
+			print_line(vformat("DIRECT_EMITTERS settings: master %s resampled %s emitters %s temporal %s spatial %s source_match %s", GLOBAL_GET("rendering/global_illumination/direct/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/temporal"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial_source_match")));
 		}
 	}
 
