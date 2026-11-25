@@ -165,8 +165,9 @@ private:
 		int32_t full_size[2];
 		float jitter_delta[2];
 		uint32_t pad[2];
+		float anchor[4];
 	};
-	static_assert(sizeof(Params) == 400);
+	static_assert(sizeof(Params) == 416);
 
 	static constexpr uint32_t COUNTER_WORDS = 49;
 	static constexpr uint32_t EMITTER_HIT_INSTANCES = 4096;

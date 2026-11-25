@@ -543,6 +543,11 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	params.range_scale = settings.range_sigmas > 0.0f ? 0.5f / (settings.range_sigmas * settings.range_sigmas) : 0.0f;
 	params.world_per_pixel = (quarter ? 4.0f : 2.0f) * Math::abs(float(inverse.columns[1][1])) / float(size.y);
 	params.count = viewport->counted ? 1 : 0;
+	const Vector3 ray_anchor = RayScene::get_singleton()->get_anchor();
+	params.anchor[0] = ray_anchor.x;
+	params.anchor[1] = ray_anchor.y;
+	params.anchor[2] = ray_anchor.z;
+	params.anchor[3] = 0.0f;
 	rd->buffer_update(params_buffer, 0, sizeof(Params), &params);
 	if (viewport->counted) {
 		rd->buffer_clear(counter_buffer, 0, COUNTER_BYTES);
@@ -575,8 +580,8 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 					const float sample_max_y = float(values[45]) / 16.0f - 4096.0f;
 					const float sample_min_z = float(values[43]) / 16.0f - 4096.0f;
 					const float sample_max_z = float(values[46]) / 16.0f - 4096.0f;
-					print_line(vformat("DIRECT_EMITTERS sample_points: count %d min (%.3f %.3f %.3f) max (%.3f %.3f %.3f) center (%.3f %.3f %.3f)", int(values[47]), sample_min_x, sample_min_y, sample_min_z, sample_max_x, sample_max_y, sample_max_z, (sample_min_x + sample_max_x) * 0.5f, (sample_min_y + sample_max_y) * 0.5f, (sample_min_z + sample_max_z) * 0.5f));
-					print_line(vformat("DIRECT_EMITTERS receiver_omni: 005 %d 030 %d 200 %d far %d min_ray %.3f", int(values[37]), int(values[38]), int(values[39]), int(values[40]), float(values[48]) / 4.0f));
+					const Vector3 ray_anchor_print = RayScene::get_singleton()->get_anchor();
+					print_line(vformat("DIRECT_EMITTERS sample_points: count %d anchor (%.3f %.3f %.3f) min (%.3f %.3f %.3f) max (%.3f %.3f %.3f) center (%.3f %.3f %.3f)", int(values[47]), ray_anchor_print.x, ray_anchor_print.y, ray_anchor_print.z, sample_min_x + ray_anchor_print.x, sample_min_y + ray_anchor_print.y, sample_min_z + ray_anchor_print.z, sample_max_x + ray_anchor_print.x, sample_max_y + ray_anchor_print.y, sample_max_z + ray_anchor_print.z, (sample_min_x + sample_max_x) * 0.5f + ray_anchor_print.x, (sample_min_y + sample_max_y) * 0.5f + ray_anchor_print.y, (sample_min_z + sample_max_z) * 0.5f + ray_anchor_print.z));
 			if (emitter_hit_hist.is_valid()) {
 				const Vector<uint8_t> hist = rd->buffer_get_data(emitter_hit_hist);
 				const int hist_bytes = int((EMITTER_HIT_INSTANCES + 1) * 16 * uint32_t(sizeof(uint32_t)));
