@@ -1037,7 +1037,7 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 				if (held_target > 0.0 && !di_emitter_visible(p_vertex, p_normal, held_point, held_instance, distance_sq)) {
 					atomicAdd(emitter_reuse_counters.held_blocked, 1u);
 				}
-				merge = held_target > 0.0 && held_m > 0.0;
+				merge = held_m > 0.0 && held_geometric > 0.0;
 			}
 		}
 	}
