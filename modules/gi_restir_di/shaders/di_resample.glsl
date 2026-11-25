@@ -964,31 +964,11 @@ vec3 di_emitter_to_world(vec3 p_view) {
 	return ray_scene.camera_to_anchor + offset;
 }
 
-bool di_emitter_visible(vec3 p_vertex, vec3 p_normal, vec3 p_point, uint p_instance, float p_distance_sq) {
-	float distance = sqrt(p_distance_sq);
-	if (!(distance > 2.0 * DI_EMITTER_RAY_BIAS)) {
-		return true;
-	}
-	vec3 vertex = di_emitter_to_world(p_vertex);
-	vec3 point = di_emitter_to_world(p_point);
-	vec3 normal = di_emitter_to_world(p_normal) - ray_scene.camera_to_anchor;
-	vec3 from = vertex + normal * DI_EMITTER_RAY_BIAS;
-	vec3 to = point - normalize(point - vertex) * DI_EMITTER_RAY_BIAS;
-	uint blocker = 0xFFFFFFFFu;
-	float blocker_distance = 0.0;
-	uint blocker_triangle = 0u;
-	return ray_scene_sampled_visibility_blocker(from, to, RAY_SCENE_ALL_CASTERS, stream_seed + 0x51ed270bu, int(p_instance), blocker, blocker_distance, blocker_triangle);
-}
-
 void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 	vec3 new_point = di_emitter_point;
 	vec3 new_color = di_emitter_color;
 	float new_geometric = di_emitter_geometric;
 	float new_target = di_emitter_target(new_color, new_geometric);
-	if (new_target > 0.0 && !di_emitter_visible(p_vertex, p_normal, new_point, di_emitter_instance, dot(new_point - p_vertex, new_point - p_vertex))) {
-		atomicAdd(emitter_reuse_counters.new_blocked, 1u);
-	}
-
 	float held_target = 0.0;
 	float held_origin = 0.0;
 	float held_m = 0.0;
@@ -1033,11 +1013,7 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 				float held_luminance = 0.0;
 				held_color = di_emitter_color_at(held_index, held_point, held_luminance);
 				held_target = di_emitter_target(held_color, held_geometric);
-				held_m = min(uintBitsToFloat(surface.z), 20.0);
-				if (held_target > 0.0 && !di_emitter_visible(p_vertex, p_normal, held_point, held_instance, distance_sq)) {
-					atomicAdd(emitter_reuse_counters.held_blocked, 1u);
-				}
-				merge = held_m > 0.0 && held_geometric > 0.0;
+				held_m = min(uintBitsToFloat(surface.z), 20.0);				merge = held_m > 0.0 && held_geometric > 0.0;
 			}
 		}
 	}
@@ -1088,11 +1064,7 @@ bool di_emitter_hold(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 	vec3 point = (inverse(params.prev_view_from_view) * vec4(held_vec.xyz, 1.0)).xyz;
 	float geometric = held_vec.w;
 	vec3 color = held_tail.rgb;
-	float target = di_emitter_target(color, geometric);
-	if (target > 0.0 && !di_emitter_visible(p_vertex, p_normal, point, instance, dot(point - p_vertex, point - p_vertex))) {
-		atomicAdd(emitter_reuse_counters.held_blocked, 1u);
-	}
-	uint age = min((header.y & 0xFFu) + 1u, 0xFFu);
+	float target = di_emitter_target(color, geometric);	uint age = min((header.y & 0xFFu) + 1u, 0xFFu);
 	float mass = uintBitsToFloat(surface.z);
 	float damp = held_tail.w;
 	uvec4 next_header = uvec4(header.x, age | 0x100u, header.z, floatBitsToUint(target));
