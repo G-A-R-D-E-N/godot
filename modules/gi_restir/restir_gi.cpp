@@ -31,6 +31,7 @@
 #include "restir_gi.h"
 
 #include "restir_harness.h"
+#include "restir_events.h"
 #include "restir_settings.h"
 
 #include "core/config/project_settings.h"
@@ -309,7 +310,10 @@ bool RestirGiBackend::is_active() const {
 	if (!reported) {
 		reported = true;
 		const Variant raw = ProjectSettings::get_singleton()->get_setting("rendering/global_illumination/restir/gi/enabled", false);
-		print_line(vformat("RESTIR_GI active=%s setting=%s", enabled ? "true" : "false", raw));
+		print_line(vformat("RESTIR_GI active=%s setting=%s module_output=%s", enabled ? "true" : "false", raw, restir_route_output(_gi_text("denoise") == "r2", _gi_bool("event_reshade") && _gi_bool("replay_seed"), _gi_text("confidence") == "frames_and_m", uint32_t(_gi_int("n_target"))).module_output ? "true" : "false"));
+		if (enabled && !restir_route_output(_gi_text("denoise") == "r2", _gi_bool("event_reshade") && _gi_bool("replay_seed"), _gi_text("confidence") == "frames_and_m", uint32_t(_gi_int("n_target"))).module_output) {
+			WARN_PRINT_ONCE("ReSTIR GI is enabled but its output is not routed into the picture: set gi/confidence=frames_and_m, or gi/replay_seed and gi/event_reshade, or the pass changes nothing visible.");
+		}
 	}
 	return enabled;
 }
