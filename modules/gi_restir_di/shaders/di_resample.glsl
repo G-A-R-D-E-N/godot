@@ -162,7 +162,7 @@ emitter_scan;
 
 #if defined(MODE_EMITTER_SPATIAL)
 layout(set = 0, binding = 25, std430) restrict buffer EmitterSpatialCounts {
-	uint words[4];
+	uint words[16];
 }
 emitter_spatial_counts;
 #endif
