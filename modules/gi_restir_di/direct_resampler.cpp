@@ -371,7 +371,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	const Settings settings = get_project_settings();
 	{
 		static bool rdi_settings_printed = false;
-		if (!rdi_settings_printed) {
+		if (!rdi_settings_printed && variant_mode_names.size() == int(VARIANT_LAST)) {
 			rdi_settings_printed = true;
 			{
 				String variant_line;
