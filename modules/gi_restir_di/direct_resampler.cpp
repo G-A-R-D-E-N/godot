@@ -383,7 +383,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 				}
 				print_line(vformat("DIRECT_EMITTERS variants: count %d modes_count %d match %d last %d emitter_spatial %d modes %s", int(VARIANT_LAST), int(variant_mode_names.size()), int(VARIANT_LAST) == int(variant_mode_names.size()) ? 1 : 0, int(VARIANT_LAST - 1), int(VARIANT_EMITTER_SPATIAL), variant_line));
 			}
-			print_line(vformat("DIRECT_EMITTERS settings: master %s resampled %s emitters %s temporal %s spatial %s source_match %s", GLOBAL_GET("rendering/global_illumination/direct/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/temporal"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial_source_match")));
+			print_line(vformat("DIRECT_EMITTERS settings: master %s resampled %s emitters %s temporal %s spatial %s source_match %s normal_dot %.2f", GLOBAL_GET("rendering/global_illumination/direct/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/temporal"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial_source_match"), double(GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial_normal_dot"))));
 		}
 	}
 
