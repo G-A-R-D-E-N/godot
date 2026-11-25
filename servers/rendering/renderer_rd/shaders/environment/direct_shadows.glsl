@@ -799,9 +799,9 @@ void main() {
 			uint sx = uint(clamp((emitter_point.x + 2048.0) * 16.0, 0.0, 131071.0));
 			uint sy = uint(clamp((emitter_point.y + 2048.0) * 16.0, 0.0, 131071.0));
 			uint sz = uint(clamp((emitter_point.z + 2048.0) * 16.0, 0.0, 131071.0));
-			atomicMin(counters.sample_min_x, sx);
-			atomicMin(counters.sample_min_y, sy);
-			atomicMin(counters.sample_min_z, sz);
+			atomicMax(counters.sample_min_x, 131071u - sx);
+			atomicMax(counters.sample_min_y, 131071u - sy);
+			atomicMax(counters.sample_min_z, 131071u - sz);
 			atomicMax(counters.sample_max_x, sx);
 			atomicMax(counters.sample_max_y, sy);
 			atomicMax(counters.sample_max_z, sz);
@@ -821,7 +821,7 @@ void main() {
 			vec3 emitter_to = emitter_from + emitter_offset * (1.0 - params.bias / emitter_reach);
 			uint emitter_rays = params.reference != 0u ? REFERENCE_RAYS : 1u;
 			float emitter_ray_length = length(emitter_to - emitter_from);
-			atomicMin(counters.min_ray_len, uint(clamp(emitter_ray_length * 4.0, 0.0, 4095.0)));
+			atomicMax(counters.min_ray_len, 4095u - uint(clamp(emitter_ray_length * 4.0, 0.0, 4095.0)));
 			for (uint r = 0u; r < emitter_rays; r++) {
 				int skip_instance = params.pad1 != 0u ? int(params.pad1) - 1 : -1;
 				uint blocker = 0xFFFFFFFFu;
@@ -1114,6 +1114,7 @@ void main() {
 		imageStore(debug_image, at, vec4(color, 1.0));
 	}
 }
+
 
 
 
