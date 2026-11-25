@@ -356,7 +356,18 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		static bool rdi_settings_printed = false;
 		if (!rdi_settings_printed) {
 			rdi_settings_printed = true;
-			print_line(vformat("DIRECT_EMITTERS settings: master %s resampled %s emitters %s temporal %s spatial %s source_match %s", GLOBAL_GET("rendering/global_illumination/direct/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/temporal"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial_source_match")));
+			{
+				static const char *mode_names[] = {
+					"none", "MODE_SPATIAL", "DI_EMITTERS", "MODE_EMITTER_SUM", "MODE_EMITTER_SCAN",
+					"MODE_EMITTER_PREFIX", "MODE_EMITTER_TEMPORAL", "LAB_COUNTS", "MODE_SPATIAL+LAB_COUNTS",
+					"MODE_EMITTER_SPATIAL"
+				};
+				String variant_line;
+				for (int v = 0; v < int(VARIANT_LAST); v++) {
+					variant_line += vformat("%s%d:%s", v == 0 ? "" : " ", v, v < int(sizeof(mode_names) / sizeof(mode_names[0])) ? mode_names[v] : "unmapped");
+				}
+				print_line(vformat("DIRECT_EMITTERS variants: count %d last %d emitter_spatial %d modes %s", int(VARIANT_LAST), int(VARIANT_LAST - 1), int(VARIANT_EMITTER_SPATIAL), variant_line));
+			}			print_line(vformat("DIRECT_EMITTERS settings: master %s resampled %s emitters %s temporal %s spatial %s source_match %s", GLOBAL_GET("rendering/global_illumination/direct/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/temporal"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial_source_match")));
 		}
 	}
 

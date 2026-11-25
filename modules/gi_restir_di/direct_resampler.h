@@ -207,7 +207,9 @@ private:
 		VARIANT_SPATIAL_LAB = 8,
 #endif
 		VARIANT_EMITTER_SPATIAL,
+		VARIANT_LAST,
 	};
+	static_assert(VARIANT_EMITTER_SPATIAL == VARIANT_LAST - 1, "The emitter spatial variant must be last: a variant inserted before it shifts every later index.");
 
 	DiResampleShaderRD *shader = nullptr;
 	RID shader_version;
