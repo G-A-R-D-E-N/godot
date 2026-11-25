@@ -708,7 +708,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		print_line(vformat("DIRECT_EMITTERS spatial bytes: %d", int(spatial_counts.size())));
 		if (spatial_counts.size() >= 12) {
 			const uint32_t *words = reinterpret_cast<const uint32_t *>(spatial_counts.ptr());
-			print_line(vformat("DIRECT_EMITTERS spatial: pixels %d merged %d accepted %d", int(words[0]), int(words[1]), int(words[2])));
+			print_line(vformat("DIRECT_EMITTERS spatial: pixels %d merged %d accepted %d probe %d", int(words[0]), int(words[1]), int(words[2]), int(words[3])));
 		}
 	}
 	if (spatial) {
