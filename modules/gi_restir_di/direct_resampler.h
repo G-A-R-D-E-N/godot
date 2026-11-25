@@ -88,6 +88,7 @@ public:
 		float head_swap_margin = 0.25f;
 		uint32_t head_swap_frames = 4;
 		bool head_window = false;
+		float emitter_clamp = 0.0f;
 	};
 
 	struct Params {
@@ -124,8 +125,13 @@ public:
 		uint32_t head_swap_frames;
 		uint32_t temporal_reuse;
 		uint32_t head_window;
+		float emitter_clamp;
+		uint32_t emitter_clamp_pad0;
+		uint32_t emitter_clamp_pad1;
+		uint32_t emitter_clamp_pad2;
 	};
-	static_assert(sizeof(Params) == 432);
+	static_assert(sizeof(Params) == 448);
+	static_assert(sizeof(Params) % 16 == 0);
 
 	static constexpr uint32_t RESERVOIRS_OFF = 0;
 	static constexpr uint32_t RESERVOIRS_B1 = 1;

@@ -85,6 +85,10 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	uint head_swap_frames;
 	uint temporal_reuse;
 	uint head_window;
+	float emitter_clamp;
+	uint emitter_clamp_pad0;
+	uint emitter_clamp_pad1;
+	uint emitter_clamp_pad2;
 }
 params;
 
@@ -197,6 +201,15 @@ uint di_emitter_instance = 0u;
 uint di_emitter_triangle = 0u;
 uint di_emitter_index = 0u;
 #endif
+
+float di_emitter_clamped_luminance(vec3 p_color, float p_total) {
+	float unit = p_total * params.emitter_clamp;
+	if (!(unit > 0.0)) {
+		return 0.0;
+	}
+	float luminance = dot(max(p_color, vec3(0.0)), luminance_weights);
+	return luminance > unit ? unit / luminance : 0.0;
+}
 
 float di_emitter_selection_luminance(uint p_material) {
 	float luminance = dot(max(ray_scene_triangle_emitter_emission(p_material), vec3(0.0)), luminance_weights);
@@ -313,6 +326,10 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 	}
 	float geometric = min(cos_light / max(distance * distance, 1e-8), 60000.0);
 	vec3 color = texel_emission * (total / luminance);
+	float clamp_scale = di_emitter_clamped_luminance(color, total);
+	if (clamp_scale > 0.0) {
+		color *= clamp_scale;
+	}
 	if (any(isinf(color)) || any(isnan(color))) {
 		di_emitter_clear(p_pixel, 4u);
 		return;
@@ -952,7 +969,13 @@ vec3 di_emitter_color_at(uint p_index, vec3 p_point, out float r_luminance_weigh
 	float luminance = dot(max(emission, vec3(0.0)), luminance_weights);
 	float selection = di_emitter_selection_luminance(emitter.material);
 	r_luminance_weight = luminance;
-	return (luminance > 0.0 && selection > 0.0) ? emission * (emitter_scan.data[DI_EMITTER_TOTAL] / selection) : vec3(0.0);
+	if (!(luminance > 0.0 && selection > 0.0)) {
+		return vec3(0.0);
+	}
+	float total = emitter_scan.data[DI_EMITTER_TOTAL];
+	vec3 color = emission * (total / selection);
+	float clamp_scale = di_emitter_clamped_luminance(color, total);
+	return clamp_scale > 0.0 ? color * clamp_scale : color;
 }
 
 float di_emitter_target(vec3 p_color, float p_geometric) {
