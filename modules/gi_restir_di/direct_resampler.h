@@ -65,6 +65,7 @@ public:
 		bool emitters = false;
 			bool emitter_temporal = false;
 		bool emitter_spatial = false;
+	bool emitter_visibility = false;
 		uint32_t head = 4;
 		uint32_t tail_samples = 1;
 		float floor_value = 0.0625f;
@@ -128,8 +129,12 @@ public:
 		uint32_t pad_emitter_a;
 		uint32_t pad_emitter_b;
 		uint32_t pad_emitter_c;
+		uint32_t emitter_visibility;
+		uint32_t pad_visibility_a;
+		uint32_t pad_visibility_b;
+		uint32_t pad_visibility_c;
 	};
-	static_assert(sizeof(Params) == 448);
+	static_assert(sizeof(Params) == 464);
 
 	static constexpr uint32_t RESERVOIRS_OFF = 0;
 	static constexpr uint32_t RESERVOIRS_B1 = 1;
@@ -186,6 +191,7 @@ private:
 		bool emitters = false;
 			bool emitter_temporal = false;
 		bool emitter_spatial = false;
+	bool emitter_visibility = false;
 		uint32_t counter = 1;
 		uint32_t history_set = 0;
 		uint32_t head_state_set = 0;
