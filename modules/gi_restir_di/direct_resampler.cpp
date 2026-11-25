@@ -674,6 +674,9 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 			uint32_t rejected_other = 0;
 			float best = 0.0f;
 			Vector3 best_color;
+			double sum_r = 0.0;
+			double sum_g = 0.0;
+			double sum_b = 0.0;
 			const float *floats = reinterpret_cast<const float *>(data.ptr());
 			if (data.size() >= int(pixels) * 32) {
 				for (uint32_t i = 0; i < pixels; i++) {
@@ -682,6 +685,9 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 					const float lum = floats[o + 4] + floats[o + 5] + floats[o + 6];
 					if (geometric > 0.0f && lum > 0.0f) {
 						nonzero++;
+						sum_r += double(floats[o + 4]);
+						sum_g += double(floats[o + 5]);
+						sum_b += double(floats[o + 6]);
 						if (lum > best) {
 							best = lum;
 							best_color = Vector3(floats[o + 4], floats[o + 5], floats[o + 6]);
@@ -699,7 +705,8 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 					}
 				}
 			}
-			print_line(vformat("DIRECT_EMITTERS samples: pixels %d nonzero %d best_lum %.4f best_rgb %.3f %.3f %.3f rejected_area %d rejected_cos %d rejected_shadow %d rejected_other %d", int(pixels), int(nonzero), best, best_color.x, best_color.y, best_color.z, int(rejected_area), int(rejected_cos), int(rejected_shadow), int(rejected_other)));
+			const double sum_lum = sum_r * 0.2126 + sum_g * 0.7152 + sum_b * 0.0722;
+			print_line(vformat("DIRECT_EMITTERS samples: pixels %d nonzero %d best_lum %.4f best_rgb %.3f %.3f %.3f rejected_area %d rejected_cos %d rejected_shadow %d rejected_other %d sample_sum_rgb %.6f %.6f %.6f sample_sum_lum %.6f", int(pixels), int(nonzero), best, best_color.x, best_color.y, best_color.z, int(rejected_area), int(rejected_cos), int(rejected_shadow), int(rejected_other), sum_r, sum_g, sum_b, sum_lum));
 			emitter_samples_before = data;
 		}
 	}
