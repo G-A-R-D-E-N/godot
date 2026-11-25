@@ -789,10 +789,10 @@ void main() {
 	if (emitter_tail && emitter_geometry.w > 0.0) {
 		vec3 emitter_point = to_world(emitter_geometry.xyz) + ray_scene.camera_to_anchor;
 		vec3 emitter_from = anchored + to_world(normal) * params.bias;
-		{
-			uint sx = uint(clamp((emitter_point.x + 4096.0) * 16.0, 0.0, 131071.0));
-			uint sy = uint(clamp((emitter_point.y + 4096.0) * 16.0, 0.0, 131071.0));
-			uint sz = uint(clamp((emitter_point.z + 4096.0) * 16.0, 0.0, 131071.0));
+		if (abs(emitter_point.x) < 2048.0 && abs(emitter_point.y) < 2048.0 && abs(emitter_point.z) < 2048.0) {
+			uint sx = uint(clamp((emitter_point.x + 2048.0) * 16.0, 0.0, 131071.0));
+			uint sy = uint(clamp((emitter_point.y + 2048.0) * 16.0, 0.0, 131071.0));
+			uint sz = uint(clamp((emitter_point.z + 2048.0) * 16.0, 0.0, 131071.0));
 			atomicMin(counters.sample_min_x, sx);
 			atomicMin(counters.sample_min_y, sy);
 			atomicMin(counters.sample_min_z, sz);
