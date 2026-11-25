@@ -130,6 +130,7 @@ public:
 		uint32_t head_window;
 	};
 	static_assert(sizeof(Params) == 448);
+	static_assert(sizeof(Params) % 16 == 0);
 
 	static constexpr uint32_t RESERVOIRS_OFF = 0;
 	static constexpr uint32_t RESERVOIRS_B1 = 1;
