@@ -325,6 +325,7 @@ float di_emitter_lane_sum(uint p_base, uint p_count) {
 #define DEBUG_STALE_PRIOR 1u
 #define DEBUG_COUNT 2u
 #define DEBUG_NO_STAMP 4u
+#define DEBUG_SOURCE_MATCH 8u
 #define RECORD_EXACT_CHECK 0x80000000u
 #define RESERVOIRS_OFF 0u
 #define RESERVOIRS_U1 2u
@@ -1074,7 +1075,7 @@ void main() {
 		uint other_index = uint(other.y) * uint(params.size.x) + uint(other.x);
 		vec4 other_point = emitter_samples.data[other_index * 2u];
 		vec4 other_color = emitter_samples.data[other_index * 2u + 1u];
-		if (abs(other_color.a - selected_color.a) > 0.5) {
+		if ((params.debug_flags & DEBUG_SOURCE_MATCH) != 0u && abs(other_color.a - selected_color.a) > 0.5) {
 			continue;
 		}
 		float other_mass = di_emitter_sample_mass(other_color, other_point);

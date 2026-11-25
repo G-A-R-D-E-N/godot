@@ -74,6 +74,7 @@ public:
 		String debug_log;
 #ifdef DI_RESAMPLER_LAB
 		bool no_stamp = false;
+	bool emitter_spatial_source_match = true;
 		String lab_log;
 #endif
 		uint32_t reservoirs = 0;
@@ -146,6 +147,7 @@ public:
 	static constexpr uint32_t DEBUG_BYTES = (DEBUG_HEADER_WORDS + DEBUG_SLOTS) * 4;
 #ifdef DI_RESAMPLER_LAB
 	static constexpr uint32_t DEBUG_FLAG_NO_STAMP = 4;
+	static constexpr uint32_t DEBUG_FLAG_SOURCE_MATCH = 8;
 	static constexpr uint32_t LAB_HEADER_WORDS = 8;
 	static constexpr uint32_t LAB_BYTES = (LAB_HEADER_WORDS + DEBUG_SLOTS) * 4;
 	static constexpr uint32_t LAB_MASK_BYTES = 2560 * 1440 / 8;

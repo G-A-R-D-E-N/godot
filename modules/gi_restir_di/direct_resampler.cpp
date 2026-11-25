@@ -62,6 +62,7 @@ void DirectResamplerRD::register_settings() {
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("debug/stale_prior"), false);
 #ifdef DI_RESAMPLER_LAB
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("debug/no_stamp"), false);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/spatial_source_match"), true);
 #endif
 	GLOBAL_DEF(PropertyInfo(Variant::STRING, DI_RESAMPLED_SETTING("debug/log"), PROPERTY_HINT_GLOBAL_SAVE_FILE, "*.txt"), String());
 #ifdef DI_RESAMPLER_LAB
@@ -110,6 +111,7 @@ DirectResamplerRD::Settings DirectResamplerRD::get_project_settings() {
 	settings.debug_log = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/log"));
 #ifdef DI_RESAMPLER_LAB
 	settings.no_stamp = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/no_stamp"));
+	settings.emitter_spatial_source_match = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/spatial_source_match"));
 	settings.lab_log = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/lab_log"));
 #endif
 	clamp_reservoir_settings(settings, GLOBAL_GET(DI_RESAMPLED_SETTING("reservoirs")), GLOBAL_GET(DI_RESAMPLED_SETTING("temporal_reuse")), GLOBAL_GET(DI_RESAMPLED_SETTING("spatial_neighbors")), GLOBAL_GET(DI_RESAMPLED_SETTING("spatial_radius")), GLOBAL_GET(DI_RESAMPLED_SETTING("c_full")), GLOBAL_GET(DI_RESAMPLED_SETTING("m_temporal_cap")), GLOBAL_GET(DI_RESAMPLED_SETTING("m_stored_cap")), GLOBAL_GET("rendering/global_illumination/direct/dynamic_history_cap"), GLOBAL_GET(DI_RESAMPLED_SETTING("head_rank")), GLOBAL_GET(DI_RESAMPLED_SETTING("head_swap_margin")), GLOBAL_GET(DI_RESAMPLED_SETTING("head_swap_frames")), GLOBAL_GET(DI_RESAMPLED_SETTING("debug/head_swap_window")));
@@ -144,6 +146,7 @@ String DirectResamplerRD::lab_settings_text(const Settings &p_settings) {
 	text += " tail_visibility=" + String(visibility[MIN(p_settings.tail_visibility, 2u)]);
 	text += " stale_prior=" + itos(p_settings.stale_prior ? 1 : 0);
 	text += " no_stamp=" + itos(p_settings.no_stamp ? 1 : 0);
+	text += " source_match=" + itos(p_settings.emitter_spatial_source_match ? 1 : 0);
 	text += " mass_bound=" + itos(lab_mass_bound(p_settings));
 	return text;
 }
@@ -535,6 +538,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	params.debug_flags = (settings.stale_prior ? DEBUG_FLAG_STALE_PRIOR : 0) | (counting ? DEBUG_FLAG_COUNT : 0);
 #ifdef DI_RESAMPLER_LAB
 	params.debug_flags |= settings.no_stamp ? DEBUG_FLAG_NO_STAMP : 0;
+	params.debug_flags |= settings.emitter_spatial_source_match ? DEBUG_FLAG_SOURCE_MATCH : 0;
 #endif
 	params.reservoirs = settings.reservoirs;
 	params.c_full = settings.c_full;
