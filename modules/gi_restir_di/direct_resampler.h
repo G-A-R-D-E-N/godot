@@ -230,6 +230,8 @@ private:
 	RID emitter_spatial_counts;
 	bool spatial_counts_due = false;
 	bool emitter_census_printed = false;
+	uint32_t emitter_census_triangles = 0;
+	uint32_t emitter_census_frames = 0;
 	uint32_t emitter_cdf_capacity = 0;
 	uint32_t emitter_samples_bytes = 0;
 	bool emitter_device_ready = false;
