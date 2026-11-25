@@ -63,6 +63,7 @@ void DirectResamplerRD::register_settings() {
 #ifdef DI_RESAMPLER_LAB
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("debug/no_stamp"), false);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/spatial_source_match"), true);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, DI_RESAMPLED_SETTING("emitters/spatial_normal_dot"), PROPERTY_HINT_RANGE, "0.5,1.0,0.01"), 0.9);
 #endif
 	GLOBAL_DEF(PropertyInfo(Variant::STRING, DI_RESAMPLED_SETTING("debug/log"), PROPERTY_HINT_GLOBAL_SAVE_FILE, "*.txt"), String());
 #ifdef DI_RESAMPLER_LAB
@@ -112,6 +113,7 @@ DirectResamplerRD::Settings DirectResamplerRD::get_project_settings() {
 #ifdef DI_RESAMPLER_LAB
 	settings.no_stamp = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/no_stamp"));
 	settings.emitter_spatial_source_match = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/spatial_source_match"));
+	settings.spatial_normal_dot = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/spatial_normal_dot"));
 	settings.lab_log = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/lab_log"));
 #endif
 	clamp_reservoir_settings(settings, GLOBAL_GET(DI_RESAMPLED_SETTING("reservoirs")), GLOBAL_GET(DI_RESAMPLED_SETTING("temporal_reuse")), GLOBAL_GET(DI_RESAMPLED_SETTING("spatial_neighbors")), GLOBAL_GET(DI_RESAMPLED_SETTING("spatial_radius")), GLOBAL_GET(DI_RESAMPLED_SETTING("c_full")), GLOBAL_GET(DI_RESAMPLED_SETTING("m_temporal_cap")), GLOBAL_GET(DI_RESAMPLED_SETTING("m_stored_cap")), GLOBAL_GET("rendering/global_illumination/direct/dynamic_history_cap"), GLOBAL_GET(DI_RESAMPLED_SETTING("head_rank")), GLOBAL_GET(DI_RESAMPLED_SETTING("head_swap_margin")), GLOBAL_GET(DI_RESAMPLED_SETTING("head_swap_frames")), GLOBAL_GET(DI_RESAMPLED_SETTING("debug/head_swap_window")));
@@ -564,6 +566,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 #ifdef DI_RESAMPLER_LAB
 	params.debug_flags |= settings.no_stamp ? DEBUG_FLAG_NO_STAMP : 0;
 	params.debug_flags |= settings.emitter_spatial_source_match ? DEBUG_FLAG_SOURCE_MATCH : 0;
+	params.spatial_normal_dot = settings.spatial_normal_dot;
 #endif
 	params.reservoirs = settings.reservoirs;
 	params.c_full = settings.c_full;

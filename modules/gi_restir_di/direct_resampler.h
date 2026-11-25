@@ -87,6 +87,7 @@ public:
 		uint32_t dynamic_cap = 2;
 		bool head_rank_visible = false;
 		float head_swap_margin = 0.25f;
+	float spatial_normal_dot = 0.9f;
 		uint32_t head_swap_frames = 4;
 		bool head_window = false;
 	};
@@ -122,11 +123,12 @@ public:
 		uint32_t counter;
 		uint32_t head_rank;
 		float head_swap_margin;
+		float spatial_normal_dot;
 		uint32_t head_swap_frames;
 		uint32_t temporal_reuse;
 		uint32_t head_window;
 	};
-	static_assert(sizeof(Params) == 432);
+	static_assert(sizeof(Params) == 436);
 
 	static constexpr uint32_t RESERVOIRS_OFF = 0;
 	static constexpr uint32_t RESERVOIRS_B1 = 1;

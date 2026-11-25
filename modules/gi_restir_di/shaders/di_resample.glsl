@@ -82,6 +82,7 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	uint counter;
 	uint head_rank;
 	float head_swap_margin;
+	float spatial_normal_dot;
 	uint head_swap_frames;
 	uint temporal_reuse;
 	uint head_window;
@@ -1072,7 +1073,7 @@ void main() {
 			continue;
 		}
 		atomicAdd(emitter_spatial_counts.words[12], 1u);
-		if (dot(normal, other_normal) < 0.9) {
+		if (dot(normal, other_normal) < params.spatial_normal_dot) {
 			continue;
 		}
 		uint other_index = uint(other.y) * uint(params.size.x) + uint(other.x);
