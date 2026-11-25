@@ -54,4 +54,4 @@ TEST_CASE("[RayScene] a non-zero gi_emission is an emission value") {
 
 } // namespace TestRaySceneEmission
 
-#endif // RD_ENABLED
+#endif
