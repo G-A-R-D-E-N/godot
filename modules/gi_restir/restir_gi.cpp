@@ -304,7 +304,14 @@ RestirGiBackend::~RestirGiBackend() {
 }
 
 bool RestirGiBackend::is_active() const {
-	return restir_gi_enabled();
+	const bool enabled = restir_gi_enabled();
+	static bool reported = false;
+	if (!reported) {
+		reported = true;
+		const Variant raw = ProjectSettings::get_singleton()->get_setting("rendering/global_illumination/restir/gi/enabled", false);
+		print_line(vformat("RESTIR_GI active=%s setting=%s", enabled ? "true" : "false", raw));
+	}
+	return enabled;
 }
 
 bool RestirGiBackend::wants_all_tiles() const {
