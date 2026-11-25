@@ -580,7 +580,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	}
 #endif
 	if (emitter_spatial_counts.is_null()) {
-		emitter_spatial_counts = rd->storage_buffer_create(64u);
+		emitter_spatial_counts = rd->storage_buffer_create(96u);
 		rd->set_resource_name(emitter_spatial_counts, "Direct Resampler Emitter Spatial Counts");
 	}
 	LocalVector<RD::Uniform> ray_uniforms;
@@ -694,9 +694,10 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		print_line(vformat("DIRECT_EMITTERS emitter terms: emitters %d device_ready %d scene %d ready %d hw %d count %d head %d tail %d max %d", int(settings.emitters), int(emitter_device_ready), int(ray_scene != nullptr), int(ray_scene && ray_scene->is_ready()), int(ray_scene && ray_scene->uses_hardware()), int(ray_scene ? ray_scene->get_triangle_emitter_count() : 0), int(settings.head), int(settings.tail_samples), int(MAX_EMITTER_TAIL_SUM)));
 		if (spatial_counts_due) {
 		const Vector<uint8_t> spatial_counts = rd->buffer_get_data(emitter_spatial_counts);
-		if (spatial_counts.size() >= 64) {
+		if (spatial_counts.size() >= 96) {
 			const uint32_t *words = reinterpret_cast<const uint32_t *>(spatial_counts.ptr());
 			print_line(vformat("DIRECT_EMITTERS spatial: invocations %d tilegate %d surface %d neighbours %d merges %d pixels %d merged %d accepted %d", int(words[3]), int(words[4]), int(words[5]), int(words[6]), int(words[7]), int(words[0]), int(words[1]), int(words[2])));
+			print_line(vformat("DIRECT_EMITTERS spatial tile: value %d counter %d", int(words[8]), int(words[9])));
 		}
 		spatial_counts_due = false;
 	}
@@ -707,11 +708,11 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		rd->draw_command_begin_label("Direct Resample Emitter Spatial");
 			{
 				LocalVector<uint8_t> sentinel;
-				sentinel.resize(64);
-				for (uint32_t i = 0; i < 64u; i++) {
+				sentinel.resize(96);
+				for (uint32_t i = 0; i < 96u; i++) {
 					sentinel[i] = 0x7F;
 				}
-				rd->buffer_update(emitter_spatial_counts, 0, 64, sentinel.ptr());
+				rd->buffer_update(emitter_spatial_counts, 0, 96, sentinel.ptr());
 			}
 			LocalVector<RD::Uniform> spatial_set;
 			spatial_set.reserve(uniforms.size() + 1);

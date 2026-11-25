@@ -162,7 +162,7 @@ emitter_scan;
 
 #if defined(MODE_EMITTER_SPATIAL)
 layout(set = 0, binding = 25, std430) restrict buffer EmitterSpatialCounts {
-	uint words[16];
+	uint words[24];
 }
 emitter_spatial_counts;
 #endif
@@ -1025,9 +1025,11 @@ void main() {
 		return;
 	}
 	atomicAdd(emitter_spatial_counts.words[3], 12345u);
-	if (imageLoad(tile_flags, pixel >> 3).r != params.counter) {
-		return;
+	if (pixel == ivec2(0)) {
+		emitter_spatial_counts.words[8] = imageLoad(tile_flags, ivec2(0)).r;
+		emitter_spatial_counts.words[9] = params.counter;
 	}
+	atomicAdd(emitter_spatial_counts.words[4], 1u);
 	vec3 vertex = vec3(0.0);
 	vec3 normal = vec3(0.0, 0.0, 1.0);
 	float roughness = 0.0;
@@ -1036,6 +1038,7 @@ void main() {
 	if (!surface_at(pixel, vertex, normal, roughness, packed_normal, depth)) {
 		return;
 	}
+	atomicAdd(emitter_spatial_counts.words[5], 1u);
 	uint index = uint(pixel.y) * uint(params.size.x) + uint(pixel.x);
 	vec4 selected_point = emitter_samples.data[index * 2u];
 	vec4 selected_color = emitter_samples.data[index * 2u + 1u];
@@ -1083,9 +1086,11 @@ void main() {
 			selected_color = other_color;
 		}
 	}
+	atomicAdd(emitter_spatial_counts.words[6], accepted);
 	if (!(total_mass > 0.0)) {
 		return;
 	}
+	atomicAdd(emitter_spatial_counts.words[7], 1u);
 	merged = 1u;
 	emitter_samples.data[index * 2u] = selected_point;
 	emitter_samples.data[index * 2u + 1u] = vec4(total_weighted / total_mass, 0.0);
