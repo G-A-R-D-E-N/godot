@@ -702,7 +702,10 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 			print_line(vformat("DIRECT_EMITTERS samples: pixels %d nonzero %d best_lum %.4f best_rgb %.3f %.3f %.3f rejected_area %d rejected_cos %d rejected_shadow %d rejected_other %d", int(pixels), int(nonzero), best, best_color.x, best_color.y, best_color.z, int(rejected_area), int(rejected_cos), int(rejected_shadow), int(rejected_other)));
 		}
 	}
-	emitter_census_frames++;`r`n`tif (ray_scene && ray_scene->uses_hardware() && ray_scene->get_triangle_emitter_count() > 0 && (emitter_census_triangles != ray_scene->get_triangle_emitter_count() || emitter_census_frames > 240u)) {`r`n`t`temitter_census_triangles = ray_scene->get_triangle_emitter_count();`r`n`t`temitter_census_frames = 0;
+	emitter_census_frames++;
+	if (ray_scene && ray_scene->uses_hardware() && ray_scene->get_triangle_emitter_count() > 0 && (emitter_census_triangles != ray_scene->get_triangle_emitter_count() || emitter_census_frames > 240u)) {
+		emitter_census_triangles = ray_scene->get_triangle_emitter_count();
+		emitter_census_frames = 0;
 		emitter_census_printed = true;
 		const uint32_t census_count = ray_scene->get_triangle_emitter_count();
 		const Vector<uint8_t> census_data = rd->buffer_get_data(ray_scene->get_triangle_emitters());
