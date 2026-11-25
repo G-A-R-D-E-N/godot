@@ -258,6 +258,11 @@ bool DirectResamplerRD::_ensure_emitter_samples(uint32_t p_pixels) {
 void DirectResamplerRD::_free_emitter_buffers() {
 	RD *rd = RD::get_singleton();
 	RID *owned[] = { &emitter_cdf, &emitter_scan, &emitter_samples };
+	if (emitter_spatial_counts.is_valid()) {
+		rd->free_rid(emitter_spatial_counts);
+		emitter_spatial_counts = RID();
+	}
+	spatial_counts_due = false;
 	for (RID *rid : owned) {
 		if (rid->is_valid()) {
 			rd->free_rid(*rid);
