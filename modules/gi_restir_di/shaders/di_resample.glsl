@@ -947,7 +947,8 @@ bool di_emitter_visible(vec3 p_vertex, vec3 p_normal, vec3 p_point, uint p_insta
 	vec3 to = point - normalize(point - vertex) * DI_EMITTER_RAY_BIAS;
 	uint blocker = 0xFFFFFFFFu;
 	float blocker_distance = 0.0;
-	return ray_scene_sampled_visibility_blocker(from, to, RAY_SCENE_ALL_CASTERS, stream_seed + 0x51ed270bu, int(p_instance), blocker, blocker_distance);
+	uint blocker_triangle = 0u;
+	return ray_scene_sampled_visibility_blocker(from, to, RAY_SCENE_ALL_CASTERS, stream_seed + 0x51ed270bu, int(p_instance), blocker, blocker_distance, blocker_triangle);
 }
 
 void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
