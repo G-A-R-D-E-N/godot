@@ -692,7 +692,15 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		}
 	}
 		print_line(vformat("DIRECT_EMITTERS emitter terms: emitters %d device_ready %d scene %d ready %d hw %d count %d head %d tail %d max %d", int(settings.emitters), int(emitter_device_ready), int(ray_scene != nullptr), int(ray_scene && ray_scene->is_ready()), int(ray_scene && ray_scene->uses_hardware()), int(ray_scene ? ray_scene->get_triangle_emitter_count() : 0), int(settings.head), int(settings.tail_samples), int(MAX_EMITTER_TAIL_SUM)));
-		print_line(vformat("DIRECT_EMITTERS spatial gate: emitter_active %d setting %d pipeline %d", int(emitter_active), int(settings.emitter_spatial), int(emitter_spatial_pipeline.get_rid().is_valid())));
+		if (spatial_counts_due) {
+		const Vector<uint8_t> spatial_counts = rd->buffer_get_data(emitter_spatial_counts);
+		if (spatial_counts.size() >= 16) {
+			const uint32_t *words = reinterpret_cast<const uint32_t *>(spatial_counts.ptr());
+			print_line(vformat("DIRECT_EMITTERS spatial: pixels %d merged %d accepted %d probe %d", int(words[0]), int(words[1]), int(words[2]), int(words[3])));
+		}
+		spatial_counts_due = false;
+	}
+	print_line(vformat("DIRECT_EMITTERS spatial gate: emitter_active %d setting %d pipeline %d", int(emitter_active), int(settings.emitter_spatial), int(emitter_spatial_pipeline.get_rid().is_valid())));
 	if (emitter_active && settings.emitter_spatial && emitter_spatial_pipeline.get_rid().is_valid()) {
 		const RID emitter_spatial_rid = shader->version_get_shader(shader_version, VARIANT_EMITTER_SPATIAL);
 		RENDER_TIMESTAMP("Direct Resample Emitter Spatial");
@@ -704,12 +712,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
 		rd->compute_list_end();
 		rd->draw_command_end_label();
-		const Vector<uint8_t> spatial_counts = rd->buffer_get_data(emitter_spatial_counts);
-		print_line(vformat("DIRECT_EMITTERS spatial bytes: %d", int(spatial_counts.size())));
-		if (spatial_counts.size() >= 12) {
-			const uint32_t *words = reinterpret_cast<const uint32_t *>(spatial_counts.ptr());
-			print_line(vformat("DIRECT_EMITTERS spatial: pixels %d merged %d accepted %d probe %d", int(words[0]), int(words[1]), int(words[2]), int(words[3])));
-		}
+		spatial_counts_due = true;
 	}
 	if (spatial) {
 		const RID spatial_rid = shader->version_get_shader(shader_version, spatial_variant);

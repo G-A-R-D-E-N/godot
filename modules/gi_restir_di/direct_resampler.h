@@ -226,6 +226,7 @@ private:
 	RID emitter_scan;
 	RID emitter_samples;
 	RID emitter_spatial_counts;
+	bool spatial_counts_due = false;
 	uint32_t emitter_cdf_capacity = 0;
 	uint32_t emitter_samples_bytes = 0;
 	bool emitter_device_ready = false;
