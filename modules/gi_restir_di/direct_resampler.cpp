@@ -579,11 +579,18 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 21, lab_mask_buffer));
 	}
 #endif
+	if (emitter_spatial_counts.is_null()) {
+		emitter_spatial_counts = rd->storage_buffer_create(16u);
+		rd->set_resource_name(emitter_spatial_counts, "Direct Resampler Emitter Spatial Counts");
+	}
 	LocalVector<RD::Uniform> ray_uniforms;
 	if (emitter_active) {
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 22, emitter_cdf));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 23, emitter_scan));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 24, emitter_samples));
+		if (settings.emitter_spatial) {
+			uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 25, emitter_spatial_counts));
+		}
 		ray_uniforms.reserve(8);
 		ray_scene->append_uniforms(ray_uniforms);
 	}
@@ -697,7 +704,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
 		rd->compute_list_end();
 		rd->draw_command_end_label();
-		const Vector<uint8_t> spatial_counts = rd->buffer_get_data(debug_buffer);
+		const Vector<uint8_t> spatial_counts = rd->buffer_get_data(emitter_spatial_counts);
 		print_line(vformat("DIRECT_EMITTERS spatial bytes: %d", int(spatial_counts.size())));
 		if (spatial_counts.size() >= 12) {
 			const uint32_t *words = reinterpret_cast<const uint32_t *>(spatial_counts.ptr());
