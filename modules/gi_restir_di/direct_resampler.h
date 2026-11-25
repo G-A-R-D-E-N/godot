@@ -124,11 +124,12 @@ public:
 		uint32_t head_rank;
 		float head_swap_margin;
 		float spatial_normal_dot;
+		float std140_pad[3];
 		uint32_t head_swap_frames;
 		uint32_t temporal_reuse;
 		uint32_t head_window;
 	};
-	static_assert(sizeof(Params) == 436);
+	static_assert(sizeof(Params) == 448);
 
 	static constexpr uint32_t RESERVOIRS_OFF = 0;
 	static constexpr uint32_t RESERVOIRS_B1 = 1;
