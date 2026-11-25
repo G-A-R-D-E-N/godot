@@ -681,15 +681,17 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 							best_color = Vector3(floats[o + 4], floats[o + 5], floats[o + 6]);
 						}
 					}
-					const uint32_t reason = uint32_t(floats[o + 7]);
-					if (reason == 1) {
-						rejected_area++;
-					} else if (reason == 2) {
-						rejected_shadow++;
-					} else if (reason == 3) {
-						rejected_cos++;
-					} else if (reason != 0) {
-						rejected_other++;
+					if (!(geometric > 0.0f && lum > 0.0f)) {
+						const uint32_t reason = uint32_t(floats[o + 7]);
+						if (reason == 1) {
+							rejected_area++;
+						} else if (reason == 2) {
+							rejected_shadow++;
+						} else if (reason == 3) {
+							rejected_cos++;
+						} else if (reason != 0) {
+							rejected_other++;
+						}
 					}
 				}
 			}
