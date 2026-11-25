@@ -232,6 +232,7 @@ private:
 	RID emitter_spatial_counts;
 	bool spatial_counts_due = false;
 	bool emitter_census_printed = false;
+	Vector<String> variant_mode_names;
 	uint32_t emitter_census_triangles = 0;
 	uint32_t emitter_census_frames = 0;
 	uint32_t emitter_cdf_capacity = 0;

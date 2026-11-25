@@ -192,7 +192,24 @@ bool DirectResamplerRD::_ensure_device() {
 #endif
 	modes.push_back("\n#define DI_EMITTERS\n#define MODE_EMITTER_SPATIAL\n");
 	const String defines = vformat("\n#define RAY_SCENE_BLAS_STACK_SIZE %d\n#define RAY_SCENE_TLAS_STACK_SIZE %d\n%s", int(RendererRD::RayScene::BLAS_MAX_DEPTH), int(RendererRD::RayScene::TLAS_MAX_DEPTH), RendererRD::RayScene::get_singleton()->uses_hardware() ? "#define SHADER_GLSL_VERSION_460\n#extension GL_EXT_ray_query : require\n#define RAY_SCENE_HW\n" : "");
-	shader->initialize(modes, defines);
+	variant_mode_names.clear();
+	for (int v = 0; v < modes.size(); v++) {
+		const String &entry = modes[v];
+		String name;
+		int at = 0;
+		while ((at = entry.find("#define ", at)) >= 0) {
+			at += 8;
+			int end = at;
+			while (end < entry.length() && entry[end] != ' ' && entry[end] != '\n') {
+				end++;
+			}
+			const String token = entry.substr(at, end - at);
+			if (token != "DI_EMITTERS" && token != "DI_EMITTER_TABLE") {
+				name += name.is_empty() ? token : "+" + token;
+			}
+		}
+		variant_mode_names.push_back(name.is_empty() ? "none" : name);
+	}	shader->initialize(modes, defines);
 	shader_version = shader->version_create();
 	if (!shader->version_is_valid(shader_version)) {
 		return false;
@@ -357,17 +374,14 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		if (!rdi_settings_printed) {
 			rdi_settings_printed = true;
 			{
-				static const char *mode_names[] = {
-					"none", "MODE_SPATIAL", "DI_EMITTERS", "MODE_EMITTER_SUM", "MODE_EMITTER_SCAN",
-					"MODE_EMITTER_PREFIX", "MODE_EMITTER_TEMPORAL", "LAB_COUNTS", "MODE_SPATIAL+LAB_COUNTS",
-					"MODE_EMITTER_SPATIAL"
-				};
 				String variant_line;
 				for (int v = 0; v < int(VARIANT_LAST); v++) {
-					variant_line += vformat("%s%d:%s", v == 0 ? "" : " ", v, v < int(sizeof(mode_names) / sizeof(mode_names[0])) ? mode_names[v] : "unmapped");
+					const String name = v < variant_mode_names.size() ? variant_mode_names[v] : String("unmapped");
+					variant_line += vformat("%s%d:%s", v == 0 ? "" : " ", v, name);
 				}
 				print_line(vformat("DIRECT_EMITTERS variants: count %d last %d emitter_spatial %d modes %s", int(VARIANT_LAST), int(VARIANT_LAST - 1), int(VARIANT_EMITTER_SPATIAL), variant_line));
-			}			print_line(vformat("DIRECT_EMITTERS settings: master %s resampled %s emitters %s temporal %s spatial %s source_match %s", GLOBAL_GET("rendering/global_illumination/direct/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/temporal"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial_source_match")));
+			}
+			print_line(vformat("DIRECT_EMITTERS settings: master %s resampled %s emitters %s temporal %s spatial %s source_match %s", GLOBAL_GET("rendering/global_illumination/direct/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/temporal"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial_source_match")));
 		}
 	}
 
