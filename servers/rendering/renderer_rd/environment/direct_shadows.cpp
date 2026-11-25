@@ -64,7 +64,7 @@ DirectShadows::Settings DirectShadows::get_project_settings() {
 	static bool direct_settings_printed = false;
 	if (!direct_settings_printed) {
 		direct_settings_printed = true;
-		print_line(vformat("DIRECT_SHADOWS settings: force_factor_one %s block_resolve %s entries %d quarter %s bias %.4f emitter_skip %d", settings.force_one ? "true" : "false", GLOBAL_GET("rendering/global_illumination/direct/block_resolve") ? "true" : "false", int(settings.entries), settings.quarter ? "true" : "false", settings.emitter_shorten + float(GLOBAL_GET("rendering/global_illumination/direct/ray_bias")), int(settings.emitter_skip_instance)));
+		print_line(vformat("DIRECT_SHADOWS settings: force_factor_one %s block_resolve %s entries %d quarter %s bias %.4f emitter_skip %d alpha_test %s", settings.force_one ? "true" : "false", GLOBAL_GET("rendering/global_illumination/direct/block_resolve") ? "true" : "false", int(settings.entries), settings.quarter ? "true" : "false", settings.emitter_shorten + float(GLOBAL_GET("rendering/global_illumination/direct/ray_bias")), int(settings.emitter_skip_instance), GLOBAL_GET("rendering/global_illumination/ray_scene/alpha_test") ? "true" : "false"));
 	}
 	return settings;
 }
@@ -568,6 +568,15 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 					print_line(vformat("DIRECT_SHADOWS counters: frames %d emitter_pixels %d emitter_rays %d emitter_blocked %d", int(p_input.frame), int(values[13]), int(values[14]), int(values[15])));
 					print_line(vformat("DIRECT_EMITTERS blocked: backface %d front %d unblocked_front %d hist005 %d hist030 %d hist200 %d histfar %d emitter_end 005 %d 030 %d 200 %d far %d", int(values[16]), int(values[17]), int(values[22]), int(values[18]), int(values[19]), int(values[20]), int(values[21]), int(values[23]), int(values[24]), int(values[25]), int(values[26])));
 					print_line(vformat("DIRECT_EMITTERS length: <1 u %d b %d | 1-3 u %d b %d | 3-10 u %d b %d | >10 u %d b %d", int(values[27]), int(values[28]), int(values[29]), int(values[30]), int(values[31]), int(values[32]), int(values[33]), int(values[34])));
+					print_line(vformat("DIRECT_EMITTERS blockers: alpha_surface %d solid_surface %d", int(values[35]), int(values[36])));
+					const float sample_min_x = float(values[41]) / 16.0f - 4096.0f;
+					const float sample_max_x = float(values[44]) / 16.0f - 4096.0f;
+					const float sample_min_y = float(values[42]) / 16.0f - 4096.0f;
+					const float sample_max_y = float(values[45]) / 16.0f - 4096.0f;
+					const float sample_min_z = float(values[43]) / 16.0f - 4096.0f;
+					const float sample_max_z = float(values[46]) / 16.0f - 4096.0f;
+					print_line(vformat("DIRECT_EMITTERS sample_points: count %d min (%.3f %.3f %.3f) max (%.3f %.3f %.3f) center (%.3f %.3f %.3f)", int(values[47]), sample_min_x, sample_min_y, sample_min_z, sample_max_x, sample_max_y, sample_max_z, (sample_min_x + sample_max_x) * 0.5f, (sample_min_y + sample_max_y) * 0.5f, (sample_min_z + sample_max_z) * 0.5f));
+					print_line(vformat("DIRECT_EMITTERS receiver_omni: 005 %d 030 %d 200 %d far %d min_ray %.3f", int(values[37]), int(values[38]), int(values[39]), int(values[40]), float(values[48]) / 4.0f));
 			if (emitter_hit_hist.is_valid()) {
 				const Vector<uint8_t> hist = rd->buffer_get_data(emitter_hit_hist);
 				const int hist_bytes = int((EMITTER_HIT_INSTANCES + 1) * 16 * uint32_t(sizeof(uint32_t)));
