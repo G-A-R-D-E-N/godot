@@ -8,7 +8,7 @@
 - `volumetric_fog_process.glsl` uses the same constant, and the two must change together.
 
 **Density limit.** `DENSITY_LIMIT` clamps each volume's density to ±32 per metre before it is quantised.
-- The sum is read back as a signed int32, so it holds just under 2048 per metre. 63 volumes at the limit fit, and a 64th wraps the froxel to empty.
+- The sum is read back as a signed int32, so it holds just under 2048 per metre. 63 volumes at the limit fit. Density and colour wrap independently: a 64th volume at the density limit wraps the froxel's positive density to zero and the froxel is empty, while a 64th volume at a colour limit wraps only that channel, so the froxel keeps its fog and loses the channel. Emission-heavy, moderate-density stacks are the case to watch.
 - 32 per metre makes 1 cm of fog 27 % opaque, and FogMaterial's own range is ±8, so nothing real is cut.
 - Values are rounded with `floor(x + 0.5)`, the same on every driver and in the CPU tests. Above 8 per metre (2^23 counts) a float32 tie rounds to even, which moves the result by one count (9.5e-7 per metre).
 
