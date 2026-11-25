@@ -111,6 +111,7 @@ layout(set = 0, binding = 12, std430) restrict buffer Counters {
 	uint sample_max_z;
 	uint sample_count;
 	uint min_ray_len;
+	uint blocked_split_unavailable;
 }
 counters;
 
@@ -842,6 +843,7 @@ void main() {
 					atomicAdd(emitter_hit_hist.hits[hist_base + 1u], hist_distance);
 					atomicMin(emitter_hit_hist.hits[hist_base + 2u], hist_distance);
 					atomicMax(emitter_hit_hist.hits[hist_base + 3u], hist_distance);
+					#ifdef RAY_SCENE_ALPHA
 					RaySceneHit blocker_hit;
 					blocker_hit.instance = blocker;
 					blocker_hit.triangle = blocker_triangle;
@@ -851,6 +853,9 @@ void main() {
 					} else {
 						atomicAdd(counters.blocked_solid_surface, 1u);
 					}
+					#else
+						atomicAdd(counters.blocked_split_unavailable, 1u);
+					#endif
 					atomicAdd(counters.emitter_blocked_front, 1u);
 					if (blocker_distance < 0.05) {
 						atomicAdd(counters.emitter_hist_005, 1u);

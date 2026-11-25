@@ -96,7 +96,7 @@ Vector<String> DirectShadows::_trace_modes() {
 }
 
 DirectShadows::DirectShadows() {
-	defines = vformat("\n#define RAY_SCENE_BLAS_STACK_SIZE %d\n#define RAY_SCENE_TLAS_STACK_SIZE %d\n", RayScene::BLAS_MAX_DEPTH, RayScene::TLAS_MAX_DEPTH);
+	defines = vformat("\n#define RAY_SCENE_BLAS_STACK_SIZE %d\n#define RAY_SCENE_TLAS_STACK_SIZE %d\n", RayScene::BLAS_MAX_DEPTH, RayScene::TLAS_MAX_DEPTH) + RayScene::alpha_shader_defines();
 	shader.initialize(_trace_modes(), defines);
 	shader_version = shader.version_create();
 	for (int i = 0; i < TRACE_MAX; i++) {
@@ -573,7 +573,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 					print_line(vformat("DIRECT_SHADOWS counters: frames %d emitter_pixels %d emitter_rays %d emitter_blocked %d", int(p_input.frame), int(values[13]), int(values[14]), int(values[15])));
 					print_line(vformat("DIRECT_EMITTERS blocked: backface %d front %d unblocked_front %d hist005 %d hist030 %d hist200 %d histfar %d emitter_end 005 %d 030 %d 200 %d far %d", int(values[16]), int(values[17]), int(values[22]), int(values[18]), int(values[19]), int(values[20]), int(values[21]), int(values[23]), int(values[24]), int(values[25]), int(values[26])));
 					print_line(vformat("DIRECT_EMITTERS length: <1 u %d b %d | 1-3 u %d b %d | 3-10 u %d b %d | >10 u %d b %d", int(values[27]), int(values[28]), int(values[29]), int(values[30]), int(values[31]), int(values[32]), int(values[33]), int(values[34])));
-					print_line(vformat("DIRECT_EMITTERS blockers: alpha_surface %d solid_surface %d", int(values[35]), int(values[36])));
+					print_line(vformat("DIRECT_EMITTERS blockers: alpha_surface %d solid_surface %d split_unavailable %d", int(values[35]), int(values[36]), int(values[49])));
 					const float sample_min_x = float(values[41]) / 16.0f - 4096.0f;
 					const float sample_max_x = float(values[44]) / 16.0f - 4096.0f;
 					const float sample_min_y = float(values[42]) / 16.0f - 4096.0f;
