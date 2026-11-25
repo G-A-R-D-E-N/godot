@@ -767,13 +767,13 @@ void main() {
 
 	vec3 anchored = relative + ray_scene.camera_to_anchor;
 	{
-		const vec3 omni_anchor = vec3(-3.720, -0.857, -1.148);
+		const vec3 omni_anchor = vec3(-3.720, -0.857, -1.148) - params.anchor.xyz;
 		float receiver_omni_distance = length(anchored - omni_anchor);
-		if (receiver_omni_distance < 0.05) {
+		if (receiver_omni_distance < 1.0) {
 			atomicAdd(counters.recv_near_005, 1u);
-		} else if (receiver_omni_distance < 0.3) {
+		} else if (receiver_omni_distance < 3.0) {
 			atomicAdd(counters.recv_near_030, 1u);
-		} else if (receiver_omni_distance < 2.0) {
+		} else if (receiver_omni_distance < 10.0) {
 			atomicAdd(counters.recv_near_200, 1u);
 		} else {
 			atomicAdd(counters.recv_near_far, 1u);
@@ -813,8 +813,8 @@ void main() {
 		} else {
 			vec3 emitter_to = emitter_from + emitter_offset * (1.0 - params.bias / emitter_reach);
 			uint emitter_rays = params.reference != 0u ? REFERENCE_RAYS : 1u;
-			atomicMin(counters.min_ray_len, uint(clamp(emitter_ray_length * 4.0, 0.0, 4095.0)));
 			float emitter_ray_length = length(emitter_to - emitter_from);
+			atomicMin(counters.min_ray_len, uint(clamp(emitter_ray_length * 4.0, 0.0, 4095.0)));
 			for (uint r = 0u; r < emitter_rays; r++) {
 				int skip_instance = params.pad1 != 0u ? int(params.pad1) - 1 : -1;
 				uint blocker = 0xFFFFFFFFu;
