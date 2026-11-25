@@ -99,7 +99,7 @@ TEST_CASE("[DirectResampler] Params match the entry pass's std140 block") {
 	CHECK(offsetof(DirectResamplerRD::Params, head_swap_frames) == 420);
 	CHECK(offsetof(DirectResamplerRD::Params, temporal_reuse) == 424);
 	CHECK(offsetof(DirectResamplerRD::Params, head_window) == 428);
-	CHECK(sizeof(DirectResamplerRD::Params) == 432);
+	CHECK(sizeof(DirectResamplerRD::Params) == 448);
 	CHECK(DirectResamplerRD::DEBUG_BYTES == (4 + 65536) * 4);
 }
 
