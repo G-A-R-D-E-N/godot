@@ -138,6 +138,7 @@ public:
 	static constexpr uint32_t EMITTER_CHUNK = 4096;
 	static constexpr uint32_t EMITTER_CHUNKS = 256;
 	static constexpr uint32_t EMITTER_SCAN_FLOATS = EMITTER_CHUNKS * 2 + 1;
+	static constexpr uint32_t EMITTER_REUSE_COUNTER_BYTES = 48;
 
 	static constexpr uint32_t DEBUG_FLAG_STALE_PRIOR = 1;
 	static constexpr uint32_t DEBUG_FLAG_COUNT = 2;

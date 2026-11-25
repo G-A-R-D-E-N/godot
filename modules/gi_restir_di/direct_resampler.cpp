@@ -253,7 +253,7 @@ bool DirectResamplerRD::_ensure_emitter_samples(uint32_t p_pixels) {
 	rd->set_resource_name(emitter_samples, "Direct Resampler Emitter Samples");
 	emitter_samples_bytes = emitter_samples.is_valid() ? bytes : 0;
 	if (!emitter_reuse_counters.is_valid()) {
-		emitter_reuse_counters = rd->storage_buffer_create(8u);
+		emitter_reuse_counters = rd->storage_buffer_create(EMITTER_REUSE_COUNTER_BYTES);
 		rd->set_resource_name(emitter_reuse_counters, "Direct Resampler Emitter Reuse Counters");
 	}
 	return emitter_samples.is_valid();
@@ -599,9 +599,11 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		ray_uniforms.reserve(8);
 		ray_scene->append_uniforms(ray_uniforms);
 	}
+	if (emitter_active && emitter_reuse_counters.is_valid()) {
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 26, emitter_reuse_counters));
+	}
 	if (emitter_temporal) {
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 25, emitter_history));
-		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 26, emitter_reuse_counters));
 	}
 
 	int main_variant = VARIANT_MAIN;
@@ -643,6 +645,9 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 			rd->compute_list_end();
 		}
 		rd->draw_command_end_label();
+	}
+	if (emitter_active && emitter_reuse_counters.is_valid()) {
+		rd->buffer_clear(emitter_reuse_counters, 0, EMITTER_REUSE_COUNTER_BYTES);
 	}
 	const RID shader_rid = shader->version_get_shader(shader_version, main_variant);
 	RENDER_TIMESTAMP("Direct Resample Entries");
@@ -737,18 +742,19 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 				temporal_merged = reinterpret_cast<const uint32_t *>(reuse.ptr())[0];
 			}
 		}
-		print_line(vformat("DIRECT_EMITTERS reuse: temporal_merged %d spatial_pixels_rewritten %d", int(temporal_merged), int(changed)));
+		print_line(vformat("DIRECT_EMITTERS reuse: temporal_accepted %d spatial_pixels_rewritten %d", int(temporal_merged), int(changed)));
 		}
 	}
-	if (emitter_active && emitter_temporal && p_input.frame >= 31) {
-		static bool temporal_reuse_printed = false;
-		if (!temporal_reuse_printed && emitter_reuse_counters.is_valid()) {
-			temporal_reuse_printed = true;
-			const Vector<uint8_t> reuse = rd->buffer_get_data(emitter_reuse_counters);
-			if (reuse.size() >= 8) {
-				const uint32_t temporal_merged = reinterpret_cast<const uint32_t *>(reuse.ptr())[0];
-				print_line(vformat("DIRECT_EMITTERS reuse: temporal_merged %d spatial_pixels_rewritten -1", int(temporal_merged)));
-			}
+	if (emitter_active && p_input.frame >= 31 && p_input.frame % 30 == 1 && emitter_reuse_counters.is_valid()) {
+		const Vector<uint8_t> reuse = rd->buffer_get_data(emitter_reuse_counters);
+		if (reuse.size() >= int(EMITTER_REUSE_COUNTER_BYTES)) {
+			const uint32_t *words = reinterpret_cast<const uint32_t *>(reuse.ptr());
+			const uint32_t events = words[0] + words[8];
+			const float mean_age = events > 0 ? float(words[1]) / float(events) : 0.0f;
+			const float mean_mass = events > 0 ? float(words[7]) / float(events) : 0.0f;
+			const float held_share = events > 0 ? float(words[6]) / float(events) : 0.0f;
+			const float mean_damp = events > 0 ? float(words[11]) / 65536.0 / float(events) : 0.0f;
+			print_line(vformat("DIRECT_EMITTERS reuse: temporal_accepted %d mean_age %.2f plain_writes %d instance_mismatch %d depth_reject %d normal_reject %d mean_mass %.2f held_share %.2f held_only %d held_blocked %d new_blocked %d mean_damp %.3f", int(words[0]), mean_age, int(words[2]), int(words[3]), int(words[4]), int(words[5]), mean_mass, held_share, int(words[8]), int(words[9]), int(words[10]), mean_damp));
 		}
 	}
 	if (spatial) {
