@@ -210,10 +210,10 @@ float di_emitter_hash(uint p_seed, uint p_salt) {
 	return float(di_hash(p_seed ^ di_hash(p_salt)) >> 8u) / 16777216.0;
 }
 
-void di_emitter_write(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geometric) {
+void di_emitter_write(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geometric, uint p_source) {
 	uint index = uint(p_pixel.y) * uint(params.size.x) + uint(p_pixel.x);
 	emitter_samples.data[index * 2u] = vec4(p_point, p_geometric);
-	emitter_samples.data[index * 2u + 1u] = vec4(p_color, 0.0);
+	emitter_samples.data[index * 2u + 1u] = vec4(p_color, float(p_source & 0xFFFFu));
 }
 
 void di_emitter_clear(ivec2 p_pixel, uint p_reason) {
@@ -235,7 +235,7 @@ void di_emitter_commit(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geomet
 }
 #else
 void di_emitter_commit(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geometric, uint p_instance, uint p_triangle, uint p_index) {
-	di_emitter_write(p_pixel, p_point, p_color, p_geometric);
+	di_emitter_write(p_pixel, p_point, p_color, p_geometric, p_instance);
 }
 #endif
 
@@ -907,7 +907,7 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 		}
 	}
 	di_emitter_history_store(p_pixel, uvec4((di_emitter_instance & 0xFFFFu) | ((di_emitter_triangle & 0xFFFFu) << 16u), age | 0x100u, 0u, 0u), point, color, surface);
-	di_emitter_write(p_pixel, point.xyz, color.rgb, point.w);
+	di_emitter_write(p_pixel, point.xyz, color.rgb, point.w, di_emitter_instance);
 }
 #endif
 
@@ -1074,6 +1074,9 @@ void main() {
 		uint other_index = uint(other.y) * uint(params.size.x) + uint(other.x);
 		vec4 other_point = emitter_samples.data[other_index * 2u];
 		vec4 other_color = emitter_samples.data[other_index * 2u + 1u];
+		if (abs(other_color.a - selected_color.a) > 0.5) {
+			continue;
+		}
 		float other_mass = di_emitter_sample_mass(other_color, other_point);
 		if (!(other_mass > 0.0)) {
 			continue;
@@ -1093,7 +1096,7 @@ void main() {
 	atomicAdd(emitter_spatial_counts.words[7], 1u);
 	merged = 1u;
 	emitter_samples.data[index * 2u] = selected_point;
-	emitter_samples.data[index * 2u + 1u] = vec4(total_weighted / total_mass, 0.0);
+	emitter_samples.data[index * 2u + 1u] = vec4(total_weighted / total_mass, selected_color.a);
 	atomicAdd(emitter_spatial_counts.words[0], 1u);
 	atomicAdd(emitter_spatial_counts.words[1], merged);
 	atomicAdd(emitter_spatial_counts.words[2], accepted);
