@@ -75,6 +75,7 @@ public:
 #ifdef DI_RESAMPLER_LAB
 		bool no_stamp = false;
 	bool emitter_spatial_source_match = true;
+	bool emitter_census_printed = false;
 		String lab_log;
 #endif
 		uint32_t reservoirs = 0;

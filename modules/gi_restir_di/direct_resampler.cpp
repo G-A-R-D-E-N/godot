@@ -702,6 +702,56 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 			print_line(vformat("DIRECT_EMITTERS samples: pixels %d nonzero %d best_lum %.4f best_rgb %.3f %.3f %.3f rejected_area %d rejected_cos %d rejected_shadow %d rejected_other %d", int(pixels), int(nonzero), best, best_color.x, best_color.y, best_color.z, int(rejected_area), int(rejected_cos), int(rejected_shadow), int(rejected_other)));
 		}
 	}
+	if (!emitter_census_printed && ray_scene && ray_scene->uses_hardware() && ray_scene->get_triangle_emitter_count() > 0) {
+		emitter_census_printed = true;
+		const uint32_t census_count = ray_scene->get_triangle_emitter_count();
+		const Vector<uint8_t> census_data = rd->buffer_get_data(ray_scene->get_triangle_emitters());
+		if (census_data.size() >= int(census_count) * int(sizeof(RayScene::TriangleEmitter))) {
+			HashMap<uint32_t, uint32_t> per_instance;
+			HashMap<uint32_t, AABB> per_bounds;
+			const uint8_t *census_bytes = census_data.ptr();
+			for (uint32_t i = 0; i < census_count; i++) {
+				const RayScene::TriangleEmitter *emitter = reinterpret_cast<const RayScene::TriangleEmitter *>(census_bytes + i * sizeof(RayScene::TriangleEmitter));
+				per_instance[emitter->instance] = per_instance.has(emitter->instance) ? per_instance[emitter->instance] + 1u : 1u;
+				AABB box;
+				box.position = Vector3(emitter->v0[0], emitter->v0[1], emitter->v0[2]);
+				box.size = Vector3();
+				box.expand_to(Vector3(emitter->v1[0], emitter->v1[1], emitter->v1[2]));
+				box.expand_to(Vector3(emitter->v2[0], emitter->v2[1], emitter->v2[2]));
+				per_bounds[emitter->instance] = per_bounds.has(emitter->instance) ? per_bounds[emitter->instance].merge(box) : box;
+			}
+			LocalVector<Pair<uint32_t, uint32_t>> ranked;
+			for (const KeyValue<uint32_t, uint32_t> &entry : per_instance) {
+				ranked.push_back(Pair<uint32_t, uint32_t>(entry.value, entry.key));
+			}
+			for (uint32_t i = 0; i < ranked.size(); i++) {
+				for (uint32_t j = i + 1; j < ranked.size(); j++) {
+					if (ranked[j].first > ranked[i].first) {
+						const Pair<uint32_t, uint32_t> held = ranked[i];
+						ranked[i] = ranked[j];
+						ranked[j] = held;
+					}
+				}
+			}
+			String top;
+			const uint32_t shown = MIN(ranked.size(), 5u);
+			for (uint32_t i = 0; i < shown; i++) {
+				top += vformat("%s%d:%d", i == 0 ? "" : " ", int(ranked[i].second), int(ranked[i].first));
+			}
+			uint32_t close_pairs = 0;
+			for (uint32_t i = 0; i < shown; i++) {
+				for (uint32_t j = i + 1; j < shown; j++) {
+					AABB a = per_bounds[ranked[i].second];
+					AABB b = per_bounds[ranked[j].second];
+					a.grow_by(5.0f);
+					if (a.intersects(b)) {
+						close_pairs++;
+					}
+				}
+			}
+			print_line(vformat("DIRECT_EMITTERS emitter census: instances %d triangles %d capped %d top %s frames_near %d", int(ranked.size()), int(census_count), int(ray_scene->get_triangle_emitters_capped() ? 1 : 0), top, int(close_pairs)));
+		}
+	}
 		print_line(vformat("DIRECT_EMITTERS emitter terms: emitters %d device_ready %d scene %d ready %d hw %d count %d head %d tail %d max %d", int(settings.emitters), int(emitter_device_ready), int(ray_scene != nullptr), int(ray_scene && ray_scene->is_ready()), int(ray_scene && ray_scene->uses_hardware()), int(ray_scene ? ray_scene->get_triangle_emitter_count() : 0), int(settings.head), int(settings.tail_samples), int(MAX_EMITTER_TAIL_SUM)));
 		if (spatial_counts_due) {
 		const Vector<uint8_t> spatial_counts = rd->buffer_get_data(emitter_spatial_counts);
