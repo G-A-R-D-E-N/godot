@@ -306,7 +306,7 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 	float b = root * (1.0 - r2);
 	float c = root * r2;
 	vec3 sample_point = v0 * (1.0 - root) + v1 * b + v2 * c;
-	vec2 emitter_uv = ray_scene_triangle_emitter_uv(emitter.uv_index, vec3(1.0 - root, b, c));
+	vec2 emitter_uv = ray_scene_triangle_emitter_uv(emitter.uv_index, vec3(b, c, 0.0));
 	vec3 texel_emission = ray_scene_triangle_emitter_emission_texel(emitter.material, emitter_uv);
 	vec3 rel = sample_point - p_vertex;
 	float distance = length(rel);
@@ -959,7 +959,7 @@ vec2 di_emitter_uv_at(RaySceneTriangleEmitter p_emitter, vec3 p_point) {
 	}
 	float v = (d22 * dp1 - d12 * dp2) / denom;
 	float w = (d11 * dp2 - d12 * dp1) / denom;
-	return ray_scene_triangle_emitter_uv(p_emitter.uv_index, vec3(1.0 - v - w, v, w));
+	return ray_scene_triangle_emitter_uv(p_emitter.uv_index, vec3(v, w, 0.0));
 }
 
 vec3 di_emitter_color_at(uint p_index, vec3 p_point, out float r_luminance_weight) {

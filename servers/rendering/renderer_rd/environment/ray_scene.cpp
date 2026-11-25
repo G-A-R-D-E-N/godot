@@ -1826,7 +1826,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		if (atlas.is_valid()) {
 			emission_texture_count = RD::get_singleton()->texture_get_format(atlas).array_layers;
 		}
-		print_line(vformat("Ray scene emission atlas: %d layers", emission_texture_count));
+		print_line(vformat("Ray scene emission atlas: %d layers, hit emission texel %s", emission_texture_count, GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ray_scene/hit_emission_texel") ? "on" : "off"));
 	}
 	skip_additive = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ray_scene/skip_additive_surfaces");
 	shell_ranges.clear();
@@ -2217,6 +2217,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	scene_data.triangle_emitter_generation = triangle_emitter_generation;
 	scene_data.emission_texture_count = emission_texture_count;
 	scene_data.proxy_emitters_traced = int(GLOBAL_GET("rendering/global_illumination/ray_scene/proxy_emitters")) != 0 ? 1u : 0u;
+	scene_data.hit_emission_texel = GLOBAL_GET("rendering/global_illumination/ray_scene/hit_emission_texel") ? 1u : 0u;
 	if (scene_data_buffer.is_null()) {
 		scene_data_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(SceneData));
 		RD::get_singleton()->set_resource_name(scene_data_buffer, "Ray Scene Data");

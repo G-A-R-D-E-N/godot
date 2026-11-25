@@ -284,4 +284,3 @@ TEST_CASE("[DirectResampler] Params field order matches di_resample.glsl") {
 	}
 	CHECK_MESSAGE(index == count, vformat("the shader block has %d fields and C++ expects %d", index, count));
 }
->>>>>>> 111003c0f8 (Resampler: clamp the emitter pick to a multiple of the mean pick behind a setting)

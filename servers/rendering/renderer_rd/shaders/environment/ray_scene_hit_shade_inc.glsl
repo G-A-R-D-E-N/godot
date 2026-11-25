@@ -38,6 +38,6 @@ vec4 shade_hit(vec3 p_origin, vec3 p_direction, RaySceneHit hit, uint p_seed) {
 #endif
 		irradiance += bounce * RAY_SCENE_SHADE_BOUNCE_ENERGY;
 	}
-	vec3 radiance = material.emission * RAY_SCENE_SHADE_EMISSION_EXPOSURE + material.albedo * irradiance;
+	vec3 radiance = ray_scene_hit_emission(hit, position) * RAY_SCENE_SHADE_EMISSION_EXPOSURE + material.albedo * irradiance;
 	return vec4(min(radiance, vec3(RAY_SCENE_SHADE_MAX_RADIANCE)), hit.t);
 }

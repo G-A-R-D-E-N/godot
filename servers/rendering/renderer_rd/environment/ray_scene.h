@@ -304,7 +304,7 @@ public:
 		uint32_t triangle_emitter_generation;
 		uint32_t emission_texture_count;
 		uint32_t proxy_emitters_traced;
-		uint32_t pad;
+		uint32_t hit_emission_texel;
 	};
 
 	static_assert(sizeof(SceneData) == 48);
