@@ -574,15 +574,15 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 					print_line(vformat("DIRECT_EMITTERS blocked: backface %d front %d unblocked_front %d hist005 %d hist030 %d hist200 %d histfar %d emitter_end 005 %d 030 %d 200 %d far %d", int(values[16]), int(values[17]), int(values[22]), int(values[18]), int(values[19]), int(values[20]), int(values[21]), int(values[23]), int(values[24]), int(values[25]), int(values[26])));
 					print_line(vformat("DIRECT_EMITTERS length: <1 u %d b %d | 1-3 u %d b %d | 3-10 u %d b %d | >10 u %d b %d", int(values[27]), int(values[28]), int(values[29]), int(values[30]), int(values[31]), int(values[32]), int(values[33]), int(values[34])));
 					print_line(vformat("DIRECT_EMITTERS blockers: alpha_surface %d solid_surface %d split_unavailable %d", int(values[35]), int(values[36]), int(values[49])));
-					const float sample_min_x = float(values[41]) / 16.0f - 2048.0f;
+					const float sample_min_x = float(131071u - values[41]) / 16.0f - 2048.0f;
 					const float sample_max_x = float(values[44]) / 16.0f - 2048.0f;
-					const float sample_min_y = float(values[42]) / 16.0f - 2048.0f;
+					const float sample_min_y = float(131071u - values[42]) / 16.0f - 2048.0f;
 					const float sample_max_y = float(values[45]) / 16.0f - 2048.0f;
-					const float sample_min_z = float(values[43]) / 16.0f - 2048.0f;
+					const float sample_min_z = float(131071u - values[43]) / 16.0f - 2048.0f;
 					const float sample_max_z = float(values[46]) / 16.0f - 2048.0f;
 					const Vector3 ray_anchor_print = RayScene::get_singleton()->get_anchor();
 					print_line(vformat("DIRECT_EMITTERS sample_points: count %d anchor (%.3f %.3f %.3f) min (%.3f %.3f %.3f) max (%.3f %.3f %.3f) center (%.3f %.3f %.3f)", int(values[47]), ray_anchor_print.x, ray_anchor_print.y, ray_anchor_print.z, sample_min_x + ray_anchor_print.x, sample_min_y + ray_anchor_print.y, sample_min_z + ray_anchor_print.z, sample_max_x + ray_anchor_print.x, sample_max_y + ray_anchor_print.y, sample_max_z + ray_anchor_print.z, (sample_min_x + sample_max_x) * 0.5f + ray_anchor_print.x, (sample_min_y + sample_max_y) * 0.5f + ray_anchor_print.y, (sample_min_z + sample_max_z) * 0.5f + ray_anchor_print.z));
-					print_line(vformat("DIRECT_EMITTERS receiver_omni: <1 %d 1-3 %d 3-10 %d >10 %d min_ray %.3f", int(values[37]), int(values[38]), int(values[39]), int(values[40]), float(values[48]) / 4.0f));
+					print_line(vformat("DIRECT_EMITTERS receiver_omni: <1 %d 1-3 %d 3-10 %d >10 %d min_ray %.3f", int(values[37]), int(values[38]), int(values[39]), int(values[40]), float(4095u - values[48]) / 4.0f));
 					print_line(vformat("DIRECT_EMITTERS receiver_camera: <1 %d 1-3 %d 3-10 %d >10 %d", int(values[50]), int(values[51]), int(values[52]), int(values[53])));
 					print_line(vformat("DIRECT_EMITTERS words35_53: %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d", int(values[35]), int(values[36]), int(values[37]), int(values[38]), int(values[39]), int(values[40]), int(values[41]), int(values[42]), int(values[43]), int(values[44]), int(values[45]), int(values[46]), int(values[47]), int(values[48]), int(values[49]), int(values[50]), int(values[51]), int(values[52]), int(values[53])));
 			if (emitter_hit_hist.is_valid()) {
