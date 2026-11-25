@@ -565,6 +565,7 @@ public:
 	const DirtyFeed &get_dirty_feed() const { return feed; }
 	uint32_t get_structure_generation() const { return structure_generation; }
 	AABB get_light_region(const Vector3 &p_camera_world, const Vector3 &p_region_half);
+	static uint32_t material_window(uint32_t p_material_count, uint32_t p_offset, uint32_t p_surfaces);
 
 	bool is_ready() const { return scene_data_buffer.is_valid() && blas_node_buffer.is_valid() && tlas_node_buffer.is_valid() && (!accel || _hw_ready()) && _alpha_ready(); }
 	bool uses_hardware() const { return accel != nullptr; }
