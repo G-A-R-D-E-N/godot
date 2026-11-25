@@ -97,6 +97,20 @@ layout(set = 0, binding = 12, std430) restrict buffer Counters {
 	uint len_b_10;
 	uint len_u_far;
 	uint len_b_far;
+	uint blocked_alpha_surface;
+	uint blocked_solid_surface;
+	uint recv_near_005;
+	uint recv_near_030;
+	uint recv_near_200;
+	uint recv_near_far;
+	uint sample_min_x;
+	uint sample_min_y;
+	uint sample_min_z;
+	uint sample_max_x;
+	uint sample_max_y;
+	uint sample_max_z;
+	uint sample_count;
+	uint min_ray_len;
 }
 counters;
 
@@ -752,6 +766,19 @@ void main() {
 	}
 
 	vec3 anchored = relative + ray_scene.camera_to_anchor;
+	{
+		const vec3 omni_anchor = vec3(-3.720, -0.857, -1.148);
+		float receiver_omni_distance = length(anchored - omni_anchor);
+		if (receiver_omni_distance < 0.05) {
+			atomicAdd(counters.recv_near_005, 1u);
+		} else if (receiver_omni_distance < 0.3) {
+			atomicAdd(counters.recv_near_030, 1u);
+		} else if (receiver_omni_distance < 2.0) {
+			atomicAdd(counters.recv_near_200, 1u);
+		} else {
+			atomicAdd(counters.recv_near_far, 1u);
+		}
+	}
 	uint traced_rays = 0u;
 	uint ray_record = 0u;
 
@@ -761,6 +788,18 @@ void main() {
 	if (emitter_tail && emitter_geometry.w > 0.0) {
 		vec3 emitter_point = to_world(emitter_geometry.xyz) + ray_scene.camera_to_anchor;
 		vec3 emitter_from = anchored + to_world(normal) * params.bias;
+		{
+			uint sx = uint(clamp((emitter_point.x + 4096.0) * 16.0, 0.0, 131071.0));
+			uint sy = uint(clamp((emitter_point.y + 4096.0) * 16.0, 0.0, 131071.0));
+			uint sz = uint(clamp((emitter_point.z + 4096.0) * 16.0, 0.0, 131071.0));
+			atomicMin(counters.sample_min_x, sx);
+			atomicMin(counters.sample_min_y, sy);
+			atomicMin(counters.sample_min_z, sz);
+			atomicMax(counters.sample_max_x, sx);
+			atomicMax(counters.sample_max_y, sy);
+			atomicMax(counters.sample_max_z, sz);
+			atomicAdd(counters.sample_count, 1u);
+		}
 		vec3 emitter_offset = emitter_point - emitter_from;
 		float emitter_reach = length(emitter_offset);
 		float emitter_ndotl = dot(to_world(normal), normalize(emitter_point - anchored));
@@ -774,12 +813,14 @@ void main() {
 		} else {
 			vec3 emitter_to = emitter_from + emitter_offset * (1.0 - params.bias / emitter_reach);
 			uint emitter_rays = params.reference != 0u ? REFERENCE_RAYS : 1u;
+			atomicMin(counters.min_ray_len, uint(clamp(emitter_ray_length * 4.0, 0.0, 4095.0)));
 			float emitter_ray_length = length(emitter_to - emitter_from);
 			for (uint r = 0u; r < emitter_rays; r++) {
 				int skip_instance = params.pad1 != 0u ? int(params.pad1) - 1 : -1;
 				uint blocker = 0xFFFFFFFFu;
+				uint blocker_triangle = 0u;
 				float blocker_distance = 0.0;
-				bool emitter_unblocked = ray_scene_sampled_visibility_blocker(emitter_from, emitter_to, RAY_SCENE_ALL_CASTERS, rng_state + r, skip_instance, blocker, blocker_distance);
+				bool emitter_unblocked = ray_scene_sampled_visibility_blocker(emitter_from, emitter_to, RAY_SCENE_ALL_CASTERS, rng_state + r, skip_instance, blocker, blocker_distance, blocker_triangle);
 								emitter_visible += emitter_unblocked ? 1.0 : 0.0;
 				if (emitter_ray_length < 1.0) {
 					if (emitter_unblocked) { atomicAdd(counters.len_u_1, 1u); } else { atomicAdd(counters.len_b_1, 1u); }
@@ -801,6 +842,15 @@ void main() {
 					atomicAdd(emitter_hit_hist.hits[hist_base + 1u], hist_distance);
 					atomicMin(emitter_hit_hist.hits[hist_base + 2u], hist_distance);
 					atomicMax(emitter_hit_hist.hits[hist_base + 3u], hist_distance);
+					RaySceneHit blocker_hit;
+					blocker_hit.instance = blocker;
+					blocker_hit.triangle = blocker_triangle;
+					const RaySceneMaterial blocker_material = ray_scene_hit_material(blocker_hit);
+					if ((blocker_material.flags >> RAY_SCENE_ALPHA_SHIFT) != 0u) {
+						atomicAdd(counters.blocked_alpha_surface, 1u);
+					} else {
+						atomicAdd(counters.blocked_solid_surface, 1u);
+					}
 					atomicAdd(counters.emitter_blocked_front, 1u);
 					if (blocker_distance < 0.05) {
 						atomicAdd(counters.emitter_hist_005, 1u);
@@ -1053,6 +1103,9 @@ void main() {
 		imageStore(debug_image, at, vec4(color, 1.0));
 	}
 }
+
+
+
 
 
 
