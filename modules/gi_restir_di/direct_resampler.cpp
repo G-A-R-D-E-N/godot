@@ -705,13 +705,30 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		const RID emitter_spatial_rid = shader->version_get_shader(shader_version, VARIANT_EMITTER_SPATIAL);
 		RENDER_TIMESTAMP("Direct Resample Emitter Spatial");
 		rd->draw_command_begin_label("Direct Resample Emitter Spatial");
+			{
+				LocalVector<uint8_t> sentinel;
+				sentinel.resize(16);
+				for (uint32_t i = 0; i < 16u; i++) {
+					sentinel[i] = 0x7F;
+				}
+				rd->buffer_update(emitter_spatial_counts, 0, 16, sentinel.ptr());
+			}
+			LocalVector<RD::Uniform> spatial_set;
+			spatial_set.reserve(uniforms.size() + 1);
+			for (const RD::Uniform &uniform : uniforms) {
+				if (uniform.binding != 25) {
+					spatial_set.push_back(uniform);
+				}
+			}
+			spatial_set.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 25, emitter_spatial_counts));
 		list = rd->compute_list_begin();
 		rd->compute_list_bind_compute_pipeline(list, emitter_spatial_pipeline.get_rid());
-		rd->compute_list_bind_uniform_set(list, UniformSetCacheRD::get_singleton()->get_cache_vec(emitter_spatial_rid, 0, uniforms), 0);
+				rd->compute_list_bind_uniform_set(list, UniformSetCacheRD::get_singleton()->get_cache_vec(emitter_spatial_rid, 0, spatial_set), 0);
 		rd->compute_list_bind_uniform_set(list, UniformSetCacheRD::get_singleton()->get_cache_vec(emitter_spatial_rid, 1, ray_uniforms), 1);
 		rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
 		rd->compute_list_end();
 		rd->draw_command_end_label();
+			print_line(vformat("DIRECT_EMITTERS spatial rid: bound %d read %d set %d", int(emitter_spatial_counts.get_id()), int(emitter_spatial_counts.get_id()), int(spatial_set.size())));
 		spatial_counts_due = true;
 	}
 	if (spatial) {
