@@ -198,6 +198,11 @@ uint di_emitter_triangle = 0u;
 uint di_emitter_index = 0u;
 #endif
 
+float di_emitter_selection_luminance(uint p_material) {
+	float luminance = dot(max(ray_scene_triangle_emitter_emission(p_material), vec3(0.0)), luminance_weights);
+	return luminance > 0.0 ? luminance : ray_scene_triangle_emitter_mean_luminance(p_material);
+}
+
 float di_emitter_weight(uint p_index) {
 	if (ray_scene_triangle_emitter_proxied(p_index) && ray_scene.proxy_emitters_traced == 0u) {
 		return 0.0;
@@ -205,8 +210,7 @@ float di_emitter_weight(uint p_index) {
 	RaySceneTriangleEmitter emitter = ray_scene_triangle_emitter(p_index);
 	vec3 e1 = emitter.v1 - emitter.v0;
 	vec3 e2 = emitter.v2 - emitter.v0;
-	vec3 emission = ray_scene_triangle_emitter_emission(emitter.material);
-	return 0.5 * length(cross(e1, e2)) * dot(max(emission, vec3(0.0)), luminance_weights);
+	return 0.5 * length(cross(e1, e2)) * di_emitter_selection_luminance(emitter.material);
 }
 
 vec3 di_emitter_to_view(vec3 p_ray) {
@@ -278,8 +282,7 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 	vec3 cross_e1e2 = cross(e2, e1);
 	float normal_length = length(cross_e1e2);
 	float area = 0.5 * normal_length;
-	vec3 emission = ray_scene_triangle_emitter_emission(emitter.material);
-	float luminance = dot(max(emission, vec3(0.0)), luminance_weights);
+	float luminance = di_emitter_selection_luminance(emitter.material);
 	if (!(area > 0.0) || !(luminance > 0.0)) {
 		di_emitter_clear(p_pixel, 1u);
 		return;
@@ -290,6 +293,8 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 	float b = root * (1.0 - r2);
 	float c = root * r2;
 	vec3 sample_point = v0 * (1.0 - root) + v1 * b + v2 * c;
+	vec2 emitter_uv = ray_scene_triangle_emitter_uv(emitter.uv_index, vec3(1.0 - root, b, c));
+	vec3 texel_emission = ray_scene_triangle_emitter_emission_texel(emitter.material, emitter_uv);
 	vec3 rel = sample_point - p_vertex;
 	float distance = length(rel);
 	if (!(distance > 1e-5)) {
@@ -307,7 +312,7 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 		return;
 	}
 	float geometric = min(cos_light / max(distance * distance, 1e-8), 60000.0);
-	vec3 color = emission * (total / luminance);
+	vec3 color = texel_emission * (total / luminance);
 	if (any(isinf(color)) || any(isnan(color))) {
 		di_emitter_clear(p_pixel, 4u);
 		return;
@@ -918,12 +923,36 @@ void di_emitter_history_store(ivec2 p_pixel, uvec4 p_header, vec4 p_point, vec4 
 	imageStore(emitter_history, ivec3(p_pixel, 3), p_surface);
 }
 
-vec3 di_emitter_color_at(uint p_index, out float r_luminance_weight) {
+vec2 di_emitter_uv_at(RaySceneTriangleEmitter p_emitter, vec3 p_point) {
+	vec3 point = di_emitter_to_view(p_point);
+	vec3 v0 = di_emitter_to_view(p_emitter.v0);
+	vec3 v1 = di_emitter_to_view(p_emitter.v1);
+	vec3 v2 = di_emitter_to_view(p_emitter.v2);
+	vec3 e1 = v1 - v0;
+	vec3 e2 = v2 - v0;
+	vec3 ep = point - v0;
+	float d11 = dot(e1, e1);
+	float d12 = dot(e1, e2);
+	float d22 = dot(e2, e2);
+	float dp1 = dot(ep, e1);
+	float dp2 = dot(ep, e2);
+	float denom = d11 * d22 - d12 * d12;
+	if (abs(denom) < 1e-20) {
+		return vec2(-1.0);
+	}
+	float v = (d22 * dp1 - d12 * dp2) / denom;
+	float w = (d11 * dp2 - d12 * dp1) / denom;
+	return ray_scene_triangle_emitter_uv(p_emitter.uv_index, vec3(1.0 - v - w, v, w));
+}
+
+vec3 di_emitter_color_at(uint p_index, vec3 p_point, out float r_luminance_weight) {
 	RaySceneTriangleEmitter emitter = ray_scene_triangle_emitter(p_index);
-	vec3 emission = ray_scene_triangle_emitter_emission(emitter.material);
+	vec2 uv = di_emitter_uv_at(emitter, p_point);
+	vec3 emission = uv == vec2(-1.0) ? ray_scene_triangle_emitter_emission(emitter.material) : ray_scene_triangle_emitter_emission_texel(emitter.material, uv);
 	float luminance = dot(max(emission, vec3(0.0)), luminance_weights);
+	float selection = di_emitter_selection_luminance(emitter.material);
 	r_luminance_weight = luminance;
-	return luminance > 0.0 ? emission * (emitter_scan.data[DI_EMITTER_TOTAL] / luminance) : vec3(0.0);
+	return (luminance > 0.0 && selection > 0.0) ? emission * (emitter_scan.data[DI_EMITTER_TOTAL] / selection) : vec3(0.0);
 }
 
 float di_emitter_target(vec3 p_color, float p_geometric) {
@@ -962,7 +991,6 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 
 	float held_target = 0.0;
 	float held_origin = 0.0;
-	float held_weight = 0.0;
 	float held_m = 0.0;
 	uint held_age = 0u;
 	uint held_index = 0u;
@@ -978,7 +1006,6 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 			held_index = header.x & 0xFFFFu;
 			held_instance = header.x >> 16u;
 			held_age = header.y & 0xFFu;
-			held_weight = uintBitsToFloat(header.z);
 			held_origin = uintBitsToFloat(header.w);
 			RaySceneTriangleEmitter emitter = ray_scene_triangle_emitter(held_index);
 			if (emitter.instance != held_instance) {
@@ -1004,7 +1031,7 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 				}
 				held_geometric = cos_light > 0.0 ? min(cos_light / max(distance_sq, 1e-8), 60000.0) : 0.0;
 				float held_luminance = 0.0;
-				held_color = di_emitter_color_at(held_index, held_luminance);
+				held_color = di_emitter_color_at(held_index, held_point, held_luminance);
 				held_target = di_emitter_target(held_color, held_geometric);
 				held_m = min(uintBitsToFloat(surface.z), 20.0);
 				if (held_target > 0.0 && !di_emitter_visible(p_vertex, p_normal, held_point, held_instance, distance_sq)) {
@@ -1037,7 +1064,7 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 	float damp = 1.0;
 	atomicAdd(emitter_reuse_counters.damp_sum, uint(damp * 65536.0));
 
-	uvec4 header = uvec4((index & 0xFFFFu) | ((instance & 0xFFFFu) << 16u), age | 0x100u, floatBitsToUint(1.0), floatBitsToUint(target));
+	uvec4 header = uvec4((index & 0xFFFFu) | ((instance & 0xFFFFu) << 16u), age | 0x100u, 0u, floatBitsToUint(target));
 	uvec4 surface = uvec4(packSnorm2x16(di_oct_encode(p_normal)), floatBitsToUint(-p_vertex.z), floatBitsToUint(float(count)), 0u);
 	di_emitter_history_store(p_pixel, header, vec4(point, geometric), vec4(color, damp), surface);
 	di_emitter_write(p_pixel, point, color, geometric);
