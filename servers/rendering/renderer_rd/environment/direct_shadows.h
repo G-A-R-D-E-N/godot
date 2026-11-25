@@ -169,7 +169,7 @@ private:
 	};
 	static_assert(sizeof(Params) == 416);
 
-	static constexpr uint32_t COUNTER_WORDS = 58;
+	static constexpr uint32_t COUNTER_WORDS = 62;
 	static constexpr uint32_t EMITTER_HIT_INSTANCES = 4096;
 	static constexpr uint32_t COUNTER_BYTES = COUNTER_WORDS * 4;
 

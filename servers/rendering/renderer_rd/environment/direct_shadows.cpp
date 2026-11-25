@@ -585,6 +585,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 					print_line(vformat("DIRECT_EMITTERS receiver_omni: <1 %d 1-3 %d 3-10 %d >10 %d min_ray %.3f", int(values[37]), int(values[38]), int(values[39]), int(values[40]), float(4095u - values[48]) / 4.0f));
 					print_line(vformat("DIRECT_EMITTERS receiver_camera: <1 %d 1-3 %d 3-10 %d >10 %d", int(values[50]), int(values[51]), int(values[52]), int(values[53])));
 					print_line(vformat("DIRECT_EMITTERS backface_by_distance: <1 %d 1-3 %d 3-10 %d >10 %d", int(values[54]), int(values[55]), int(values[56]), int(values[57])));
+					print_line(vformat("DIRECT_EMITTERS near_normals: within3m total %d facing_cam %d back_cam %d | backface within3m facing_cam %d back_cam %d", int(values[59]) + int(values[58]), int(values[59]), int(values[58]), int(values[61]), int(values[60])));
 					print_line(vformat("DIRECT_EMITTERS words35_57: %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d", int(values[35]), int(values[36]), int(values[37]), int(values[38]), int(values[39]), int(values[40]), int(values[41]), int(values[42]), int(values[43]), int(values[44]), int(values[45]), int(values[46]), int(values[47]), int(values[48]), int(values[49]), int(values[50]), int(values[51]), int(values[52]), int(values[53]), int(values[54]), int(values[55]), int(values[56]), int(values[57])));
 			if (emitter_hit_hist.is_valid()) {
 				const Vector<uint8_t> hist = rd->buffer_get_data(emitter_hit_hist);
