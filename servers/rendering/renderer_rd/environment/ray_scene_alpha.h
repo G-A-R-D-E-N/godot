@@ -59,11 +59,20 @@ public:
 		uint32_t width = 0;
 		uint32_t height = 0;
 		uint64_t data_version = 0;
+		uint64_t observation = 0;
 
 		bool operator==(const SourceIdentity &p_other) const {
-			return rd == p_other.rd && width == p_other.width && height == p_other.height && data_version == p_other.data_version;
+			return rd == p_other.rd && width == p_other.width && height == p_other.height && data_version == p_other.data_version && observation == p_other.observation;
 		}
 	};
+
+	struct FillRequest {
+		uint64_t cost = 0;
+		bool needs_near = false;
+		bool needs_far = false;
+	};
+
+	static void plan_fills(const LocalVector<FillRequest> &p_requests, uint64_t p_budget, uint64_t p_used, uint32_t &r_cursor, LocalVector<uint32_t> &r_selected);
 
 	struct EntryKey {
 		float scale[2] = {};
@@ -129,7 +138,7 @@ public:
 		key.offset[1] = float(p_offset.y);
 		return acquire(p_source, p_cutoff, key);
 	}
-	void update();
+	void update(bool p_refresh_dynamic = true);
 	void commit_fill(uint32_t p_layer, uint64_t p_signature);
 	bool layer_needs_far(uint32_t p_layer) const;
 	void commit_far(uint32_t p_layer, uint64_t p_signature);
@@ -158,6 +167,7 @@ public:
 	RID get_layer_source(uint32_t p_layer) const { return layers[p_layer].source; }
 	uint32_t get_layer_cutoff(uint32_t p_layer) const { return layers[p_layer].cutoff & LAYER_CUTOFF_MASK; }
 	uint32_t get_layer_state(uint32_t p_layer) const { return layers[p_layer].state; }
+	bool layer_requested(uint32_t p_layer) const { return layers[p_layer].last_observation == observation_revision; }
 	uint32_t get_layer_generation(uint32_t p_layer) const { return layers[p_layer].generation; }
 	uint32_t get_max_layers() const { return max_layers; }
 	uint64_t get_change_serial() const { return change_serial; }
@@ -174,6 +184,7 @@ private:
 		uint64_t far_filled_signature = 0;
 		uint32_t generation = 0;
 		uint64_t last_used = 0;
+		uint64_t last_observation = 0;
 		bool far_wanted = false;
 	};
 
@@ -210,7 +221,7 @@ private:
 	bool _ensure_fallback_textures();
 	void _free_textures();
 	void _free_fallback_textures();
-	void _update_far_mips();
+	void _update_far_mips(const LocalVector<uint32_t> &p_pending);
 	void _ensure_table_capacity(uint32_t p_count);
 	void _upload_table();
 
@@ -237,6 +248,8 @@ private:
 	bool table_dirty = true;
 	uint64_t change_serial = 0;
 	uint64_t source_revision = 0;
+	uint64_t observation_revision = 0;
+	uint32_t fill_cursor = 0;
 	bool state_changed = false;
 	uint64_t state_change_frame = 0;
 	RaySceneAlphaFillShaderRD *fill_shader = nullptr;

@@ -161,6 +161,7 @@ void RayAlphaStore::release() {
 	table_dirty = true;
 	textures_ok = false;
 	stats = Stats();
+	fill_cursor = 0;
 }
 
 bool RayAlphaStore::_ensure_pipeline() {
@@ -369,6 +370,13 @@ bool RayAlphaStore::_publish_far(TableEntry &r_entry, const Layer &p_layer) {
 }
 
 void RayAlphaStore::begin_update(uint64_t p_frame) {
+	if (++observation_revision == 0) {
+		++observation_revision;
+	}
+	if (p_frame != frame) {
+		stats.fills_this_frame = 0;
+		stats.fill_texels_this_frame = 0;
+	}
 	frame = p_frame;
 	stats.layers_refused = 0;
 	stats.dead_sources_refused = 0;
@@ -485,6 +493,7 @@ uint32_t RayAlphaStore::acquire(RID p_source, uint32_t p_cutoff, const EntryKey 
 	}
 	Layer &layer = layers[layer_index];
 	layer.last_used = frame;
+	layer.last_observation = observation_revision;
 	const bool wants_far = uses_far(key.bits);
 	if (wants_far) {
 		layer.far_wanted = true;
@@ -557,27 +566,55 @@ uint64_t RayAlphaStore::observe_source(uint32_t p_layer, const SourceIdentity &p
 	return layer.signature;
 }
 
-void RayAlphaStore::update() {
+void RayAlphaStore::plan_fills(const LocalVector<FillRequest> &p_requests, uint64_t p_budget, uint64_t p_used, uint32_t &r_cursor, LocalVector<uint32_t> &r_selected) {
+	r_selected.clear();
+	if (p_requests.is_empty()) {
+		r_cursor = 0;
+		return;
+	}
+	const uint32_t count = p_requests.size();
+	const uint32_t start = r_cursor % count;
+	uint64_t remaining = p_budget > p_used ? p_budget - p_used : 0;
+	for (uint32_t n = 0; n < count; n++) {
+		const uint32_t index = (start + n) % count;
+		const FillRequest &request = p_requests[index];
+		if (!request.needs_near && !request.needs_far) {
+			continue;
+		}
+		if (request.cost > remaining && (p_used != 0 || !r_selected.is_empty())) {
+			r_cursor = index;
+			return;
+		}
+		r_selected.push_back(index);
+		remaining = request.cost < remaining ? remaining - request.cost : 0;
+		r_cursor = (index + 1u) % count;
+	}
+}
+
+void RayAlphaStore::update(bool p_refresh_dynamic) {
 	if (max_layers == 0) {
 		return;
 	}
-	stats.fills_this_frame = 0;
-	stats.fill_texels_this_frame = 0;
 	stats.source_missing_frames = 0;
 	if (!_ensure_texture()) {
 		_ensure_fallback_textures();
 	}
 
 	TextureStorage *texture_storage = TextureStorage::get_singleton();
-	LocalVector<uint32_t> pending;
+	LocalVector<FillRequest> requests;
+	requests.resize(layers.size());
 	for (uint32_t i = 0; i < layers.size(); i++) {
 		Layer &layer = layers[i];
 		if (layer.source.is_null()) {
 			continue;
 		}
+		const bool dynamic = texture_storage->texture_has_external_writes(layer.source);
+		if (dynamic && (!p_refresh_dynamic || !layer_requested(i))) {
+			continue;
+		}
 		const RID rd = texture_storage->texture_get_rd_texture(layer.source, false);
 		if (rd.is_null()) {
-			observe_source(i, SourceIdentity());
+			observe_source(i, SourceIdentity{ RID(), 0, 0, 0, dynamic ? observation_revision : 0 });
 			if (layer.state != LAYER_PENDING) {
 				layer.state = LAYER_PENDING;
 				_mark_state_changed();
@@ -586,28 +623,32 @@ void RayAlphaStore::update() {
 			continue;
 		}
 		const RD::TextureFormat format = RD::get_singleton()->texture_get_format(rd);
-		const SourceIdentity identity{ rd, format.width, format.height, texture_storage->texture_get_data_version(layer.source) };
+		const uint64_t observation = dynamic ? observation_revision : 0;
+		const SourceIdentity identity{ rd, format.width, format.height, texture_storage->texture_get_data_version(layer.source), observation };
 		observe_source(i, identity);
-		if (layer.signature != layer.filled_signature || layer.state != LAYER_READY) {
-			if (layer.state != LAYER_PENDING) {
-				layer.state = LAYER_PENDING;
-				_mark_state_changed();
-			}
-			pending.push_back(i);
+		FillRequest &request = requests[i];
+		request.needs_near = layer.signature != layer.filled_signature || layer.state != LAYER_READY;
+		if (request.needs_near && layer.state != LAYER_PENDING) {
+			layer.state = LAYER_PENDING;
+			_mark_state_changed();
 		}
+		request.needs_far = layer.far_wanted && (request.needs_near || layer_needs_far(i));
+		request.cost = (request.needs_near ? uint64_t(format.width) * uint64_t(format.height) : 0) + (request.needs_far ? MEAN_MIP_READS : 0);
 	}
 
-	if (!pending.is_empty() && _ensure_pipeline()) {
+	LocalVector<uint32_t> selected;
+	plan_fills(requests, texels_per_frame, stats.fill_texels_this_frame, fill_cursor, selected);
+	if (!selected.is_empty() && _ensure_pipeline()) {
 		RID shader = fill_shader->version_get_shader(fill_version, 0);
 		RID sampler = MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_ENABLED);
 		RD::ComputeListID list = RD::get_singleton()->compute_list_begin();
 		RD::get_singleton()->compute_list_bind_compute_pipeline(list, fill_pipeline);
-		for (uint32_t index : pending) {
+		for (uint32_t index : selected) {
+			if (!requests[index].needs_near) {
+				continue;
+			}
 			Layer &layer = layers[index];
 			const uint64_t texels = uint64_t(layer.source_identity.width) * uint64_t(layer.source_identity.height);
-			if (stats.fills_this_frame > 0 && stats.fill_texels_this_frame + texels > texels_per_frame) {
-				break;
-			}
 			RD::Uniform u_source(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ sampler, layer.source_identity.rd }));
 			RD::Uniform u_layers(RD::UNIFORM_TYPE_IMAGE, 1, layer_texture);
 			RD::Uniform u_mean(RD::UNIFORM_TYPE_IMAGE, 2, mean_mip_views[0]);
@@ -635,7 +676,13 @@ void RayAlphaStore::update() {
 		RD::get_singleton()->compute_list_end();
 	}
 
-	_update_far_mips();
+	LocalVector<uint32_t> far_pending;
+	for (uint32_t index : selected) {
+		if (requests[index].needs_far && layer_needs_far(index)) {
+			far_pending.push_back(index);
+		}
+	}
+	_update_far_mips(far_pending);
 	sync_entries();
 	if (table_dirty) {
 		_upload_table();
@@ -648,20 +695,8 @@ bool RayAlphaStore::layer_needs_far(uint32_t p_layer) const {
 	return layer.source.is_valid() && layer.state == LAYER_READY && layer.far_wanted && layer.far_filled_signature != layer.filled_signature;
 }
 
-void RayAlphaStore::_update_far_mips() {
-	LocalVector<uint32_t> pending;
-	uint64_t texels = stats.fill_texels_this_frame;
-	for (uint32_t i = 0; i < layers.size(); i++) {
-		if (!layer_needs_far(i)) {
-			continue;
-		}
-		if ((stats.fills_this_frame > 0 || !pending.is_empty()) && texels + MEAN_MIP_READS > texels_per_frame) {
-			break;
-		}
-		pending.push_back(i);
-		texels += MEAN_MIP_READS;
-	}
-	if (pending.is_empty() || !_ensure_pipeline()) {
+void RayAlphaStore::_update_far_mips(const LocalVector<uint32_t> &p_pending) {
+	if (p_pending.is_empty() || !_ensure_pipeline()) {
 		return;
 	}
 
@@ -687,7 +722,7 @@ void RayAlphaStore::_update_far_mips() {
 		FillParams params = {};
 		params.layer_size = MEAN_SIZE >> mip;
 		const uint32_t groups = (params.layer_size + 7u) / 8u;
-		for (uint32_t index : pending) {
+		for (uint32_t index : p_pending) {
 			params.layer = index;
 			rd->compute_list_set_push_constant(list, &params, sizeof(params));
 			rd->compute_list_dispatch(list, groups, groups, 1);
@@ -695,10 +730,10 @@ void RayAlphaStore::_update_far_mips() {
 	}
 	rd->compute_list_end();
 
-	for (uint32_t index : pending) {
+	for (uint32_t index : p_pending) {
 		commit_far(index, layers[index].filled_signature);
 	}
-	const uint64_t added = uint64_t(pending.size()) * MEAN_MIP_READS;
+	const uint64_t added = uint64_t(p_pending.size()) * MEAN_MIP_READS;
 	stats.fill_texels_this_frame += added;
 	stats.fill_texels_total += added;
 }
@@ -743,9 +778,15 @@ void RayAlphaStore::sync_entries() {
 
 	for (uint32_t i = 1; i < entries.size(); i++) {
 		TableEntry &entry = entries[i];
-		if (entry.layer < layers.size() && entry.state != layers[entry.layer].state) {
-			entry.state = layers[entry.layer].state;
-			_mark_state_changed();
+		if (entry.layer < layers.size()) {
+			const Layer &layer = layers[entry.layer];
+			if (entry.state != layer.state) {
+				entry.state = layer.state;
+				_mark_state_changed();
+			}
+			if (layer.source_identity.observation != 0 && uses_far(entry.bits) && _publish_far(entry, layer)) {
+				_mark_state_changed();
+			}
 		}
 	}
 }

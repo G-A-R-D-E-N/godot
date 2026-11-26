@@ -205,6 +205,7 @@ private:
 		RID streaming_state;
 
 		uint64_t data_version = 0;
+		bool external_writes = false;
 
 		void cleanup();
 	};
@@ -650,9 +651,11 @@ public:
 	virtual void texture_rd_initialize(RID p_texture, const RID &p_rd_texture, const RSE::TextureLayeredType p_layer_type = RSE::TEXTURE_LAYERED_2D_ARRAY) override;
 
 	virtual RID texture_get_rd_texture(RID p_texture, bool p_srgb = false) const override;
+	virtual RID texture_get_rd_texture_for_export(RID p_texture, bool p_srgb = false) const override;
 	virtual uint64_t texture_get_native_handle(RID p_texture, bool p_srgb = false) const override;
 
 	uint64_t texture_get_data_version(RID p_texture) const;
+	bool texture_has_external_writes(RID p_texture) const;
 
 	//internal usage
 	_FORCE_INLINE_ TextureType texture_get_type(RID p_texture) {

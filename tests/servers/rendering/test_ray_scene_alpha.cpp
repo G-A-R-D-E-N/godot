@@ -2566,6 +2566,92 @@ TEST_CASE("[RayScene] Alpha source revisions invalidate coverage and far mips") 
 	CHECK(store.layer_needs_far(layer));
 }
 
+TEST_CASE("[RayScene] Alpha fill plan rotates fairly across frames and views") {
+	LocalVector<RayAlphaStore::FillRequest> requests;
+	requests.resize(3);
+	for (uint32_t i = 0; i < requests.size(); i++) {
+		requests[i].cost = 6;
+		requests[i].needs_near = true;
+		requests[i].needs_far = true;
+	}
+	LocalVector<uint32_t> selected;
+	uint32_t cursor = 0;
+	for (uint32_t expected = 0; expected < 3; expected++) {
+		RayAlphaStore::plan_fills(requests, 6, 0, cursor, selected);
+		REQUIRE(selected.size() == 1);
+		CHECK(selected[0] == expected);
+		const uint32_t saved_cursor = cursor;
+		RayAlphaStore::plan_fills(requests, 6, 6, cursor, selected);
+		CHECK(selected.is_empty());
+		CHECK(cursor == saved_cursor);
+	}
+	requests[0].cost = 20;
+	RayAlphaStore::plan_fills(requests, 6, 0, cursor, selected);
+	REQUIRE(selected.size() == 1);
+	CHECK(selected[0] == 0);
+	RayAlphaStore::plan_fills(requests, 6, 0, cursor, selected);
+	REQUIRE(selected.size() == 1);
+	CHECK(selected[0] == 1);
+}
+
+TEST_CASE("[RayScene] Alpha requests distinguish views sharing a frame") {
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	const RID first = RID::from_uint64(0x100000003ull);
+	const RID second = RID::from_uint64(0x100000004ull);
+	store.begin_update(1);
+	const uint32_t first_entry = store.acquire(first, 128, Vector2(1, 1), Vector2());
+	const uint32_t second_entry = store.acquire(second, 128, Vector2(1, 1), Vector2());
+	REQUIRE(first_entry != 0);
+	REQUIRE(second_entry != 0);
+	const uint32_t first_layer = store.get_entry(first_entry).layer;
+	const uint32_t second_layer = store.get_entry(second_entry).layer;
+	CHECK(store.layer_requested(first_layer));
+	CHECK(store.layer_requested(second_layer));
+	store.begin_update(1);
+	CHECK(store.acquire(second, 128, Vector2(1, 1), Vector2()) == second_entry);
+	CHECK_FALSE(store.layer_requested(first_layer));
+	CHECK(store.layer_requested(second_layer));
+}
+
+TEST_CASE("[RayScene] Dynamic alpha revisions publish only their current far mip") {
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	store.begin_update(1);
+	const RID source = RID::from_uint64(0x100000003ull);
+	const uint32_t entry = store.acquire(source, 128, make_key(uint32_t(RSE::CULL_MODE_BACK), 1u, 1.15f, 6.0f, 0.25f, 1.0f, 0.0f));
+	REQUIRE(entry != 0);
+	const uint32_t layer = store.get_entry(entry).layer;
+	const RayAlphaStore::SourceIdentity first{ RID::from_uint64(0x100000004ull), 8, 8, 0, 1 };
+	RayAlphaStore::SourceIdentity next = first;
+	next.observation = 2;
+	const uint64_t first_revision = store.observe_source(layer, first);
+	store.commit_fill(layer, first_revision);
+	store.commit_far(layer, first_revision);
+	store.sync_entries();
+	CHECK(store.get_entry(entry).far_state == RayAlphaStore::LAYER_READY);
+	const uint32_t ready_hash = RayScene::alpha_far_hash(17, store.get_entry(entry));
+	const uint64_t next_revision = store.observe_source(layer, next);
+	store.sync_entries();
+	CHECK(store.get_entry(entry).state == RayAlphaStore::LAYER_PENDING);
+	CHECK(store.get_entry(entry).far_state == RayAlphaStore::LAYER_EMPTY);
+	CHECK(RayScene::alpha_far_hash(17, store.get_entry(entry)) != ready_hash);
+	store.commit_far(layer, next_revision);
+	store.sync_entries();
+	CHECK(store.get_entry(entry).far_state == RayAlphaStore::LAYER_EMPTY);
+	store.commit_fill(layer, next_revision);
+	store.sync_entries();
+	CHECK(store.get_entry(entry).far_state == RayAlphaStore::LAYER_EMPTY);
+	store.commit_far(layer, next_revision);
+	store.sync_entries();
+	CHECK(store.get_entry(entry).far_state == RayAlphaStore::LAYER_READY);
+	CHECK(RayScene::alpha_far_hash(17, store.get_entry(entry)) == ready_hash);
+	store.observe_source(layer, RayAlphaStore::SourceIdentity{ RID(), 0, 0, 0, 3 });
+	store.sync_entries();
+	CHECK(store.get_entry(entry).state == RayAlphaStore::LAYER_PENDING);
+	CHECK(store.get_entry(entry).far_state == RayAlphaStore::LAYER_EMPTY);
+}
+
 TEST_CASE("[RayScene] Alpha cutoff coverage honors inverted range boundaries") {
 	CHECK(RayScene::classify_alpha_cutoff(-0.6f, true) == RayScene::ALPHA_CUTOFF_SKIP);
 	CHECK(RayScene::classify_alpha_cutoff(0.0f, true) == RayScene::ALPHA_CUTOFF_TEXTURE);
@@ -2674,6 +2760,35 @@ TEST_CASE("[RayScene] Texture data version bumps after a same-RID image update")
 #else
 	MESSAGE("SKIP: RD_DISABLED.");
 #endif
+}
+
+TEST_CASE("[RayScene] Externally writable texture status follows the backing source") {
+	TextureStorage *texture_storage = TextureStorage::get_singleton();
+	if (texture_storage == nullptr || RD::get_singleton() == nullptr) {
+		MESSAGE("SKIP: renderer texture storage unavailable.");
+		return;
+	}
+	Ref<Image> image = Image::create_empty(4, 4, false, Image::FORMAT_RGBA8);
+	const RID base = texture_storage->texture_allocate();
+	texture_storage->texture_2d_initialize(base, image);
+	const RID proxy = texture_storage->texture_allocate();
+	texture_storage->texture_proxy_initialize(proxy, base);
+	CHECK_FALSE(texture_storage->texture_has_external_writes(base));
+	CHECK_FALSE(texture_storage->texture_has_external_writes(proxy));
+	const RID borrowed = texture_storage->texture_allocate();
+	texture_storage->texture_rd_initialize(borrowed, texture_storage->texture_get_rd_texture(base));
+	CHECK(texture_storage->texture_has_external_writes(borrowed));
+	texture_storage->texture_free(borrowed);
+	const RID render_target = texture_storage->render_target_create();
+	CHECK(texture_storage->texture_has_external_writes(texture_storage->render_target_get_texture(render_target)));
+	texture_storage->render_target_free(render_target);
+	CHECK(texture_storage->texture_get_rd_texture(proxy).is_valid());
+	CHECK_FALSE(texture_storage->texture_has_external_writes(base));
+	CHECK(texture_storage->texture_get_rd_texture_for_export(proxy).is_valid());
+	CHECK(texture_storage->texture_has_external_writes(base));
+	CHECK(texture_storage->texture_has_external_writes(proxy));
+	texture_storage->texture_free(proxy);
+	texture_storage->texture_free(base);
 }
 
 TEST_CASE("[RayScene] Proxy textures follow source data version updates") {

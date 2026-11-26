@@ -1668,6 +1668,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	LocalVector<BuildPrimitive> primitives;
 	uint32_t signature = HASH_MURMUR3_SEED;
 	uint64_t scene_signature = 0;
+	LocalVector<uint32_t> scene_hashes;
 	scene_members.clear();
 	for (uint32_t i = 0; i < p_instances.size(); i++) {
 		RenderGeometryInstanceBase *geometry = static_cast<RenderGeometryInstanceBase *>(p_instances[i]);
@@ -1782,24 +1783,25 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		scene_hash = hash_murmur3_one_32(geometry->layer_mask, scene_hash);
 		scene_hash = hash_murmur3_one_32(mesh->build_serial, scene_hash);
 		scene_hash = hash_murmur3_buffer(materials.ptr() + instance.material_offset, sizeof(Material) * mesh->surface_count, scene_hash);
+		scene_hashes.push_back(scene_hash);
+		scene_members.push_back(GISceneTracker::member_key(p_instances[i], mesh_rid.get_id()));
+	}
+	alpha_store.update(alpha_enabled);
+	for (uint32_t i = 0; i < instances.size(); i++) {
+		uint32_t scene_hash = scene_hashes[i];
 		if (alpha_enabled) {
-			for (uint32_t s = 0; s < mesh->surface_count; s++) {
-				const uint32_t index = materials[instance.material_offset + s].flags >> MATERIAL_ALPHA_SHIFT;
+			const uint32_t end = i + 1u < instances.size() ? instances[i + 1u].material_offset : materials.size();
+			for (uint32_t s = instances[i].material_offset; s < end; s++) {
+				const uint32_t index = materials[s].flags >> MATERIAL_ALPHA_SHIFT;
 				if (index != 0) {
-					const RayAlphaStore::TableEntry &entry = alpha_store.get_entry(index);
-					if (RayAlphaStore::uses_far(entry.bits)) {
-						scene_hash = hash_murmur3_one_32(entry.far_state, scene_hash);
-						scene_hash = hash_murmur3_one_float(entry.density, scene_hash);
-					}
+					scene_hash = alpha_far_hash(scene_hash, alpha_store.get_entry(index));
 				}
 			}
 		}
 		scene_signature = GISceneTracker::add_instance(scene_signature, scene_hash);
-		scene_members.push_back(GISceneTracker::member_key(p_instances[i], mesh_rid.get_id()));
 	}
 	scene_signature = alpha_scene_signature(scene_signature, alpha_enabled);
 	GIEpochs::get_singleton()->apply(scene_tracker.update(scene_signature, scene_members));
-	alpha_store.update();
 	if (alpha_enabled) {
 		_print_alpha();
 	}

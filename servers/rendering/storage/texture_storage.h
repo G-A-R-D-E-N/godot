@@ -114,6 +114,7 @@ public:
 
 	virtual void texture_rd_initialize(RID p_texture, const RID &p_rd_texture, const RSE::TextureLayeredType p_layer_type = RSE::TEXTURE_LAYERED_2D_ARRAY) = 0;
 	virtual RID texture_get_rd_texture(RID p_texture, bool p_srgb = false) const = 0;
+	virtual RID texture_get_rd_texture_for_export(RID p_texture, bool p_srgb = false) const { return texture_get_rd_texture(p_texture, p_srgb); }
 	virtual uint64_t texture_get_native_handle(RID p_texture, bool p_srgb = false) const = 0;
 
 	/* AREA LIGHT ATLAS API */

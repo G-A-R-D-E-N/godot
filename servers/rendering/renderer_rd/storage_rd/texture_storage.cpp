@@ -2353,6 +2353,7 @@ void TextureStorage::texture_rd_initialize(RID p_texture, const RID &p_rd_textur
 	texture.height_2d = texture.height;
 	texture.is_render_target = false;
 	texture.is_proxy = false;
+	texture.external_writes = true;
 
 	texture_owner.initialize_rid(p_texture, texture);
 }
@@ -2370,15 +2371,30 @@ RID TextureStorage::texture_get_rd_texture(RID p_texture, bool p_srgb) const {
 	return (p_srgb && tex->rd_texture_srgb.is_valid()) ? tex->rd_texture_srgb : tex->rd_texture;
 }
 
+RID TextureStorage::texture_get_rd_texture_for_export(RID p_texture, bool p_srgb) const {
+	const RID rd = texture_get_rd_texture(p_texture, p_srgb);
+	Texture *base = _texture_get_base(texture_owner.get_or_null(p_texture));
+	if (rd.is_valid() && base != nullptr) {
+		base->external_writes = true;
+	}
+	return rd;
+}
+
+bool TextureStorage::texture_has_external_writes(RID p_texture) const {
+	const Texture *base = _texture_get_base(texture_owner.get_or_null(p_texture));
+	return base != nullptr && (base->is_render_target || base->external_writes);
+}
+
 uint64_t TextureStorage::texture_get_native_handle(RID p_texture, bool p_srgb) const {
 	Texture *tex = texture_owner.get_or_null(p_texture);
 	ERR_FAIL_NULL_V(tex, 0);
-
-	if (p_srgb && tex->rd_texture_srgb.is_valid()) {
-		return RD::get_singleton()->get_driver_resource(RD::DRIVER_RESOURCE_TEXTURE, tex->rd_texture_srgb);
-	} else {
-		return RD::get_singleton()->get_driver_resource(RD::DRIVER_RESOURCE_TEXTURE, tex->rd_texture);
+	const RID rd = p_srgb && tex->rd_texture_srgb.is_valid() ? tex->rd_texture_srgb : tex->rd_texture;
+	const uint64_t handle = RD::get_singleton()->get_driver_resource(RD::DRIVER_RESOURCE_TEXTURE, rd);
+	Texture *base = _texture_get_base(tex);
+	if (handle != 0 && base != nullptr) {
+		base->external_writes = true;
 	}
+	return handle;
 }
 
 static Ref<Image> duplicate_and_convert(const Ref<Image> &p_source_image, Image::Format p_format) {
