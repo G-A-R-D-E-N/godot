@@ -99,7 +99,7 @@ TEST_CASE("[DirectResampler] Params match the entry pass's std140 block") {
 	CHECK(offsetof(DirectResamplerRD::Params, head_swap_frames) == 420);
 	CHECK(offsetof(DirectResamplerRD::Params, temporal_reuse) == 424);
 	CHECK(offsetof(DirectResamplerRD::Params, head_window) == 428);
-	CHECK(sizeof(DirectResamplerRD::Params) == 448);
+	CHECK(sizeof(DirectResamplerRD::Params) == 464);
 	CHECK(DirectResamplerRD::DEBUG_BYTES == (4 + 65536) * 4);
 }
 
@@ -259,6 +259,10 @@ TEST_CASE("[DirectResampler] Params field order matches di_resample.glsl") {
 		{ "temporal_reuse", offsetof(DirectResamplerRD::Params, temporal_reuse) },
 		{ "head_window", offsetof(DirectResamplerRD::Params, head_window) },
 		{ "emitter_clamp", offsetof(DirectResamplerRD::Params, emitter_clamp) },
+		{ "emitter_clamp_pad0", offsetof(DirectResamplerRD::Params, emitter_clamp_pad0) },
+		{ "emitter_clamp_pad1", offsetof(DirectResamplerRD::Params, emitter_clamp_pad1) },
+		{ "emitter_clamp_pad2", offsetof(DirectResamplerRD::Params, emitter_clamp_pad2) },
+		{ "emitter_pick_radius", offsetof(DirectResamplerRD::Params, emitter_pick_radius) },
 	};
 	const int count = int(sizeof(fields) / sizeof(fields[0]));
 

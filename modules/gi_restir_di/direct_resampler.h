@@ -89,6 +89,7 @@ public:
 		uint32_t head_swap_frames = 4;
 		bool head_window = false;
 		float emitter_clamp = 0.0f;
+		float emitter_pick_radius = 0.0f;
 	};
 
 	struct Params {
@@ -129,8 +130,12 @@ public:
 		uint32_t emitter_clamp_pad0;
 		uint32_t emitter_clamp_pad1;
 		uint32_t emitter_clamp_pad2;
+		float emitter_pick_radius;
+		uint32_t emitter_pick_pad0;
+		uint32_t emitter_pick_pad1;
+		uint32_t emitter_pick_pad2;
 	};
-	static_assert(sizeof(Params) == 448);
+	static_assert(sizeof(Params) == 464);
 	static_assert(sizeof(Params) % 16 == 0);
 
 	static constexpr uint32_t RESERVOIRS_OFF = 0;

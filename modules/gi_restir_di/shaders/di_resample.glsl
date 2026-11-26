@@ -89,6 +89,10 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	uint emitter_clamp_pad0;
 	uint emitter_clamp_pad1;
 	uint emitter_clamp_pad2;
+	float emitter_pick_radius;
+	uint emitter_pick_pad0;
+	uint emitter_pick_pad1;
+	uint emitter_pick_pad2;
 }
 params;
 
@@ -268,6 +272,26 @@ void di_emitter_commit(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geomet
 }
 #endif
 
+uint di_emitter_pick_index(float p_target, uint p_count) {
+	uint low = 0u;
+	uint high = p_count - 1u;
+	while (low < high) {
+		uint mid = (low + high) >> 1u;
+		if (emitter_cdf.data[mid] < p_target) {
+			low = mid + 1u;
+		} else {
+			high = mid;
+		}
+	}
+	return low;
+}
+
+float di_emitter_distance(vec3 p_vertex, uint p_index) {
+	RaySceneTriangleEmitter emitter = ray_scene_triangle_emitter(p_index);
+	vec3 centre = di_emitter_to_view((emitter.v0 + emitter.v1 + emitter.v2) * (1.0 / 3.0));
+	return length(centre - p_vertex);
+}
+
 void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 	uint count = ray_scene_triangle_emitter_count();
 	float total = count == 0u ? 0.0 : emitter_scan.data[DI_EMITTER_TOTAL];
@@ -275,16 +299,22 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 		di_emitter_clear(p_pixel, 1u);
 		return;
 	}
-	float target = di_emitter_hash(p_seed, 0x27d4eb2fu) * total;
-	uint low = 0u;
-	uint high = count - 1u;
-	while (low < high) {
-		uint mid = (low + high) >> 1u;
-		if (emitter_cdf.data[mid] < target) {
-			low = mid + 1u;
-		} else {
-			high = mid;
+	uint low = di_emitter_pick_index(di_emitter_hash(p_seed, 0x27d4eb2fu) * total, count);
+	if (params.emitter_pick_radius > 0.0) {
+		uint nearest = low;
+		float nearest_distance = di_emitter_distance(p_vertex, low);
+		for (uint attempt = 1u; attempt < 4u; attempt++) {
+			if (nearest_distance <= params.emitter_pick_radius) {
+				break;
+			}
+			uint candidate = di_emitter_pick_index(di_emitter_hash(p_seed ^ (0x9e3779b9u * attempt), 0x27d4eb2fu) * total, count);
+			float candidate_distance = di_emitter_distance(p_vertex, candidate);
+			if (candidate_distance < nearest_distance) {
+				nearest = candidate;
+				nearest_distance = candidate_distance;
+			}
 		}
+		low = nearest;
 	}
 	RaySceneTriangleEmitter emitter = ray_scene_triangle_emitter(low);
 	vec3 v0 = di_emitter_to_view(emitter.v0);

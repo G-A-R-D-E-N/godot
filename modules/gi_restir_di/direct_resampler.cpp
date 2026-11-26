@@ -44,6 +44,7 @@ void DirectResamplerRD::register_settings() {
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/temporal"), false);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/spatial"), false);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/firefly_clamp"), 0.0);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/pick_radius"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("head"), PROPERTY_HINT_RANGE, "0,6,1"), 4);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("tail_samples"), PROPERTY_HINT_RANGE, "1,7,1"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, DI_RESAMPLED_SETTING("floor"), PROPERTY_HINT_RANGE, "0.0001,1,0.0001"), 0.0625);
@@ -108,6 +109,7 @@ DirectResamplerRD::Settings DirectResamplerRD::get_project_settings() {
 	settings.emitter_temporal = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/temporal"));
 	settings.emitter_spatial = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/spatial"));
 	settings.emitter_clamp = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/firefly_clamp"));
+	settings.emitter_pick_radius = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/pick_radius"));
 	settings.stale_prior = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/stale_prior"));
 	settings.debug_log = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/log"));
 #ifdef DI_RESAMPLER_LAB
@@ -559,6 +561,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	params.temporal_reuse = settings.temporal_reuse ? 1 : 0;
 	params.head_window = settings.head_window ? 1 : 0;
 	params.emitter_clamp = MAX(0.0f, settings.emitter_clamp);
+	params.emitter_pick_radius = MAX(0.0f, settings.emitter_pick_radius);
 	rd->buffer_update(params_buffer, 0, sizeof(Params), &params);
 
 	RID sampler = RendererRD::MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
