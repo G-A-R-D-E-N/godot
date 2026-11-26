@@ -155,11 +155,10 @@ layout(set = RAY_SCENE_SET, binding = 6, std140) uniform RaySceneData {
 	uint emission_texture_count;
 	uint proxy_emitters_traced;
 	uint hit_emission_texel;
+	vec2 room_grid_origin;
+	float room_grid_cell;
 	uint room_count;
-	uint pad_room_align0;
-	uint pad_room_align1;
-	uint pad_room_align2;
-	uint room_start[257];
+	uint room_start[258];
 }
 ray_scene;
 

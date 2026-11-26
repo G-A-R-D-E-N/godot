@@ -510,8 +510,9 @@ uint32_t RayScene::_emitter_room_at(const Vector3 &p_position) const {
 	if (!grid.valid) {
 		return 0u;
 	}
-	const int32_t x = int32_t(Math::floor((p_position.x - grid.origin.x) / grid.cell_size));
-	const int32_t z = int32_t(Math::floor((p_position.z - grid.origin.y) / grid.cell_size));
+	const Vector2 origin = grid.origin - Vector2(anchor.x, anchor.z);
+	const int32_t x = int32_t(Math::floor((p_position.x - origin.x) / grid.cell_size));
+	const int32_t z = int32_t(Math::floor((p_position.z - origin.y) / grid.cell_size));
 	if (x < 0 || z < 0 || x >= grid.size.x || z >= grid.size.y) {
 		return 0u;
 	}
@@ -579,12 +580,13 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 		for (const TriangleEmitter &emitter : triangle_emitters) {
 			counts[MIN(emitter.pad[0], room_count)]++;
 		}
-		emitter_room_starts.resize(room_count + 1);
+		emitter_room_starts.resize(room_count + 2);
 		uint32_t running = 0;
 		for (uint32_t r = 0; r <= room_count; r++) {
 			emitter_room_starts[r] = running;
 			running += counts[r];
 		}
+		emitter_room_starts[room_count + 1] = running;
 		LocalVector<TriangleEmitter> sorted;
 		sorted.resize(triangle_emitters.size());
 		LocalVector<uint32_t> cursor(emitter_room_starts);
@@ -2302,9 +2304,12 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	scene_data.emission_texture_count = emission_texture_count;
 	scene_data.proxy_emitters_traced = int(GLOBAL_GET("rendering/global_illumination/ray_scene/proxy_emitters")) != 0 ? 1u : 0u;
 	scene_data.hit_emission_texel = GLOBAL_GET("rendering/global_illumination/ray_scene/hit_emission_texel") ? 1u : 0u;
+	scene_data.room_grid_origin[0] = float(emitter_room_grid.origin.x - anchor.x);
+	scene_data.room_grid_origin[1] = float(emitter_room_grid.origin.y - anchor.z);
+	scene_data.room_grid_cell = emitter_room_grid.cell_size;
 	scene_data.room_count = emitter_room_count;
 	if (emitter_room_count > 0) {
-		for (uint32_t r = 0; r <= emitter_room_count; r++) {
+		for (uint32_t r = 0; r <= emitter_room_count + 1; r++) {
 			scene_data.room_start[r * 4] = emitter_room_starts[r];
 		}
 	}

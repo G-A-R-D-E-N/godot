@@ -307,12 +307,13 @@ public:
 		uint32_t emission_texture_count;
 		uint32_t proxy_emitters_traced;
 		uint32_t hit_emission_texel;
+		float room_grid_origin[2];
+		float room_grid_cell;
 		uint32_t room_count;
-		uint32_t pad_room_align[3];
-		uint32_t room_start[(MAX_EMITTER_ROOMS + 1) * 4];
+		uint32_t room_start[(MAX_EMITTER_ROOMS + 2) * 4];
 	};
 
-	static_assert(sizeof(SceneData) == 4176);
+	static_assert(sizeof(SceneData) == 4192);
 
 	struct BuildPrimitive {
 		float bmin[3];

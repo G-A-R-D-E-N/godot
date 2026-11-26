@@ -335,7 +335,6 @@ bool di_emitter_visible(vec3 p_vertex, vec3 p_normal, vec3 p_point, uint p_insta
 
 #ifdef DI_EMITTER_ROOM_PICK
 global uniform sampler2D ray_room_grid;
-global uniform vec4 ray_room_grid_origin_size;
 
 vec3 di_emitter_ray_space(vec3 p_view) {
 	mat3 to_ray = mat3(params.camera_basis[0].xyz, params.camera_basis[1].xyz, params.camera_basis[2].xyz);
@@ -344,19 +343,20 @@ vec3 di_emitter_ray_space(vec3 p_view) {
 
 uint di_emitter_room_of(vec3 p_view) {
 	vec3 ray_position = di_emitter_ray_space(p_view);
-	float cell = max(ray_room_grid_origin_size.w, 1e-3);
-	vec2 uv = (ray_position.xz - ray_room_grid_origin_size.xz) / cell;
-	if (any(lessThan(uv, vec2(0.0))) || any(greaterThanEqual(uv, vec2(1.0)))) {
+	ivec2 extent = textureSize(ray_room_grid, 0);
+	float cell = max(ray_scene.room_grid_cell, 1e-3);
+	vec2 texel = (ray_position.xz - ray_scene.room_grid_origin) / cell;
+	if (any(lessThan(texel, vec2(0.0))) || any(greaterThanEqual(texel, vec2(extent)))) {
 		return 0u;
 	}
-	return uint(textureLod(ray_room_grid, uv, 0.0).r * 255.0 + 0.5);
+	return uint(texelFetch(ray_room_grid, ivec2(texel), 0).r * 255.0 + 0.5);
 }
 
 bool di_emitter_room_window(uint p_room, out uint r_first, out uint r_last) {
 	r_first = 0u;
 	r_last = 0u;
 	uint room_count = ray_scene.room_count;
-	if (room_count == 0u || p_room >= room_count) {
+	if (room_count == 0u || p_room > room_count) {
 		return false;
 	}
 	r_first = ray_scene.room_start[p_room];
