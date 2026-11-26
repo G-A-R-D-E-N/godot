@@ -1706,7 +1706,11 @@ void TextureStorage::texture_3d_update(RID p_texture, const Vector<Ref<Image>> &
 		}
 	}
 
-	RD::get_singleton()->texture_update(tex->rd_texture, 0, all_data);
+	Texture *base = _texture_get_base(tex);
+	ERR_FAIL_NULL(base);
+	if (RD::get_singleton()->texture_update(tex->rd_texture, 0, all_data) == OK) {
+		base->data_version++;
+	}
 }
 
 void TextureStorage::texture_external_update(RID p_texture, int p_width, int p_height, uint64_t p_external_buffer) {
@@ -2098,7 +2102,9 @@ void TextureStorage::texture_replace(RID p_texture, RID p_by_texture) {
 
 	RID streaming_state = tex->streaming_state;
 
+	const uint64_t previous_data_version = tex->data_version;
 	*tex = *by_tex;
+	tex->data_version = previous_data_version + 1;
 
 	tex->streaming_state = streaming_state; // restore streaming state
 
@@ -2146,7 +2152,9 @@ void TextureStorage::texture_replace_compatible(RID p_texture, RID p_by_texture)
 	Vector<RID> proxies_to_update = tex->proxies;
 	Vector<RID> proxies_to_redirect = by_tex->proxies;
 
+	const uint64_t previous_data_version = tex->data_version;
 	*tex = *by_tex;
+	tex->data_version = previous_data_version + 1;
 
 	tex->proxies = proxies_to_update; //restore proxies, so they can be updated
 

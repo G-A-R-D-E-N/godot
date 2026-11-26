@@ -35,3 +35,7 @@ Externally writable alpha sources receive a new observation revision at each ray
 ### `servers/rendering/renderer_rd/environment/ray_scene.cpp:RayScene::update`
 
 `RayScene::update` incorporates the alpha table into the scene tracker after refresh scheduling, so far-state and density changes are reflected in the same update that publishes them to rendering. Ready alpha layers also contribute their fill revision, including when far mode is off; pending layers contribute no revision. Externally writable sources can therefore advance the scene epoch on every serviced view even if their pixels happen to be unchanged.
+
+### `servers/rendering/renderer_rd/storage_rd/texture_storage.cpp:TextureStorage::texture_replace_compatible`
+
+`texture_storage.cpp:TextureStorage::texture_replace` and `TextureStorage::texture_replace_compatible` advance the target texture content version after adopting a replacement, even if the device texture identity happens to match. Successful 3D uploads also advance the backing content version.
