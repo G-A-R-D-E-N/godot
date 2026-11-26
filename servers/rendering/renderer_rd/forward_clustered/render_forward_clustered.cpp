@@ -1483,9 +1483,9 @@ void RenderForwardClustered::_update_volumetric_fog(Ref<RenderSceneBuffersRD> p_
 		sdfgi = p_render_buffers->get_custom_data(RB_SCOPE_SDFGI);
 	}
 
-	Ref<RendererRD::DDGI::Volume> ddgi;
+	Ref<RendererRD::DDGI::Volume> ddgi_volume;
 	if (p_render_buffers->has_custom_data(RB_SCOPE_DDGI)) {
-		ddgi = p_render_buffers->get_custom_data(RB_SCOPE_DDGI);
+		ddgi_volume = p_render_buffers->get_custom_data(RB_SCOPE_DDGI);
 	}
 
 	Size2i size = p_render_buffers->get_internal_size();
@@ -1543,7 +1543,7 @@ void RenderForwardClustered::_update_volumetric_fog(Ref<RenderSceneBuffersRD> p_
 		settings.cluster_builder = rb_data->cluster_builder;
 		settings.rbgi = rbgi;
 		settings.sdfgi = sdfgi;
-		settings.ddgi = ddgi;
+		settings.ddgi = ddgi_volume;
 		settings.env = p_environment;
 		settings.sky = &sky;
 		settings.gi = &gi;
