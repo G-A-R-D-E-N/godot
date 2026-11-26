@@ -1151,6 +1151,11 @@ vec3 di_emitter_color_at(uint p_index, vec3 p_point, out float r_luminance_weigh
 	return clamp_scale > 0.0 ? color * clamp_scale : color;
 }
 
+float di_emitter_hit_fraction(uvec4 p_surface) {
+	float hit = uintBitsToFloat(p_surface.w);
+	return p_surface.w == 0u ? 1.0 : clamp(hit, 0.0, 1.0);
+}
+
 float di_emitter_target(vec3 p_color, float p_geometric) {
 	return dot(max(p_color * p_geometric, vec3(0.0)), luminance_weights);
 }
@@ -1171,6 +1176,7 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 	vec3 held_point = vec3(0.0);
 	vec3 held_color = vec3(0.0);
 	float held_geometric = 0.0;
+	float held_hit = 1.0;
 	bool merge = false;
 	if (params.history_valid != 0u) {
 		uvec4 header = uvec4(0u);
@@ -1206,7 +1212,9 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 				float held_luminance = 0.0;
 				held_color = di_emitter_color_at(held_index, held_point, held_luminance);
 				held_target = di_emitter_target(held_color, held_geometric);
-				held_m = min(uintBitsToFloat(surface.z), 20.0);				merge = held_m > 0.0 && held_geometric > 0.0;
+				held_m = min(uintBitsToFloat(surface.z), 20.0);
+				held_hit = di_emitter_hit_fraction(surface);
+				merge = held_m > 0.0 && held_geometric > 0.0;
 			}
 		}
 	}
@@ -1219,11 +1227,13 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 	uint index = di_emitter_index;
 	uint instance = di_emitter_instance;
 	uint count = 1u;
+	float hit = 1.0;
 	if (merge) {
 		float total = 1.0 + held_m;
 		color = (held_color * held_m + new_color) / total;
 		geometric = (held_geometric * held_m + new_geometric) / total;
-		target = di_emitter_target(color, geometric);
+		hit = (held_hit * held_m + 1.0) / total;
+		target = di_emitter_target(color * hit, geometric);
 		count = uint(min(total, 21.0));
 		age = min(held_age + 1u, 0xFFu);
 		atomicAdd(emitter_reuse_counters.temporal_accepted, 1u);
@@ -1234,9 +1244,9 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 	atomicAdd(emitter_reuse_counters.damp_sum, uint(damp * 65536.0));
 
 	uvec4 header = uvec4((index & 0xFFFFu) | ((instance & 0xFFFFu) << 16u), age | 0x100u, 0u, floatBitsToUint(target));
-	uvec4 surface = uvec4(packSnorm2x16(di_oct_encode(p_normal)), floatBitsToUint(-p_vertex.z), floatBitsToUint(float(count)), 0u);
+	uvec4 surface = uvec4(packSnorm2x16(di_oct_encode(p_normal)), floatBitsToUint(-p_vertex.z), floatBitsToUint(float(count)), floatBitsToUint(hit));
 	di_emitter_history_store(p_pixel, header, vec4(point, geometric), vec4(color, damp), surface);
-	di_emitter_write(p_pixel, point, color, geometric);
+	di_emitter_write(p_pixel, point, color * hit, geometric);
 	imageStore(record_image, ivec3(p_pixel, int(params.tail_samples + 1u)), uvec4(DI_EMITTER_MARK, floatBitsToUint(float(params.tail_samples + 1u) * damp), 0u, 0u));
 }
 
@@ -1256,14 +1266,21 @@ bool di_emitter_hold(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 	vec4 held_tail = di_emitter_history_load(p_pixel, 2);
 	vec3 point = (inverse(params.prev_view_from_view) * vec4(held_vec.xyz, 1.0)).xyz;
 	float geometric = held_vec.w;
-	vec3 color = held_tail.rgb;
-	float target = di_emitter_target(color, geometric);	uint age = min((header.y & 0xFFu) + 1u, 0xFFu);
 	float mass = uintBitsToFloat(surface.z);
+	float held_m = min(mass, 20.0);
+	float next_mass = min(held_m + 1.0, 21.0);
+	float hit = di_emitter_hit_fraction(surface) * (held_m / (held_m + 1.0));
+	if (hit < 1e-3) {
+		return false;
+	}
+	vec3 color = held_tail.rgb;
+	float target = di_emitter_target(color * hit, geometric);
+	uint age = min((header.y & 0xFFu) + 1u, 0xFFu);
 	float damp = held_tail.w;
 	uvec4 next_header = uvec4(header.x, age | 0x100u, header.z, floatBitsToUint(target));
-	uvec4 next_surface = uvec4(surface.x, surface.y, surface.z, 0u);
+	uvec4 next_surface = uvec4(surface.x, surface.y, floatBitsToUint(next_mass), floatBitsToUint(hit));
 	di_emitter_history_store(p_pixel, next_header, vec4(point, geometric), vec4(color, damp), next_surface);
-	di_emitter_write(p_pixel, point, color, geometric);
+	di_emitter_write(p_pixel, point, color * hit, geometric);
 	imageStore(record_image, ivec3(p_pixel, int(params.tail_samples + 1u)), uvec4(DI_EMITTER_MARK, floatBitsToUint(float(params.tail_samples + 1u) * damp), 0u, 0u));
 	atomicAdd(emitter_reuse_counters.held_only, 1u);
 	atomicAdd(emitter_reuse_counters.age_sum, age);
@@ -1380,12 +1397,11 @@ float di_emitter_sample_mass(vec4 p_color, vec4 p_point) {
 	return dot(max(p_color.rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722)) * max(p_point.w, 0.0);
 }
 
+#define DI_EMITTER_SPATIAL_TAPS 12u
+
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 	if (any(greaterThanEqual(pixel, params.size))) {
-		return;
-	}
-	if (imageLoad(tile_flags, pixel >> 3).r != params.counter) {
 		return;
 	}
 	vec3 vertex = vec3(0.0);
@@ -1400,11 +1416,12 @@ void main() {
 	vec4 selected_point = emitter_samples.data[index * 2u];
 	vec4 selected_color = emitter_samples.data[index * 2u + 1u];
 	float total_mass = di_emitter_sample_mass(selected_color, selected_point);
-	vec3 total_weighted = max(selected_color.rgb, vec3(0.0)) * total_mass;
+	vec3 total_contribution = max(selected_color.rgb, vec3(0.0)) * max(selected_point.w, 0.0);
+	float taps = 1.0;
 	float view_depth = max(-vertex.z, 0.001);
 	float tolerance = view_depth * 0.05;
 	uint seed = di_hash(uint(pixel.y) * 65537u + uint(pixel.x)) ^ di_hash(params.frame ^ 0x51ed270bu);
-	uint neighbours = uint(params.spatial_neighbors);
+	uint neighbours = max(uint(params.spatial_neighbors), DI_EMITTER_SPATIAL_TAPS);
 	for (uint i = 0u; i < neighbours; i++) {
 		float angle = (float(i) + di_emitter_hash(seed, i * 2u + 1u)) * 6.2831853 / float(max(neighbours, 1u));
 		float radius = sqrt(di_emitter_hash(seed, i * 2u + 2u)) * params.spatial_radius;
@@ -1420,7 +1437,7 @@ void main() {
 		if (!surface_at(other, other_vertex, other_normal, other_roughness, other_packed, other_depth)) {
 			continue;
 		}
-		if (abs(other_depth - depth) > tolerance) {
+		if (abs(-other_vertex.z - view_depth) > tolerance) {
 			continue;
 		}
 		if (dot(normal, other_normal) < 0.9) {
@@ -1429,22 +1446,25 @@ void main() {
 		uint other_index = uint(other.y) * uint(params.size.x) + uint(other.x);
 		vec4 other_point = emitter_samples.data[other_index * 2u];
 		vec4 other_color = emitter_samples.data[other_index * 2u + 1u];
+		taps += 1.0;
 		float other_mass = di_emitter_sample_mass(other_color, other_point);
 		if (!(other_mass > 0.0)) {
 			continue;
 		}
+		total_contribution += max(other_color.rgb, vec3(0.0)) * max(other_point.w, 0.0);
 		total_mass += other_mass;
-		total_weighted += max(other_color.rgb, vec3(0.0)) * other_mass;
 		if (di_emitter_hash(seed, i * 2u + 3u) * total_mass < other_mass) {
 			selected_point = other_point;
-			selected_color = other_color;
 		}
 	}
-	if (!(total_mass > 0.0)) {
+	if (!(total_mass > 0.0) || !(selected_point.w > 0.0)) {
 		return;
 	}
+	vec3 mean_contribution = total_contribution / taps;
 	emitter_samples.data[index * 2u] = selected_point;
-	emitter_samples.data[index * 2u + 1u] = vec4(total_weighted / total_mass, 0.0);
+	emitter_samples.data[index * 2u + 1u] = vec4(mean_contribution / selected_point.w, 0.0);
+	uint layer = params.tail_samples + 1u;
+	imageStore(record_image, ivec3(pixel, int(layer)), uvec4(DI_EMITTER_MARK, floatBitsToUint(float(layer)), 0u, 0u));
 }
 #elif !defined(MODE_SPATIAL)
 void main() {
