@@ -42,3 +42,5 @@ Off unless `rendering/global_illumination/ray_scene/debug_emitters_near` (Vector
 
 ## Skipped materials are not emitters (ray_scene.cpp _update_triangle_emitters)
 Materials flagged MATERIAL_FLAG_SKIP (no shadow casting, or additive blending with skip_additive_surfaces on) are invisible to ray hits and occlusion, so DDGI never sees them. They were still entered into the resampler's triangle emitter list, so additive glow cards lit the room through the direct emitter term only. They are now left out, so both paths see the same scene. EMITTER_NEAR prints a skip column.
+
+EMITTER_NEAR also prints, per emissive surface, its triangle count, world area and flux pi x area x mean_lum (lm), the same formula DerivedLightPolicy.Flux uses for the proxy lamp (whose lumens are then doubled by AreaLightLumens).

@@ -611,11 +611,27 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 			}
 			const uint32_t instance = source.instance < p_order.size() ? p_order[source.instance] : 0xFFFFFFFFu;
 			print_line(vformat("EMITTER_NEAR instance %d distance %.2f origin_world %s proxied %s mesh \"%s\"", int(instance), distance, source.transform.origin + anchor, source.proxied ? "yes" : "no", MeshStorage::get_singleton()->mesh_get_path(source.mesh)));
+			const MeshEntry *near_mesh = meshes.getptr(source.mesh);
 			for (uint32_t s = 0; s < source.surface_count && source.material_offset + s < materials.size(); s++) {
 				const Material &m = materials[source.material_offset + s];
 				if (!(m.emission[0] > 0.0f || m.emission[1] > 0.0f || m.emission[2] > 0.0f) && m.emission_texture == 0) {
 					continue;
 				}
+				double area = 0.0;
+				uint32_t surface_triangles = 0;
+				if (near_mesh && near_mesh->built) {
+					for (uint32_t t = 0; t < uint32_t(near_mesh->triangle_surface.size()); t++) {
+						if (near_mesh->triangle_surface[t] != s) {
+							continue;
+						}
+						const Vector3 a = source.transform.xform(near_mesh->positions[near_mesh->indices[t * 3 + 0]]);
+						const Vector3 b = source.transform.xform(near_mesh->positions[near_mesh->indices[t * 3 + 1]]);
+						const Vector3 c = source.transform.xform(near_mesh->positions[near_mesh->indices[t * 3 + 2]]);
+						area += 0.5 * double((b - a).cross(c - a).length());
+						surface_triangles++;
+					}
+				}
+				print_line(vformat("EMITTER_NEAR   surface %d triangles %d area_m2 %.6f flux_lm %.2f (pi x area x mean_lum)", int(s), int(surface_triangles), area, Math::PI * area * double(m.emission_mean_luminance)));
 				print_line(vformat("EMITTER_NEAR   surface %d emission %.4f %.4f %.4f mean_lum %.4f texture %d texel_scale %.4f nits_range %.2f %.2f ranges %s skip %s", int(s), m.emission[0], m.emission[1], m.emission[2], m.emission_mean_luminance, int(m.emission_texture), m.emission_texel_scale, m.emission_nits_range[0], m.emission_nits_range[1], (m.emission_flags & EMISSION_FLAG_TEXTURE_RANGES) ? "yes" : "no", (m.flags & MATERIAL_FLAG_SKIP) ? "yes" : "no"));
 			}
 		}
