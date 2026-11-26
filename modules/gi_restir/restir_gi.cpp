@@ -304,7 +304,13 @@ RestirGiBackend::~RestirGiBackend() {
 }
 
 bool RestirGiBackend::is_active() const {
-	return restir_gi_enabled();
+	const bool enabled = restir_gi_enabled();
+	static int reported = -1;
+	if (reported != int(enabled)) {
+		reported = int(enabled);
+		print_line(vformat("RESTIR_GI active=%s", enabled ? "true" : "false"));
+	}
+	return enabled;
 }
 
 bool RestirGiBackend::wants_all_tiles() const {
