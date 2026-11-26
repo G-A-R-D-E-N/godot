@@ -294,7 +294,7 @@ public:
 		uint32_t packed_out = 0;
 	};
 
-	static constexpr uint32_t MAX_EMITTER_ROOMS = 1024;
+	static constexpr uint32_t MAX_EMITTER_ROOMS = 256;
 
 	struct SceneData {
 		float camera_to_anchor[3];
@@ -306,13 +306,13 @@ public:
 		uint32_t triangle_emitter_generation;
 		uint32_t emission_texture_count;
 		uint32_t proxy_emitters_traced;
-		uint32_t pad;
+		uint32_t hit_emission_texel;
 		uint32_t room_count;
-		uint32_t room_start[MAX_EMITTER_ROOMS + 1];
-		uint32_t pad_room[2];
+		uint32_t pad_room_align[3];
+		uint32_t room_start[(MAX_EMITTER_ROOMS + 1) * 4];
 	};
 
-	static_assert(sizeof(SceneData) == 4160);
+	static_assert(sizeof(SceneData) == 4176);
 
 	struct BuildPrimitive {
 		float bmin[3];

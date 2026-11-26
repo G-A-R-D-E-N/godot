@@ -196,3 +196,95 @@ TEST_CASE("[DirectResampler] The lab mass bound is the registered one at the gat
 #endif
 
 } // namespace TestDirectResampler
+
+
+TEST_CASE("[DirectResampler] Params field order matches di_resample.glsl") {
+	String base = OS::get_singleton()->get_executable_path().get_base_dir();
+	String source;
+	for (int i = 0; i < 6; i++) {
+		const String candidate = base.path_join("modules/gi_restir_di/shaders/di_resample.glsl");
+		if (FileAccess::exists(candidate)) {
+			source = FileAccess::get_file_as_string(candidate);
+			break;
+		}
+		base = base.get_base_dir();
+	}
+	if (source.is_empty()) {
+		WARN("shader source not found from the executable path; skipping");
+		return;
+	}
+	const int at = source.find("uniform Params");
+	REQUIRE(at >= 0);
+	const int open = source.find("{", at);
+	const int close = source.find("}", open);
+	REQUIRE(open >= 0);
+	REQUIRE(close > open);
+
+	struct Field {
+		const char *name;
+		size_t offset;
+	};
+	const Field fields[] = {
+		{ "inv_projection", offsetof(DirectResamplerRD::Params, inv_projection) },
+		{ "prev_view_from_view", offsetof(DirectResamplerRD::Params, prev_view_from_view) },
+		{ "prev_projection", offsetof(DirectResamplerRD::Params, prev_projection) },
+		{ "prev_inv_projection", offsetof(DirectResamplerRD::Params, prev_inv_projection) },
+		{ "camera_basis", offsetof(DirectResamplerRD::Params, camera_basis) },
+		{ "region_half", offsetof(DirectResamplerRD::Params, region_half) },
+		{ "floor_value", offsetof(DirectResamplerRD::Params, floor_value) },
+		{ "size", offsetof(DirectResamplerRD::Params, size) },
+		{ "pixel_size", offsetof(DirectResamplerRD::Params, pixel_size) },
+		{ "cluster_shift", offsetof(DirectResamplerRD::Params, cluster_shift) },
+		{ "cluster_width", offsetof(DirectResamplerRD::Params, cluster_width) },
+		{ "cluster_type_size", offsetof(DirectResamplerRD::Params, cluster_type_size) },
+		{ "max_cluster_element_count_div_32", offsetof(DirectResamplerRD::Params, max_cluster_element_count_div_32) },
+		{ "z_far", offsetof(DirectResamplerRD::Params, z_far) },
+		{ "frame", offsetof(DirectResamplerRD::Params, frame) },
+		{ "head_entries", offsetof(DirectResamplerRD::Params, head_entries) },
+		{ "tail_samples", offsetof(DirectResamplerRD::Params, tail_samples) },
+		{ "history_valid", offsetof(DirectResamplerRD::Params, history_valid) },
+		{ "live_energy", offsetof(DirectResamplerRD::Params, live_energy) },
+		{ "debug_flags", offsetof(DirectResamplerRD::Params, debug_flags) },
+		{ "reservoirs", offsetof(DirectResamplerRD::Params, reservoirs) },
+		{ "c_full", offsetof(DirectResamplerRD::Params, c_full) },
+		{ "m_temporal_cap", offsetof(DirectResamplerRD::Params, m_temporal_cap) },
+		{ "dynamic_cap", offsetof(DirectResamplerRD::Params, dynamic_cap) },
+		{ "m_stored_cap", offsetof(DirectResamplerRD::Params, m_stored_cap) },
+		{ "spatial_neighbors", offsetof(DirectResamplerRD::Params, spatial_neighbors) },
+		{ "spatial_radius", offsetof(DirectResamplerRD::Params, spatial_radius) },
+		{ "counter", offsetof(DirectResamplerRD::Params, counter) },
+		{ "head_rank", offsetof(DirectResamplerRD::Params, head_rank) },
+		{ "head_swap_margin", offsetof(DirectResamplerRD::Params, head_swap_margin) },
+		{ "head_swap_frames", offsetof(DirectResamplerRD::Params, head_swap_frames) },
+		{ "temporal_reuse", offsetof(DirectResamplerRD::Params, temporal_reuse) },
+		{ "head_window", offsetof(DirectResamplerRD::Params, head_window) },
+		{ "emitter_clamp", offsetof(DirectResamplerRD::Params, emitter_clamp) },
+		{ "emitter_clamp_pad0", offsetof(DirectResamplerRD::Params, emitter_clamp_pad0) },
+		{ "emitter_clamp_pad1", offsetof(DirectResamplerRD::Params, emitter_clamp_pad1) },
+		{ "emitter_clamp_pad2", offsetof(DirectResamplerRD::Params, emitter_clamp_pad2) },
+		{ "emitter_pick_radius", offsetof(DirectResamplerRD::Params, emitter_pick_radius) },
+	};
+	const int count = int(sizeof(fields) / sizeof(fields[0]));
+
+	int index = 0;
+	int cursor = open + 1;
+	while (index < count) {
+		const int semi = source.find(";", cursor);
+		if (semi < 0 || semi > close) {
+			break;
+		}
+		const String line = source.substr(cursor, semi - cursor).strip_edges();
+		cursor = semi + 1;
+		if (line.is_empty()) {
+			continue;
+		}
+		String name = line.get_slice(" ", line.get_slice_count(" ") - 1).strip_edges();
+		const int bracket = name.find("[");
+		if (bracket >= 0) {
+			name = name.substr(0, bracket);
+		}
+		CHECK_MESSAGE(name == fields[index].name, vformat("field %d is %s in the shader and %s in C++", index, name, fields[index].name));
+		index++;
+	}
+	CHECK_MESSAGE(index == count, vformat("the shader block has %d fields and C++ expects %d", index, count));
+}
