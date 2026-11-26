@@ -40,6 +40,38 @@ using Data = RendererSceneCull::InstanceData;
 
 constexpr uint32_t MESH = uint32_t(RSE::INSTANCE_MESH);
 
+TEST_CASE("[SceneCull] Light pairing dirties raster shadows only for raster casters") {
+	RendererSceneCull::Instance geometry;
+	geometry.base_type = RSE::INSTANCE_MESH;
+	geometry.base_data = memnew(RendererSceneCull::InstanceGeometryData);
+	auto *geometry_data = static_cast<RendererSceneCull::InstanceGeometryData *>(geometry.base_data);
+	RendererSceneCull::Instance light;
+	light.base_type = RSE::INSTANCE_LIGHT;
+	light.base_data = memnew(RendererSceneCull::InstanceLightData);
+	auto *light_data = static_cast<RendererSceneCull::InstanceLightData *>(light.base_data);
+	light_data->decrement_shadow_dirty();
+	REQUIRE_FALSE(light_data->is_shadow_dirty());
+
+	geometry.no_raster_shadow = true;
+	RendererSceneCull::_instance_pair(&geometry, &light);
+	CHECK(geometry_data->lights.has(&light));
+	CHECK(light_data->geometries.has(&geometry));
+	CHECK_FALSE(light_data->is_shadow_dirty());
+	RendererSceneCull::_instance_unpair(&geometry, &light);
+	CHECK_FALSE(geometry_data->lights.has(&light));
+	CHECK_FALSE(light_data->geometries.has(&geometry));
+	CHECK_FALSE(light_data->is_shadow_dirty());
+
+	geometry.no_raster_shadow = false;
+	RendererSceneCull::_instance_pair(&geometry, &light);
+	CHECK(light_data->is_shadow_dirty());
+	light_data->decrement_shadow_dirty();
+	light_data->decrement_shadow_dirty();
+	REQUIRE_FALSE(light_data->is_shadow_dirty());
+	RendererSceneCull::_instance_unpair(&geometry, &light);
+	CHECK(light_data->is_shadow_dirty());
+}
+
 TEST_CASE("[SceneCull] Flag rules: both flags with casting on give ray scene only and no raster shadow") {
 	const uint32_t flags = MESH | Data::FLAG_CAST_SHADOWS | Data::FLAG_RAY_SCENE_ONLY | Data::FLAG_NO_RASTER_SHADOW;
 	CHECK(Data::enters_ray_scene(flags));
