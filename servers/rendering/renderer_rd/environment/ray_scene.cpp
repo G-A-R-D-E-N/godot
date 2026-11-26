@@ -1539,6 +1539,13 @@ void RayScene::_pick_settings(float p_cell, bool p_stable) {
 	region_recorded = false;
 }
 
+uint32_t RayScene::material_window(uint32_t p_material_count, uint32_t p_offset, uint32_t p_surfaces) {
+	if (p_offset >= p_material_count) {
+		return 0;
+	}
+	return MIN(p_surfaces, p_material_count - p_offset);
+}
+
 AABB RayScene::get_light_region(const Vector3 &p_camera_world, const Vector3 &p_region_half) {
 	MutexLock lock(mesh_mutex);
 	const float cell = light_pick_cell();
@@ -1758,13 +1765,19 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		instances.push_back(instance);
 		signature = hash_murmur3_buffer(&instance, sizeof(Instance), signature);
 
+		const uint32_t material_window = RayScene::material_window(materials.size(), instance.material_offset, mesh->surface_count);
+		if (material_window != mesh->surface_count) {
+			ERR_PRINT_ONCE("Ray scene material window is shorter than the mesh surface count.");
+		}
 		uint32_t scene_hash = hash_murmur3_one_64(mesh_rid.get_id());
 		scene_hash = hash_murmur3_buffer(&geometry->transform, sizeof(Transform3D), scene_hash);
 		scene_hash = hash_murmur3_one_32(geometry->layer_mask, scene_hash);
 		scene_hash = hash_murmur3_one_32(mesh->build_serial, scene_hash);
-		scene_hash = hash_murmur3_buffer(materials.ptr() + instance.material_offset, sizeof(Material) * mesh->surface_count, scene_hash);
+		if (material_window > 0) {
+			scene_hash = hash_murmur3_buffer(materials.ptr() + instance.material_offset, sizeof(Material) * material_window, scene_hash);
+		}
 		if (alpha_enabled) {
-			for (uint32_t s = 0; s < mesh->surface_count; s++) {
+			for (uint32_t s = 0; s < material_window; s++) {
 				const uint32_t index = materials[instance.material_offset + s].flags >> MATERIAL_ALPHA_SHIFT;
 				if (index != 0) {
 					const RayAlphaStore::TableEntry &entry = alpha_store.get_entry(index);
