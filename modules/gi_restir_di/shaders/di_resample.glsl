@@ -149,7 +149,6 @@ lab_mask;
 #define DI_EMITTER_PREFIX 256u
 #define DI_EMITTER_TOTAL 512u
 #define DI_EMITTER_MARK 0xFFFFFFFFu
-#define DI_EMITTER_RAY_BIAS 0.02
 
 layout(set = 0, binding = 22, std430) buffer EmitterCdf {
 	float data[];
@@ -959,11 +958,6 @@ vec3 di_emitter_color_at(uint p_index, vec3 p_point, out float r_luminance_weigh
 
 float di_emitter_target(vec3 p_color, float p_geometric) {
 	return dot(max(p_color * p_geometric, vec3(0.0)), luminance_weights);
-}
-
-vec3 di_emitter_to_world(vec3 p_view) {
-	vec3 offset = params.camera_basis[0].xyz * p_view.x + params.camera_basis[1].xyz * p_view.y + params.camera_basis[2].xyz * p_view.z;
-	return ray_scene.camera_to_anchor + offset;
 }
 
 void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
