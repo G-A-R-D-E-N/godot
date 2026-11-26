@@ -735,7 +735,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 				histogram_policy.light_adjust = MIN(MAX(1.0 - Math::exp(-time_step / MAX(RSG::camera_attributes->camera_attributes_get_auto_exposure_light_adaptation_time(p_render_data->camera_attributes), 0.001)), 0.0), 1.0);
 				histogram_policy.dark_adjust = MIN(MAX(1.0 - Math::exp(-time_step / MAX(RSG::camera_attributes->camera_attributes_get_auto_exposure_dark_adaptation_time(p_render_data->camera_attributes), 0.001)), 0.0), 1.0);
 			}
-			luminance->luminance_histogram_meter(rb->get_internal_texture(), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate,
+			luminance->luminance_histogram_meter(rb->get_internal_texture(0), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate,
 					RSG::camera_attributes->camera_attributes_get_auto_exposure_clip_low(p_render_data->camera_attributes),
 					RSG::camera_attributes->camera_attributes_get_auto_exposure_clip_high(p_render_data->camera_attributes),
 					RSG::camera_attributes->camera_attributes_get_auto_exposure_center_weight(p_render_data->camera_attributes),
@@ -744,7 +744,7 @@ void RendererSceneRenderRD::_render_buffers_post_process_and_tonemap(const Rende
 			if (auto_exposure_meter == RSE::AUTO_EXPOSURE_METER_LOG_HISTOGRAM) {
 				WARN_PRINT_ONCE("The log histogram auto-exposure meter needs the compute effects path; using the mean meter.");
 			}
-			luminance->luminance_reduction(rb->get_internal_texture(), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate, RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_limit(p_render_data->camera_attributes), auto_exposure_adaptation, auto_exposure_adaptation_pivot, auto_exposure_light_limit, auto_exposure_hold);
+			luminance->luminance_reduction(rb->get_internal_texture(0), rb->get_internal_size(), luminance_buffers, auto_exposure_min_sensitivity, auto_exposure_max_sensitivity, step, set_immediate, RSG::camera_attributes->camera_attributes_get_auto_exposure_highlight_limit(p_render_data->camera_attributes), auto_exposure_adaptation, auto_exposure_adaptation_pivot, auto_exposure_light_limit, auto_exposure_hold);
 		}
 		if (auto_exposure_log) {
 			const float luminance_multiplier = rb->get_luminance_multiplier();
@@ -1677,7 +1677,7 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 	ERR_FAIL_COND(rb.is_null());
 
 	// View count of our render target must match our camera data.
-	ERR_FAIL_COND(rb->get_view_count() != p_camera_data->view_count);
+	ERR_FAIL_COND_MSG(rb->get_view_count() != p_camera_data->view_count, "The current camera doesn't match the view count of the viewport. Please make sure the correct camera is used or is set to current.");
 
 	// setup scene data
 	RenderSceneDataRD scene_data;

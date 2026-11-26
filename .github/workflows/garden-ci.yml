@@ -13,7 +13,8 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}|${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  # Tags and main must finish (especially publish-release); job-level engine-release is not enough alone.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 permissions:
   contents: read
@@ -25,8 +26,38 @@ env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
   SCONS_CACHE_LIMIT: 3072
+  GODOT_TEST_WORKER_THREADS: "8"
 
 jobs:
+  editor-build-scope:
+    name: Determine editor build scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      build: ${{ steps.scope.outputs.build }}
+    steps:
+      - id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_FILES: ${{ github.event.pull_request.changed_files }}
+        run: |
+          build=true
+          if [[ "$GITHUB_EVENT_NAME" == pull_request && "$PR_FILES" =~ ^[0-9]+$ && "$PR_FILES" -gt 0 && "$PR_FILES" -lt 3000 ]]; then
+            if gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files?per_page=100" > "$RUNNER_TEMP/pr-files.json"; then
+              build=$(jq -er --argjson expected "$PR_FILES" '
+                [ .[][] ] as $files |
+                [ $files[] | .filename, (.previous_filename // empty) ] as $paths |
+                if ($files | length) != $expected then error("incomplete PR file list")
+                elif all($paths[]; startswith(".github/") or (ascii_downcase | endswith(".md"))) then "false"
+                else "true" end
+              ' "$RUNNER_TEMP/pr-files.json") || build=true
+            fi
+          fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
   static-checks:
     name: Static checks
     runs-on: ubuntu-24.04
@@ -58,6 +89,8 @@ jobs:
 
   linux-editor:
     name: Linux editor (double, Mono)
+    needs: editor-build-scope
+    if: ${{ needs.editor-build-scope.outputs.build == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     steps:
@@ -75,7 +108,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwayland-bin gdb
-          python -m pip install --disable-pip-version-check scons==4.11.1
+          python -m pip install --disable-pip-version-check scons==4.11.1 zstandard
           dotnet --version
           scons --version
           echo "SCONS_CACHE=$RUNNER_TEMP/scons-cache" >> "$GITHUB_ENV"
@@ -113,8 +146,7 @@ jobs:
       - name: Unit tests
         timeout-minutes: 45
         run: |
-          # Quarantine: this case starves the worker pool and never reaches its gate on CI. Tracked separately on both editors.
-          stdbuf -oL -eL ./bin/godot.linuxbsd.editor.double.x86_64.mono --headless --test --force-colors --test-case-exclude=*Retired* -s &
+          stdbuf -oL -eL ./bin/godot.linuxbsd.editor.double.x86_64.mono --headless --test --force-colors -s &
           pid=$!
           (sleep 1200; echo "::error::Unit tests still running after 20 minutes; dumping thread stacks"; nproc
             for g in "gdb" "sudo -n gdb"; do
@@ -143,6 +175,8 @@ jobs:
 
   windows-editor:
     name: Windows editor (MSVC, double, Mono)
+    needs: editor-build-scope
+    if: ${{ needs.editor-build-scope.outputs.build == 'true' }}
     runs-on: windows-latest
     timeout-minutes: 240
     env:
@@ -163,7 +197,7 @@ jobs:
 
       - name: Install build tools
         run: |
-          python -m pip install --disable-pip-version-check scons==4.11.1
+          python -m pip install --disable-pip-version-check scons==4.11.1 zstandard
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           dotnet --version
           python -m SCons --version
@@ -208,8 +242,7 @@ jobs:
         timeout-minutes: 45
         shell: pwsh
         run: |
-          # Quarantine: this case starves the worker pool and never reaches its gate on CI. Tracked separately on both editors.
-          $tests = Start-Process -FilePath ./bin/godot.windows.editor.double.x86_64.mono.exe -ArgumentList '--headless', '--test', '--force-colors', '--test-case-exclude=*Retired*' -PassThru -NoNewWindow
+          $tests = Start-Process -FilePath ./bin/godot.windows.editor.double.x86_64.mono.exe -ArgumentList '--headless', '--test', '--force-colors' -PassThru -NoNewWindow
           if (-not $tests.WaitForExit(1200000)) {
             Write-Host "::error::Unit tests still running after 20 minutes; capturing a hang dump"
             $hang = Join-Path $env:RUNNER_TEMP "unit-tests-hang.dmp"
@@ -260,9 +293,12 @@ jobs:
   publish-release:
     name: Publish engine release
     needs: [static-checks, linux-editor, windows-editor]
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/engine-4.8.0-dev-') }}
+    if: ${{ github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/engine-4.8.0-dev-') || github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    concurrency:
+      group: engine-release
+      cancel-in-progress: false
     permissions:
       contents: write
     env:
@@ -294,15 +330,34 @@ jobs:
 
       - name: Publish GitHub release
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
         run: |
           set -euo pipefail
+          TAG=${TAG:-engine-4.8.0-dev-${GITHUB_SHA:0:10}}
           pkg=$(ls stage/linux64/GodotSharp/Tools/nupkgs/ | sed -n 's/^Godot\.NET\.Sdk\.\(.*\)\.nupkg$/\1/p')
           test -n "$pkg"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" assets/* --clobber
           else
-            gh release create "$TAG" assets/* --verify-tag \
+            gh release create "$TAG" assets/* --target "$GITHUB_SHA" \
               --title "Garden engine 4.8.0-dev double + Mono (${GITHUB_SHA:0:10})" \
               --notes "Built by CI from $GITHUB_SHA. .NET packages: $pkg."
           fi
+
+      - name: Notify Garden-Engine engine-update
+        env:
+          DISPATCH_TOKEN: ${{ secrets.GARDEN_ENGINE_DISPATCH_TOKEN }}
+          TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+        run: |
+          set -euo pipefail
+          TAG=${TAG:-engine-4.8.0-dev-${GITHUB_SHA:0:10}}
+          if [ -z "${DISPATCH_TOKEN:-}" ]; then
+            echo "::warning::GARDEN_ENGINE_DISPATCH_TOKEN is not set; Garden-Engine will rely on its engine-update schedule."
+            exit 0
+          fi
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $DISPATCH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -X POST "https://api.github.com/repos/G-A-R-D-E-N/Garden-Engine/dispatches" \
+            -d "{\"event_type\":\"engine-release-published\",\"client_payload\":{\"tag\":\"$TAG\"}}"
+          echo "Requested Garden-Engine engine-update for $TAG"

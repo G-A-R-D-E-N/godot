@@ -91,7 +91,12 @@ int test_main(int argc, char *argv[]) {
 	OS::get_singleton()->set_cmdline("", args, List<String>());
 	DisplayServerMock::register_mock_driver();
 
-	WorkerThreadPool::get_singleton()->init();
+	int worker_threads = -1;
+	const String worker_threads_env = OS::get_singleton()->get_environment("GODOT_TEST_WORKER_THREADS");
+	if (!worker_threads_env.is_empty()) {
+		worker_threads = worker_threads_env.to_int();
+	}
+	WorkerThreadPool::get_singleton()->init(worker_threads);
 
 	{
 		const String test_path = TestUtils::get_temp_path("");
