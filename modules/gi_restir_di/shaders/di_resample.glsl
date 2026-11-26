@@ -241,17 +241,17 @@ void di_emitter_commit(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geomet
 
 void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 	uint count = ray_scene_triangle_emitter_count();
-	float total = count == 0u ? 0.0 : emitter_scan.data[DI_EMITTER_TOTAL];
-	if (!(total > 0.0)) {
+	float total = count == 0u ? 0.0 : emitter_cdf.data[count - 1u];
+	if (!(total > 0.0) || isinf(total)) {
 		di_emitter_clear(p_pixel, 1u);
 		return;
 	}
-	float target = di_emitter_hash(p_seed, 0x27d4eb2fu) * total;
+	float target = min(di_emitter_hash(p_seed, 0x27d4eb2fu) * total, uintBitsToFloat(floatBitsToUint(total) - 1u));
 	uint low = 0u;
 	uint high = count - 1u;
 	while (low < high) {
 		uint mid = (low + high) >> 1u;
-		if (emitter_cdf.data[mid] < target) {
+		if (emitter_cdf.data[mid] <= target) {
 			low = mid + 1u;
 		} else {
 			high = mid;
@@ -937,7 +937,7 @@ vec3 di_emitter_color_at(uint p_index, vec3 p_point, out float r_luminance_weigh
 	float luminance = dot(max(emission, vec3(0.0)), luminance_weights);
 	float selection = di_emitter_selection_luminance(emitter.material);
 	r_luminance_weight = luminance;
-	return (luminance > 0.0 && selection > 0.0) ? emission * (emitter_scan.data[DI_EMITTER_TOTAL] / selection) : vec3(0.0);
+	return (luminance > 0.0 && selection > 0.0) ? emission * (emitter_cdf.data[ray_scene_triangle_emitter_count() - 1u] / selection) : vec3(0.0);
 }
 
 float di_emitter_target(vec3 p_color, float p_geometric) {
