@@ -39,3 +39,6 @@ emitter reads, as lamps (light_energy) and raster emission already are.
 
 ## EMITTER_NEAR debug listing (ray_scene.cpp _update_triangle_emitters)
 Off unless `rendering/global_illumination/ray_scene/debug_emitters_near` (Vector3, world) is set; `debug_emitters_radius` defaults to 8 m. Prints every emissive instance within the radius with its mesh path and, per emissive surface, the stored emission, mean luminance, atlas layer, texel scale and nits range, so the emitter lighting a given spot can be named.
+
+## Skipped materials are not emitters (ray_scene.cpp _update_triangle_emitters)
+Materials flagged MATERIAL_FLAG_SKIP (no shadow casting, or additive blending with skip_additive_surfaces on) are invisible to ray hits and occlusion, so DDGI never sees them. They were still entered into the resampler's triangle emitter list, so additive glow cards lit the room through the direct emitter term only. They are now left out, so both paths see the same scene. EMITTER_NEAR prints a skip column.

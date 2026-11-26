@@ -566,6 +566,9 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 			if (!(material.emission[0] > 0.0f || material.emission[1] > 0.0f || material.emission[2] > 0.0f) && material.emission_texture == 0) {
 				continue;
 			}
+			if ((material.flags & MATERIAL_FLAG_SKIP) != 0u) {
+				continue;
+			}
 			if (triangle_emitters.size() >= MAX_TRIANGLE_EMITTERS) {
 				capped = true;
 				break;
@@ -613,7 +616,7 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 				if (!(m.emission[0] > 0.0f || m.emission[1] > 0.0f || m.emission[2] > 0.0f) && m.emission_texture == 0) {
 					continue;
 				}
-				print_line(vformat("EMITTER_NEAR   surface %d emission %.4f %.4f %.4f mean_lum %.4f texture %d texel_scale %.4f nits_range %.2f %.2f ranges %s", int(s), m.emission[0], m.emission[1], m.emission[2], m.emission_mean_luminance, int(m.emission_texture), m.emission_texel_scale, m.emission_nits_range[0], m.emission_nits_range[1], (m.emission_flags & EMISSION_FLAG_TEXTURE_RANGES) ? "yes" : "no"));
+				print_line(vformat("EMITTER_NEAR   surface %d emission %.4f %.4f %.4f mean_lum %.4f texture %d texel_scale %.4f nits_range %.2f %.2f ranges %s skip %s", int(s), m.emission[0], m.emission[1], m.emission[2], m.emission_mean_luminance, int(m.emission_texture), m.emission_texel_scale, m.emission_nits_range[0], m.emission_nits_range[1], (m.emission_flags & EMISSION_FLAG_TEXTURE_RANGES) ? "yes" : "no", (m.flags & MATERIAL_FLAG_SKIP) ? "yes" : "no"));
 			}
 		}
 	}
