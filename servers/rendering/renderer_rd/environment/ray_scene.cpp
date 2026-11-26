@@ -595,6 +595,28 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 			break;
 		}
 	}
+	const Variant debug_near = ProjectSettings::get_singleton()->get_setting("rendering/global_illumination/ray_scene/debug_emitters_near", Variant());
+	if (debug_near.get_type() == Variant::VECTOR3) {
+		const Vector3 near_world = debug_near;
+		const Vector3 near_ray = near_world - anchor;
+		const float radius = float(ProjectSettings::get_singleton()->get_setting("rendering/global_illumination/ray_scene/debug_emitters_radius", 8.0));
+		print_line(vformat("EMITTER_NEAR query world %s anchor %s radius %.2f sources %d", near_world, anchor, radius, int(p_sources.size())));
+		for (const TriangleEmitterSource &source : p_sources) {
+			const float distance = source.transform.origin.distance_to(near_ray);
+			if (distance > radius) {
+				continue;
+			}
+			const uint32_t instance = source.instance < p_order.size() ? p_order[source.instance] : 0xFFFFFFFFu;
+			print_line(vformat("EMITTER_NEAR instance %d distance %.2f origin_world %s proxied %s mesh \"%s\"", int(instance), distance, source.transform.origin + anchor, source.proxied ? "yes" : "no", MeshStorage::get_singleton()->mesh_get_path(source.mesh)));
+			for (uint32_t s = 0; s < source.surface_count && source.material_offset + s < materials.size(); s++) {
+				const Material &m = materials[source.material_offset + s];
+				if (!(m.emission[0] > 0.0f || m.emission[1] > 0.0f || m.emission[2] > 0.0f) && m.emission_texture == 0) {
+					continue;
+				}
+				print_line(vformat("EMITTER_NEAR   surface %d emission %.4f %.4f %.4f mean_lum %.4f texture %d texel_scale %.4f nits_range %.2f %.2f ranges %s", int(s), m.emission[0], m.emission[1], m.emission[2], m.emission_mean_luminance, int(m.emission_texture), m.emission_texel_scale, m.emission_nits_range[0], m.emission_nits_range[1], (m.emission_flags & EMISSION_FLAG_TEXTURE_RANGES) ? "yes" : "no"));
+			}
+		}
+	}
 	triangle_emitter_count = triangle_emitters.size();
 	triangle_emitters_capped = capped;
 	emitter_room_starts.clear();

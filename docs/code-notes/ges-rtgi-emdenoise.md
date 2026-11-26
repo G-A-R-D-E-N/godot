@@ -36,3 +36,6 @@ emitter reads, as lamps (light_energy) and raster emission already are.
 
 ## Second emitter shadow ray (direct_shadows.glsl read_entries / emitter factor, direct_shadows.cpp params.pad[0])
 `params.pad[0]` is a bitfield: bit 0 = emitter samples present, bit 1 = the resampler already traced emitter visibility (`emitters/visibility`). With bit 1 set, direct_shadows no longer traces its own per-pixel 0/1 ray to the emitter sample and writes factor 1: that ray re-grained the spatially filtered emitter term pixel by pixel and counted visibility twice.
+
+## EMITTER_NEAR debug listing (ray_scene.cpp _update_triangle_emitters)
+Off unless `rendering/global_illumination/ray_scene/debug_emitters_near` (Vector3, world) is set; `debug_emitters_radius` defaults to 8 m. Prints every emissive instance within the radius with its mesh path and, per emissive surface, the stored emission, mean luminance, atlas layer, texel scale and nits range, so the emitter lighting a given spot can be named.
