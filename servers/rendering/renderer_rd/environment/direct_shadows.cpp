@@ -725,7 +725,7 @@ bool DirectShadows::get_history(const Ref<RenderSceneBuffersRD> &p_render_buffer
 		return false;
 	}
 	Ref<ViewportData> viewport = p_render_buffers->get_custom_data(RB_SCOPE_DIRECT_SHADOWS);
-	if (viewport->last_frame == 0 || viewport->table_generation != p_table_generation) {
+	if (viewport->last_frame == 0 || viewport->table_generation != p_table_generation || viewport->quarter) {
 		return false;
 	}
 	r_slots = get_slots(p_render_buffers);
