@@ -969,8 +969,6 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 	vec3 new_color = di_emitter_color;
 	float new_geometric = di_emitter_geometric;
 	float new_target = di_emitter_target(new_color, new_geometric);
-	float held_target = 0.0;
-	float held_origin = 0.0;
 	float held_m = 0.0;
 	uint held_age = 0u;
 	uint held_index = 0u;
@@ -986,7 +984,6 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 			held_index = header.x & 0xFFFFu;
 			held_instance = header.x >> 16u;
 			held_age = header.y & 0xFFu;
-			held_origin = uintBitsToFloat(header.w);
 			RaySceneTriangleEmitter emitter = ray_scene_triangle_emitter(held_index);
 			if (emitter.instance != held_instance) {
 				atomicAdd(emitter_reuse_counters.instance_mismatch, 1u);
@@ -1012,8 +1009,8 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 				held_geometric = cos_light > 0.0 ? min(cos_light / max(distance_sq, 1e-8), 60000.0) : 0.0;
 				float held_luminance = 0.0;
 				held_color = di_emitter_color_at(held_index, held_point, held_luminance);
-				held_target = di_emitter_target(held_color, held_geometric);
-				held_m = min(uintBitsToFloat(surface.z), 20.0);				merge = held_m > 0.0 && held_geometric > 0.0;
+				held_m = min(uintBitsToFloat(surface.z), 20.0);
+				merge = held_m > 0.0 && held_geometric > 0.0;
 			}
 		}
 	}
@@ -1064,7 +1061,8 @@ bool di_emitter_hold(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 	vec3 point = (inverse(params.prev_view_from_view) * vec4(held_vec.xyz, 1.0)).xyz;
 	float geometric = held_vec.w;
 	vec3 color = held_tail.rgb;
-	float target = di_emitter_target(color, geometric);	uint age = min((header.y & 0xFFu) + 1u, 0xFFu);
+	float target = di_emitter_target(color, geometric);
+	uint age = min((header.y & 0xFFu) + 1u, 0xFFu);
 	float mass = uintBitsToFloat(surface.z);
 	float damp = held_tail.w;
 	uvec4 next_header = uvec4(header.x, age | 0x100u, header.z, floatBitsToUint(target));
