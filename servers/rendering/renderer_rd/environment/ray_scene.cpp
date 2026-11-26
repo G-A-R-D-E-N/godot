@@ -2165,6 +2165,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		RD::get_singleton()->buffer_update(instance_buffer, 0, ordered.size() * sizeof(Instance), ordered.ptr());
 	}
 
+	_poll_room_grid();
 	const bool emitters_dirty = !triangle_emitters_built || rebuilt || emitter_state != triangle_emitter_state;
 	if (emitters_dirty) {
 		LocalVector<uint32_t> instance_order;
@@ -2313,7 +2314,6 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	}
 	_print_tlas_rebuilds(false);
 
-	_poll_room_grid();
 	SceneData scene_data = {};
 	const Vector3 camera_to_anchor = p_camera_position - anchor;
 	scene_data.camera_to_anchor[0] = camera_to_anchor.x;
