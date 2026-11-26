@@ -1281,6 +1281,19 @@ void RayScene::_pack_light(RID p_light_instance, bool p_physical_units, float p_
 	packed.inv_spot_attenuation = 1.0f / MAX(0.0001f, light_storage->light_get_param(light, RSE::LIGHT_PARAM_SPOT_ATTENUATION));
 	packed.caster_mask = light_storage->light_get_shadow_caster_mask(light);
 	packed.pad = p_light_instance.get_local_index();
+	{
+		static HashSet<RID> lamp_near_printed;
+		const Variant debug_near = ProjectSettings::get_singleton()->get_setting("rendering/global_illumination/ray_scene/debug_emitters_near", Variant());
+		if (debug_near.get_type() == Variant::VECTOR3 && !lamp_near_printed.has(p_light_instance)) {
+			const Vector3 near_world = debug_near;
+			const float radius = float(ProjectSettings::get_singleton()->get_setting("rendering/global_illumination/ray_scene/debug_emitters_radius", 8.0));
+			const float distance = transform.origin.distance_to(near_world);
+			if (distance <= radius) {
+				lamp_near_printed.insert(p_light_instance);
+				print_line(vformat("LAMP_NEAR type %d distance %.2f world %s intensity_lm %.2f energy %.4f indirect %.4f color %.3f %.3f %.3f range %.2f cull_mask %d", int(type), distance, transform.origin, light_storage->light_get_param(light, RSE::LIGHT_PARAM_INTENSITY), light_storage->light_get_param(light, RSE::LIGHT_PARAM_ENERGY), light_storage->light_get_param(light, RSE::LIGHT_PARAM_INDIRECT_ENERGY), color.r, color.g, color.b, light_storage->light_get_param(light, RSE::LIGHT_PARAM_RANGE), int(light_storage->light_get_cull_mask(light))));
+			}
+		}
+	}
 	pack_shape(type, transform.basis, area_size, light_storage->light_get_direct_size(light), packed);
 	if (type != RSE::LIGHT_DIRECTIONAL) {
 		census.candidates++;

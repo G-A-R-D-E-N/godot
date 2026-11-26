@@ -44,3 +44,5 @@ Off unless `rendering/global_illumination/ray_scene/debug_emitters_near` (Vector
 Materials flagged MATERIAL_FLAG_SKIP (no shadow casting, or additive blending with skip_additive_surfaces on) are invisible to ray hits and occlusion, so DDGI never sees them. They were still entered into the resampler's triangle emitter list, so additive glow cards lit the room through the direct emitter term only. They are now left out, so both paths see the same scene. EMITTER_NEAR prints a skip column.
 
 EMITTER_NEAR also prints, per emissive surface, its triangle count, world area and flux pi x area x mean_lum (lm), the same formula DerivedLightPolicy.Flux uses for the proxy lamp (whose lumens are then doubled by AreaLightLumens).
+
+LAMP_NEAR (ray_scene.cpp _pack_light): with debug_emitters_near set, each packed lamp within the radius is printed once with type, world position, intensity (lm), energy, indirect energy, linear colour, range and cull mask (0 = stood down), so traced surface flux can be compared with the authored lamp that stands for the same fixture.
