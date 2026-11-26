@@ -162,10 +162,12 @@ layout(set = 0, binding = 23, std430) buffer EmitterScan {
 emitter_scan;
 
 #if defined(MODE_EMITTER_SPATIAL)
-layout(set = 0, binding = 24, std430) restrict buffer EmitterSamples {
-#else
-layout(set = 0, binding = 24, std430) restrict writeonly buffer EmitterSamples {
+layout(set = 0, binding = 27, std430) restrict readonly buffer EmitterSamplesSnapshot {
+	vec4 data[];
+}
+emitter_samples_snapshot;
 #endif
+layout(set = 0, binding = 24, std430) restrict writeonly buffer EmitterSamples {
 	vec4 data[];
 }
 emitter_samples;
@@ -1232,8 +1234,8 @@ void main() {
 		return;
 	}
 	uint index = uint(pixel.y) * uint(params.size.x) + uint(pixel.x);
-	vec4 selected_point = emitter_samples.data[index * 2u];
-	vec4 selected_color = emitter_samples.data[index * 2u + 1u];
+	vec4 selected_point = emitter_samples_snapshot.data[index * 2u];
+	vec4 selected_color = emitter_samples_snapshot.data[index * 2u + 1u];
 	float total_mass = di_emitter_sample_mass(selected_color, selected_point);
 	vec3 total_weighted = max(selected_color.rgb, vec3(0.0)) * total_mass;
 	float view_depth = max(-vertex.z, 0.001);
@@ -1262,8 +1264,8 @@ void main() {
 			continue;
 		}
 		uint other_index = uint(other.y) * uint(params.size.x) + uint(other.x);
-		vec4 other_point = emitter_samples.data[other_index * 2u];
-		vec4 other_color = emitter_samples.data[other_index * 2u + 1u];
+		vec4 other_point = emitter_samples_snapshot.data[other_index * 2u];
+		vec4 other_color = emitter_samples_snapshot.data[other_index * 2u + 1u];
 		float other_mass = di_emitter_sample_mass(other_color, other_point);
 		if (!(other_mass > 0.0)) {
 			continue;

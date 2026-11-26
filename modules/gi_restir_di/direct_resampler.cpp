@@ -249,6 +249,10 @@ bool DirectResamplerRD::_ensure_emitter_samples(uint32_t p_pixels) {
 	if (emitter_samples.is_valid()) {
 		rd->free_rid(emitter_samples);
 	}
+	if (emitter_samples_snapshot.is_valid()) {
+		rd->free_rid(emitter_samples_snapshot);
+		emitter_samples_snapshot = RID();
+	}
 	emitter_samples = rd->storage_buffer_create(bytes);
 	rd->set_resource_name(emitter_samples, "Direct Resampler Emitter Samples");
 	emitter_samples_bytes = emitter_samples.is_valid() ? bytes : 0;
@@ -261,7 +265,7 @@ bool DirectResamplerRD::_ensure_emitter_samples(uint32_t p_pixels) {
 
 void DirectResamplerRD::_free_emitter_buffers() {
 	RD *rd = RD::get_singleton();
-	RID *owned[] = { &emitter_cdf, &emitter_scan, &emitter_samples, &emitter_reuse_counters };
+	RID *owned[] = { &emitter_cdf, &emitter_scan, &emitter_samples, &emitter_samples_snapshot, &emitter_reuse_counters };
 	for (RID *rid : owned) {
 		if (rid->is_valid()) {
 			rd->free_rid(*rid);
@@ -640,16 +644,26 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	rd->compute_list_end();
 	rd->draw_command_end_label();
 	if (emitter_active && settings.emitter_spatial && emitter_spatial_pipeline.get_rid().is_valid()) {
-		const RID emitter_spatial_rid = shader->version_get_shader(shader_version, VARIANT_EMITTER_SPATIAL);
-		RENDER_TIMESTAMP("Direct Resample Emitter Spatial");
-		rd->draw_command_begin_label("Direct Resample Emitter Spatial");
-		list = rd->compute_list_begin();
-		rd->compute_list_bind_compute_pipeline(list, emitter_spatial_pipeline.get_rid());
-		rd->compute_list_bind_uniform_set(list, UniformSetCacheRD::get_singleton()->get_cache_vec(emitter_spatial_rid, 0, uniforms), 0);
-		rd->compute_list_bind_uniform_set(list, UniformSetCacheRD::get_singleton()->get_cache_vec(emitter_spatial_rid, 1, ray_uniforms), 1);
-		rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
-		rd->compute_list_end();
-		rd->draw_command_end_label();
+		if (emitter_samples_snapshot.is_null()) {
+			emitter_samples_snapshot = rd->storage_buffer_create(emitter_samples_bytes);
+			if (emitter_samples_snapshot.is_valid()) {
+				rd->set_resource_name(emitter_samples_snapshot, "Direct Resampler Emitter Samples Snapshot");
+			}
+		}
+		if (emitter_samples_snapshot.is_valid() && rd->buffer_copy(emitter_samples, emitter_samples_snapshot, 0, 0, emitter_samples_bytes) == OK) {
+			uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 27, emitter_samples_snapshot));
+			const RID emitter_spatial_rid = shader->version_get_shader(shader_version, VARIANT_EMITTER_SPATIAL);
+			RENDER_TIMESTAMP("Direct Resample Emitter Spatial");
+			rd->draw_command_begin_label("Direct Resample Emitter Spatial");
+			list = rd->compute_list_begin();
+			rd->compute_list_bind_compute_pipeline(list, emitter_spatial_pipeline.get_rid());
+			rd->compute_list_bind_uniform_set(list, UniformSetCacheRD::get_singleton()->get_cache_vec(emitter_spatial_rid, 0, uniforms), 0);
+			rd->compute_list_bind_uniform_set(list, UniformSetCacheRD::get_singleton()->get_cache_vec(emitter_spatial_rid, 1, ray_uniforms), 1);
+			rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
+			rd->compute_list_end();
+			rd->draw_command_end_label();
+			uniforms.remove_at(uniforms.size() - 1);
+		}
 	}
 	if (spatial) {
 		const RID spatial_rid = shader->version_get_shader(shader_version, spatial_variant);

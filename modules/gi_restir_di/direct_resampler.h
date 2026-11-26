@@ -226,6 +226,7 @@ private:
 	RID emitter_cdf;
 	RID emitter_scan;
 	RID emitter_samples;
+	RID emitter_samples_snapshot;
 	RID emitter_reuse_counters;
 	uint32_t emitter_cdf_capacity = 0;
 	uint32_t emitter_samples_bytes = 0;
