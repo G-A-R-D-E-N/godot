@@ -45,6 +45,7 @@ void DirectResamplerRD::register_settings() {
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/spatial"), false);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/firefly_clamp"), 0.0);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/pick_radius"), 0.0);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/room_pick"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("head"), PROPERTY_HINT_RANGE, "0,6,1"), 4);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("tail_samples"), PROPERTY_HINT_RANGE, "1,7,1"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, DI_RESAMPLED_SETTING("floor"), PROPERTY_HINT_RANGE, "0.0001,1,0.0001"), 0.0625);
@@ -110,6 +111,7 @@ DirectResamplerRD::Settings DirectResamplerRD::get_project_settings() {
 	settings.emitter_spatial = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/spatial"));
 	settings.emitter_clamp = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/firefly_clamp"));
 	settings.emitter_pick_radius = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/pick_radius"));
+	settings.emitter_room_pick = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/room_pick"));
 	settings.stale_prior = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/stale_prior"));
 	settings.debug_log = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/log"));
 #ifdef DI_RESAMPLER_LAB
@@ -187,6 +189,7 @@ bool DirectResamplerRD::_ensure_device() {
 	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TABLE\n#define MODE_EMITTER_SCAN\n");
 	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TABLE\n#define MODE_EMITTER_PREFIX\n");
 	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TEMPORAL\n");
+	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TEMPORAL\n#define DI_EMITTER_ROOM_PICK\n");
 #ifdef DI_RESAMPLER_LAB
 	modes.push_back("\n#define LAB_COUNTS\n");
 	modes.push_back("\n#define MODE_SPATIAL\n#define LAB_COUNTS\n");
@@ -205,6 +208,9 @@ bool DirectResamplerRD::_ensure_device() {
 	emitter_scan_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_EMITTER_SCAN));
 	emitter_prefix_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_EMITTER_PREFIX));
 	emitter_temporal_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_MAIN_EMITTER_TEMPORAL));
+	if (ROOM_PICK_AVAILABLE) {
+		emitter_room_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_MAIN_EMITTER_TEMPORAL_ROOM));
+	}
 	emitter_spatial_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_EMITTER_SPATIAL));
 	emitter_device_ready = emitter_main_pipeline.get_rid().is_valid() && emitter_sum_pipeline.get_rid().is_valid() && emitter_scan_pipeline.get_rid().is_valid() && emitter_prefix_pipeline.get_rid().is_valid();
 	if (!emitter_device_ready) {
@@ -562,6 +568,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	params.head_window = settings.head_window ? 1 : 0;
 	params.emitter_clamp = MAX(0.0f, settings.emitter_clamp);
 	params.emitter_pick_radius = MAX(0.0f, settings.emitter_pick_radius);
+	params.emitter_room_pick = settings.emitter_room_pick ? 1u : 0u;
 	rd->buffer_update(params_buffer, 0, sizeof(Params), &params);
 
 	RID sampler = RendererRD::MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);

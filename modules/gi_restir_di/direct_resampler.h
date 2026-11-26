@@ -90,6 +90,7 @@ public:
 		bool head_window = false;
 		float emitter_clamp = 0.0f;
 		float emitter_pick_radius = 0.0f;
+		bool emitter_room_pick = false;
 	};
 
 	struct Params {
@@ -134,8 +135,12 @@ public:
 		uint32_t emitter_pick_pad0;
 		uint32_t emitter_pick_pad1;
 		uint32_t emitter_pick_pad2;
+		uint32_t emitter_room_pick;
+		uint32_t emitter_room_pad0;
+		uint32_t emitter_room_pad1;
+		uint32_t emitter_room_pad2;
 	};
-	static_assert(sizeof(Params) == 464);
+	static_assert(sizeof(Params) == 480);
 	static_assert(sizeof(Params) % 16 == 0);
 
 	static constexpr uint32_t RESERVOIRS_OFF = 0;
@@ -212,11 +217,13 @@ private:
 		VARIANT_EMITTER_SCAN = 4,
 		VARIANT_EMITTER_PREFIX = 5,
 		VARIANT_MAIN_EMITTER_TEMPORAL = 6,
+		VARIANT_MAIN_EMITTER_TEMPORAL_ROOM = 10,
 #ifdef DI_RESAMPLER_LAB
 		VARIANT_MAIN_LAB = 7,
 		VARIANT_SPATIAL_LAB = 8,
 #endif
 		VARIANT_EMITTER_SPATIAL,
+		ROOM_PICK_AVAILABLE = false,
 	};
 
 	DiResampleShaderRD *shader = nullptr;

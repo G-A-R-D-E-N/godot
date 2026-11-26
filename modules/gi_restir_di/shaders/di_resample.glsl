@@ -93,6 +93,10 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	uint emitter_pick_pad0;
 	uint emitter_pick_pad1;
 	uint emitter_pick_pad2;
+	uint emitter_room_pick;
+	uint emitter_room_pad0;
+	uint emitter_room_pad1;
+	uint emitter_room_pad2;
 }
 params;
 
@@ -272,6 +276,21 @@ void di_emitter_commit(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geomet
 }
 #endif
 
+#ifdef DI_EMITTER_ROOM_PICK
+bool di_emitter_room_window(uint p_room, out uint r_first, out uint r_count) {
+	r_first = 0u;
+	r_count = 0u;
+	uint room_count = uint(emitter_scan.data[DI_EMITTER_ROOM_TABLE]);
+	if (p_room >= room_count) {
+		return false;
+	}
+	uint base = DI_EMITTER_ROOM_TABLE + 1u + p_room * 2u;
+	r_first = uint(emitter_scan.data[base]);
+	r_count = uint(emitter_scan.data[base + 1u]);
+	return r_count > 0u;
+}
+#endif
+
 uint di_emitter_pick_index(float p_target, uint p_count) {
 	uint low = 0u;
 	uint high = p_count - 1u;
@@ -300,6 +319,16 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 		return;
 	}
 	uint low = di_emitter_pick_index(di_emitter_hash(p_seed, 0x27d4eb2fu) * total, count);
+#ifdef DI_EMITTER_ROOM_PICK
+	if (params.emitter_room_pick != 0u) {
+		uint room_first = 0u;
+		uint room_count = 0u;
+		if (di_emitter_room_window(ray_scene.emitter_room, room_first, room_count)) {
+			uint room_pick = di_emitter_pick_index(di_emitter_hash(p_seed, 0x27d4eb2fu), room_count);
+			low = room_first + room_pick;
+		}
+	}
+#endif
 	if (params.emitter_pick_radius > 0.0) {
 		uint nearest = low;
 		float nearest_distance = di_emitter_distance(p_vertex, low);
