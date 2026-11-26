@@ -229,22 +229,6 @@ vec3 di_emitter_to_view(vec3 p_ray) {
 			dot(vec3(params.camera_basis[0].z, params.camera_basis[1].z, params.camera_basis[2].z), relative));
 }
 
-bool di_emitter_visible(vec3 p_vertex, vec3 p_normal, vec3 p_point, uint p_instance, float p_distance_sq) {
-	float distance = sqrt(p_distance_sq);
-	if (!(distance > 2.0 * DI_EMITTER_RAY_BIAS)) {
-		return true;
-	}
-	vec3 vertex = di_emitter_to_world(p_vertex);
-	vec3 point = di_emitter_to_world(p_point);
-	vec3 normal = di_emitter_to_world(p_normal) - ray_scene.camera_to_anchor;
-	vec3 from = vertex + normal * DI_EMITTER_RAY_BIAS;
-	vec3 to = point - normalize(point - vertex) * DI_EMITTER_RAY_BIAS;
-	uint blocker = 0xFFFFFFFFu;
-	float blocker_distance = 0.0;
-	uint blocker_triangle = 0u;
-	return ray_scene_sampled_visibility_blocker(from, to, RAY_SCENE_ALL_CASTERS, stream_seed + 0x51ed270bu, int(p_instance), blocker, blocker_distance, blocker_triangle);
-}
-
 float di_emitter_hash(uint p_seed, uint p_salt) {
 	return float(di_hash(p_seed ^ di_hash(p_salt)) >> 8u) / 16777216.0;
 }
@@ -306,6 +290,24 @@ void di_emitter_commit(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geomet
 	di_emitter_write_block(p_pixel, p_point, p_color, p_geometric);
 }
 #endif
+
+vec3 di_emitter_to_world(vec3 p_view);
+
+bool di_emitter_visible(vec3 p_vertex, vec3 p_normal, vec3 p_point, uint p_instance, float p_distance_sq) {
+	float distance = sqrt(p_distance_sq);
+	if (!(distance > 2.0 * DI_EMITTER_RAY_BIAS)) {
+		return true;
+	}
+	vec3 vertex = di_emitter_to_world(p_vertex);
+	vec3 point = di_emitter_to_world(p_point);
+	vec3 normal = di_emitter_to_world(p_normal) - ray_scene.camera_to_anchor;
+	vec3 from = vertex + normal * DI_EMITTER_RAY_BIAS;
+	vec3 to = point - normalize(point - vertex) * DI_EMITTER_RAY_BIAS;
+	uint blocker = 0xFFFFFFFFu;
+	float blocker_distance = 0.0;
+	uint blocker_triangle = 0u;
+	return ray_scene_sampled_visibility_blocker(from, to, RAY_SCENE_ALL_CASTERS, stream_seed + 0x51ed270bu, int(p_instance), blocker, blocker_distance, blocker_triangle);
+}
 
 void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 	uint count = ray_scene_triangle_emitter_count();
@@ -1019,6 +1021,7 @@ vec3 di_emitter_to_world(vec3 p_view) {
 	vec3 offset = params.camera_basis[0].xyz * p_view.x + params.camera_basis[1].xyz * p_view.y + params.camera_basis[2].xyz * p_view.z;
 	return ray_scene.camera_to_anchor + offset;
 }
+
 
 void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 	vec3 new_point = di_emitter_point;
