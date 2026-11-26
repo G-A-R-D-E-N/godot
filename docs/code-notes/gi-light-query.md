@@ -141,7 +141,7 @@ pre-existing engine issue, to be reported and fixed on its own.
 sampled") gives the colour the forward pass mixes in where coverage is below 1. It takes the ambient part of
 `RenderSceneDataRD::update_ubo` (`render_scene_data_rd.cpp`): background colour times the background energy for a colour
 background with ambient source Background; otherwise the ambient colour times ambient energy, and the sky contribution
-as the sky share when the ambient comes from the sky. Ambient disabled leaves it 0. Both colours are then put on the
+as the sky share when the ambient comes from the sky. Ambient disabled leaves it 0. Both colors from `render_scene_data_rd.cpp` are then put on the
 trace's exposure, not the forward pass's: times the camera exposure normalization whenever camera attributes are valid
 (1 otherwise), whatever the light units, the same factor `_fill_sky` writes to `emission_exposure` and applies to the
 colour background, and that `RayScene` applies to every light. The shader divides the whole sum by `emission_exposure`,

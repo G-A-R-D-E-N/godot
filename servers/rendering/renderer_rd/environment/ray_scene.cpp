@@ -896,13 +896,17 @@ void RayScene::pack_shape(RSE::LightType p_type, const Basis &p_basis, const Vec
 
 void RayScene::_pack_light(RID p_light_instance, bool p_physical_units, float p_exposure, uint32_t p_limit, LocalVector<Light> &r_lights, LocalVector<RID> *r_ids) {
 	LightStorage *light_storage = LightStorage::get_singleton();
-	if (r_lights.size() >= p_limit || !light_storage->owns_light_instance(p_light_instance)) {
+	if (!light_storage->owns_light_instance(p_light_instance)) {
 		return;
 	}
 	const RID light = light_storage->light_instance_get_base_light(p_light_instance);
 	const RSE::LightType type = light_storage->light_get_type(light);
 	const Vector2 area_size = type == RSE::LIGHT_AREA ? light_storage->light_area_get_size(light) : Vector2();
 	if (type == RSE::LIGHT_AREA && !(area_size.x > 0.0f && area_size.y > 0.0f)) {
+		return;
+	}
+	if (r_lights.size() >= p_limit) {
+		light_list_trimmed = true;
 		return;
 	}
 
@@ -1837,6 +1841,8 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	lights.clear();
 	local_lights.clear();
 	local_ids.clear();
+	cloud_mapped_mask = 0;
+	light_list_trimmed = false;
 	census = LightCensus();
 	DDGILightTracker::begin(reset_on, RSG::rasterizer->get_frame_number(), MAX(GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/probe_spacing"), 0.1f), GLOBAL_GET_CACHED(bool, "rendering/global_illumination/rtgi/enabled"));
 	const uint32_t fired_before = DDGILightTracker::stats().fired;
@@ -1854,6 +1860,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		_candidate_changes(inv_exposure, cand_in, cand_out, cand_changed);
 	}
 	const uint32_t cand = local_lights.size();
+	light_list_trimmed |= lights.size() + cand > max_lights;
 	const Vector3i cell_key = pick_cell_key(p_camera_position, cell);
 	PickCensus pick;
 	int64_t slot_index = -1;
