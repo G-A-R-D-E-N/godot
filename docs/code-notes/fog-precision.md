@@ -71,7 +71,7 @@ There is no density clamp to 0..1, no emission cap of 4 and no packing, so the b
 
 ### `servers/rendering/renderer_rd/environment/fog_precision.h`
 
-**`RendererRD::FogPrecision`** is the CPU form of the shader maths, used by `tests/servers/rendering/test_fog_precision.cpp`. It covers:
+**`RendererRD::FogPrecision`** is the CPU form of the shader math, used by `tests/servers/rendering/test_fog_precision.cpp`. It covers:
 - quantising and decoding with the same rounding;
 - the carve fraction;
 - the light gate;
