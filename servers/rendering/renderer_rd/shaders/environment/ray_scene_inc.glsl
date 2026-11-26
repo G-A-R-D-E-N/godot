@@ -227,8 +227,7 @@ vec3 ray_scene_triangle_emitter_emission(uint p_material) {
 
 vec2 ray_scene_triangle_emitter_uv(uint p_uv_index, vec3 p_bary) {
 	uint base = p_uv_index * 4u;
-	float w0 = 1.0 - p_bary.x - p_bary.y;
-	return unpackHalf2x16(ray_scene_triangle_uvs.data[base]) * w0 + unpackHalf2x16(ray_scene_triangle_uvs.data[base + 1u]) * p_bary.x + unpackHalf2x16(ray_scene_triangle_uvs.data[base + 2u]) * p_bary.y;
+	return unpackHalf2x16(ray_scene_triangle_uvs.data[base]) * p_bary.x + unpackHalf2x16(ray_scene_triangle_uvs.data[base + 1u]) * p_bary.y + unpackHalf2x16(ray_scene_triangle_uvs.data[base + 2u]) * p_bary.z;
 }
 
 vec3 ray_scene_triangle_emitter_emission_texel(uint p_material, vec2 p_uv) {
