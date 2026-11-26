@@ -277,17 +277,34 @@ void di_emitter_commit(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geomet
 #endif
 
 #ifdef DI_EMITTER_ROOM_PICK
-bool di_emitter_room_window(uint p_room, out uint r_first, out uint r_count) {
+global uniform sampler2D ray_room_grid;
+global uniform vec4 ray_room_grid_origin_size;
+
+vec3 di_emitter_ray_space(vec3 p_view) {
+	mat3 to_ray = mat3(params.camera_basis[0].xyz, params.camera_basis[1].xyz, params.camera_basis[2].xyz);
+	return ray_scene.camera_to_anchor + to_ray * p_view;
+}
+
+uint di_emitter_room_of(vec3 p_view) {
+	vec3 ray_position = di_emitter_ray_space(p_view);
+	float cell = max(ray_room_grid_origin_size.w, 1e-3);
+	vec2 uv = (ray_position.xz - ray_room_grid_origin_size.xz) / cell;
+	if (any(lessThan(uv, vec2(0.0))) || any(greaterThanEqual(uv, vec2(1.0)))) {
+		return 0u;
+	}
+	return uint(textureLod(ray_room_grid, uv, 0.0).r * 255.0 + 0.5);
+}
+
+bool di_emitter_room_window(uint p_room, out uint r_first, out uint r_last) {
 	r_first = 0u;
-	r_count = 0u;
-	uint room_count = uint(emitter_scan.data[DI_EMITTER_ROOM_TABLE]);
-	if (p_room >= room_count) {
+	r_last = 0u;
+	uint room_count = ray_scene.room_count;
+	if (room_count == 0u || p_room >= room_count) {
 		return false;
 	}
-	uint base = DI_EMITTER_ROOM_TABLE + 1u + p_room * 2u;
-	r_first = uint(emitter_scan.data[base]);
-	r_count = uint(emitter_scan.data[base + 1u]);
-	return r_count > 0u;
+	r_first = ray_scene.room_start[p_room];
+	r_last = ray_scene.room_start[p_room + 1u];
+	return r_last > r_first;
 }
 #endif
 
@@ -322,10 +339,21 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 #ifdef DI_EMITTER_ROOM_PICK
 	if (params.emitter_room_pick != 0u) {
 		uint room_first = 0u;
-		uint room_count = 0u;
-		if (di_emitter_room_window(ray_scene.emitter_room, room_first, room_count)) {
-			uint room_pick = di_emitter_pick_index(di_emitter_hash(p_seed, 0x27d4eb2fu), room_count);
-			low = room_first + room_pick;
+		uint room_last = 0u;
+		if (di_emitter_room_window(di_emitter_room_of(p_vertex), room_first, room_last) && room_last <= count) {
+			float room_base = room_first > 0u ? emitter_cdf.data[room_first - 1u] : 0.0;
+			float room_span = emitter_cdf.data[room_last - 1u] - room_base;
+			float room_target = room_base + di_emitter_hash(p_seed, 0x27d4eb2fu) * max(room_span, 0.0);
+			low = room_first;
+			uint high = room_last - 1u;
+			while (low < high) {
+				uint mid = (low + high) >> 1u;
+				if (emitter_cdf.data[mid] < room_target) {
+					low = mid + 1u;
+				} else {
+					high = mid;
+				}
+			}
 		}
 	}
 #endif
