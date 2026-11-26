@@ -30,7 +30,7 @@ A rendering-device texture supplied by a caller, a render target, or a texture w
 
 ### `servers/rendering/renderer_rd/environment/ray_scene_alpha.cpp:RayAlphaStore::update`
 
-Externally writable alpha sources receive a new observation revision at each ray-scene update, including repeated views in one frame. A rotating fill plan reserves near and required far work together, while retaining the per-frame texel budget across views. Only dynamic sources requested by the current view when alpha testing is enabled consume that budget. The first requested job can exceed the budget to ensure progress; later views may remain pending when the shared budget is exhausted. Sources that cannot be refreshed remain pending rather than publishing an old mask.
+Externally writable alpha sources receive a new observation revision at each ray-scene update, including repeated views in one frame. A rotating fill plan reserves near and required far work together, while retaining the per-frame texel budget across views. Only dynamic sources requested by the current view when alpha testing is enabled consume that budget. The first requested job can exceed the budget to ensure progress; later views may remain pending when the shared budget is exhausted. Sources that cannot be refreshed remain pending rather than publishing an old mask. `ray_scene_alpha.cpp:RayAlphaStore::update` pauses fill scheduling without advancing its cursor if primary texture allocation fails; fallback allocation is attempted and table synchronization continues.
 
 ### `servers/rendering/renderer_rd/environment/ray_scene.cpp:RayScene::update`
 

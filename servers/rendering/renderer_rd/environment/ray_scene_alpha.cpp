@@ -596,7 +596,8 @@ void RayAlphaStore::update(bool p_refresh_dynamic) {
 		return;
 	}
 	stats.source_missing_frames = 0;
-	if (!_ensure_texture()) {
+	const bool primary_ready = _ensure_texture();
+	if (!primary_ready) {
 		_ensure_fallback_textures();
 	}
 
@@ -637,7 +638,9 @@ void RayAlphaStore::update(bool p_refresh_dynamic) {
 	}
 
 	LocalVector<uint32_t> selected;
-	plan_fills(requests, texels_per_frame, stats.fill_texels_this_frame, fill_cursor, selected);
+	if (primary_ready) {
+		plan_fills(requests, texels_per_frame, stats.fill_texels_this_frame, fill_cursor, selected);
+	}
 	if (!selected.is_empty() && _ensure_pipeline()) {
 		RID shader = fill_shader->version_get_shader(fill_version, 0);
 		RID sampler = MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_ENABLED);
