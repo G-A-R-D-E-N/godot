@@ -76,6 +76,12 @@ public partial class ShutdownTrackerProbe : Node
                 tree.Quit();
                 return;
             }
+            if (args.Contains("--finalizer-registration"))
+            {
+                FinalizerRegistration.Start();
+                tree.Quit();
+                return;
+            }
             if (args.Contains("--shutdown-resume-after-check"))
             {
                 ShutdownResumeAfterCheck.Start();
