@@ -497,7 +497,12 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 			TriangleEmitter emitter = {};
 			float *const corners[3] = { emitter.v0, emitter.v1, emitter.v2 };
 			for (uint32_t v = 0; v < 3; v++) {
-				const Vector3 local_position(triangle.v0[0] + (v == 1 ? triangle.e1[0] : v == 2 ? triangle.e2[0] : 0.0f), triangle.v0[1] + (v == 1 ? triangle.e1[1] : v == 2 ? triangle.e2[1] : 0.0f), triangle.v0[2] + (v == 1 ? triangle.e1[2] : v == 2 ? triangle.e2[2] : 0.0f));
+				const Vector3 local_position(triangle.v0[0] + (v == 1 ? triangle.e1[0] : v == 2 ? triangle.e2[0]
+																								: 0.0f),
+						triangle.v0[1] + (v == 1 ? triangle.e1[1] : v == 2 ? triangle.e2[1]
+																		   : 0.0f),
+						triangle.v0[2] + (v == 1 ? triangle.e1[2] : v == 2 ? triangle.e2[2]
+																		   : 0.0f));
 				const Vector3 position = source.transform.xform(local_position);
 				corners[v][0] = position.x;
 				corners[v][1] = position.y;
