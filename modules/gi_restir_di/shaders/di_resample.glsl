@@ -293,7 +293,7 @@ void di_emitter_commit(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geomet
 
 vec3 di_emitter_to_world(vec3 p_view);
 
-bool di_emitter_visible(vec3 p_vertex, vec3 p_normal, vec3 p_point, uint p_instance, float p_distance_sq) {
+bool di_emitter_visible(vec3 p_vertex, vec3 p_normal, vec3 p_point, uint p_instance, float p_distance_sq, uint p_seed) {
 	float distance = sqrt(p_distance_sq);
 	if (!(distance > 2.0 * DI_EMITTER_RAY_BIAS)) {
 		return true;
@@ -306,7 +306,7 @@ bool di_emitter_visible(vec3 p_vertex, vec3 p_normal, vec3 p_point, uint p_insta
 	uint blocker = 0xFFFFFFFFu;
 	float blocker_distance = 0.0;
 	uint blocker_triangle = 0u;
-	return ray_scene_sampled_visibility_blocker(from, to, RAY_SCENE_ALL_CASTERS, stream_seed + 0x51ed270bu, int(p_instance), blocker, blocker_distance, blocker_triangle);
+	return ray_scene_sampled_visibility_blocker(from, to, RAY_SCENE_ALL_CASTERS, p_seed + 0x51ed270bu, int(p_instance), blocker, blocker_distance, blocker_triangle);
 }
 
 void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
@@ -367,7 +367,7 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
 	}
 	float geometric = min(cos_light / max(distance * distance, 1e-8), 60000.0);
 	vec3 color = texel_emission * (total / luminance);
-	if (params.emitter_visibility != 0u && !di_emitter_visible(p_vertex, p_normal, sample_point, emitter.instance, distance * distance)) {
+	if (params.emitter_visibility != 0u && !di_emitter_visible(p_vertex, p_normal, sample_point, emitter.instance, distance * distance, p_seed)) {
 		di_emitter_clear_block(p_pixel, 2u);
 		return;
 	}
