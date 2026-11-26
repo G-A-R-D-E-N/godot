@@ -291,7 +291,10 @@ void di_emitter_commit(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geomet
 }
 #endif
 
-vec3 di_emitter_to_world(vec3 p_view);
+vec3 di_emitter_to_world(vec3 p_view) {
+	vec3 offset = params.camera_basis[0].xyz * p_view.x + params.camera_basis[1].xyz * p_view.y + params.camera_basis[2].xyz * p_view.z;
+	return ray_scene.camera_to_anchor + offset;
+}
 
 bool di_emitter_visible(vec3 p_vertex, vec3 p_normal, vec3 p_point, uint p_instance, float p_distance_sq, uint p_seed) {
 	float distance = sqrt(p_distance_sq);
@@ -1017,10 +1020,6 @@ float di_emitter_target(vec3 p_color, float p_geometric) {
 	return dot(max(p_color * p_geometric, vec3(0.0)), luminance_weights);
 }
 
-vec3 di_emitter_to_world(vec3 p_view) {
-	vec3 offset = params.camera_basis[0].xyz * p_view.x + params.camera_basis[1].xyz * p_view.y + params.camera_basis[2].xyz * p_view.z;
-	return ray_scene.camera_to_anchor + offset;
-}
 
 
 void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
