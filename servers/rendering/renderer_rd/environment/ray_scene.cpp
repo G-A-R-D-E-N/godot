@@ -1795,6 +1795,10 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 				const uint32_t index = materials[s].flags >> MATERIAL_ALPHA_SHIFT;
 				if (index != 0) {
 					scene_hash = alpha_far_hash(scene_hash, alpha_store.get_entry(index));
+					const uint64_t revision = alpha_store.get_content_revision(index);
+					if (revision != 0) {
+						scene_hash = hash_murmur3_one_64(revision, scene_hash);
+					}
 				}
 			}
 		}

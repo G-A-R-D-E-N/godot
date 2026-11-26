@@ -34,4 +34,4 @@ Externally writable alpha sources receive a new observation revision at each ray
 
 ### `servers/rendering/renderer_rd/environment/ray_scene.cpp:RayScene::update`
 
-The scene tracker incorporates the alpha table after refresh scheduling, so far-state and density changes are reflected in the same update that publishes them to rendering.
+`RayScene::update` incorporates the alpha table into the scene tracker after refresh scheduling, so far-state and density changes are reflected in the same update that publishes them to rendering. Ready alpha layers also contribute their fill revision, including when far mode is off; pending layers contribute no revision. Externally writable sources can therefore advance the scene epoch on every serviced view even if their pixels happen to be unchanged.

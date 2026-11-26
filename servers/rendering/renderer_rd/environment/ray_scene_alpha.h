@@ -166,6 +166,13 @@ public:
 	uint32_t get_live_layer_count() const { return layers.size() - free_layers.size(); }
 	RID get_layer_source(uint32_t p_layer) const { return layers[p_layer].source; }
 	uint32_t get_layer_cutoff(uint32_t p_layer) const { return layers[p_layer].cutoff & LAYER_CUTOFF_MASK; }
+	uint64_t get_content_revision(uint32_t p_entry) const {
+		if (p_entry >= entries.size() || entries[p_entry].layer >= layers.size()) {
+			return 0;
+		}
+		const Layer &layer = layers[entries[p_entry].layer];
+		return layer.state == LAYER_READY ? layer.filled_signature : 0;
+	}
 	uint32_t get_layer_state(uint32_t p_layer) const { return layers[p_layer].state; }
 	bool layer_requested(uint32_t p_layer) const { return layers[p_layer].last_observation == observation_revision; }
 	uint32_t get_layer_generation(uint32_t p_layer) const { return layers[p_layer].generation; }

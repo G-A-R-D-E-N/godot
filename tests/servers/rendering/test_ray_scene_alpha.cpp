@@ -2566,6 +2566,32 @@ TEST_CASE("[RayScene] Alpha source revisions invalidate coverage and far mips") 
 	CHECK(store.layer_needs_far(layer));
 }
 
+TEST_CASE("[RayScene] Near-only alpha content changes move the scene epoch") {
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	const RID source = RID::from_uint64(0x100000003ull);
+	const uint32_t entry = store.acquire(source, 128, Vector2(1, 1), Vector2());
+	REQUIRE(entry != 0);
+	const uint32_t layer = store.get_entry(entry).layer;
+	const RayAlphaStore::SourceIdentity first{ RID::from_uint64(0x100000004ull), 8, 8, 1 };
+	RayAlphaStore::SourceIdentity changed = first;
+	changed.data_version = 2;
+	const uint64_t first_revision = store.observe_source(layer, first);
+	store.commit_fill(layer, first_revision);
+	const uint32_t first_hash = hash_murmur3_one_64(store.get_content_revision(entry), 17);
+	RendererRD::GISceneTracker tracker;
+	RendererRD::GIEpochs epochs;
+	epochs.apply(tracker.update(RendererRD::GISceneTracker::add_instance(0, first_hash), { 1 }));
+	const uint32_t epoch = epochs.get(RendererRD::GIEpochs::SOURCE_SCENE);
+	const uint64_t next_revision = store.observe_source(layer, changed);
+	CHECK(store.get_content_revision(entry) == 0);
+	store.commit_fill(layer, next_revision);
+	const uint32_t next_hash = hash_murmur3_one_64(store.get_content_revision(entry), 17);
+	CHECK(first_hash != next_hash);
+	epochs.apply(tracker.update(RendererRD::GISceneTracker::add_instance(0, next_hash), { 1 }));
+	CHECK(epochs.get(RendererRD::GIEpochs::SOURCE_SCENE) != epoch);
+}
+
 TEST_CASE("[RayScene] Alpha fill plan rotates fairly across frames and views") {
 	LocalVector<RayAlphaStore::FillRequest> requests;
 	requests.resize(3);
@@ -2630,17 +2656,20 @@ TEST_CASE("[RayScene] Dynamic alpha revisions publish only their current far mip
 	store.commit_far(layer, first_revision);
 	store.sync_entries();
 	CHECK(store.get_entry(entry).far_state == RayAlphaStore::LAYER_READY);
+	CHECK(store.get_content_revision(entry) == first_revision);
 	const uint32_t ready_hash = RayScene::alpha_far_hash(17, store.get_entry(entry));
 	const uint64_t next_revision = store.observe_source(layer, next);
 	store.sync_entries();
 	CHECK(store.get_entry(entry).state == RayAlphaStore::LAYER_PENDING);
 	CHECK(store.get_entry(entry).far_state == RayAlphaStore::LAYER_EMPTY);
+	CHECK(store.get_content_revision(entry) == 0);
 	CHECK(RayScene::alpha_far_hash(17, store.get_entry(entry)) != ready_hash);
 	store.commit_far(layer, next_revision);
 	store.sync_entries();
 	CHECK(store.get_entry(entry).far_state == RayAlphaStore::LAYER_EMPTY);
 	store.commit_fill(layer, next_revision);
 	store.sync_entries();
+	CHECK(store.get_content_revision(entry) == next_revision);
 	CHECK(store.get_entry(entry).far_state == RayAlphaStore::LAYER_EMPTY);
 	store.commit_far(layer, next_revision);
 	store.sync_entries();

@@ -507,8 +507,9 @@ apply cut-outs. A cut-out surface casts a solid shadow there, while DDGI and ReS
   writable sources, `RayAlphaStore::sync_entries` publishes the current observation after fill scheduling. The scene
   hash is assembled after `alpha_store.update`, so a far readiness or density change reaches `GIEpochs::SOURCE_SCENE`
   in the same update that publishes the table used by rendering.
-- Slots with `alpha_enabled` false, index 0, or far mode 0 add no words, preserving byte-identical scene hashes for all
-  non-far scenes.
+- `RayScene::update` adds no alpha words for disabled alpha or index 0. Each ready alpha layer also contributes its fill
+  revision, including far mode 0, so changes to near coverage invalidate the scene epoch. Pending layers contribute no
+  fill revision. Externally writable sources can advance the epoch each time they are serviced even if pixels are unchanged.
 - DDGI does not read `GIEpochs::SOURCE_SCENE` and keys its moved-instance reset (`RayScene::collect_moved_instances`) on
   `instance_signature` (which hashes `Instance` records only, not `Material` flags or alpha table fields), so neither
   DDGI resets nor TLAS rebuilds are triggered by cull, cast-bit, far-key, `density`, or `far_state` transitions.
