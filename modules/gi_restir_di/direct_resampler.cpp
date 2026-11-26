@@ -193,12 +193,15 @@ bool DirectResamplerRD::_ensure_device() {
 	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TABLE\n#define MODE_EMITTER_SCAN\n");
 	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TABLE\n#define MODE_EMITTER_PREFIX\n");
 	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TEMPORAL\n");
-	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TEMPORAL\n#define DI_EMITTER_ROOM_PICK\n");
 #ifdef DI_RESAMPLER_LAB
 	modes.push_back("\n#define LAB_COUNTS\n");
 	modes.push_back("\n#define MODE_SPATIAL\n#define LAB_COUNTS\n");
+#else
+	modes.push_back("\n");
+	modes.push_back("\n");
 #endif
 	modes.push_back("\n#define DI_EMITTERS\n#define MODE_EMITTER_SPATIAL\n");
+	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TEMPORAL\n" + room_pick_define);
 	const String defines = vformat("\n#define RAY_SCENE_BLAS_STACK_SIZE %d\n#define RAY_SCENE_TLAS_STACK_SIZE %d\n%s", int(RendererRD::RayScene::BLAS_MAX_DEPTH), int(RendererRD::RayScene::TLAS_MAX_DEPTH), RendererRD::RayScene::get_singleton()->uses_hardware() ? "#define SHADER_GLSL_VERSION_460\n#extension GL_EXT_ray_query : require\n#define RAY_SCENE_HW\n" : "");
 	shader->initialize(modes, defines);
 	shader_version = shader->version_create();
