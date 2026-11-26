@@ -207,7 +207,8 @@ TEST_CASE("[FogPrecision] The in-scatter weight matches the exact integral from 
 	const float below = in_scatter_weight(0.5f, switch_extinction);
 	const float above = in_scatter_weight(0.5f, std::nextafter(switch_extinction, 1.0f));
 	CHECK(std::abs(double(above) - double(below)) <= 4e-6 * double(below));
-	CHECK(in_scatter_weight(1.0f, 0.0f) == 0.0f);
+	volatile float zero_extinction = 0.0f;
+	CHECK(in_scatter_weight(1.0f, zero_extinction) == 0.0f);
 	CHECK(in_scatter_weight(1.0f, -1.0f) == 0.0f);
 	CHECK(in_scatter_weight(1.0f, float(Math::NaN)) == 0.0f);
 	CHECK(in_scatter_weight(0.0f, 1.0f) == 0.0f);
