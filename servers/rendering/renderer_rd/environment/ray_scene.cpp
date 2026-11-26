@@ -489,9 +489,7 @@ void RayScene::_poll_room_grid() {
 	}
 	room_grid_texture = rid;
 	triangle_emitters_built = false;
-	if (!rid.is_valid()) {
-		print_line(vformat("Ray scene room grid: the global is %s", Variant::get_type_name(value.get_type())));
-	}
+	print_line(vformat("Ray scene room grid changed: %s", rid.is_valid() ? "valid" : Variant::get_type_name(value.get_type())));
 }
 
 void RayScene::_refresh_emitter_room_grid() {
@@ -501,12 +499,14 @@ void RayScene::_refresh_emitter_room_grid() {
 	const Variant grid_value = material_storage->global_shader_parameter_get_internal(SNAME("ray_room_grid"));
 	const Variant origin_size_value = material_storage->global_shader_parameter_get_internal(SNAME("ray_room_grid_origin_size"));
 	if (grid_value.get_type() != Variant::RID || origin_size_value.get_type() != Variant::VECTOR4) {
+		print_line(vformat("Ray scene room grid: parameters %s %s", Variant::get_type_name(grid_value.get_type()), Variant::get_type_name(origin_size_value.get_type())));
 		return;
 	}
 	const Vector4 origin_size = origin_size_value;
 	const float cell_size = MAX(origin_size.w, 0.01f);
 	Ref<Image> image = TextureStorage::get_singleton()->texture_2d_get(RID(grid_value));
 	if (image.is_null() || image->get_format() != Image::FORMAT_R8) {
+		print_line(vformat("Ray scene room grid: image %s", image.is_null() ? "null" : itos(int(image->get_format()))));
 		return;
 	}
 	PackedByteArray ids = image->get_data();
@@ -518,6 +518,7 @@ void RayScene::_refresh_emitter_room_grid() {
 		max_room = MAX(max_room, uint32_t(ids[i]));
 	}
 	if (max_room == 0 || max_room > MAX_EMITTER_ROOMS) {
+		print_line(vformat("Ray scene room grid: max room %d", int(max_room)));
 		return;
 	}
 	grid.origin = Vector2(origin_size.x, origin_size.z);
