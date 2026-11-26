@@ -54,6 +54,17 @@ public:
 	static constexpr uint32_t LAYER_CUTOFF_INVERT = 0x100u;
 	static constexpr uint32_t LAYER_CUTOFF_MASK = 0xFFu;
 
+	struct SourceIdentity {
+		RID rd;
+		uint32_t width = 0;
+		uint32_t height = 0;
+		uint32_t data_version = 0;
+
+		bool operator==(const SourceIdentity &p_other) const {
+			return rd == p_other.rd && width == p_other.width && height == p_other.height && data_version == p_other.data_version;
+		}
+	};
+
 	struct EntryKey {
 		float scale[2] = {};
 		float offset[2] = {};
@@ -124,6 +135,10 @@ public:
 	void commit_far(uint32_t p_layer, uint64_t p_signature);
 	void sync_entries();
 
+#ifdef TESTS_ENABLED
+	uint64_t test_observe_source(uint32_t p_layer, const SourceIdentity &p_identity) { return _observe_source(p_layer, p_identity); }
+#endif
+
 	static bool uses_far(uint32_t p_bits) {
 		const uint32_t mode = (p_bits >> ENTRY_FAR_MODE_SHIFT) & ENTRY_FAR_MODE_MASK;
 		return mode == 1u || mode == 2u;
@@ -153,11 +168,9 @@ public:
 private:
 	struct Layer {
 		RID source;
-		RID source_rd;
+		SourceIdentity source_identity;
 		uint32_t cutoff = 0;
 		uint32_t state = LAYER_EMPTY;
-		uint32_t width = 0;
-		uint32_t height = 0;
 		uint64_t signature = 0;
 		uint64_t filled_signature = 0;
 		uint64_t far_filled_signature = 0;
@@ -190,6 +203,7 @@ private:
 
 	static bool _publish_far(TableEntry &r_entry, const Layer &p_layer);
 	uint32_t _find_victim() const;
+	uint64_t _observe_source(uint32_t p_layer, const SourceIdentity &p_identity);
 	void _release_layer(uint32_t p_layer);
 	void _retire_entry(uint32_t p_entry);
 	void _mark_changed();
@@ -225,6 +239,7 @@ private:
 	LivenessFunc liveness = nullptr;
 	bool table_dirty = true;
 	uint64_t change_serial = 0;
+	uint64_t source_revision = 0;
 	bool state_changed = false;
 	uint64_t state_change_frame = 0;
 	RaySceneAlphaFillShaderRD *fill_shader = nullptr;

@@ -50,10 +50,6 @@ struct FillParams {
 	uint32_t pad2;
 };
 
-uint64_t _signature(RID p_rd, uint32_t p_width, uint32_t p_height, uint32_t p_data_version) {
-	return (p_rd.get_id() * 1000003ULL) ^ (uint64_t(p_width) << 40) ^ (uint64_t(p_height) << 20) ^ (uint64_t(p_data_version) << 8);
-}
-
 uint32_t _layer_cutoff_k(uint32_t p_cutoff) {
 	return p_cutoff & RayAlphaStore::LAYER_CUTOFF_MASK;
 }
@@ -362,7 +358,7 @@ void RayAlphaStore::_mark_state_changed() {
 }
 
 bool RayAlphaStore::_publish_far(TableEntry &r_entry, const Layer &p_layer) {
-	const float density = _layer_density(p_layer.width, p_layer.height);
+	const float density = _layer_density(p_layer.source_identity.width, p_layer.source_identity.height);
 	const uint32_t far_state = p_layer.state == LAYER_READY && p_layer.far_filled_signature == p_layer.filled_signature ? LAYER_READY : LAYER_EMPTY;
 	if (r_entry.density == density && r_entry.far_state == far_state) {
 		return false;
@@ -542,6 +538,24 @@ uint32_t RayAlphaStore::acquire(RID p_source, uint32_t p_cutoff, const EntryKey 
 	return index;
 }
 
+uint64_t RayAlphaStore::_observe_source(uint32_t p_layer, const SourceIdentity &p_identity) {
+	Layer &layer = layers[p_layer];
+	if (!(layer.source_identity == p_identity)) {
+		layer.source_identity = p_identity;
+		if (p_identity.rd.is_valid()) {
+			if (++source_revision == 0) {
+				++source_revision;
+			}
+			layer.signature = source_revision;
+		}
+		if (layer.state != LAYER_PENDING) {
+			layer.state = LAYER_PENDING;
+			_mark_state_changed();
+		}
+	}
+	return layer.signature;
+}
+
 void RayAlphaStore::update() {
 	if (max_layers == 0) {
 		return;
@@ -562,6 +576,7 @@ void RayAlphaStore::update() {
 		}
 		const RID rd = texture_storage->texture_get_rd_texture(layer.source, false);
 		if (rd.is_null()) {
+			_observe_source(i, SourceIdentity());
 			if (layer.state != LAYER_PENDING) {
 				layer.state = LAYER_PENDING;
 				_mark_state_changed();
@@ -570,11 +585,8 @@ void RayAlphaStore::update() {
 			continue;
 		}
 		const RD::TextureFormat format = RD::get_singleton()->texture_get_format(rd);
-		layer.source_rd = rd;
-		layer.width = format.width;
-		layer.height = format.height;
-		const uint32_t data_version = texture_storage->texture_get_data_version(layer.source);
-		layer.signature = _signature(rd, format.width, format.height, data_version);
+		const SourceIdentity identity{ rd, format.width, format.height, texture_storage->texture_get_data_version(layer.source) };
+		_observe_source(i, identity);
 		if (layer.signature != layer.filled_signature || layer.state != LAYER_READY) {
 			if (layer.state != LAYER_PENDING) {
 				layer.state = LAYER_PENDING;
@@ -591,11 +603,11 @@ void RayAlphaStore::update() {
 		RD::get_singleton()->compute_list_bind_compute_pipeline(list, fill_pipeline);
 		for (uint32_t index : pending) {
 			Layer &layer = layers[index];
-			const uint64_t texels = uint64_t(layer.width) * uint64_t(layer.height);
+			const uint64_t texels = uint64_t(layer.source_identity.width) * uint64_t(layer.source_identity.height);
 			if (stats.fills_this_frame > 0 && stats.fill_texels_this_frame + texels > texels_per_frame) {
 				break;
 			}
-			RD::Uniform u_source(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ sampler, layer.source_rd }));
+			RD::Uniform u_source(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ sampler, layer.source_identity.rd }));
 			RD::Uniform u_layers(RD::UNIFORM_TYPE_IMAGE, 1, layer_texture);
 			RD::Uniform u_mean(RD::UNIFORM_TYPE_IMAGE, 2, mean_mip_views[0]);
 			RID set = UniformSetCacheRD::get_singleton()->get_cache(shader, 0, u_source, u_layers, u_mean);
@@ -606,8 +618,8 @@ void RayAlphaStore::update() {
 			FillParams params = {};
 			params.layer = index;
 			params.layer_size = layer_size;
-			params.source_width = layer.width;
-			params.source_height = layer.height;
+			params.source_width = layer.source_identity.width;
+			params.source_height = layer.source_identity.height;
 			params.cutoff = _layer_cutoff_k(layer.cutoff);
 			params.invert = _layer_cutoff_invert(layer.cutoff) ? 1u : 0u;
 			RD::get_singleton()->compute_list_set_push_constant(list, &params, sizeof(params));

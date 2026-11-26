@@ -11,3 +11,7 @@ When a finalizer has already entered an override but reaches base disposal after
 ### `servers/rendering/renderer_rd/environment/ray_scene.cpp:RayScene::_alpha_entry`
 
 For inverted opacity ranges, a cutoff below zero discards every texel, while a cutoff at or above one retains every texel. Forward ranges use the opposite boundaries; a cutoff exactly at one can still retain the maximum-alpha texel.
+
+### `servers/rendering/renderer_rd/environment/ray_scene_alpha.cpp:RayAlphaStore::update`
+
+Alpha-layer source changes are detected by comparing the RD texture, dimensions, and CPU-update version separately. Each change receives a fresh revision so its coverage and far mip are refilled without relying on overlapping packed fields. GPU-written texture content still needs its own invalidation mechanism.

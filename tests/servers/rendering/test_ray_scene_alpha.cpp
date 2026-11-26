@@ -2525,6 +2525,47 @@ TEST_CASE("[RayScene] Alpha cutoff above one keeps fully discarded surfaces from
 	CHECK_FALSE(trace_instance(triangles, Transform3D(), skip_flags | (1u << RayScene::MATERIAL_ALPHA_SHIFT), Vector3(0.25, 0.25, 1), Vector3(0, 0, -1), 10, true, true, 1, table, uvs, coverage, false, hit));
 }
 
+TEST_CASE("[RayScene] Alpha source identity compares each field") {
+	const RID rd = RID::from_uint64(0x100000003ull);
+	const RayAlphaStore::SourceIdentity base{ rd, 8, 1, 0 };
+	CHECK(base == (RayAlphaStore::SourceIdentity{ rd, 8, 1, 0 }));
+	CHECK_FALSE(base == (RayAlphaStore::SourceIdentity{ rd, 8, 2, 4096 }));
+	CHECK_FALSE(base == (RayAlphaStore::SourceIdentity{ rd, 9, 1, 0 }));
+	CHECK_FALSE(base == (RayAlphaStore::SourceIdentity{ rd, 8, 1, 1 }));
+	CHECK_FALSE(base == (RayAlphaStore::SourceIdentity{ RID::from_uint64(0x100000004ull), 8, 1, 0 }));
+}
+
+TEST_CASE("[RayScene] Alpha source revisions invalidate coverage and far mips") {
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	const RID source = RID::from_uint64(0x100000003ull);
+	const uint32_t entry = store.acquire(source, 128, make_key(uint32_t(RSE::CULL_MODE_BACK), 1u, 1.15f, 6.0f, 0.25f, 1.0f, 0.0f));
+	REQUIRE(entry != 0);
+	const uint32_t layer = store.get_entry(entry).layer;
+	const RayAlphaStore::SourceIdentity first{ RID::from_uint64(0x100000004ull), 8, 1, 0 };
+	const RayAlphaStore::SourceIdentity changed{ first.rd, 8, 2, 4096 };
+	const uint64_t first_revision = store.test_observe_source(layer, first);
+	CHECK(first_revision != 0);
+	store.commit_fill(layer, first_revision);
+	store.commit_far(layer, first_revision);
+	CHECK_FALSE(store.layer_needs_far(layer));
+	CHECK(store.test_observe_source(layer, first) == first_revision);
+	CHECK(store.get_layer_state(layer) == RayAlphaStore::LAYER_READY);
+	const uint64_t changed_revision = store.test_observe_source(layer, changed);
+	CHECK(changed_revision != first_revision);
+	CHECK(store.get_layer_state(layer) == RayAlphaStore::LAYER_PENDING);
+	store.commit_fill(layer, changed_revision);
+	CHECK(store.layer_needs_far(layer));
+	store.commit_far(layer, changed_revision);
+	CHECK_FALSE(store.layer_needs_far(layer));
+	store.test_observe_source(layer, RayAlphaStore::SourceIdentity());
+	CHECK(store.get_layer_state(layer) == RayAlphaStore::LAYER_PENDING);
+	const uint64_t restored_revision = store.test_observe_source(layer, changed);
+	CHECK(restored_revision != changed_revision);
+	store.commit_fill(layer, restored_revision);
+	CHECK(store.layer_needs_far(layer));
+}
+
 TEST_CASE("[RayScene] Alpha cutoff coverage honors inverted range boundaries") {
 	CHECK(RayScene::classify_alpha_cutoff(-0.6f, true) == RayScene::ALPHA_CUTOFF_SKIP);
 	CHECK(RayScene::classify_alpha_cutoff(0.0f, true) == RayScene::ALPHA_CUTOFF_TEXTURE);
