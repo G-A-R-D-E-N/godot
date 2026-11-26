@@ -901,12 +901,12 @@ bool di_emitter_history_valid(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal, inout
 void di_emitter_history_store(ivec2 p_pixel, uvec4 p_header, vec4 p_point, vec4 p_color, uvec4 p_surface) {
 	imageStore(emitter_history, ivec3(p_pixel, 0), p_header);
 	imageStore(emitter_history, ivec3(p_pixel, 1), uvec4(floatBitsToUint(p_point.x), floatBitsToUint(p_point.y), floatBitsToUint(p_point.z), floatBitsToUint(p_point.w)));
-	imageStore(emitter_history, ivec3(p_pixel, 2), uvec4(floatBitsToUint(p_color.x), floatBitsToUint(p_color.y), floatBitsToUint(p_color.z), 0u));
+	imageStore(emitter_history, ivec3(p_pixel, 2), uvec4(floatBitsToUint(p_color.x), floatBitsToUint(p_color.y), floatBitsToUint(p_color.z), floatBitsToUint(p_color.w)));
 	imageStore(emitter_history, ivec3(p_pixel, 3), p_surface);
 }
 
 vec2 di_emitter_uv_at(RaySceneTriangleEmitter p_emitter, vec3 p_point) {
-	vec3 point = di_emitter_to_view(p_point);
+	vec3 point = p_point;
 	vec3 v0 = di_emitter_to_view(p_emitter.v0);
 	vec3 v1 = di_emitter_to_view(p_emitter.v1);
 	vec3 v2 = di_emitter_to_view(p_emitter.v2);
