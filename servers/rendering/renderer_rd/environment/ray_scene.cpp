@@ -573,7 +573,9 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 		const uint32_t room_count = emitter_room_grid.room_count;
 		LocalVector<uint32_t> counts;
 		counts.resize(room_count + 1);
-		counts.fill(0u);
+		for (uint32_t r = 0; r <= room_count; r++) {
+			counts[r] = 0;
+		}
 		for (const TriangleEmitter &emitter : triangle_emitters) {
 			counts[MIN(emitter.pad[0], room_count)]++;
 		}
@@ -585,7 +587,7 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 		}
 		LocalVector<TriangleEmitter> sorted;
 		sorted.resize(triangle_emitters.size());
-		LocalVector<uint32_t> cursor = emitter_room_starts;
+		LocalVector<uint32_t> cursor(emitter_room_starts);
 		for (const TriangleEmitter &emitter : triangle_emitters) {
 			const uint32_t room = MIN(emitter.pad[0], room_count);
 			sorted[cursor[room]++] = emitter;
