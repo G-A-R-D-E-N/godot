@@ -2155,6 +2155,15 @@ bool MaterialStorage::global_shader_parameters_instance_read_float(int32_t p_pos
 	return true;
 }
 
+bool MaterialStorage::global_shader_parameters_instance_read_vec4(int32_t p_position, Color &r_value) const {
+	if (p_position < 0 || uint32_t(p_position) >= global_shader_uniforms.buffer_size || !global_shader_uniforms.buffer_values) {
+		return false;
+	}
+	const GlobalShaderUniforms::Value &value = global_shader_uniforms.buffer_values[p_position];
+	r_value = Color(value.x, value.y, value.z, value.w);
+	return true;
+}
+
 void MaterialStorage::_update_global_shader_uniforms() {
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
 	if (global_shader_uniforms.buffer_dirty_region_count > 0) {
@@ -2420,6 +2429,18 @@ int32_t MaterialStorage::material_get_instance_float_index(RID p_material, const
 	}
 	const ShaderLanguage::ShaderNode::Uniform *uniform = material->shader->data->uniforms.getptr(p_param);
 	if (!uniform || uniform->scope != ShaderLanguage::ShaderNode::Uniform::SCOPE_INSTANCE || uniform->type != ShaderLanguage::TYPE_FLOAT) {
+		return -1;
+	}
+	return uniform->instance_index;
+}
+
+int32_t MaterialStorage::material_get_instance_vec4_index(RID p_material, const StringName &p_param) const {
+	Material *material = material_owner.get_or_null(p_material);
+	if (!material || !material->shader || !material->shader->data) {
+		return -1;
+	}
+	const ShaderLanguage::ShaderNode::Uniform *uniform = material->shader->data->uniforms.getptr(p_param);
+	if (!uniform || uniform->scope != ShaderLanguage::ShaderNode::Uniform::SCOPE_INSTANCE || uniform->type != ShaderLanguage::TYPE_VEC4) {
 		return -1;
 	}
 	return uniform->instance_index;

@@ -46,3 +46,6 @@ Materials flagged MATERIAL_FLAG_SKIP (no shadow casting, or additive blending wi
 EMITTER_NEAR also prints, per emissive surface, its triangle count, world area and flux pi x area x mean_lum (lm), the same formula DerivedLightPolicy.Flux uses for the proxy lamp (whose lumens are then doubled by AreaLightLumens).
 
 LAMP_NEAR (ray_scene.cpp _pack_light): with debug_emitters_near set, each packed lamp within the radius is printed once with type, world position, intensity (lm), energy, indirect energy, linear colour, range and cull mask (0 = stood down), so traced surface flux can be compared with the authored lamp that stands for the same fixture.
+
+## Per-instance emitter colour and scale (ray_scene.cpp _instance_slots / instance assembly; MaterialStorage vec4 instance read)
+The ray scene now honours the OpenPBR instance uniform `oc_emission_color` (vec4, alpha > 0 means placed) the way the raster OPBR_PLACED_EMISSION does: for an untextured emissive surface the stored emission becomes `placed.rgb x nits`, with nits = mean_luminance / luminance(linear emission_color). `oc_emission_scale` now also scales `emission_texel_scale`, so textured emitters follow it too. The game uses both to give a fixture traced in place of an authored lamp that lamp's chromaticity and lumens (MC decision 26 Nov 08:30).

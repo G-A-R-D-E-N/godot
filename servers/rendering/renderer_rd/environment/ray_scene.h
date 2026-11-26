@@ -446,6 +446,8 @@ private:
 		uint32_t alpha_flags = 0;
 		int32_t scale_index = -1;
 		int32_t bounce_index = -1;
+		int32_t color_index = -1;
+		float emission_color_luminance = 0.0f;
 	};
 
 	struct AlphaCounts {

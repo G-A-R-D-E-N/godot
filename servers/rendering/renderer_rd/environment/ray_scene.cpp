@@ -819,6 +819,19 @@ void RayScene::_instance_slots(RID p_material, CachedMaterial &r_cached) const {
 	const MaterialStorage *material_storage = MaterialStorage::get_singleton();
 	r_cached.scale_index = material_storage->material_get_instance_float_index(p_material, SNAME("oc_emission_scale"));
 	r_cached.bounce_index = material_storage->material_get_instance_float_index(p_material, SNAME("oc_emission_bounce"));
+	r_cached.color_index = material_storage->material_get_instance_vec4_index(p_material, SNAME("oc_emission_color"));
+	Color authored;
+	if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("emission_color")), authored)) {
+		authored = authored.srgb_to_linear();
+		r_cached.emission_color_luminance = 0.2126f * authored.r + 0.7152f * authored.g + 0.0722f * authored.b;
+	}
+}
+
+static bool _instance_color(int32_t p_offset, int32_t p_index, Color &r_color) {
+	if (p_offset < 0 || p_index < 0) {
+		return false;
+	}
+	return MaterialStorage::get_singleton()->global_shader_parameters_instance_read_vec4(p_offset + p_index, r_color) && r_color.a > 0.0f;
 }
 
 static constexpr float ALBEDO_MAX = 0.9f;
@@ -2106,6 +2119,15 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			if (instance_bounce <= 0.0f) {
 				instance_proxied = true;
 			}
+			Color placed;
+			if (_instance_color(geometry->shader_uniforms_offset, cached->color_index, placed) && cached->emission_color_luminance > 0.0f && cached->entry.emission_texture == 0) {
+				Material &instance_material = materials[materials.size() - 1];
+				const float nits = instance_material.emission_mean_luminance / cached->emission_color_luminance;
+				instance_material.emission[0] = placed.r * nits;
+				instance_material.emission[1] = placed.g * nits;
+				instance_material.emission[2] = placed.b * nits;
+				instance_material.emission_mean_luminance = 0.2126f * instance_material.emission[0] + 0.7152f * instance_material.emission[1] + 0.0722f * instance_material.emission[2];
+			}
 			const float factor = MAX(instance_scale, 0.0f);
 			if (factor != 1.0f) {
 				Material &instance_material = materials[materials.size() - 1];
@@ -2113,6 +2135,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 					instance_material.emission[k] *= factor;
 				}
 				instance_material.emission_mean_luminance *= factor;
+				instance_material.emission_texel_scale *= factor;
 			}
 			if (pipboy_scan_logged < 96 && mesh_storage->mesh_get_path(mesh_rid).contains("npcpipboygroundtake01")) {
 				pipboy_scan_logged++;
