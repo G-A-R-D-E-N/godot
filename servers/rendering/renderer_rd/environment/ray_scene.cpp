@@ -1766,6 +1766,9 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		signature = hash_murmur3_buffer(&instance, sizeof(Instance), signature);
 
 		const uint32_t material_window = RayScene::material_window(materials.size(), instance.material_offset, mesh->surface_count);
+		if (material_window != mesh->surface_count) {
+			ERR_PRINT_ONCE("Ray scene material window is shorter than the mesh surface count.");
+		}
 		uint32_t scene_hash = hash_murmur3_one_64(mesh_rid.get_id());
 		scene_hash = hash_murmur3_buffer(&geometry->transform, sizeof(Transform3D), scene_hash);
 		scene_hash = hash_murmur3_one_32(geometry->layer_mask, scene_hash);
