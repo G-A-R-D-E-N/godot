@@ -516,62 +516,64 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 	}
 	triangle_emitter_count = triangle_emitters.size();
 	triangle_emitters_capped = capped;
-	uint32_t emitter_instances = 0;
-	uint32_t emitter_proxied_instances = 0;
-	{
-		HashSet<uint32_t> unique_instances;
-		for (const TriangleEmitter &emitter : triangle_emitters) {
-			if (unique_instances.has(emitter.instance)) {
-				continue;
+	if (GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ray_scene/print_instances")) {
+		uint32_t emitter_instances = 0;
+		uint32_t emitter_proxied_instances = 0;
+		{
+			HashSet<uint32_t> unique_instances;
+			for (const TriangleEmitter &emitter : triangle_emitters) {
+				if (unique_instances.has(emitter.instance)) {
+					continue;
+				}
+				unique_instances.insert(emitter.instance);
+				emitter_instances++;
+				if ((emitter.flags & TRIANGLE_EMITTER_PROXIED) != 0u) {
+					emitter_proxied_instances++;
+				}
 			}
-			unique_instances.insert(emitter.instance);
-			emitter_instances++;
-			if ((emitter.flags & TRIANGLE_EMITTER_PROXIED) != 0u) {
-				emitter_proxied_instances++;
+		}
+		print_line(vformat("Ray scene triangle emitters: %d triangles across %d instances (%d proxied)%s", triangle_emitter_count, emitter_instances, emitter_proxied_instances, triangle_emitters_capped ? " (capped)" : ""));
+		if (emitter_filter >= 0) {
+			print_line(vformat("Ray scene emitter filter: instance %d, %d triangles kept", int(emitter_filter), int(triangle_emitter_count)));
+		}
+		if (triangles_logged < 64) {
+			triangles_logged++;
+			for (const TriangleEmitterSource &source : p_sources) {
+				const MeshEntry *mesh = meshes.getptr(source.mesh);
+				if (!mesh || !mesh->built || source.instance >= p_order.size()) {
+					continue;
+				}
+				uint32_t instance_triangles = 0;
+				HashSet<uint32_t> surfaces;
+				for (uint32_t t = 0; t < uint32_t(mesh->triangle_surface.size()); t++) {
+					const uint32_t surface = mesh->triangle_surface[t];
+					if (surface >= source.surface_count || source.material_offset + surface >= materials.size()) {
+						continue;
+					}
+					const Material &material = materials[source.material_offset + surface];
+					if (!(material.emission[0] > 0.0f || material.emission[1] > 0.0f || material.emission[2] > 0.0f) && material.emission_texture == 0) {
+						continue;
+					}
+					instance_triangles++;
+					surfaces.insert(surface);
+				}
+				if (instance_triangles == 0) {
+					continue;
+				}
+				String surface_list;
+				for (const uint32_t &surface : surfaces) {
+					const Material &material = materials[source.material_offset + surface];
+					if (!surface_list.is_empty()) {
+						surface_list += ",";
+					}
+					surface_list += vformat("%d(layer %d scale %.4f flat %.3f)", surface, int(material.emission_texture), material.emission_texel_scale, material.emission_mean_luminance);
+				}
+				print_line(vformat("Ray scene emitter: mesh \"%s\" instance %d triangles %d surfaces %s proxied %s", MeshStorage::get_singleton()->mesh_get_path(source.mesh), int(p_order[source.instance]), int(instance_triangles), surface_list, source.proxied ? "yes" : "no"));
 			}
 		}
 	}
 	if (triangle_emitters.is_empty()) {
 		triangle_emitters.push_back(TriangleEmitter());
-	}
-	print_line(vformat("Ray scene triangle emitters: %d triangles across %d instances (%d proxied)%s", triangle_emitter_count, emitter_instances, emitter_proxied_instances, triangle_emitters_capped ? " (capped)" : ""));
-	if (emitter_filter >= 0) {
-		print_line(vformat("Ray scene emitter filter: instance %d, %d triangles kept", int(emitter_filter), int(triangle_emitter_count)));
-	}
-	if (triangles_logged < 64) {
-		triangles_logged++;
-		for (const TriangleEmitterSource &source : p_sources) {
-			const MeshEntry *mesh = meshes.getptr(source.mesh);
-			if (!mesh || !mesh->built || source.instance >= p_order.size()) {
-				continue;
-			}
-			uint32_t instance_triangles = 0;
-			HashSet<uint32_t> surfaces;
-			for (uint32_t t = 0; t < uint32_t(mesh->triangle_surface.size()); t++) {
-				const uint32_t surface = mesh->triangle_surface[t];
-				if (surface >= source.surface_count || source.material_offset + surface >= materials.size()) {
-					continue;
-				}
-				const Material &material = materials[source.material_offset + surface];
-				if (!(material.emission[0] > 0.0f || material.emission[1] > 0.0f || material.emission[2] > 0.0f) && material.emission_texture == 0) {
-					continue;
-				}
-				instance_triangles++;
-				surfaces.insert(surface);
-			}
-			if (instance_triangles == 0) {
-				continue;
-			}
-			String surface_list;
-			for (const uint32_t &surface : surfaces) {
-				const Material &material = materials[source.material_offset + surface];
-				if (!surface_list.is_empty()) {
-					surface_list += ",";
-				}
-				surface_list += vformat("%d(layer %d scale %.4f flat %.3f)", surface, int(material.emission_texture), material.emission_texel_scale, material.emission_mean_luminance);
-			}
-			print_line(vformat("Ray scene emitter: mesh \"%s\" instance %d triangles %d surfaces %s proxied %s", MeshStorage::get_singleton()->mesh_get_path(source.mesh), int(p_order[source.instance]), int(instance_triangles), surface_list, source.proxied ? "yes" : "no"));
-		}
 	}
 	_ensure_buffer(triangle_emitter_buffer, triangle_emitter_capacity, triangle_emitters.size(), sizeof(TriangleEmitter), "Ray Scene Triangle Emitters");
 	RD::get_singleton()->buffer_update(triangle_emitter_buffer, 0, triangle_emitters.size() * sizeof(TriangleEmitter), triangle_emitters.ptr());
@@ -755,36 +757,18 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 	const Variant gi_value = material_storage->material_get_param(p_material, SNAME("gi_emission"));
 	Color gi_emission;
 	const bool gi_present = _param_color(gi_value, gi_emission);
-	const Variant color_value = material_storage->material_get_declared_param(p_material, SNAME("emission_color"));
-	Color authored_color;
-	const bool color_present = _param_color(color_value, authored_color);
-	const float authored_luminance = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_luminance")), 0.0f);
-	int branch = 0;
 	if (RayScene::emission_has_value(gi_present ? gi_emission : Color())) {
-		branch = 1;
 		_store_color(r_material.emission, gi_emission, emission_scale);
 	} else if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("emission_color")), emission)) {
-		branch = 2;
 		const float luminance = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_luminance")), 0.0f);
 		const float bounce = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_bounce_weight")), 1.0f);
 		emission = emission.srgb_to_linear();
 		const float multiplier = luminance * bounce * emission_scale;
 		_store_color(r_material.emission, emission, multiplier);
 	} else if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("emission")), emission)) {
-		branch = 3;
 		const float multiplier = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_energy")), 1.0f);
 		emission = emission.srgb_to_linear();
 		_store_color(r_material.emission, emission, multiplier);
-	}
-	const String scan_mesh = MeshStorage::get_singleton()->mesh_get_path(p_mesh);
-	if (pipboy_scan_logged < 64 && scan_mesh.contains("npcpipboygroundtake01")) {
-		pipboy_scan_logged++;
-		const bool mask_flag = material_storage->material_get_declared_param(p_material, SNAME("use_emission_mask_texture")).booleanize();
-		print_line(vformat("Ray scene scan: surface %d mesh \"%s\" gi_present %s gi_type %d gi_value %s color_present %s color_value %s luminance %.4f mask %s branch %d stored %.4f %.4f %.4f", int(p_surface), scan_mesh, gi_present ? "yes" : "no", int(gi_value.get_type()), String(gi_value), color_present ? "yes" : "no", String(color_value), authored_luminance, mask_flag ? "yes" : "no", branch, r_material.emission[0], r_material.emission[1], r_material.emission[2]));
-	}
-	if (emission_debug_logged < 32 && gi_present && !RayScene::emission_has_value(gi_emission) && RayScene::emission_has_value(Color(r_material.emission[0], r_material.emission[1], r_material.emission[2]))) {
-		emission_debug_logged++;
-		print_line(vformat("Ray scene emission debug: mesh \"%s\" surface %d gi_emission type %d value %s -> authored fallback %.3f %.3f %.3f", MeshStorage::get_singleton()->mesh_get_path(p_mesh), int(p_surface), int(gi_value.get_type()), String(gi_value), r_material.emission[0], r_material.emission[1], r_material.emission[2]));
 	}
 	r_material.emission_mean_luminance = 0.2126f * r_material.emission[0] + 0.7152f * r_material.emission[1] + 0.0722f * r_material.emission[2];
 	if (material_storage->material_get_declared_param(p_material, SNAME("use_emission_mask_texture")).booleanize()) {
@@ -1814,7 +1798,6 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	material_cache.clear();
 	memset(albedo_sources, 0, sizeof(albedo_sources));
 	additive_skipped = 0;
-	emission_debug_logged = 0;
 	emission_scale = _param_float(MaterialStorage::get_singleton()->global_shader_parameter_get_internal(SNAME("openpbr_emission_scale")), 1.0f);
 	const Variant atlas_value = MaterialStorage::get_singleton()->global_shader_parameter_get_internal(SNAME("ray_emission_atlas"));
 	const Variant::Type atlas_type = atlas_value.get_type();
@@ -1937,10 +1920,6 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 					instance_material.emission[k] *= factor;
 				}
 				instance_material.emission_mean_luminance *= factor;
-			}
-			if (pipboy_scan_logged < 96 && mesh_storage->mesh_get_path(mesh_rid).contains("npcpipboygroundtake01")) {
-				pipboy_scan_logged++;
-				print_line(vformat("Ray scene instance: surface %d instance %d scale %.4f bounce %.4f factor %.4f emission %.4f %.4f %.4f", int(s), int(p_instances[i]), instance_scale, instance_bounce, factor, materials[materials.size() - 1].emission[0], materials[materials.size() - 1].emission[1], materials[materials.size() - 1].emission[2]));
 			}
 		}
 		bool instance_emissive = false;

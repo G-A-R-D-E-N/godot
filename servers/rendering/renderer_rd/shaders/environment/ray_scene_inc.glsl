@@ -764,7 +764,3 @@ vec3 ray_scene_direct_light(vec3 p_position, vec3 p_normal, float p_bias, float 
 }
 
 #define gi_hit_direct_light ray_scene_direct_light
-
-
-
-

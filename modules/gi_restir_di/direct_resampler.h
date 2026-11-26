@@ -63,7 +63,7 @@ public:
 	struct Settings {
 		bool enabled = false;
 		bool emitters = false;
-			bool emitter_temporal = false;
+		bool emitter_temporal = false;
 		bool emitter_spatial = false;
 		uint32_t head = 4;
 		uint32_t tail_samples = 1;
@@ -180,7 +180,7 @@ private:
 		bool reservoir_sets = false;
 		bool head_state = false;
 		bool emitters = false;
-			bool emitter_temporal = false;
+		bool emitter_temporal = false;
 		bool emitter_spatial = false;
 		uint32_t counter = 1;
 		uint32_t history_set = 0;
@@ -226,7 +226,7 @@ private:
 	RID emitter_cdf;
 	RID emitter_scan;
 	RID emitter_samples;
-	Vector<uint8_t> emitter_samples_before;
+	RID emitter_samples_snapshot;
 	RID emitter_reuse_counters;
 	uint32_t emitter_cdf_capacity = 0;
 	uint32_t emitter_samples_bytes = 0;
@@ -264,4 +264,3 @@ private:
 #endif
 	RID _dummy(RD::DataFormat p_format, RD::TextureType p_type, const char *p_name);
 };
-
