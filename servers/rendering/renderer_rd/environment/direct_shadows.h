@@ -285,5 +285,3 @@ public:
 };
 
 } // namespace RendererRD
-
-

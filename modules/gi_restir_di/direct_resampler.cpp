@@ -456,14 +456,14 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		}
 		rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_ENTRIES, RD::DATA_FORMAT_R32_UINT, RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, size, settings.head + 3 * settings.tail_samples, 1, true);
 		rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_RECORD, RD::DATA_FORMAT_R32G32_UINT, RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT, RD::TEXTURE_SAMPLES_1, size, settings.tail_samples + 1 + (emitter_active ? 1 : 0), 1, true);
-	{
-		static bool rdi_temporal_printed = false;
-		if (!rdi_temporal_printed) {
-			rdi_temporal_printed = true;
-			const bool want_temporal = GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/temporal");
-			print_line(vformat("DIRECT_EMITTERS temporal: setting %s history %s", want_temporal, want_temporal ? "allocated" : "off"));
+		{
+			static bool rdi_temporal_printed = false;
+			if (!rdi_temporal_printed) {
+				rdi_temporal_printed = true;
+				const bool want_temporal = GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/temporal");
+				print_line(vformat("DIRECT_EMITTERS temporal: setting %s history %s", want_temporal, want_temporal ? "allocated" : "off"));
+			}
 		}
-	}
 		if (emitter_temporal) {
 			rd->texture_clear(rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_EMITTER_HISTORY, RD::DATA_FORMAT_R32G32B32A32_UINT, private_usage, RD::TEXTURE_SAMPLES_1, size, 4, 1, true), Color(0, 0, 0, 0), 0, 1, 0, 4);
 		}
@@ -634,9 +634,11 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 			RD::ComputeListID build_list = rd->compute_list_begin();
 			rd->compute_list_bind_compute_pipeline(build_list, build_pipelines[pass]->get_rid());
 			{
-				const RID set0 = UniformSetCacheRD::get_singleton()->get_cache_vec(build_shader, 0, uniforms); 
+				const RID set0 = UniformSetCacheRD::get_singleton()->get_cache_vec(build_shader, 0, uniforms);
 				const RID set1 = UniformSetCacheRD::get_singleton()->get_cache_vec(build_shader, 1, ray_uniforms);
-				if (set0.is_null() || set1.is_null()) { print_line(vformat("DIRECT_EMITTERS set null: set0 %s set1 %s uniforms %d ray_uniforms %d emitters %d", set0.is_null() ? "NULL" : "ok", set1.is_null() ? "NULL" : "ok", uniforms.size(), ray_uniforms.size(), int(ray_scene->get_triangle_emitter_count()))); }
+				if (set0.is_null() || set1.is_null()) {
+					print_line(vformat("DIRECT_EMITTERS set null: set0 %s set1 %s uniforms %d ray_uniforms %d emitters %d", set0.is_null() ? "NULL" : "ok", set1.is_null() ? "NULL" : "ok", uniforms.size(), ray_uniforms.size(), int(ray_scene->get_triangle_emitter_count())));
+				}
 				print_line(vformat("DIRECT_EMITTERS dispatch pass %d emitters %d", pass, int(ray_scene->get_triangle_emitter_count())));
 			}
 			rd->compute_list_bind_uniform_set(build_list, UniformSetCacheRD::get_singleton()->get_cache_vec(build_shader, 0, uniforms), 0);
@@ -743,13 +745,13 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 				}
 			}
 			uint32_t temporal_merged = 0;
-		if (emitter_reuse_counters.is_valid()) {
-			const Vector<uint8_t> reuse = rd->buffer_get_data(emitter_reuse_counters);
-			if (reuse.size() >= 8) {
-				temporal_merged = reinterpret_cast<const uint32_t *>(reuse.ptr())[0];
+			if (emitter_reuse_counters.is_valid()) {
+				const Vector<uint8_t> reuse = rd->buffer_get_data(emitter_reuse_counters);
+				if (reuse.size() >= 8) {
+					temporal_merged = reinterpret_cast<const uint32_t *>(reuse.ptr())[0];
+				}
 			}
-		}
-		print_line(vformat("DIRECT_EMITTERS reuse: temporal_accepted %d spatial_pixels_rewritten %d", int(temporal_merged), int(changed)));
+			print_line(vformat("DIRECT_EMITTERS reuse: temporal_accepted %d spatial_pixels_rewritten %d", int(temporal_merged), int(changed)));
 		}
 	}
 	if (emitter_active && p_input.frame >= 31 && p_input.frame % 30 == 1 && emitter_reuse_counters.is_valid()) {
@@ -877,6 +879,3 @@ void DirectResamplerRD::free_device_resources() {
 DirectResamplerRD::~DirectResamplerRD() {
 	ERR_FAIL_COND_MSG(device_ready, "The direct resampler's device resources were not freed before shutdown.");
 }
-
-
-

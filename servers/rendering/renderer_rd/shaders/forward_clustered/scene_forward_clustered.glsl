@@ -3985,4 +3985,3 @@ void main() {
 
 	fragment_shader(scene_data_block.data);
 }
-
