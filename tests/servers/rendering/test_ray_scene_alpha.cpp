@@ -43,7 +43,7 @@ TEST_FORCE_LINK(test_ray_scene_alpha)
 #include "core/templates/hash_map.h"
 #include "core/templates/hash_set.h"
 #include "core/templates/local_vector.h"
-#include "scene/resources/image.h"
+#include "core/io/image.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene_alpha.h"
 #include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
