@@ -394,6 +394,7 @@ private:
 		uint32_t material_offset = 0;
 		uint32_t surface_count = 0;
 		bool proxied = false;
+		float window_range = 0.0f;
 	};
 
 	Mutex mesh_mutex;

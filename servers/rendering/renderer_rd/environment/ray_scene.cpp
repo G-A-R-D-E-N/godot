@@ -592,6 +592,7 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 			emitter.material = source.material_offset + surface;
 			emitter.uv_index = mesh->triangle_offset + t;
 			emitter.flags = source.proxied ? TRIANGLE_EMITTER_PROXIED : 0u;
+			memcpy(&emitter.pad[1], &source.window_range, sizeof(float));
 			triangle_emitters.push_back(emitter);
 		}
 		if (capped) {
@@ -610,7 +611,7 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 				continue;
 			}
 			const uint32_t instance = source.instance < p_order.size() ? p_order[source.instance] : 0xFFFFFFFFu;
-			print_line(vformat("EMITTER_NEAR instance %d distance %.2f origin_world %s proxied %s mesh \"%s\"", int(instance), distance, source.transform.origin + anchor, source.proxied ? "yes" : "no", MeshStorage::get_singleton()->mesh_get_path(source.mesh)));
+			print_line(vformat("EMITTER_NEAR instance %d distance %.2f origin_world %s proxied %s window_range %.2f mesh \"%s\"", int(instance), distance, source.transform.origin + anchor, source.proxied ? "yes" : "no", source.window_range, MeshStorage::get_singleton()->mesh_get_path(source.mesh)));
 			const MeshEntry *near_mesh = meshes.getptr(source.mesh);
 			for (uint32_t s = 0; s < source.surface_count && source.material_offset + s < materials.size(); s++) {
 				const Material &m = materials[source.material_offset + s];
@@ -2080,6 +2081,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		uint64_t alpha_split = 0;
 		uint32_t feed_state = hash_murmur3_one_32(geometry->layer_mask);
 		bool instance_proxied = false;
+		float instance_window_range = 0.0f;
 
 		for (uint32_t s = 0; s < mesh->surface_count; s++) {
 			RID material = geometry->data->material_override;
@@ -2120,7 +2122,11 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 				instance_proxied = true;
 			}
 			Color placed;
-			if (_instance_color(geometry->shader_uniforms_offset, cached->color_index, placed) && cached->emission_color_luminance > 0.0f && cached->entry.emission_texture == 0) {
+			const bool has_placed = _instance_color(geometry->shader_uniforms_offset, cached->color_index, placed);
+			if (has_placed) {
+				instance_window_range = MAX(instance_window_range, placed.a);
+			}
+			if (has_placed && cached->emission_color_luminance > 0.0f && cached->entry.emission_texture == 0) {
 				Material &instance_material = materials[materials.size() - 1];
 				const float nits = instance_material.emission_mean_luminance / cached->emission_color_luminance;
 				instance_material.emission[0] = placed.r * nits;
@@ -2160,6 +2166,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			emitter_source.material_offset = instance.material_offset;
 			emitter_source.surface_count = mesh->surface_count;
 			emitter_source.proxied = instance_proxied;
+			emitter_source.window_range = instance_window_range;
 			emitter_sources.push_back(emitter_source);
 		}
 		bool hw_instance_usable = true;

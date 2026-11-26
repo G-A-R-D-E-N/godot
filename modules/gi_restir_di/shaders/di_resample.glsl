@@ -242,6 +242,18 @@ float di_emitter_weight(uint p_index) {
 	return 0.5 * length(cross(e1, e2)) * di_emitter_selection_luminance(emitter.material);
 }
 
+float di_emitter_window(RaySceneTriangleEmitter p_emitter, float p_distance) {
+	float range = uintBitsToFloat(p_emitter.pad1);
+	if (!(range > 0.0)) {
+		return 1.0;
+	}
+	float x = p_distance / range;
+	x *= x;
+	x *= x;
+	float w = max(1.0 - x, 0.0);
+	return w * w;
+}
+
 vec3 di_emitter_to_view(vec3 p_ray) {
 	vec3 relative = p_ray - ray_scene.camera_to_anchor;
 	return vec3(
@@ -493,7 +505,7 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal, uint p_seed) {
 		di_emitter_clear_block(p_pixel, room_taken != 0u ? (100u + room_taken) : 3u);
 		return;
 	}
-	float geometric = min(cos_light / max(distance * distance, 1e-8), 60000.0);
+	float geometric = min(cos_light / max(distance * distance, 1e-8), 60000.0) * di_emitter_window(emitter, distance);
 	vec3 color = texel_emission * (total / luminance);
 	float clamp_scale = di_emitter_clamped_luminance(color, total);
 	if (clamp_scale > 0.0) {
@@ -1208,7 +1220,7 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 				if ((ray_scene_materials.data[emitter.material].flags & RAY_SCENE_MATERIAL_TWO_SIDED) != 0u) {
 					cos_light = abs(cos_light);
 				}
-				held_geometric = cos_light > 0.0 ? min(cos_light / max(distance_sq, 1e-8), 60000.0) : 0.0;
+				held_geometric = cos_light > 0.0 ? min(cos_light / max(distance_sq, 1e-8), 60000.0) * di_emitter_window(emitter, sqrt(distance_sq)) : 0.0;
 				float held_luminance = 0.0;
 				held_color = di_emitter_color_at(held_index, held_point, held_luminance);
 				held_target = di_emitter_target(held_color, held_geometric);
