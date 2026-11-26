@@ -69,6 +69,7 @@ public:
 	struct FrameInput : DirectFrameView {
 		uint64_t table_generation = 0;
 		RID entries;
+		RID emitter_samples;
 		uint32_t head_entries = 0;
 		uint32_t tail_samples = 0;
 		uint32_t tail_visibility = 0;
@@ -76,6 +77,8 @@ public:
 	};
 
 	struct Settings {
+		float emitter_shorten = 0.0f;
+		int emitter_skip_instance = -1;
 		uint32_t entries = 6;
 		uint32_t rays = 1;
 		bool reference = false;
@@ -98,7 +101,7 @@ public:
 	};
 
 	static Settings get_project_settings();
-	static uint32_t factor_layers(uint32_t p_entries) { return p_entries + 2; }
+	static uint32_t factor_layers(uint32_t p_entries) { return p_entries + 3; }
 	static uint32_t accum_layers(uint32_t p_entries, bool p_precise) { return MAX(2u, p_precise ? p_entries : p_entries - 1); }
 	static Size2i block_grid(const Size2i &p_size) { return Size2i((p_size.x + 1) / 2, (p_size.y + 1) / 2); }
 
@@ -162,8 +165,9 @@ private:
 		int32_t full_size[2];
 		float jitter_delta[2];
 		uint32_t pad[2];
+		float anchor[4];
 	};
-	static_assert(sizeof(Params) == 400);
+	static_assert(sizeof(Params) == 416);
 
 	static constexpr uint32_t COUNTER_WORDS = 13;
 	static constexpr uint32_t COUNTER_BYTES = COUNTER_WORDS * 4;
@@ -228,6 +232,7 @@ private:
 	RID debug_unused;
 	RID resampled_dummy;
 	RID lamp_dummy;
+	RID emitter_dummy;
 	bool lamps_prepared = false;
 	String lamps_dump_request;
 	RID tier_unused;

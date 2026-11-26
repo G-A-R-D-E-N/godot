@@ -163,15 +163,19 @@ uint sc_debug_lighting_component() {
 }
 
 bool sc_use_far_shadow() {
-	return ((sc_packed_1() >> 13) & 1U) != 0;
-}
-
-bool sc_use_direct_shadow() {
 	return ((sc_packed_1() >> 14) & 1U) != 0;
 }
 
-bool sc_use_direct_resampled() {
+bool sc_use_direct_shadow() {
 	return ((sc_packed_1() >> 15) & 1U) != 0;
+}
+
+bool sc_use_direct_resampled() {
+	return ((sc_packed_1() >> 16) & 1U) != 0;
+}
+
+bool sc_use_direct_emitters() {
+	return ((sc_packed_1() >> 17) & 1U) != 0;
 }
 
 float sc_luminance_multiplier() {
@@ -564,6 +568,11 @@ layout(set = 1, binding = 51) uniform texture2DArray far_shadow_terrain[FAR_SHAD
 layout(set = 1, binding = 52) uniform texture2DArray direct_shadow_slots;
 layout(set = 1, binding = 53) uniform texture2DArray direct_shadow_factors;
 layout(set = 1, binding = 54) uniform utexture2DArray direct_resampled;
+
+layout(set = 1, binding = 57, std430) restrict readonly buffer DirectEmitterSamples {
+	vec4 data[];
+}
+direct_emitter_samples;
 
 struct DirectSlotData {
 	uint caster_mask;

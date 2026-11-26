@@ -69,6 +69,7 @@ public:
 	struct Output {
 		RID entries;
 		RID record;
+		RID emitter_samples;
 		uint32_t head_entries = 0;
 		uint32_t tail_samples = 0;
 		uint32_t tail_visibility = 0;

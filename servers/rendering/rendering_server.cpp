@@ -3988,6 +3988,8 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ray_scene/dirty_merge_distance", PROPERTY_HINT_RANGE, "0,16,0.01,suffix:m"), 0.5);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/mover_frames", PROPERTY_HINT_RANGE, "1,8,1"), 3);
 	GLOBAL_DEF("rendering/global_illumination/ray_scene/alpha_test", false);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/proxy_emitters", PROPERTY_HINT_ENUM, "Skip,Trace"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/emitter_instance", PROPERTY_HINT_RANGE, "-1,2147483647,1"), -1);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/max_alpha_layers", PROPERTY_HINT_RANGE, "16,2048,1"), 512);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/alpha_mode", PROPERTY_HINT_ENUM, "Stochastic,Threshold"), 0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/alpha_layer_size", PROPERTY_HINT_RANGE, "256,512,256"), 256);
@@ -4006,7 +4008,10 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/trace_resolution", PROPERTY_HINT_ENUM, "Full,Quarter"), 0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/rays_per_pixel", PROPERTY_HINT_RANGE, "1,2,1"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/direct/ray_bias", PROPERTY_HINT_RANGE, "0,0.2,0.001"), 0.02);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/direct/emitter_ray_shorten", PROPERTY_HINT_RANGE, "0,0.2,0.001"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/emitter_skip_instance", PROPERTY_HINT_RANGE, "-1,1048575,1"), -1);
 	GLOBAL_DEF("rendering/global_illumination/direct/reference", false);
+	GLOBAL_DEF("rendering/global_illumination/ray_scene/print_instances", false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/debug_view", PROPERTY_HINT_ENUM, "Off,First Entry,All Lamps,First Slot,Lamp Count,Samples,Filtered First Entry"), 0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/history_cap", PROPERTY_HINT_RANGE, "0,256,1"), 32);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/dynamic_history_cap", PROPERTY_HINT_RANGE, "1,256,1"), 2);
