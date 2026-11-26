@@ -99,6 +99,21 @@ public:
 		LIGHT_PICK_STABLE,
 	};
 
+	enum AlphaCutoffCoverage {
+		ALPHA_CUTOFF_TEXTURE,
+		ALPHA_CUTOFF_SOLID,
+		ALPHA_CUTOFF_SKIP,
+	};
+
+	static AlphaCutoffCoverage classify_alpha_cutoff(float p_cutoff, bool p_invert) {
+		if (p_invert) {
+			return p_cutoff < 0.0f ? ALPHA_CUTOFF_SKIP : p_cutoff >= 1.0f ? ALPHA_CUTOFF_SOLID
+																		  : ALPHA_CUTOFF_TEXTURE;
+		}
+		return p_cutoff > 1.0f ? ALPHA_CUTOFF_SKIP : p_cutoff <= 0.0f ? ALPHA_CUTOFF_SOLID
+																	  : ALPHA_CUTOFF_TEXTURE;
+	}
+
 	enum MaterialFlags {
 		MATERIAL_FLAG_TWO_SIDED = 1,
 		MATERIAL_FLAG_SKIP = 2,

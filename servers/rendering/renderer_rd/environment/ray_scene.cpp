@@ -749,12 +749,16 @@ void RayScene::_alpha_entry(RID p_material, Material &r_material, float p_alpha_
 		return;
 	}
 	const bool invert = (key.bits & RayAlphaStore::ENTRY_ALPHA_INVERT_MASK) != 0;
-	if (cutoff > 1.0f) {
+	const AlphaCutoffCoverage coverage = classify_alpha_cutoff(cutoff, invert);
+	if (coverage == ALPHA_CUTOFF_SKIP) {
 		r_material.flags |= MATERIAL_FLAG_SKIP;
 		alpha_counts.solid_degenerate++;
 		return;
 	}
-	cutoff = CLAMP(cutoff, 0.0f, 1.0f);
+	if (coverage == ALPHA_CUTOFF_SOLID) {
+		alpha_counts.solid_always++;
+		return;
+	}
 	const uint32_t cutoff_k = invert ? uint32_t(Math::floor(cutoff * 255.0f)) : uint32_t(Math::ceil(cutoff * 255.0f));
 	if (cutoff_k == 0 && !invert) {
 		alpha_counts.solid_always++;

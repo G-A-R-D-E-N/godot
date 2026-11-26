@@ -2525,6 +2525,30 @@ TEST_CASE("[RayScene] Alpha cutoff above one keeps fully discarded surfaces from
 	CHECK_FALSE(trace_instance(triangles, Transform3D(), skip_flags | (1u << RayScene::MATERIAL_ALPHA_SHIFT), Vector3(0.25, 0.25, 1), Vector3(0, 0, -1), 10, true, true, 1, table, uvs, coverage, false, hit));
 }
 
+TEST_CASE("[RayScene] Alpha cutoff coverage honors inverted range boundaries") {
+	CHECK(RayScene::classify_alpha_cutoff(-0.6f, true) == RayScene::ALPHA_CUTOFF_SKIP);
+	CHECK(RayScene::classify_alpha_cutoff(0.0f, true) == RayScene::ALPHA_CUTOFF_TEXTURE);
+	CHECK(RayScene::classify_alpha_cutoff(1.0f, true) == RayScene::ALPHA_CUTOFF_SOLID);
+	CHECK(RayScene::classify_alpha_cutoff(1.5f, true) == RayScene::ALPHA_CUTOFF_SOLID);
+	CHECK(RayScene::classify_alpha_cutoff(0.0f, false) == RayScene::ALPHA_CUTOFF_SOLID);
+	CHECK(RayScene::classify_alpha_cutoff(1.0f, false) == RayScene::ALPHA_CUTOFF_TEXTURE);
+	CHECK(RayScene::classify_alpha_cutoff(1.5f, false) == RayScene::ALPHA_CUTOFF_SKIP);
+	for (bool invert : { false, true }) {
+		const Vector2 range = invert ? Vector2(1.0f, 0.0f) : Vector2(0.0f, 1.0f);
+		for (float cutoff : { -0.25f, 0.0f, 1.0f, 1.25f }) {
+			const float threshold = float(range.x) + cutoff * float(range.y - range.x);
+			const RayScene::AlphaCutoffCoverage coverage = RayScene::classify_alpha_cutoff(cutoff, invert);
+			for (uint32_t sample : { 0u, 128u, 255u }) {
+				LocalVector<uint8_t> source;
+				source.push_back(uint8_t(sample));
+				const bool raster = raster_visible_range(float(sample) / 255.0f, threshold, range);
+				const bool ray = coverage == RayScene::ALPHA_CUTOFF_SOLID || (coverage == RayScene::ALPHA_CUTOFF_TEXTURE && fill_texel(source, 1, 1, 1, ray_cutoff_k(cutoff, invert), 0, 0, invert) >= 0.5f);
+				CHECK(raster == ray);
+			}
+		}
+	}
+}
+
 TEST_CASE("[RayScene] Inverted opacity texture range matches raster visibility") {
 	bool invert = false;
 	const Vector2 range(1.0f, 0.0f);
