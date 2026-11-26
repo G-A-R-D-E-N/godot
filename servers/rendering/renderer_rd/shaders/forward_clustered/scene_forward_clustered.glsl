@@ -2732,7 +2732,11 @@ void fragment_shader(in SceneData scene_data) {
 		specular_occlusion = bool(scene_data.flags & SCENE_DATA_FLAGS_USE_PHYSICAL_LIGHT_UNITS) && bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_LIGHTING_SOURCES) ? 1.0 : specular_occlusion;
 #endif
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+#ifdef SPECULAR_OCCLUSION_COMBINED
+		float cc_specular_occlusion = specular_occlusion_lagarde(clamp(dot(CLEARCOAT_NORMAL, view), 0.0, 1.0), specular_ao, indirect_coat_roughness * indirect_coat_roughness);
+#else
 		float cc_specular_occlusion = specular_occlusion;
+#endif
 #endif
 		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_BENT_NORMALS)) {
 #ifdef USE_MULTIVIEW
@@ -2744,7 +2748,9 @@ void fragment_shader(in SceneData scene_data) {
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
 			cc_specular_occlusion = specular_occlusion;
 #ifdef INDIRECT_COAT_NORMAL_ACTIVE
-			if (cc_custom) cc_specular_occlusion = specular_occlusion_cone(specular_ao, indirect_coat_roughness, occlusion_bent_normal, reflect(-view, cc_normal));
+			if (cc_custom) {
+				cc_specular_occlusion = specular_occlusion_cone(specular_ao, indirect_coat_roughness, occlusion_bent_normal, reflect(-view, cc_normal));
+			}
 #endif
 #endif
 		}
