@@ -309,7 +309,7 @@ bool di_emitter_visible(vec3 p_vertex, vec3 p_normal, vec3 p_point, uint p_insta
 	return ray_scene_sampled_visibility_blocker(from, to, RAY_SCENE_ALL_CASTERS, p_seed + 0x51ed270bu, int(p_instance), blocker, blocker_distance, blocker_triangle);
 }
 
-void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, uint p_seed) {
+void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal, uint p_seed) {
 	uint count = ray_scene_triangle_emitter_count();
 	float total = count == 0u ? 0.0 : emitter_scan.data[DI_EMITTER_TOTAL];
 	if (!(total > 0.0)) {
@@ -1338,10 +1338,10 @@ void main() {
 #ifndef DI_EMITTER_TEMPORAL
 	bool di_emitter_origin = params.emitter_half == 0u || (((pixel.x & 1) == 0) && ((pixel.y & 1) == 0));
 	if (di_emitter_origin) {
-		di_emitter_pick(pixel, vertex, stream_seed ^ 0x2545f491u);
+		di_emitter_pick(pixel, vertex, normal, stream_seed ^ 0x2545f491u);
 	}
 #else
-	di_emitter_pick(pixel, vertex, stream_seed ^ 0x2545f491u);
+	di_emitter_pick(pixel, vertex, normal, stream_seed ^ 0x2545f491u);
 #endif
 #ifdef DI_EMITTER_TEMPORAL
 	if (di_emitter_pending) {
