@@ -1938,10 +1938,6 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 				}
 				instance_material.emission_mean_luminance *= factor;
 			}
-			if (pipboy_scan_logged < 96 && mesh_storage->mesh_get_path(mesh_rid).contains("npcpipboygroundtake01")) {
-				pipboy_scan_logged++;
-				print_line(vformat("Ray scene instance: surface %d instance %d scale %.4f bounce %.4f factor %.4f emission %.4f %.4f %.4f", int(s), int(p_instances[i]), instance_scale, instance_bounce, factor, materials[materials.size() - 1].emission[0], materials[materials.size() - 1].emission[1], materials[materials.size() - 1].emission[2]));
-			}
 		}
 		bool instance_emissive = false;
 		for (uint32_t s = instance.material_offset; s < materials.size(); s++) {
