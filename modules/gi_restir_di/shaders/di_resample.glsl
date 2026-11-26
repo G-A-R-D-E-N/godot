@@ -881,10 +881,13 @@ bool di_emitter_history_valid(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal, inout
 		return false;
 	}
 	r_header = imageLoad(emitter_history, ivec3(p_pixel, 0));
-	if ((r_header.y & 0x100u) == 0u) {
+	if ((r_header.y & 0x100u) == 0u || (r_header.y >> 9u) != ((params.frame - 1u) & 0x7FFFFFu)) {
 		return false;
 	}
 	r_surface = imageLoad(emitter_history, ivec3(p_pixel, 3));
+	if (r_surface.w != ray_scene_triangle_emitter_generation() || r_header.x >= ray_scene_triangle_emitter_count()) {
+		return false;
+	}
 	float expected = -(params.prev_view_from_view * vec4(p_vertex, 1.0)).z;
 	float tolerance = expected * (0.01 + 0.02 / max(dot(p_normal, view), 0.05));
 	float stored_depth = uintBitsToFloat(r_surface.y);
@@ -958,8 +961,8 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 		uvec4 header = uvec4(0u);
 		uvec4 surface = uvec4(0u);
 		if (di_emitter_history_valid(p_pixel, p_vertex, p_normal, header, surface)) {
-			held_index = header.x & 0xFFFFu;
-			held_instance = header.x >> 16u;
+			held_index = header.x;
+			held_instance = header.z;
 			held_age = header.y & 0xFFu;
 			RaySceneTriangleEmitter emitter = ray_scene_triangle_emitter(held_index);
 			if (emitter.instance == held_instance) {
@@ -1005,8 +1008,8 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 	}
 	float damp = 1.0;
 
-	uvec4 header = uvec4((index & 0xFFFFu) | ((instance & 0xFFFFu) << 16u), age | 0x100u, 0u, floatBitsToUint(target));
-	uvec4 surface = uvec4(packSnorm2x16(di_oct_encode(p_normal)), floatBitsToUint(-p_vertex.z), floatBitsToUint(float(count)), 0u);
+	uvec4 header = uvec4(index, age | 0x100u | ((params.frame & 0x7FFFFFu) << 9u), instance, floatBitsToUint(target));
+	uvec4 surface = uvec4(packSnorm2x16(di_oct_encode(p_normal)), floatBitsToUint(-p_vertex.z), floatBitsToUint(float(count)), ray_scene_triangle_emitter_generation());
 	di_emitter_history_store(p_pixel, header, vec4(point, geometric), vec4(color, damp), surface);
 	di_emitter_write(p_pixel, point, color, geometric);
 	imageStore(record_image, ivec3(p_pixel, int(params.tail_samples + 1u)), uvec4(DI_EMITTER_MARK, floatBitsToUint(float(params.tail_samples + 1u) * damp), 0u, 0u));
@@ -1018,8 +1021,8 @@ bool di_emitter_hold(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 	if (!di_emitter_history_valid(p_pixel, p_vertex, p_normal, header, surface)) {
 		return false;
 	}
-	uint index = header.x & 0xFFFFu;
-	uint instance = header.x >> 16u;
+	uint index = header.x;
+	uint instance = header.z;
 	RaySceneTriangleEmitter emitter = ray_scene_triangle_emitter(index);
 	if (emitter.instance != instance) {
 		return false;
@@ -1033,8 +1036,8 @@ bool di_emitter_hold(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 	uint age = min((header.y & 0xFFu) + 1u, 0xFFu);
 	float mass = uintBitsToFloat(surface.z);
 	float damp = held_tail.w;
-	uvec4 next_header = uvec4(header.x, age | 0x100u, header.z, floatBitsToUint(target));
-	uvec4 next_surface = uvec4(surface.x, surface.y, surface.z, 0u);
+	uvec4 next_header = uvec4(header.x, age | 0x100u | ((params.frame & 0x7FFFFFu) << 9u), header.z, floatBitsToUint(target));
+	uvec4 next_surface = uvec4(surface.x, surface.y, surface.z, surface.w);
 	di_emitter_history_store(p_pixel, next_header, vec4(point, geometric), vec4(color, damp), next_surface);
 	di_emitter_write(p_pixel, point, color, geometric);
 	imageStore(record_image, ivec3(p_pixel, int(params.tail_samples + 1u)), uvec4(DI_EMITTER_MARK, floatBitsToUint(float(params.tail_samples + 1u) * damp), 0u, 0u));
