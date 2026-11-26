@@ -142,19 +142,6 @@ DirectShadows::DirectShadows() {
 	}
 	params_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(Params));
 	counter_buffer = RD::get_singleton()->storage_buffer_create(COUNTER_BYTES);
-	emitter_hit_hist = RD::get_singleton()->storage_buffer_create((EMITTER_HIT_INSTANCES + 1) * 16 * uint32_t(sizeof(uint32_t)));
-	{
-		const int hist_bytes = int((EMITTER_HIT_INSTANCES + 1) * 16 * uint32_t(sizeof(uint32_t)));
-		Vector<uint8_t> hist_init;
-		hist_init.resize(hist_bytes);
-		for (int i = 0; i <= int(EMITTER_HIT_INSTANCES); i++) {
-			const int base = i * 16;
-			memset(hist_init.ptrw() + base * int(sizeof(uint32_t)), 0, 16 * int(sizeof(uint32_t)));
-			memset(hist_init.ptrw() + (base + 2) * int(sizeof(uint32_t)), 0xFF, int(sizeof(uint32_t)));
-			memset(hist_init.ptrw() + (base + 6) * int(sizeof(uint32_t)), 0xFF, int(sizeof(uint32_t)));
-		}
-		RD::get_singleton()->buffer_update(emitter_hit_hist, 0, hist_init.size(), hist_init.ptr());
-	}
 	RD::TextureFormat format;
 	format.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
 	format.width = 1;
@@ -231,9 +218,6 @@ DirectShadows::~DirectShadows() {
 	}
 	if (counter_buffer.is_valid()) {
 		rd->free_rid(counter_buffer);
-	}
-	if (emitter_hit_hist.is_valid()) {
-		rd->free_rid(emitter_hit_hist);
 	}
 	if (lamp_buffer.is_valid()) {
 		rd->free_rid(lamp_buffer);
@@ -581,7 +565,6 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_REST_OTHER : RB_DIRECT_REST)));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 11, _debug_target(rb, settings)));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 12, counter_buffer));
-	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 27, emitter_hit_hist));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 13, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_SLOTS : RB_DIRECT_SLOTS_OTHER)));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 14, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_ACCUM : RB_DIRECT_ACCUM_OTHER)));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 15, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_REST : RB_DIRECT_REST_OTHER)));
