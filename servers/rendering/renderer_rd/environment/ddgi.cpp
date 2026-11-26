@@ -510,11 +510,32 @@ void DDGI::_fill_sky(TracePushConstant &r_push_constant, RID &r_sky_texture, RID
 	const RSE::EnvironmentBG background = scene_render->environment_get_background(p_environment);
 	if (background == RSE::ENV_BG_CLEAR_COLOR || background == RSE::ENV_BG_COLOR) {
 		const Color color = background == RSE::ENV_BG_CLEAR_COLOR ? RSG::texture_storage->get_default_clear_color().srgb_to_linear() : scene_render->environment_get_bg_color(p_environment);
-		r_push_constant.sky_flags = SKY_FLAGS_MODE_COLOR;
-		r_push_constant.sky_color_or_orientation[0] = color.r;
-		r_push_constant.sky_color_or_orientation[1] = color.g;
-		r_push_constant.sky_color_or_orientation[2] = color.b;
-		r_push_constant.sky_energy = scene_render->environment_get_bg_energy_multiplier(p_environment) * exposure;
+		const bool black_bg = color.r <= 0.0f && color.g <= 0.0f && color.b <= 0.0f;
+		if (background == RSE::ENV_BG_COLOR && black_bg && p_sky && p_sky->radiance.is_valid()) {
+			const RID sky_rid = scene_render->environment_get_sky(p_environment);
+			float sky_energy = 1.0f;
+			if (scene_render->is_using_physical_light_units()) {
+				sky_energy = exposure * scene_render->environment_get_bg_intensity(p_environment) / MAX(1e-6f, scene_render->get_sky()->sky_get_baked_exposure(sky_rid));
+			} else if (p_camera_attributes.is_valid()) {
+				sky_energy = exposure * scene_render->environment_get_bg_intensity(p_environment) / MAX(0.001f, scene_render->get_sky()->sky_get_baked_exposure(sky_rid));
+			}
+			r_sky_texture = p_sky->radiance;
+			r_push_constant.sky_flags = SKY_FLAGS_PORTAL_SKY;
+			r_push_constant.sky_energy = sky_energy * scene_render->environment_get_bg_energy_multiplier(p_environment);
+			r_push_constant.sky_border_size[0] = p_sky->uv_border_size;
+			r_push_constant.sky_border_size[1] = 1.0f - p_sky->uv_border_size * 2.0f;
+			const Quaternion orientation = scene_render->environment_get_sky_orientation(p_environment).get_quaternion().inverse();
+			r_push_constant.sky_color_or_orientation[0] = orientation.x;
+			r_push_constant.sky_color_or_orientation[1] = orientation.y;
+			r_push_constant.sky_color_or_orientation[2] = orientation.z;
+			r_push_constant.sky_flags |= orientation.w < 0.0f ? 0 : SKY_FLAGS_ORIENTATION_SIGN;
+		} else {
+			r_push_constant.sky_flags = SKY_FLAGS_MODE_COLOR;
+			r_push_constant.sky_color_or_orientation[0] = color.r;
+			r_push_constant.sky_color_or_orientation[1] = color.g;
+			r_push_constant.sky_color_or_orientation[2] = color.b;
+			r_push_constant.sky_energy = scene_render->environment_get_bg_energy_multiplier(p_environment) * exposure;
+		}
 	} else if (background == RSE::ENV_BG_SKY && p_sky && p_sky->radiance.is_valid()) {
 		const RID sky_rid = scene_render->environment_get_sky(p_environment);
 		float sky_energy = 1.0f;

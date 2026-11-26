@@ -88,6 +88,7 @@ public:
 		SKY_FLAGS_MODE_COLOR = 1,
 		SKY_FLAGS_MODE_SKY = 2,
 		SKY_FLAGS_ORIENTATION_SIGN = 4,
+		SKY_FLAGS_PORTAL_SKY = 8,
 	};
 
 	enum DebugView {

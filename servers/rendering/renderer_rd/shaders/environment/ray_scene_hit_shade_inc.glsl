@@ -4,6 +4,14 @@ vec4 shade_hit(vec3 p_origin, vec3 p_direction, RaySceneHit hit, uint p_seed) {
 	if (hit.backface && !two_sided) {
 		return vec4(0.0, 0.0, 0.0, -hit.t);
 	}
+	if (bool(material.flags & RAY_SCENE_MATERIAL_SKY_PORTAL)) {
+#ifdef RAY_SCENE_PORTAL_SKY
+		vec3 portal_radiance = material.emission * RAY_SCENE_SHADE_EMISSION_EXPOSURE + material.albedo * RAY_SCENE_PORTAL_SKY(p_direction);
+#else
+		vec3 portal_radiance = material.emission * RAY_SCENE_SHADE_EMISSION_EXPOSURE;
+#endif
+		return vec4(min(portal_radiance, vec3(RAY_SCENE_SHADE_MAX_RADIANCE)), hit.t);
+	}
 
 	vec3 normal = ray_scene_hit_normal(hit);
 	if (hit.backface) {
