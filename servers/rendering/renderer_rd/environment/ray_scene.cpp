@@ -625,7 +625,11 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 		triangle_emitters = sorted;
 		emitter_room_count = room_count;
 		emitter_room_table_generation++;
-		print_line(vformat("Ray scene emitter rooms: %d rooms, grid %dx%d cell %.2f, %d emitters sorted, %d unassigned", int(room_count), emitter_room_grid.size.x, emitter_room_grid.size.y, emitter_room_grid.cell_size, int(triangle_emitter_count), int(counts[room_count])));
+		String histogram;
+		for (uint32_t r = 0; r <= room_count; r++) {
+			histogram += String(r > 0 ? "," : "") + itos(counts[r]);
+		}
+		print_line(vformat("Ray scene emitter rooms: %d rooms, grid %dx%d cell %.2f, %d emitters sorted, %d unassigned, counts %s", int(room_count), emitter_room_grid.size.x, emitter_room_grid.size.y, emitter_room_grid.cell_size, int(triangle_emitter_count), int(counts[room_count]), histogram));
 	} else {
 		emitter_room_count = 0;
 		emitter_room_table_generation++;
