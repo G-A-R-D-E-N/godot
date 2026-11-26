@@ -134,7 +134,7 @@ public:
 	static constexpr uint32_t MAX_MASS = 255;
 	static constexpr uint32_t MAX_SWAP_FRAMES = 7;
 	static constexpr uint32_t MAX_EMITTER_TAIL_SUM = 6;
-	static constexpr uint32_t EMITTER_SAMPLE_FLOATS = 8;
+	static constexpr uint32_t EMITTER_SAMPLE_FLOATS = 12;
 	static constexpr uint32_t EMITTER_CHUNK = 4096;
 	static constexpr uint32_t EMITTER_CHUNKS = 256;
 	static constexpr uint32_t EMITTER_SCAN_FLOATS = EMITTER_CHUNKS * 2 + 1;
@@ -253,7 +253,7 @@ private:
 
 	bool _ensure_device();
 	bool _ensure_emitter_buffers(uint32_t p_count);
-	bool _ensure_emitter_samples(uint32_t p_pixels);
+	bool _ensure_emitter_samples(uint64_t p_pixels);
 	void _free_emitter_buffers();
 	void _write_debug_line();
 	void _flush_debug_line();

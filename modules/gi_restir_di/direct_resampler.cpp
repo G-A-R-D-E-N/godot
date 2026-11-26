@@ -240,9 +240,14 @@ bool DirectResamplerRD::_ensure_emitter_buffers(uint32_t p_count) {
 	return emitter_cdf.is_valid() && emitter_scan.is_valid();
 }
 
-bool DirectResamplerRD::_ensure_emitter_samples(uint32_t p_pixels) {
+bool DirectResamplerRD::_ensure_emitter_samples(uint64_t p_pixels) {
 	RD *rd = RD::get_singleton();
-	const uint32_t bytes = MAX(p_pixels, 1u) * EMITTER_SAMPLE_FLOATS * uint32_t(sizeof(float));
+	const uint64_t pixels = MAX(p_pixels, uint64_t(1));
+	const uint32_t bytes_per_pixel = EMITTER_SAMPLE_FLOATS * uint32_t(sizeof(float));
+	if (pixels > UINT32_MAX / bytes_per_pixel) {
+		return false;
+	}
+	const uint32_t bytes = uint32_t(pixels) * bytes_per_pixel;
 	if (emitter_samples.is_valid() && emitter_samples_bytes == bytes && emitter_reuse_counters.is_valid()) {
 		return true;
 	}
@@ -409,7 +414,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	emitter_active = emitter_active && !lab;
 #endif
 	if (emitter_active) {
-		emitter_active = _ensure_emitter_samples(uint32_t(size.x) * uint32_t(size.y)) && _ensure_emitter_buffers(ray_scene->get_triangle_emitter_count());
+		emitter_active = _ensure_emitter_samples(uint64_t(size.x) * uint64_t(size.y)) && _ensure_emitter_buffers(ray_scene->get_triangle_emitter_count());
 	}
 	const bool emitter_temporal = emitter_active && settings.emitter_temporal && emitter_temporal_pipeline.get_rid().is_valid();
 
