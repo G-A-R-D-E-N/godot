@@ -348,14 +348,6 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	sampler_lab.serve();
 #endif
 	const Settings settings = get_project_settings();
-	{
-		static bool rdi_settings_printed = false;
-		if (!rdi_settings_printed) {
-			rdi_settings_printed = true;
-			print_line(vformat("DIRECT_EMITTERS settings: master %s resampled %s emitters %s temporal %s spatial %s", GLOBAL_GET("rendering/global_illumination/direct/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/temporal"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial")));
-		}
-	}
-
 	const Ref<RenderSceneBuffersRD> &rb = p_input.render_buffers;
 	if (!settings.enabled || rb.is_null() || !_ensure_device()) {
 		return false;
@@ -456,14 +448,6 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		}
 		rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_ENTRIES, RD::DATA_FORMAT_R32_UINT, RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, size, settings.head + 3 * settings.tail_samples, 1, true);
 		rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_RECORD, RD::DATA_FORMAT_R32G32_UINT, RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT, RD::TEXTURE_SAMPLES_1, size, settings.tail_samples + 1 + (emitter_active ? 1 : 0), 1, true);
-		{
-			static bool rdi_temporal_printed = false;
-			if (!rdi_temporal_printed) {
-				rdi_temporal_printed = true;
-				const bool want_temporal = GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/temporal");
-				print_line(vformat("DIRECT_EMITTERS temporal: setting %s history %s", want_temporal, want_temporal ? "allocated" : "off"));
-			}
-		}
 		if (emitter_temporal) {
 			rd->texture_clear(rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_EMITTER_HISTORY, RD::DATA_FORMAT_R32G32B32A32_UINT, private_usage, RD::TEXTURE_SAMPLES_1, size, 4, 1, true), Color(0, 0, 0, 0), 0, 1, 0, 4);
 		}
@@ -633,14 +617,6 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 			const RID build_shader = shader->version_get_shader(shader_version, build_variants[pass]);
 			RD::ComputeListID build_list = rd->compute_list_begin();
 			rd->compute_list_bind_compute_pipeline(build_list, build_pipelines[pass]->get_rid());
-			{
-				const RID set0 = UniformSetCacheRD::get_singleton()->get_cache_vec(build_shader, 0, uniforms);
-				const RID set1 = UniformSetCacheRD::get_singleton()->get_cache_vec(build_shader, 1, ray_uniforms);
-				if (set0.is_null() || set1.is_null()) {
-					print_line(vformat("DIRECT_EMITTERS set null: set0 %s set1 %s uniforms %d ray_uniforms %d emitters %d", set0.is_null() ? "NULL" : "ok", set1.is_null() ? "NULL" : "ok", uniforms.size(), ray_uniforms.size(), int(ray_scene->get_triangle_emitter_count())));
-				}
-				print_line(vformat("DIRECT_EMITTERS dispatch pass %d emitters %d", pass, int(ray_scene->get_triangle_emitter_count())));
-			}
 			rd->compute_list_bind_uniform_set(build_list, UniformSetCacheRD::get_singleton()->get_cache_vec(build_shader, 0, uniforms), 0);
 			rd->compute_list_bind_uniform_set(build_list, UniformSetCacheRD::get_singleton()->get_cache_vec(build_shader, 1, ray_uniforms), 1);
 			rd->compute_list_dispatch(build_list, build_groups[pass], 1, 1);
@@ -663,55 +639,6 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
 	rd->compute_list_end();
 	rd->draw_command_end_label();
-	if (emitter_active && p_input.frame >= 30) {
-		static bool rdi_samples_printed = false;
-		if (!rdi_samples_printed) {
-			rdi_samples_printed = true;
-			const Vector<uint8_t> data = rd->buffer_get_data(emitter_samples);
-			const uint32_t pixels = uint32_t(size.x) * uint32_t(size.y);
-			uint32_t nonzero = 0;
-			uint32_t rejected_area = 0;
-			uint32_t rejected_cos = 0;
-			uint32_t rejected_shadow = 0;
-			uint32_t rejected_other = 0;
-			float best = 0.0f;
-			Vector3 best_color;
-			double sum_r = 0.0;
-			double sum_g = 0.0;
-			double sum_b = 0.0;
-			const float *floats = reinterpret_cast<const float *>(data.ptr());
-			if (data.size() >= int(pixels) * 32) {
-				for (uint32_t i = 0; i < pixels; i++) {
-					const int o = int(i) * 8;
-					const float geometric = floats[o + 3];
-					const float lum = floats[o + 4] + floats[o + 5] + floats[o + 6];
-					if (geometric > 0.0f && lum > 0.0f) {
-						nonzero++;
-						sum_r += double(floats[o + 4]);
-						sum_g += double(floats[o + 5]);
-						sum_b += double(floats[o + 6]);
-						if (lum > best) {
-							best = lum;
-							best_color = Vector3(floats[o + 4], floats[o + 5], floats[o + 6]);
-						}
-					}
-					const uint32_t reason = uint32_t(floats[o + 7]);
-					if (reason == 1) {
-						rejected_area++;
-					} else if (reason == 2) {
-						rejected_shadow++;
-					} else if (reason == 3) {
-						rejected_cos++;
-					} else if (reason != 0) {
-						rejected_other++;
-					}
-				}
-			}
-			const double sum_lum = sum_r * 0.2126 + sum_g * 0.7152 + sum_b * 0.0722;
-			print_line(vformat("DIRECT_EMITTERS samples: pixels %d nonzero %d best_lum %.4f best_rgb %.3f %.3f %.3f rejected_area %d rejected_cos %d rejected_shadow %d rejected_other %d sample_sum_rgb %.6f %.6f %.6f sample_sum_lum %.6f", int(pixels), int(nonzero), best, best_color.x, best_color.y, best_color.z, int(rejected_area), int(rejected_cos), int(rejected_shadow), int(rejected_other), sum_r, sum_g, sum_b, sum_lum));
-			emitter_samples_before = data;
-		}
-	}
 	if (emitter_active && settings.emitter_spatial && emitter_spatial_pipeline.get_rid().is_valid()) {
 		const RID emitter_spatial_rid = shader->version_get_shader(shader_version, VARIANT_EMITTER_SPATIAL);
 		RENDER_TIMESTAMP("Direct Resample Emitter Spatial");
@@ -723,48 +650,6 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
 		rd->compute_list_end();
 		rd->draw_command_end_label();
-	}
-	if (emitter_active && settings.emitter_spatial && p_input.frame >= 30) {
-		static bool spatial_change_printed = false;
-		if (!spatial_change_printed && emitter_samples_before.size() >= int(uint32_t(size.x) * uint32_t(size.y)) * 32) {
-			spatial_change_printed = true;
-			const Vector<uint8_t> after = rd->buffer_get_data(emitter_samples);
-			const uint32_t pixels = uint32_t(size.x) * uint32_t(size.y);
-			uint32_t changed = 0;
-			if (after.size() >= int(pixels) * 32) {
-				const float *before_floats = reinterpret_cast<const float *>(emitter_samples_before.ptr());
-				const float *after_floats = reinterpret_cast<const float *>(after.ptr());
-				for (uint32_t i = 0; i < pixels; i++) {
-					const int o = int(i) * 8;
-					for (int k = 0; k < 8; k++) {
-						if (before_floats[o + k] != after_floats[o + k]) {
-							changed++;
-							break;
-						}
-					}
-				}
-			}
-			uint32_t temporal_merged = 0;
-			if (emitter_reuse_counters.is_valid()) {
-				const Vector<uint8_t> reuse = rd->buffer_get_data(emitter_reuse_counters);
-				if (reuse.size() >= 8) {
-					temporal_merged = reinterpret_cast<const uint32_t *>(reuse.ptr())[0];
-				}
-			}
-			print_line(vformat("DIRECT_EMITTERS reuse: temporal_accepted %d spatial_pixels_rewritten %d", int(temporal_merged), int(changed)));
-		}
-	}
-	if (emitter_active && p_input.frame >= 31 && p_input.frame % 30 == 1 && emitter_reuse_counters.is_valid()) {
-		const Vector<uint8_t> reuse = rd->buffer_get_data(emitter_reuse_counters);
-		if (reuse.size() >= int(EMITTER_REUSE_COUNTER_BYTES)) {
-			const uint32_t *words = reinterpret_cast<const uint32_t *>(reuse.ptr());
-			const uint32_t events = words[0] + words[8];
-			const float mean_age = events > 0 ? float(words[1]) / float(events) : 0.0f;
-			const float mean_mass = events > 0 ? float(words[7]) / float(events) : 0.0f;
-			const float held_share = events > 0 ? float(words[6]) / float(events) : 0.0f;
-			const float mean_damp = events > 0 ? float(words[11]) / 65536.0 / float(events) : 0.0f;
-			print_line(vformat("DIRECT_EMITTERS reuse: temporal_accepted %d mean_age %.2f plain_writes %d instance_mismatch %d depth_reject %d normal_reject %d mean_mass %.2f held_share %.2f held_only %d held_blocked %d new_blocked %d mean_damp %.3f", int(words[0]), mean_age, int(words[2]), int(words[3]), int(words[4]), int(words[5]), mean_mass, held_share, int(words[8]), int(words[9]), int(words[10]), mean_damp));
-		}
 	}
 	if (spatial) {
 		const RID spatial_rid = shader->version_get_shader(shader_version, spatial_variant);
