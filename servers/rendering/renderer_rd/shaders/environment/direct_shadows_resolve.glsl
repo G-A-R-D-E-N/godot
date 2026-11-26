@@ -107,12 +107,69 @@ vec3 to_world(vec3 p_view) {
 	return vec3(dot(params.camera_basis[0].xyz, p_view), dot(params.camera_basis[1].xyz, p_view), dot(params.camera_basis[2].xyz, p_view));
 }
 
+bool block_coherent(ivec2 p_block) {
+	ivec2 first = direct_block_pixel(p_block, 0u);
+	float first_raw = texelFetch(depth_buffer, first, 0).r;
+	bool first_sky = first_raw <= 0.0;
+	vec3 first_position = vec3(0.0);
+	vec3 first_normal = vec3(0.0);
+	float first_depth = 0.0;
+	bool first_in_region = false;
+	if (!first_sky) {
+		vec4 view_h = params.inv_projection * vec4(((vec2(first) + 0.5) * params.pixel_size) * 2.0 - 1.0, first_raw, 1.0);
+		first_position = view_h.xyz / view_h.w;
+		first_depth = -first_position.z;
+		first_normal = normalize(texelFetch(normal_roughness_buffer, first, 0).xyz * 2.0 - 1.0);
+		first_in_region = all(lessThanEqual(abs(to_world(first_position)), params.region_half));
+	}
+	for (uint q = 1u; q < 4u; q++) {
+		ivec2 pixel = direct_block_pixel(p_block, q);
+		if (any(greaterThanEqual(pixel, params.full_size))) {
+			continue;
+		}
+		float raw = texelFetch(depth_buffer, pixel, 0).r;
+		if ((raw <= 0.0) != first_sky) {
+			return false;
+		}
+		if (!first_sky) {
+			vec4 view_h = params.inv_projection * vec4(((vec2(pixel) + 0.5) * params.pixel_size) * 2.0 - 1.0, raw, 1.0);
+			vec3 position = view_h.xyz / view_h.w;
+			vec3 normal = normalize(texelFetch(normal_roughness_buffer, pixel, 0).xyz * 2.0 - 1.0);
+			bool in_region = all(lessThanEqual(abs(to_world(position)), params.region_half));
+			if (in_region != first_in_region || !(direct_surface_weight(first_position, first_normal, first_depth, position, normal) >= 0.95)) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+bool broadcast_block = false;
+
+void store_slot(ivec2 p_pixel, int p_layer, float p_value) {
+	for (uint q = 0u; q < (broadcast_block ? 4u : 1u); q++) {
+		ivec2 pixel = broadcast_block ? direct_block_pixel(p_pixel >> 1, q) : p_pixel;
+		if (all(lessThan(pixel, params.full_size))) {
+			imageStore(slot_image, ivec3(pixel, p_layer), vec4(p_value));
+		}
+	}
+}
+
+void store_factor(ivec2 p_pixel, int p_layer, float p_value) {
+	for (uint q = 0u; q < (broadcast_block ? 4u : 1u); q++) {
+		ivec2 pixel = broadcast_block ? direct_block_pixel(p_pixel >> 1, q) : p_pixel;
+		if (all(lessThan(pixel, params.full_size))) {
+			imageStore(factor_image, ivec3(pixel, p_layer), vec4(p_value));
+		}
+	}
+}
+
 void write_none(ivec2 p_pixel, uint p_tier, float p_depth, uint p_normal) {
 	for (uint i = 0u; i <= own_limit; i++) {
-		imageStore(slot_image, ivec3(p_pixel, int(i)), vec4(0.0));
+		store_slot(p_pixel, int(i), 0.0);
 	}
 	for (uint i = 0u; i < own_limit + 3u; i++) {
-		imageStore(factor_image, ivec3(p_pixel, int(i)), vec4(1.0));
+		store_factor(p_pixel, int(i), 1.0);
 	}
 	if (params.count != 0u) {
 		imageStore(tier_image, p_pixel, uvec4(p_tier));
@@ -130,8 +187,9 @@ void main() {
 		return;
 	}
 
+	broadcast_block = params.block_resolve != 0u && block_coherent(block);
 	for (uint q = 0u; q < 4u; q++) {
-		if (params.block_resolve != 0u && q != 0u) {
+		if (broadcast_block && q != 0u) {
 			break;
 		}
 		ivec2 pixel = direct_block_pixel(block, q);
@@ -279,8 +337,8 @@ void main() {
 				}
 				factor = total > 0.0 ? sum / total : 1.0;
 			}
-			imageStore(slot_image, ivec3(pixel, int(i)), vec4(float(slot) / 65535.0));
-			imageStore(factor_image, ivec3(pixel, int(i)), vec4(factor));
+			store_slot(pixel, int(i), float(slot) / 65535.0);
+			store_factor(pixel, int(i), factor);
 		}
 
 		uint rest_key = 0u;
@@ -312,9 +370,9 @@ void main() {
 			}
 			rest_total += used_weight[u];
 		}
-		imageStore(slot_image, ivec3(pixel, int(own_limit)), vec4(float(rest_key) / 65535.0));
+		store_slot(pixel, int(own_limit), float(rest_key) / 65535.0);
 		for (uint c = 0u; c < 3u; c++) {
-			imageStore(factor_image, ivec3(pixel, int(own_limit + c)), vec4(rest_total > 0.0 ? rest_sum[c] / rest_total : 1.0));
+			store_factor(pixel, int(own_limit + c), rest_total > 0.0 ? rest_sum[c] / rest_total : 1.0);
 		}
 
 		if (params.count != 0u) {

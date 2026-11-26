@@ -4513,8 +4513,6 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		const bool resampled_bound = direct_bound && direct_resampled.is_valid();
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 54, resampled_bound ? direct_resampled : direct_shadows->get_resampled_dummy()));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 55, resampled_bound ? direct_shadows->get_lamp_buffer() : direct_shadows->get_lamp_dummy()));
-		const bool block_resolve = direct_shadows->get_block_resolve(rb);
-		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 56, direct_shadows->get_block_resolve_buffer(block_resolve)));
 	}
 
 	return UniformSetCacheRD::get_singleton()->get_cache_vec(scene_shader.get_default_shader_rd(is_multiview), RENDER_PASS_UNIFORM_SET, uniforms);

@@ -112,7 +112,6 @@ private:
 		Size2i size;
 		bool precise = false;
 		bool quarter = false;
-		bool block_resolve = false;
 		Size2i grid;
 		bool flip = false;
 		uint64_t last_frame = 0;
@@ -223,8 +222,6 @@ private:
 	String defines;
 
 	RID params_buffer;
-	RID block_resolve_on;
-	RID block_resolve_off;
 	RID lamp_buffer;
 	uint32_t lamp_buffer_capacity = 0;
 	RID exclude_buffer;
@@ -274,8 +271,6 @@ public:
 	RID get_lamp_dummy() const { return lamp_dummy; }
 	RID get_slots(const Ref<RenderSceneBuffersRD> &p_render_buffers) const;
 	RID get_factors(const Ref<RenderSceneBuffersRD> &p_render_buffers) const;
-	bool get_block_resolve(const Ref<RenderSceneBuffersRD> &p_render_buffers) const;
-	RID get_block_resolve_buffer(bool p_block_resolve) const;
 	void release(const Ref<RenderSceneBuffersRD> &p_render_buffers);
 	RID get_debug_texture(const Ref<RenderSceneBuffersRD> &p_render_buffers) const;
 	void serve_dump_request(const Ref<RenderSceneBuffersRD> &p_render_buffers);
