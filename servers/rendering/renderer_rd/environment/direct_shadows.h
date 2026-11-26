@@ -58,6 +58,7 @@
 #define RB_DIRECT_DEBUG SNAME("debug")
 #define RB_DIRECT_FACTORS_BLOCK SNAME("factors_block")
 #define RB_DIRECT_SLOTS_RESOLVED SNAME("slots_resolved")
+#define RB_DIRECT_GUIDE_RESOLVED SNAME("guide_resolved")
 #define RB_DIRECT_TIER SNAME("tier")
 #define RB_DIRECT_DEPTH_FULL SNAME("depth_full")
 #define RB_DIRECT_NORMAL_FULL SNAME("normal_full")
@@ -90,6 +91,7 @@ public:
 		float kernel_floor = 0.6f;
 		float range_sigmas = 1.5f;
 		bool quarter = false;
+		bool block_resolve = false;
 		bool second_pass = false;
 
 		bool precise() const { return reference || history_cap == 0; }
@@ -161,7 +163,8 @@ private:
 		uint32_t cold_frames;
 		int32_t full_size[2];
 		float jitter_delta[2];
-		uint32_t pad[2];
+		uint32_t block_resolve;
+		uint32_t pad;
 	};
 	static_assert(sizeof(Params) == 400);
 

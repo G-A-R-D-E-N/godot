@@ -163,15 +163,15 @@ uint sc_debug_lighting_component() {
 }
 
 bool sc_use_far_shadow() {
-	return ((sc_packed_1() >> 13) & 1U) != 0;
-}
-
-bool sc_use_direct_shadow() {
 	return ((sc_packed_1() >> 14) & 1U) != 0;
 }
 
-bool sc_use_direct_resampled() {
+bool sc_use_direct_shadow() {
 	return ((sc_packed_1() >> 15) & 1U) != 0;
+}
+
+bool sc_use_direct_resampled() {
+	return ((sc_packed_1() >> 16) & 1U) != 0;
 }
 
 float sc_luminance_multiplier() {

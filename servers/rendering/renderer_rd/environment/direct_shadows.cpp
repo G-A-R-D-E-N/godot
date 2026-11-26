@@ -58,6 +58,7 @@ DirectShadows::Settings DirectShadows::get_project_settings() {
 	settings.kernel_scale = GLOBAL_GET("rendering/global_illumination/direct/filter_kernel_scale");
 	settings.range_sigmas = GLOBAL_GET("rendering/global_illumination/direct/filter_range_sigmas");
 	settings.quarter = int(GLOBAL_GET("rendering/global_illumination/direct/trace_resolution")) == 1;
+	settings.block_resolve = GLOBAL_GET("rendering/global_illumination/direct/block_resolve");
 	settings.second_pass = GLOBAL_GET("rendering/global_illumination/direct/filter_second_pass");
 	return settings;
 }
@@ -277,7 +278,7 @@ Ref<DirectShadows::ViewportData> DirectShadows::_viewport(const Ref<RenderSceneB
 
 void DirectShadows::_ensure_textures(const Ref<RenderSceneBuffersRD> &p_render_buffers, Ref<ViewportData> p_viewport, const Settings &p_settings, bool p_quarter) {
 	const Size2i size = p_render_buffers->get_internal_size();
-	if (p_viewport->entries == p_settings.entries && p_viewport->size == size && p_viewport->precise == p_settings.precise() && p_viewport->quarter == p_quarter && p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SLOTS) && (!p_quarter || (p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_FACTORS_BLOCK) && p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SLOTS_RESOLVED)))) {
+	if (p_viewport->entries == p_settings.entries && p_viewport->size == size && p_viewport->precise == p_settings.precise() && p_viewport->quarter == p_quarter && p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SLOTS) && (!p_quarter || (p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_FACTORS_BLOCK) && p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SLOTS_RESOLVED) && p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_GUIDE_RESOLVED)))) {
 		return;
 	}
 	p_render_buffers->clear_context(RB_SCOPE_DIRECT_SHADOWS);
@@ -313,6 +314,7 @@ void DirectShadows::_ensure_textures(const Ref<RenderSceneBuffersRD> &p_render_b
 	if (p_quarter) {
 		rd->texture_clear(p_render_buffers->create_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_FACTORS_BLOCK, RD::DATA_FORMAT_R16_UNORM, usage, RD::TEXTURE_SAMPLES_1, grid, layers, 1, true), Color(1, 1, 1, 1), 0, 1, 0, layers);
 		rd->texture_clear(p_render_buffers->create_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_SLOTS_RESOLVED, RD::DATA_FORMAT_R16_UNORM, usage, RD::TEXTURE_SAMPLES_1, size, p_settings.entries, 1, true), Color(0, 0, 0, 0), 0, 1, 0, p_settings.entries);
+		rd->texture_clear(p_render_buffers->create_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_GUIDE_RESOLVED, RD::DATA_FORMAT_R32G32_UINT, usage, RD::TEXTURE_SAMPLES_1, size, 1, 1, true), Color(0, 0, 0, 0), 0, 1, 0, 1);
 	}
 }
 
@@ -512,6 +514,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	params.range_scale = settings.range_sigmas > 0.0f ? 0.5f / (settings.range_sigmas * settings.range_sigmas) : 0.0f;
 	params.world_per_pixel = (quarter ? 4.0f : 2.0f) * Math::abs(float(inverse.columns[1][1])) / float(size.y);
 	params.count = viewport->counted ? 1 : 0;
+	params.block_resolve = quarter && settings.block_resolve && !viewport->counted ? 1 : 0;
 	rd->buffer_update(params_buffer, 0, sizeof(Params), &params);
 	if (viewport->counted) {
 		rd->buffer_clear(counter_buffer, 0, COUNTER_BYTES);
@@ -600,6 +603,7 @@ void DirectShadows::_resolve(const Ref<RenderSceneBuffersRD> &p_render_buffers, 
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 20, _dump_target(p_render_buffers, p_viewport, RB_DIRECT_TIER, RD::DATA_FORMAT_R8_UINT, tier_unused)));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 21, _dump_target(p_render_buffers, p_viewport, RB_DIRECT_DEPTH_FULL, RD::DATA_FORMAT_R32_SFLOAT, depth_unused)));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 22, _dump_target(p_render_buffers, p_viewport, RB_DIRECT_NORMAL_FULL, RD::DATA_FORMAT_R32_UINT, normal_unused)));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 23, p_render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, RB_DIRECT_GUIDE_RESOLVED)));
 	const RID shader_rid = resolve_shader.version_get_shader(resolve_shader_version, 0);
 	RENDER_TIMESTAMP("Direct Shadows Resolve");
 	RD::ComputeListID list = rd->compute_list_begin();
@@ -697,7 +701,7 @@ bool DirectShadows::get_history(const Ref<RenderSceneBuffersRD> &p_render_buffer
 		return false;
 	}
 	Ref<ViewportData> viewport = p_render_buffers->get_custom_data(RB_SCOPE_DIRECT_SHADOWS);
-	if (viewport->last_frame == 0 || viewport->table_generation != p_table_generation) {
+	if (viewport->last_frame == 0 || viewport->table_generation != p_table_generation || viewport->size != p_render_buffers->get_internal_size()) {
 		return false;
 	}
 	r_slots = get_slots(p_render_buffers);
@@ -707,8 +711,12 @@ bool DirectShadows::get_history(const Ref<RenderSceneBuffersRD> &p_render_buffer
 	r_factors = get_factors(p_render_buffers);
 	r_camera = viewport->last_camera;
 	r_projection = viewport->last_projection;
-	r_guide = p_render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, viewport->flip ? RB_DIRECT_GUIDE_OTHER : RB_DIRECT_GUIDE);
-	return true;
+	const StringName guide = viewport->quarter ? RB_DIRECT_GUIDE_RESOLVED : (viewport->flip ? RB_DIRECT_GUIDE_OTHER : RB_DIRECT_GUIDE);
+	if (!p_render_buffers->has_texture(RB_SCOPE_DIRECT_SHADOWS, guide)) {
+		return false;
+	}
+	r_guide = p_render_buffers->get_texture(RB_SCOPE_DIRECT_SHADOWS, guide);
+	return r_guide.is_valid();
 }
 
 RID DirectShadows::get_debug_texture(const Ref<RenderSceneBuffersRD> &p_render_buffers) const {

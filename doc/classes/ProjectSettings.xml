@@ -3257,6 +3257,9 @@
 		<member name="rendering/global_illumination/ddgi/view_bias" type="float" setter="" getter="" default="0.25">
 			Offset of the sample point towards the camera, in units of probe spacing, to reduce light leaking and self-shadowing.
 		</member>
+		<member name="rendering/global_illumination/direct/block_resolve" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], the resolve pass computes one result for each 2×2 block of compatible surfaces and copies it to the block's pixels. Blocks with sky and geometry, dissimilar surfaces, or different tracing-region membership are resolved per pixel. Only used when [member rendering/global_illumination/direct/trace_resolution] is Quarter. Coherent blocks use less resolve work but quantize shadow-factor edges to the trace's block size.
+		</member>
 		<member name="rendering/global_illumination/direct/clamp_sigmas" type="float" setter="" getter="" default="3.0">
 			How far, in standard deviations of the rays nearby, a lamp's history may stay from those rays before it is pulled back, while that lamp or something in its range has moved recently. [code]0[/code] turns the clamp off.
 		</member>
