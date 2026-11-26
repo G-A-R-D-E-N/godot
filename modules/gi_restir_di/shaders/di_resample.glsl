@@ -171,7 +171,6 @@ layout(set = 0, binding = 24, std430) restrict writeonly buffer EmitterSamples {
 }
 emitter_samples;
 
-
 #ifdef DI_EMITTER_TEMPORAL
 layout(rgba32ui, set = 0, binding = 25) uniform restrict uimage2DArray emitter_history;
 
