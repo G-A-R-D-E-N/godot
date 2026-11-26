@@ -171,22 +171,6 @@ layout(set = 0, binding = 24, std430) restrict writeonly buffer EmitterSamples {
 }
 emitter_samples;
 
-layout(set = 0, binding = 26, std430) restrict buffer EmitterReuseCounters {
-	uint temporal_accepted;
-	uint age_sum;
-	uint plain_writes;
-	uint instance_mismatch;
-	uint depth_reject;
-	uint normal_reject;
-	uint held_selected;
-	uint mass_sum;
-	uint held_only;
-	uint held_blocked;
-	uint new_blocked;
-	uint damp_sum;
-}
-emitter_reuse_counters;
-
 #ifdef DI_EMITTER_TEMPORAL
 layout(rgba32ui, set = 0, binding = 25) uniform restrict uimage2DArray emitter_history;
 
@@ -251,7 +235,6 @@ void di_emitter_commit(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geomet
 }
 #else
 void di_emitter_commit(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geometric, uint p_instance, uint p_triangle, uint p_index) {
-	atomicAdd(emitter_reuse_counters.plain_writes, 1u);
 	di_emitter_write(p_pixel, p_point, p_color, p_geometric);
 }
 #endif
@@ -907,11 +890,9 @@ bool di_emitter_history_valid(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal, inout
 	float stored_depth = uintBitsToFloat(r_surface.y);
 	vec3 stored_normal = di_oct_decode(unpackSnorm2x16(r_surface.x));
 	if (!(expected > 0.0 && abs(stored_depth - expected) < tolerance)) {
-		atomicAdd(emitter_reuse_counters.depth_reject, 1u);
 		return false;
 	}
 	if (dot(mat3(params.prev_view_from_view) * p_normal, stored_normal) <= 0.9) {
-		atomicAdd(emitter_reuse_counters.normal_reject, 1u);
 		return false;
 	}
 	return true;
@@ -981,12 +962,7 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 			held_instance = header.x >> 16u;
 			held_age = header.y & 0xFFu;
 			RaySceneTriangleEmitter emitter = ray_scene_triangle_emitter(held_index);
-			if (emitter.instance != held_instance) {
-				atomicAdd(emitter_reuse_counters.instance_mismatch, 1u);
-			} else {
-				if (held_instance != (di_emitter_instance & 0xFFFFu)) {
-					atomicAdd(emitter_reuse_counters.instance_mismatch, 1u);
-				}
+			if (emitter.instance == held_instance) {
 				vec4 held_vec = di_emitter_history_load(p_pixel, 1);
 				held_point = (inverse(params.prev_view_from_view) * vec4(held_vec.xyz, 1.0)).xyz;
 				vec3 v0 = di_emitter_to_view(emitter.v0);
@@ -1026,12 +1002,8 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 		target = di_emitter_target(color, geometric);
 		count = uint(min(total, 21.0));
 		age = min(held_age + 1u, 0xFFu);
-		atomicAdd(emitter_reuse_counters.temporal_accepted, 1u);
-		atomicAdd(emitter_reuse_counters.age_sum, age);
-		atomicAdd(emitter_reuse_counters.mass_sum, count);
 	}
 	float damp = 1.0;
-	atomicAdd(emitter_reuse_counters.damp_sum, uint(damp * 65536.0));
 
 	uvec4 header = uvec4((index & 0xFFFFu) | ((instance & 0xFFFFu) << 16u), age | 0x100u, 0u, floatBitsToUint(target));
 	uvec4 surface = uvec4(packSnorm2x16(di_oct_encode(p_normal)), floatBitsToUint(-p_vertex.z), floatBitsToUint(float(count)), 0u);
@@ -1066,9 +1038,6 @@ bool di_emitter_hold(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 	di_emitter_history_store(p_pixel, next_header, vec4(point, geometric), vec4(color, damp), next_surface);
 	di_emitter_write(p_pixel, point, color, geometric);
 	imageStore(record_image, ivec3(p_pixel, int(params.tail_samples + 1u)), uvec4(DI_EMITTER_MARK, floatBitsToUint(float(params.tail_samples + 1u) * damp), 0u, 0u));
-	atomicAdd(emitter_reuse_counters.held_only, 1u);
-	atomicAdd(emitter_reuse_counters.age_sum, age);
-	atomicAdd(emitter_reuse_counters.mass_sum, uint(mass));
 	return true;
 }
 #endif
