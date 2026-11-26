@@ -58,7 +58,7 @@ public:
 		RID rd;
 		uint32_t width = 0;
 		uint32_t height = 0;
-		uint32_t data_version = 0;
+		uint64_t data_version = 0;
 
 		bool operator==(const SourceIdentity &p_other) const {
 			return rd == p_other.rd && width == p_other.width && height == p_other.height && data_version == p_other.data_version;

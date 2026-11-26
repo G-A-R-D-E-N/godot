@@ -1629,6 +1629,13 @@ RID TextureStorage::texture_create_from_native_handle(RSE::TextureType p_type, I
 	return texture;
 }
 
+TextureStorage::Texture *TextureStorage::_texture_get_base(Texture *p_texture) const {
+	while (p_texture != nullptr && p_texture->is_proxy && p_texture->proxy_to.is_valid()) {
+		p_texture = texture_owner.get_or_null(p_texture->proxy_to);
+	}
+	return p_texture;
+}
+
 void TextureStorage::_texture_2d_update(RID p_texture, const Ref<Image> &p_image, int p_layer, bool p_immediate) {
 	ERR_FAIL_COND(p_image.is_null() || p_image->is_empty());
 
@@ -1648,28 +1655,16 @@ void TextureStorage::_texture_2d_update(RID p_texture, const Ref<Image> &p_image
 	TextureToRDFormat f;
 	Ref<Image> validated = _validate_texture_format(p_image, f);
 
-	tex->data_version++;
-	for (int i = 0; i < tex->proxies.size(); i++) {
-		Texture *proxy = texture_owner.get_or_null(tex->proxies[i]);
-		if (proxy != nullptr) {
-			proxy->data_version = tex->data_version;
-		}
+	Texture *base = _texture_get_base(tex);
+	ERR_FAIL_NULL(base);
+	if (RD::get_singleton()->texture_update(tex->rd_texture, p_layer, validated->get_data()) == OK) {
+		base->data_version++;
 	}
-	RD::get_singleton()->texture_update(tex->rd_texture, p_layer, validated->get_data());
 }
 
-uint32_t TextureStorage::texture_get_data_version(RID p_texture) const {
-	const Texture *tex = texture_owner.get_or_null(p_texture);
-	if (tex == nullptr) {
-		return 0;
-	}
-	if (tex->is_proxy && tex->proxy_to.is_valid()) {
-		const Texture *base = texture_owner.get_or_null(tex->proxy_to);
-		if (base != nullptr) {
-			return base->data_version;
-		}
-	}
-	return tex->data_version;
+uint64_t TextureStorage::texture_get_data_version(RID p_texture) const {
+	const Texture *base = _texture_get_base(texture_owner.get_or_null(p_texture));
+	return base != nullptr ? base->data_version : 0;
 }
 
 void TextureStorage::texture_2d_update(RID p_texture, const Ref<Image> &p_image, int p_layer) {

@@ -15,3 +15,7 @@ For inverted opacity ranges, a cutoff below zero discards every texel, while a c
 ### `servers/rendering/renderer_rd/environment/ray_scene_alpha.cpp:RayAlphaStore::update`
 
 Alpha-layer source changes are detected by comparing the RD texture, dimensions, and CPU-update version separately. Each change receives a fresh revision so its coverage and far mip are refilled without relying on overlapping packed fields. GPU-written texture content still needs its own invalidation mechanism.
+
+### `servers/rendering/renderer_rd/storage_rd/texture_storage.cpp:TextureStorage::_texture_2d_update`
+
+CPU uploads advance the backing texture's content version even when the upload is made through a proxy. Version reads follow proxy chains so sibling aliases observe the same update. GPU-written content is not covered by this CPU-upload counter.

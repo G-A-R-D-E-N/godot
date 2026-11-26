@@ -2695,6 +2695,21 @@ TEST_CASE("[RayScene] Proxy textures follow source data version updates") {
 	texture_storage->texture_2d_update(base, image);
 	CHECK(texture_storage->texture_get_data_version(base) == 1);
 	CHECK(texture_storage->texture_get_data_version(proxy) == 1);
+	const RID sibling = texture_storage->texture_allocate();
+	texture_storage->texture_proxy_initialize(sibling, base);
+	const RID nested = texture_storage->texture_allocate();
+	texture_storage->texture_proxy_initialize(nested, proxy);
+	texture_storage->texture_2d_update(proxy, image);
+	CHECK(texture_storage->texture_get_data_version(base) == 2);
+	CHECK(texture_storage->texture_get_data_version(proxy) == 2);
+	CHECK(texture_storage->texture_get_data_version(sibling) == 2);
+	CHECK(texture_storage->texture_get_data_version(nested) == 2);
+	texture_storage->texture_2d_update(nested, image);
+	CHECK(texture_storage->texture_get_data_version(base) == 3);
+	CHECK(texture_storage->texture_get_data_version(sibling) == 3);
+	CHECK(texture_storage->texture_get_data_version(nested) == 3);
+	texture_storage->texture_free(nested);
+	texture_storage->texture_free(sibling);
 	texture_storage->texture_free(proxy);
 	texture_storage->texture_free(base);
 #else
