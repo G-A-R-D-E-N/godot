@@ -138,7 +138,6 @@ public:
 	static constexpr uint32_t EMITTER_CHUNK = 4096;
 	static constexpr uint32_t EMITTER_CHUNKS = 256;
 	static constexpr uint32_t EMITTER_SCAN_FLOATS = EMITTER_CHUNKS * 2 + 1;
-	static constexpr uint32_t EMITTER_REUSE_COUNTER_BYTES = 48;
 
 	static constexpr uint32_t DEBUG_FLAG_STALE_PRIOR = 1;
 	static constexpr uint32_t DEBUG_FLAG_COUNT = 2;
@@ -227,7 +226,6 @@ private:
 	RID emitter_scan;
 	RID emitter_samples;
 	RID emitter_samples_snapshot;
-	RID emitter_reuse_counters;
 	uint32_t emitter_cdf_capacity = 0;
 	uint32_t emitter_samples_bytes = 0;
 	bool emitter_device_ready = false;

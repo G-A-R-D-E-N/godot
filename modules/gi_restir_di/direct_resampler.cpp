@@ -248,7 +248,7 @@ bool DirectResamplerRD::_ensure_emitter_samples(uint64_t p_pixels) {
 		return false;
 	}
 	const uint32_t bytes = uint32_t(pixels) * bytes_per_pixel;
-	if (emitter_samples.is_valid() && emitter_samples_bytes == bytes && emitter_reuse_counters.is_valid()) {
+	if (emitter_samples.is_valid() && emitter_samples_bytes == bytes) {
 		return true;
 	}
 	if (emitter_samples.is_valid()) {
@@ -261,16 +261,12 @@ bool DirectResamplerRD::_ensure_emitter_samples(uint64_t p_pixels) {
 	emitter_samples = rd->storage_buffer_create(bytes);
 	rd->set_resource_name(emitter_samples, "Direct Resampler Emitter Samples");
 	emitter_samples_bytes = emitter_samples.is_valid() ? bytes : 0;
-	if (!emitter_reuse_counters.is_valid()) {
-		emitter_reuse_counters = rd->storage_buffer_create(EMITTER_REUSE_COUNTER_BYTES);
-		rd->set_resource_name(emitter_reuse_counters, "Direct Resampler Emitter Reuse Counters");
-	}
-	return emitter_samples.is_valid() && emitter_reuse_counters.is_valid();
+	return emitter_samples.is_valid();
 }
 
 void DirectResamplerRD::_free_emitter_buffers() {
 	RD *rd = RD::get_singleton();
-	RID *owned[] = { &emitter_cdf, &emitter_scan, &emitter_samples, &emitter_samples_snapshot, &emitter_reuse_counters };
+	RID *owned[] = { &emitter_cdf, &emitter_scan, &emitter_samples, &emitter_samples_snapshot };
 	for (RID *rid : owned) {
 		if (rid->is_valid()) {
 			rd->free_rid(*rid);
@@ -592,9 +588,6 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		ray_uniforms.reserve(8);
 		ray_scene->append_uniforms(ray_uniforms);
 	}
-	if (emitter_active && emitter_reuse_counters.is_valid()) {
-		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 26, emitter_reuse_counters));
-	}
 	if (emitter_temporal) {
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 25, emitter_history));
 	}
@@ -632,9 +625,6 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 			rd->compute_list_end();
 		}
 		rd->draw_command_end_label();
-	}
-	if (emitter_active && emitter_reuse_counters.is_valid()) {
-		rd->buffer_clear(emitter_reuse_counters, 0, EMITTER_REUSE_COUNTER_BYTES);
 	}
 	const RID shader_rid = shader->version_get_shader(shader_version, main_variant);
 	RENDER_TIMESTAMP("Direct Resample Entries");

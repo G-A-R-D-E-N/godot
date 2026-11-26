@@ -43,6 +43,9 @@ using RendererRD::RayScene;
 TEST_CASE("[RayScene] a zero gi_emission is not an emission value") {
 	CHECK_FALSE(RayScene::emission_has_value(Color(0.0f, 0.0f, 0.0f)));
 	CHECK_FALSE(RayScene::emission_has_value(Color()));
+	CHECK_FALSE(RayScene::emission_has_value(Color(1.0f, -1.0f, 0.0f)));
+	CHECK_FALSE(RayScene::emission_has_value(Color(-1.0f, 1.0f, 0.0f)));
+	CHECK_FALSE(RayScene::emission_has_value(Color(0.0f, 1.0f, -1.0f)));
 }
 
 TEST_CASE("[RayScene] a non-zero gi_emission is an emission value") {
