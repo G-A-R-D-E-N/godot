@@ -1,0 +1,20 @@
+name: PR governance
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  pr-targets-main:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require base branch main
+        run: |
+          if [ "${{ github.base_ref }}" != "main" ]; then
+            echo "Pull requests must target the main branch. This PR targets '${{ github.base_ref }}'."
+            exit 1
+          fi
+          echo "OK: PR targets main."
