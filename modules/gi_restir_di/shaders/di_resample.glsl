@@ -342,7 +342,10 @@ bool di_emitter_visible(vec3 p_vertex, vec3 p_normal, vec3 p_point, uint p_insta
 	uint blocker = 0xFFFFFFFFu;
 	float blocker_distance = 0.0;
 	uint blocker_triangle = 0u;
-	return ray_scene_sampled_visibility_blocker(from, to, RAY_SCENE_ALL_CASTERS, p_seed + 0x51ed270bu, int(p_instance), blocker, blocker_distance, blocker_triangle);
+	if (ray_scene_sampled_visibility_blocker(from, to, RAY_SCENE_ALL_CASTERS, p_seed + 0x51ed270bu, -1, blocker, blocker_distance, blocker_triangle)) {
+		return true;
+	}
+	return blocker == p_instance && blocker_distance >= length(to - from) - DI_EMITTER_RAY_BIAS;
 }
 
 #ifdef DI_EMITTER_ROOM_PICK
