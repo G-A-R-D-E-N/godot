@@ -393,13 +393,14 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal, uint p_seed) {
 		return;
 	}
 	uint low = di_emitter_pick_index(di_emitter_hash(p_seed, 0x27d4eb2fu) * total, count);
-	bool room_window = false;
+	uint room_taken = 0u;
 #ifdef DI_EMITTER_ROOM_PICK
 	if (params.emitter_room_pick != 0u) {
 		uint room_first = 0u;
 		uint room_last = 0u;
-		if (di_emitter_room_window(di_emitter_room_of(p_vertex), room_first, room_last) && room_last <= count) {
-			room_window = true;
+		const uint room_id = di_emitter_room_of(p_vertex);
+		if (di_emitter_room_window(room_id, room_first, room_last) && room_last <= count) {
+			room_taken = room_id + 1u;
 			float room_base = room_first > 0u ? emitter_cdf.data[room_first - 1u] : 0.0;
 			float room_span = emitter_cdf.data[room_last - 1u] - room_base;
 			float room_target = room_base + di_emitter_hash(p_seed, 0x27d4eb2fu) * max(room_span, 0.0);
@@ -467,7 +468,7 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal, uint p_seed) {
 		cos_light = abs(cos_light);
 	}
 	if (!(cos_light > 0.0)) {
-		di_emitter_clear_block(p_pixel, room_window ? 6u : 3u);
+		di_emitter_clear_block(p_pixel, room_taken != 0u ? (100u + room_taken) : 3u);
 		return;
 	}
 	float geometric = min(cos_light / max(distance * distance, 1e-8), 60000.0);

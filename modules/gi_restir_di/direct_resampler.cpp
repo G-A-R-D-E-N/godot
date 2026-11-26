@@ -700,6 +700,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 			uint32_t rejected_area = 0;
 			uint32_t rejected_cos = 0;
 			uint32_t rejected_cos_room = 0;
+			uint32_t room_cos[257] = {};
 			uint32_t rejected_shadow = 0;
 			uint32_t rejected_other = 0;
 			float best = 0.0f;
@@ -730,15 +731,28 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 						rejected_shadow++;
 					} else if (reason == 3) {
 						rejected_cos++;
-					} else if (reason == 6) {
+					} else if (reason >= 100u && reason < 400u) {
 						rejected_cos_room++;
+						room_cos[reason - 100u]++;
 					} else if (reason != 0) {
 						rejected_other++;
 					}
 				}
 			}
 			const double sum_lum = sum_r * 0.2126 + sum_g * 0.7152 + sum_b * 0.0722;
-			print_line(vformat("DIRECT_EMITTERS samples: pixels %d nonzero %d best_lum %.4f best_rgb %.3f %.3f %.3f rejected_area %d rejected_cos %d rejected_cos_room %d rejected_shadow %d rejected_other %d sample_sum_rgb %.6f %.6f %.6f sample_sum_lum %.6f", int(pixels), int(nonzero), best, best_color.x, best_color.y, best_color.z, int(rejected_area), int(rejected_cos), int(rejected_cos_room), int(rejected_shadow), int(rejected_other), sum_r, sum_g, sum_b, sum_lum));
+			uint32_t room_ids = 0;
+			uint32_t top_room = 0;
+			uint32_t top_room_count = 0;
+			for (uint32_t i = 0; i < 257; i++) {
+				if (room_cos[i] != 0) {
+					room_ids++;
+					if (room_cos[i] > top_room_count) {
+						top_room_count = room_cos[i];
+						top_room = i;
+					}
+				}
+			}
+			print_line(vformat("DIRECT_EMITTERS samples: pixels %d nonzero %d best_lum %.4f best_rgb %.3f %.3f %.3f rejected_area %d rejected_cos %d rejected_cos_room %d room_ids %d top_room %d top_room_count %d rejected_shadow %d rejected_other %d sample_sum_rgb %.6f %.6f %.6f sample_sum_lum %.6f", int(pixels), int(nonzero), best, best_color.x, best_color.y, best_color.z, int(rejected_area), int(rejected_cos), int(rejected_cos_room), int(room_ids), top_room > 0 ? int(top_room - 1) : -1, int(top_room_count), int(rejected_shadow), int(rejected_other), sum_r, sum_g, sum_b, sum_lum));
 			emitter_samples_before = data;
 		}
 	}
