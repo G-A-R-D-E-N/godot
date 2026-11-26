@@ -135,9 +135,7 @@ public:
 	void commit_far(uint32_t p_layer, uint64_t p_signature);
 	void sync_entries();
 
-#ifdef TESTS_ENABLED
-	uint64_t test_observe_source(uint32_t p_layer, const SourceIdentity &p_identity) { return _observe_source(p_layer, p_identity); }
-#endif
+	uint64_t observe_source(uint32_t p_layer, const SourceIdentity &p_identity);
 
 	static bool uses_far(uint32_t p_bits) {
 		const uint32_t mode = (p_bits >> ENTRY_FAR_MODE_SHIFT) & ENTRY_FAR_MODE_MASK;
@@ -203,7 +201,6 @@ private:
 
 	static bool _publish_far(TableEntry &r_entry, const Layer &p_layer);
 	uint32_t _find_victim() const;
-	uint64_t _observe_source(uint32_t p_layer, const SourceIdentity &p_identity);
 	void _release_layer(uint32_t p_layer);
 	void _retire_entry(uint32_t p_entry);
 	void _mark_changed();

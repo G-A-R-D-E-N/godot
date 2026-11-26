@@ -538,7 +538,8 @@ uint32_t RayAlphaStore::acquire(RID p_source, uint32_t p_cutoff, const EntryKey 
 	return index;
 }
 
-uint64_t RayAlphaStore::_observe_source(uint32_t p_layer, const SourceIdentity &p_identity) {
+uint64_t RayAlphaStore::observe_source(uint32_t p_layer, const SourceIdentity &p_identity) {
+	ERR_FAIL_UNSIGNED_INDEX_V(p_layer, layers.size(), 0);
 	Layer &layer = layers[p_layer];
 	if (!(layer.source_identity == p_identity)) {
 		layer.source_identity = p_identity;
@@ -576,7 +577,7 @@ void RayAlphaStore::update() {
 		}
 		const RID rd = texture_storage->texture_get_rd_texture(layer.source, false);
 		if (rd.is_null()) {
-			_observe_source(i, SourceIdentity());
+			observe_source(i, SourceIdentity());
 			if (layer.state != LAYER_PENDING) {
 				layer.state = LAYER_PENDING;
 				_mark_state_changed();
@@ -586,7 +587,7 @@ void RayAlphaStore::update() {
 		}
 		const RD::TextureFormat format = RD::get_singleton()->texture_get_format(rd);
 		const SourceIdentity identity{ rd, format.width, format.height, texture_storage->texture_get_data_version(layer.source) };
-		_observe_source(i, identity);
+		observe_source(i, identity);
 		if (layer.signature != layer.filled_signature || layer.state != LAYER_READY) {
 			if (layer.state != LAYER_PENDING) {
 				layer.state = LAYER_PENDING;
