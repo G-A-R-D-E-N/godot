@@ -703,7 +703,7 @@ void RayScene::_warn_albedo_fallback(RID p_material, RID p_texture, RID p_mesh, 
 }
 
 bool RayScene::emission_has_value(const Color &p_emission) {
-	return p_emission.r > 0.0f || p_emission.g > 0.0f || p_emission.b > 0.0f;
+	return p_emission.r >= 0.0f && p_emission.g >= 0.0f && p_emission.b >= 0.0f && (p_emission.r > 0.0f || p_emission.g > 0.0f || p_emission.b > 0.0f);
 }
 
 void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, Material &r_material, float &r_alpha_threshold, uint32_t &r_cull) {
@@ -808,7 +808,7 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 		}
 		r_material.emission_texel_scale = emission_scale;
 		if (!(r_material.emission_mean_luminance > 0.0f) && r_material.emission_texture != 0) {
-			if (gi_present) {
+			if (gi_present && RayScene::emission_has_value(gi_emission)) {
 				r_material.emission_mean_luminance = (0.2126f * gi_emission.r + 0.7152f * gi_emission.g + 0.0722f * gi_emission.b) * emission_scale;
 			} else {
 				r_material.emission_mean_luminance = 0.5f * (r_material.emission_nits_range[0] + r_material.emission_nits_range[1]) * r_material.emission_texel_scale;
