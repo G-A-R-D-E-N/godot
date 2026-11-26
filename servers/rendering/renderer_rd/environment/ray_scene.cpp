@@ -471,8 +471,56 @@ void RayScene::_ensure_buffer(RID &r_buffer, uint32_t &r_capacity, uint32_t p_co
 	RD::get_singleton()->set_resource_name(r_buffer, p_name);
 }
 
+void RayScene::_refresh_emitter_room_grid() {
+	EmitterRoomGrid &grid = emitter_room_grid;
+	grid.valid = false;
+	MaterialStorage *material_storage = MaterialStorage::get_singleton();
+	const Variant grid_value = material_storage->global_shader_parameter_get_internal(SNAME("ray_room_grid"));
+	const Variant origin_size_value = material_storage->global_shader_parameter_get_internal(SNAME("ray_room_grid_origin_size"));
+	if (grid_value.get_type() != Variant::RID || origin_size_value.get_type() != Variant::VECTOR4) {
+		return;
+	}
+	const Vector4 origin_size = origin_size_value;
+	const float cell_size = MAX(origin_size.w, 0.01f);
+	Ref<Image> image = TextureStorage::get_singleton()->texture_2d_get(RID(grid_value));
+	if (image.is_null() || image->get_format() != Image::FORMAT_R8) {
+		return;
+	}
+	PackedByteArray ids = image->get_data();
+	if (int64_t(ids.size()) != int64_t(image->get_width()) * int64_t(image->get_height())) {
+		return;
+	}
+	uint32_t max_room = 0;
+	for (int64_t i = 0; i < ids.size(); i++) {
+		max_room = MAX(max_room, uint32_t(ids[i]));
+	}
+	if (max_room == 0 || max_room > MAX_EMITTER_ROOMS) {
+		return;
+	}
+	grid.origin = Vector2(origin_size.x, origin_size.z);
+	grid.cell_size = cell_size;
+	grid.size = Vector2i(image->get_width(), image->get_height());
+	grid.room_count = max_room;
+	grid.ids = ids;
+	grid.valid = true;
+}
+
+uint32_t RayScene::_emitter_room_at(const Vector3 &p_position) const {
+	const EmitterRoomGrid &grid = emitter_room_grid;
+	if (!grid.valid) {
+		return 0u;
+	}
+	const int32_t x = int32_t(Math::floor((p_position.x - grid.origin.x) / grid.cell_size));
+	const int32_t z = int32_t(Math::floor((p_position.z - grid.origin.y) / grid.cell_size));
+	if (x < 0 || z < 0 || x >= grid.size.x || z >= grid.size.y) {
+		return 0u;
+	}
+	return uint32_t(grid.ids[z * grid.size.x + x]);
+}
+
 void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource> &p_sources, const LocalVector<uint32_t> &p_order) {
 	triangle_emitters.clear();
+	_refresh_emitter_room_grid();
 	const int64_t emitter_filter = int64_t(GLOBAL_GET("rendering/global_illumination/ray_scene/emitter_instance"));
 	bool capped = false;
 	for (const TriangleEmitterSource &source : p_sources) {
@@ -501,7 +549,11 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 				corners[v][1] = position.y;
 				corners[v][2] = position.z;
 			}
-			emitter.instance = p_order[source.instance];
+			{
+			const Vector3 centre = (Vector3(corners[0][0], corners[0][1], corners[0][2]) + Vector3(corners[1][0], corners[1][1], corners[1][2]) + Vector3(corners[2][0], corners[2][1], corners[2][2])) / 3.0f;
+			emitter.pad[0] = _emitter_room_at(centre);
+		}
+		emitter.instance = p_order[source.instance];
 			if (emitter_filter >= 0 && int64_t(emitter.instance) != emitter_filter) {
 				continue;
 			}
@@ -516,6 +568,36 @@ void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource
 	}
 	triangle_emitter_count = triangle_emitters.size();
 	triangle_emitters_capped = capped;
+	emitter_room_starts.clear();
+	if (emitter_room_grid.valid && !capped) {
+		const uint32_t room_count = emitter_room_grid.room_count;
+		LocalVector<uint32_t> counts;
+		counts.resize(room_count + 1);
+		counts.fill(0u);
+		for (const TriangleEmitter &emitter : triangle_emitters) {
+			counts[MIN(emitter.pad[0], room_count)]++;
+		}
+		emitter_room_starts.resize(room_count + 1);
+		uint32_t running = 0;
+		for (uint32_t r = 0; r <= room_count; r++) {
+			emitter_room_starts[r] = running;
+			running += counts[r];
+		}
+		LocalVector<TriangleEmitter> sorted;
+		sorted.resize(triangle_emitters.size());
+		LocalVector<uint32_t> cursor = emitter_room_starts;
+		for (const TriangleEmitter &emitter : triangle_emitters) {
+			const uint32_t room = MIN(emitter.pad[0], room_count);
+			sorted[cursor[room]++] = emitter;
+		}
+		triangle_emitters = sorted;
+		emitter_room_count = room_count;
+		emitter_room_table_generation++;
+		print_line(vformat("Ray scene emitter rooms: %d rooms, grid %dx%d cell %.2f, %d emitters sorted, %d unassigned", int(room_count), emitter_room_grid.size.x, emitter_room_grid.size.y, emitter_room_grid.cell_size, int(triangle_emitter_count), int(counts[room_count])));
+	} else {
+		emitter_room_count = 0;
+		emitter_room_table_generation++;
+	}
 	uint32_t emitter_instances = 0;
 	uint32_t emitter_proxied_instances = 0;
 	{
@@ -2217,6 +2299,15 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	scene_data.triangle_emitter_generation = triangle_emitter_generation;
 	scene_data.emission_texture_count = emission_texture_count;
 	scene_data.proxy_emitters_traced = int(GLOBAL_GET("rendering/global_illumination/ray_scene/proxy_emitters")) != 0 ? 1u : 0u;
+	scene_data.room_count = emitter_room_count;
+	scene_data.room_start[0] = 0;
+	if (emitter_room_count > 0) {
+		for (uint32_t r = 0; r <= emitter_room_count; r++) {
+			scene_data.room_start[r] = emitter_room_starts[r];
+		}
+	} else {
+		scene_data.room_start[1] = triangle_emitter_count;
+	}
 	if (scene_data_buffer.is_null()) {
 		scene_data_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(SceneData));
 		RD::get_singleton()->set_resource_name(scene_data_buffer, "Ray Scene Data");

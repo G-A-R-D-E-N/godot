@@ -155,6 +155,9 @@ layout(set = RAY_SCENE_SET, binding = 6, std140) uniform RaySceneData {
 	uint emission_texture_count;
 	uint proxy_emitters_traced;
 	uint pad2;
+	uint room_count;
+	uint room_start[1025];
+	uint pad_room[2];
 }
 ray_scene;
 
