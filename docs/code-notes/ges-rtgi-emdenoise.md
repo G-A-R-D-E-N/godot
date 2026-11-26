@@ -33,3 +33,6 @@ openpbr_emission_scale` for those materials. The emission_color tint, oc_emissio
 flicker are still not on the ray path (no room in the material struct).
 The emitter term is now multiplied by `ray_scene_emissive_exposure_normalization()` at both
 emitter reads, as lamps (light_energy) and raster emission already are.
+
+## Second emitter shadow ray (direct_shadows.glsl read_entries / emitter factor, direct_shadows.cpp params.pad[0])
+`params.pad[0]` is a bitfield: bit 0 = emitter samples present, bit 1 = the resampler already traced emitter visibility (`emitters/visibility`). With bit 1 set, direct_shadows no longer traces its own per-pixel 0/1 ray to the emitter sample and writes factor 1: that ray re-grained the spatially filtered emitter term pixel by pixel and counted visibility twice.

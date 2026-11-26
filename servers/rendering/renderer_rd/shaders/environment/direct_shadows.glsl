@@ -316,7 +316,7 @@ void read_entries(ivec2 p_pixel) {
 		head_slots[i] = imageLoad(entry_image, ivec3(p_pixel, int(i))).r & 0xFFFFu;
 	}
 	tail_count = rest_layer - own_limit;
-	emitter_tail = params.pad0 != 0u && tail_count > 0u;
+	emitter_tail = (params.pad0 & 1u) != 0u && tail_count > 0u;
 	if (emitter_tail) {
 		atomicAdd(counters.emitter_pixels, 1u);
 		tail_count--;
@@ -803,7 +803,7 @@ void main() {
 #ifdef EXTERNAL_ENTRIES
 	float emitter_visible = 0.0;
 	uint emitter_traces = 0u;
-	if (emitter_tail && emitter_geometry.w > 0.0) {
+	if (emitter_tail && emitter_geometry.w > 0.0 && (params.pad0 & 2u) == 0u) {
 		vec3 emitter_point = to_world(emitter_geometry.xyz) + ray_scene.camera_to_anchor;
 		vec3 emitter_from = anchored + to_world(normal) * params.bias;
 		if (abs(emitter_point.x) < 2048.0 && abs(emitter_point.y) < 2048.0 && abs(emitter_point.z) < 2048.0) {
@@ -1094,7 +1094,7 @@ void main() {
 	if (emitter_tail) {
 		float visible = emitter_traces > 0u ? emitter_visible / float(emitter_traces) : 1.0;
 		imageStore(factor_image, ivec3(at, int(emitter_tail_factor)), vec4(params.force_one != 0u ? 1.0 : visible));
-	} else if (params.pad0 != 0u) {
+	} else if ((params.pad0 & 1u) != 0u) {
 		imageStore(factor_image, ivec3(at, int(params.entries + 2u)), vec4(1.0));
 	}
 #endif

@@ -525,7 +525,8 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	params.entries = settings.entries;
 	params.head_entries = external ? p_input.head_entries : settings.entries - 1;
 	params.tail_visibility = external ? p_input.tail_visibility : 0;
-	params.pad[0] = emitters ? 1u : 0u;
+	const bool emitter_visibility_traced = emitters && bool(GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/visibility"));
+	params.pad[0] = (emitters ? 1u : 0u) | (emitter_visibility_traced ? 2u : 0u);
 	params.pad[1] = uint32_t(settings.emitter_skip_instance + 1);
 	params.rays = settings.rays;
 	params.reference = settings.reference ? 1 : 0;
