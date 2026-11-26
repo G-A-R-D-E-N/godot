@@ -203,7 +203,7 @@ void RenderSceneBuffersGLES3::_check_render_buffers() {
 		_clear_intermediate_buffers();
 	}
 
-	if ((!use_internal_buffer || internal3d.color != 0) && (msaa3d.mode == RSE::VIEWPORT_MSAA_DISABLED || msaa3d.color != 0)) {
+	if ((!use_internal_buffer || internal3d.color != 0) && (msaa3d.mode == RSE::VIEWPORT_MSAA_DISABLED || msaa3d.fbo != 0)) {
 		// already setup!
 		return;
 	}
@@ -278,7 +278,10 @@ void RenderSceneBuffersGLES3::_check_render_buffers() {
 		glBindFramebuffer(GL_FRAMEBUFFER, GLES3::TextureStorage::system_fbo);
 	}
 
-	if (msaa3d.mode != RSE::VIEWPORT_MSAA_DISABLED && msaa3d.color == 0) {
+	if (msaa3d.mode == RSE::VIEWPORT_MSAA_DISABLED) {
+		msaa3d.samples = 1;
+		msaa3d.check_fbo_cache = false;
+	} else if (msaa3d.fbo == 0) {
 		// Setup MSAA.
 		const GLsizei samples[] = { 1, 2, 4, 8 };
 		msaa3d.samples = samples[msaa3d.mode];
@@ -379,6 +382,7 @@ void RenderSceneBuffersGLES3::_check_render_buffers() {
 			// We are going to render directly into our render target textures,
 			// these can change from frame to frame as we cycle through swapchains,
 			// hence we'll use our FBO cache here.
+			// Note: when applicable, the code in this branch will run every time _check_render_buffers is called, which is currently harmless.
 			msaa3d.needs_resolve = false;
 			msaa3d.check_fbo_cache = true;
 		} else if (use_internal_buffer) {
@@ -409,9 +413,6 @@ void RenderSceneBuffersGLES3::_check_render_buffers() {
 			msaa3d.samples = 1;
 			msaa3d.check_fbo_cache = false;
 		}
-	} else {
-		msaa3d.samples = 1;
-		msaa3d.check_fbo_cache = false;
 	}
 }
 
@@ -478,9 +479,11 @@ void RenderSceneBuffersGLES3::check_backbuffer(bool p_need_color, bool p_need_de
 	GLES3::TextureStorage *texture_storage = GLES3::TextureStorage::get_singleton();
 
 	// Setup our back buffer
+	bool needs_init_check = false;
 
 	if (backbuffer3d.fbo == 0) {
 		glGenFramebuffers(1, &backbuffer3d.fbo);
+		needs_init_check = true;
 	}
 
 	glBindFramebuffer(GL_FRAMEBUFFER, backbuffer3d.fbo);
@@ -518,6 +521,7 @@ void RenderSceneBuffersGLES3::check_backbuffer(bool p_need_color, bool p_need_de
 #endif
 			glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, texture_target, backbuffer3d.color, 0);
 		}
+		needs_init_check = true;
 	}
 
 	if (backbuffer3d.color != 0 && p_need_mipmaps && !use_array && backbuffer3d_mipmap_count == 1) {
@@ -571,12 +575,15 @@ void RenderSceneBuffersGLES3::check_backbuffer(bool p_need_color, bool p_need_de
 #endif
 			glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, texture_target, backbuffer3d.depth, 0);
 		}
+		needs_init_check = true;
 	}
 
-	GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-	if (status != GL_FRAMEBUFFER_COMPLETE) {
-		_clear_back_buffers();
-		WARN_PRINT("Could not create 3D back buffers, status: " + texture_storage->get_framebuffer_error(status));
+	if (needs_init_check) {
+		GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+		if (status != GL_FRAMEBUFFER_COMPLETE) {
+			_clear_back_buffers();
+			WARN_PRINT("Could not create 3D back buffers, status: " + texture_storage->get_framebuffer_error(status));
+		}
 	}
 
 	glBindTexture(texture_target, 0);
