@@ -243,7 +243,7 @@ bool DirectResamplerRD::_ensure_emitter_buffers(uint32_t p_count) {
 bool DirectResamplerRD::_ensure_emitter_samples(uint32_t p_pixels) {
 	RD *rd = RD::get_singleton();
 	const uint32_t bytes = MAX(p_pixels, 1u) * EMITTER_SAMPLE_FLOATS * uint32_t(sizeof(float));
-	if (emitter_samples.is_valid() && emitter_samples_bytes == bytes) {
+	if (emitter_samples.is_valid() && emitter_samples_bytes == bytes && emitter_reuse_counters.is_valid()) {
 		return true;
 	}
 	if (emitter_samples.is_valid()) {
@@ -256,7 +256,7 @@ bool DirectResamplerRD::_ensure_emitter_samples(uint32_t p_pixels) {
 		emitter_reuse_counters = rd->storage_buffer_create(EMITTER_REUSE_COUNTER_BYTES);
 		rd->set_resource_name(emitter_reuse_counters, "Direct Resampler Emitter Reuse Counters");
 	}
-	return emitter_samples.is_valid();
+	return emitter_samples.is_valid() && emitter_reuse_counters.is_valid();
 }
 
 void DirectResamplerRD::_free_emitter_buffers() {

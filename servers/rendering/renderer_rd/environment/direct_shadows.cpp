@@ -231,9 +231,9 @@ DirectShadows::~DirectShadows() {
 	}
 	if (counter_buffer.is_valid()) {
 		rd->free_rid(counter_buffer);
+	}
 	if (emitter_hit_hist.is_valid()) {
 		rd->free_rid(emitter_hit_hist);
-	}
 	}
 	if (lamp_buffer.is_valid()) {
 		rd->free_rid(lamp_buffer);
