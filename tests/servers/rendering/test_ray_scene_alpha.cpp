@@ -1482,7 +1482,7 @@ TEST_CASE("[RayScene] Alpha entry key equality, canonicalisation and invalid far
 	{
 		bool far_invalid = true;
 		RayAlphaStore::EntryKey raw = make_key(uint32_t(RSE::CULL_MODE_BACK), 1u, -1.0f, -2.5f, 1.5f, 0.75f, -0.25f);
-		raw.bits |= 0xFFFFFFF0u;
+		raw.bits |= 0xFFFFFFE0u;
 		const RayAlphaStore::EntryKey clamped = RayAlphaStore::canonical_key(raw, far_invalid);
 		CHECK_FALSE(far_invalid);
 		CHECK(clamped.bits == (uint32_t(RSE::CULL_MODE_BACK) | (1u << RayAlphaStore::ENTRY_FAR_MODE_SHIFT)));
@@ -1498,7 +1498,7 @@ TEST_CASE("[RayScene] Alpha entry key equality, canonicalisation and invalid far
 		CHECK(clamped.offset[1] == 0.0f);
 
 		RayAlphaStore::EntryKey mode2 = make_key(uint32_t(RSE::CULL_MODE_FRONT), 2u, 2.0f, 4.0f, -0.5f, 1.0f, 0.0f);
-		mode2.bits |= 0xFFFFFFF0u;
+		mode2.bits |= 0xFFFFFFE0u;
 		const RayAlphaStore::EntryKey mode2_out = RayAlphaStore::canonical_key(mode2, far_invalid);
 		CHECK_FALSE(far_invalid);
 		CHECK(mode2_out.bits == (uint32_t(RSE::CULL_MODE_FRONT) | (2u << RayAlphaStore::ENTRY_FAR_MODE_SHIFT)));
@@ -1507,7 +1507,7 @@ TEST_CASE("[RayScene] Alpha entry key equality, canonicalisation and invalid far
 		CHECK(to_bits(mode2_out.far_veil_alpha) == 0u);
 
 		RayAlphaStore::EntryKey upper;
-		upper.bits = 0xFFFFFFF0u;
+		upper.bits = 0xFFFFFFE0u;
 		const RayAlphaStore::EntryKey upper_out = RayAlphaStore::canonical_key(upper, far_invalid);
 		CHECK_FALSE(far_invalid);
 		CHECK(upper_out.bits == 0u);
@@ -2514,12 +2514,15 @@ TEST_CASE("[RayScene] Alpha cutoff above one keeps fully discarded surfaces from
 	CHECK(cutoff > 1.0f);
 	CHECK_FALSE(raster_visible(1.0f, threshold, opacity));
 	const uint32_t skip_flags = RayScene::MATERIAL_FLAG_SKIP;
+	const LocalVector<TraceTriangle> triangles = make_unit_quad();
 	const LocalVector<RayAlphaStore::TableEntry> table;
 	const LocalVector<RayScene::TriangleUv> uvs;
 	CoverageSample coverage;
 	coverage.constant = 1.0f;
-	CHECK(alpha_passes(skip_flags, 0, 0, 0.5f, 0.25f, 1, table, uvs, coverage, false));
-	CHECK_FALSE(alpha_passes(skip_flags | (1u << RayScene::MATERIAL_ALPHA_SHIFT), 0, 0, 0.5f, 0.25f, 1, table, uvs, coverage, false));
+	TraceHit hit;
+	CHECK(trace_instance(triangles, Transform3D(), 0, Vector3(0.25, 0.25, 1), Vector3(0, 0, -1), 10, true, true, 1, table, uvs, coverage, false, hit));
+	CHECK_FALSE(trace_instance(triangles, Transform3D(), skip_flags, Vector3(0.25, 0.25, 1), Vector3(0, 0, -1), 10, true, true, 1, table, uvs, coverage, false, hit));
+	CHECK_FALSE(trace_instance(triangles, Transform3D(), skip_flags | (1u << RayScene::MATERIAL_ALPHA_SHIFT), Vector3(0.25, 0.25, 1), Vector3(0, 0, -1), 10, true, true, 1, table, uvs, coverage, false, hit));
 }
 
 TEST_CASE("[RayScene] Inverted opacity texture range matches raster visibility") {
