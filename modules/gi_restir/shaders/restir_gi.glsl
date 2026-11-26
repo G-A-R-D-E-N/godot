@@ -1023,14 +1023,14 @@ vec3 rs_fresh_lo(vec3 p_origin, vec3 p_dir, float p_dist, uint p_seed, uint p_ta
 	bool ddgi_shade = (rf.flags & F_OWN_SAMPLER) == 0u && (rf.flags & F_SHADE_DDGI) != 0u;
 	if (!ddgi_shade) {
 		vec3 irradiance = gi_hit_direct_light(position, normal, bias, rf.sky_distance, p_seed);
-		return min(material.emission * rf.emission_exposure + material.albedo * irradiance, vec3(RS_LO_CLAMP));
+		return min(ray_scene_hit_emission(hit, position) * rf.emission_exposure + material.albedo * irradiance, vec3(RS_LO_CLAMP));
 	}
 	vec3 irradiance = gi_hit_direct_light(position, normal, bias, ddgi.max_distance, p_seed);
 	if (rf.shade_bounce_energy > 0.0) {
 		vec3 bounce = ddgi_sample_direction(position - ray_scene.camera_to_anchor, normal, -p_dir, normal, 0.0, hit.t * 0.5).rgb;
 		irradiance += bounce * rf.shade_bounce_energy;
 	}
-	return min(material.emission * rf.shade_exposure + material.albedo * irradiance, vec3(RS_LO_CLAMP));
+	return min(ray_scene_hit_emission(hit, position) * rf.shade_exposure + material.albedo * irradiance, vec3(RS_LO_CLAMP));
 }
 
 vec3 rs_fresh_lo_replay(vec3 p_origin, vec3 p_dir, float p_dist, uint p_seed, out bool r_hit_here) {
@@ -1353,9 +1353,9 @@ void main() {
 		} else {
 			float bias = 0.01 + hit.t * 0.001;
 			vec3 irradiance = gi_hit_direct_light(point, normal, bias, rf.sky_distance, shade_seed);
-			radiance = min(material.emission * rf.emission_exposure + material.albedo * irradiance, vec3(RS_LO_CLAMP));
+			radiance = min(ray_scene_hit_emission(hit, point) * rf.emission_exposure + material.albedo * irradiance, vec3(RS_LO_CLAMP));
 		}
-		if (dot(material.emission, vec3(1.0)) > 0.0) {
+		if (dot(ray_scene_hit_emission(hit, point), vec3(1.0)) > 0.0) {
 			flags |= RTGI_FLAG_EMISSIVE;
 		}
 	} else {
