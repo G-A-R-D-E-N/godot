@@ -779,36 +779,6 @@ void main() {
 	}
 
 	vec3 anchored = relative + ray_scene.camera_to_anchor;
-	const vec3 omni_anchor = vec3(-3.720, -0.857, -1.148) - params.anchor.xyz;
-	const float receiver_omni_distance = length(anchored - omni_anchor);
-	const float receiver_camera_distance = length(anchored - ray_scene.camera_to_anchor);
-	if (receiver_omni_distance < 3.0) {
-		if (dot(normal, view) < 0.0) {
-			atomicAdd(counters.near3_back_cam, 1u);
-		} else {
-			atomicAdd(counters.near3_facing_cam, 1u);
-		}
-	}
-	if (receiver_camera_distance < 1.0) {
-		atomicAdd(counters.cam_005, 1u);
-	} else if (receiver_camera_distance < 3.0) {
-		atomicAdd(counters.cam_030, 1u);
-	} else if (receiver_camera_distance < 10.0) {
-		atomicAdd(counters.cam_200, 1u);
-	} else {
-		atomicAdd(counters.cam_far, 1u);
-	}
-	{
-		if (receiver_omni_distance < 1.0) {
-			atomicAdd(counters.recv_near_005, 1u);
-		} else if (receiver_omni_distance < 3.0) {
-			atomicAdd(counters.recv_near_030, 1u);
-		} else if (receiver_omni_distance < 10.0) {
-			atomicAdd(counters.recv_near_200, 1u);
-		} else {
-			atomicAdd(counters.recv_near_far, 1u);
-		}
-	}
 	uint traced_rays = 0u;
 	uint ray_record = 0u;
 
@@ -837,22 +807,6 @@ void main() {
 			emitter_visible = 1.0;
 			emitter_traces = 0u;
 			atomicAdd(counters.emitter_backface, 1u);
-			if (receiver_omni_distance < 1.0) {
-				atomicAdd(counters.back_005, 1u);
-			} else if (receiver_omni_distance < 3.0) {
-				atomicAdd(counters.back_030, 1u);
-			} else if (receiver_omni_distance < 10.0) {
-				atomicAdd(counters.back_200, 1u);
-			} else {
-				atomicAdd(counters.back_far, 1u);
-			}
-			if (receiver_omni_distance < 3.0) {
-				if (dot(normal, view) < 0.0) {
-					atomicAdd(counters.near3_backface_back_cam, 1u);
-				} else {
-					atomicAdd(counters.near3_backface_facing_cam, 1u);
-				}
-			}
 		} else if (emitter_reach <= params.bias) {
 			emitter_visible = 1.0;
 			emitter_traces = 1u;
