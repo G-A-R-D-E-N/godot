@@ -540,6 +540,7 @@ private:
 	RID triangle_uv_buffer;
 	RID triangle_emitter_buffer;
 	RID emission_dummy;
+	RID room_grid_source;
 	RID room_grid_texture;
 	RID room_grid_dummy;
 	RID emission_texture_array;

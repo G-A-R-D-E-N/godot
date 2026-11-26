@@ -483,13 +483,15 @@ void RayScene::_ensure_buffer(RID &r_buffer, uint32_t &r_capacity, uint32_t p_co
 
 void RayScene::_poll_room_grid() {
 	const Variant value = MaterialStorage::get_singleton()->global_shader_parameter_get_internal(SNAME("ray_room_grid"));
-	const RID rid = value.get_type() == Variant::RID ? RID(value) : RID();
-	if (rid == room_grid_texture) {
+	const Variant::Type type = value.get_type();
+	const RID source = (type == Variant::RID || type == Variant::OBJECT) ? RID(value) : RID();
+	if (source == room_grid_source) {
 		return;
 	}
-	room_grid_texture = rid;
+	room_grid_source = source;
+	room_grid_texture = source.is_valid() ? TextureStorage::get_singleton()->texture_get_rd_texture(source) : RID();
 	triangle_emitters_built = false;
-	print_line(vformat("Ray scene room grid changed: %s", rid.is_valid() ? "valid" : Variant::get_type_name(value.get_type())));
+	print_line(vformat("Ray scene room grid changed: %s", source.is_valid() ? "valid" : Variant::get_type_name(type)));
 }
 
 void RayScene::_refresh_emitter_room_grid() {
@@ -498,8 +500,10 @@ void RayScene::_refresh_emitter_room_grid() {
 	MaterialStorage *material_storage = MaterialStorage::get_singleton();
 	const Variant grid_value = material_storage->global_shader_parameter_get_internal(SNAME("ray_room_grid"));
 	const Variant origin_size_value = material_storage->global_shader_parameter_get_internal(SNAME("ray_room_grid_origin_size"));
-	if (grid_value.get_type() != Variant::RID || origin_size_value.get_type() != Variant::VECTOR4) {
-		print_line(vformat("Ray scene room grid: parameters %s %s", Variant::get_type_name(grid_value.get_type()), Variant::get_type_name(origin_size_value.get_type())));
+	const Variant::Type grid_type = grid_value.get_type();
+	const bool grid_is_texture = grid_type == Variant::RID || grid_type == Variant::OBJECT;
+	if (!grid_is_texture || origin_size_value.get_type() != Variant::VECTOR4) {
+		print_line(vformat("Ray scene room grid: parameters %s %s", Variant::get_type_name(grid_type), Variant::get_type_name(origin_size_value.get_type())));
 		return;
 	}
 	const Vector4 origin_size = origin_size_value;
