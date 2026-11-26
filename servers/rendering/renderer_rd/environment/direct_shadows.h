@@ -58,6 +58,7 @@
 #define RB_DIRECT_DEBUG SNAME("debug")
 #define RB_DIRECT_FACTORS_BLOCK SNAME("factors_block")
 #define RB_DIRECT_SLOTS_RESOLVED SNAME("slots_resolved")
+#define RB_DIRECT_GUIDE_RESOLVED SNAME("guide_resolved")
 #define RB_DIRECT_TIER SNAME("tier")
 #define RB_DIRECT_DEPTH_FULL SNAME("depth_full")
 #define RB_DIRECT_NORMAL_FULL SNAME("normal_full")

@@ -32,6 +32,7 @@ layout(r16, set = 0, binding = 19) uniform restrict readonly image2DArray block_
 layout(r8ui, set = 0, binding = 20) uniform restrict writeonly uimage2D tier_image;
 layout(r32f, set = 0, binding = 21) uniform restrict writeonly image2D depth_image;
 layout(r32ui, set = 0, binding = 22) uniform restrict writeonly uimage2D normal_image;
+layout(rg32ui, set = 0, binding = 23) uniform restrict writeonly uimage2D resolved_guide;
 
 layout(set = 0, binding = 12, std430) restrict buffer Counters {
 	uint lit_pixels;
@@ -164,6 +165,28 @@ void store_factor(ivec2 p_pixel, int p_layer, float p_value) {
 	}
 }
 
+void store_guide(ivec2 p_pixel, bool p_valid, float p_depth, vec3 p_normal) {
+	for (uint q = 0u; q < (broadcast_block ? 4u : 1u); q++) {
+		ivec2 pixel = broadcast_block ? direct_block_pixel(p_pixel >> 1, q) : p_pixel;
+		if (any(greaterThanEqual(pixel, params.full_size))) {
+			continue;
+		}
+		uvec4 guide = uvec4(0u);
+		if (p_valid) {
+			float depth = p_depth;
+			vec3 normal = p_normal;
+			if (q != 0u) {
+				float raw = texelFetch(depth_buffer, pixel, 0).r;
+				vec4 view_h = params.inv_projection * vec4(((vec2(pixel) + 0.5) * params.pixel_size) * 2.0 - 1.0, raw, 1.0);
+				depth = -view_h.z / view_h.w;
+				normal = normalize(texelFetch(normal_roughness_buffer, pixel, 0).xyz * 2.0 - 1.0);
+			}
+			guide = uvec4(floatBitsToUint(depth), packSnorm2x16(direct_oct_encode(normal)), 0u, 0u);
+		}
+		imageStore(resolved_guide, pixel, guide);
+	}
+}
+
 void write_none(ivec2 p_pixel, uint p_tier, float p_depth, uint p_normal) {
 	for (uint i = 0u; i <= own_limit; i++) {
 		store_slot(p_pixel, int(i), 0.0);
@@ -171,6 +194,7 @@ void write_none(ivec2 p_pixel, uint p_tier, float p_depth, uint p_normal) {
 	for (uint i = 0u; i < own_limit + 3u; i++) {
 		store_factor(p_pixel, int(i), 1.0);
 	}
+	store_guide(p_pixel, false, 0.0, vec3(0.0));
 	if (params.count != 0u) {
 		imageStore(tier_image, p_pixel, uvec4(p_tier));
 		imageStore(depth_image, p_pixel, vec4(p_depth));
@@ -375,6 +399,7 @@ void main() {
 			store_factor(pixel, int(own_limit + c), rest_total > 0.0 ? rest_sum[c] / rest_total : 1.0);
 		}
 
+		store_guide(pixel, kept != 0u || rest_key != 0u, depth, normal);
 		if (params.count != 0u) {
 			imageStore(tier_image, pixel, uvec4(tier));
 			imageStore(depth_image, pixel, vec4(depth));
