@@ -22,3 +22,14 @@ returned for every pixel because it gated on the lamp-reservoir `tile_flags` sta
 (`spatial_pixels_rewritten 0`), and its depth test compared the non-linear depth
 buffer against a tolerance in metres. A pixel the filter fills gets its emitter mark
 set, otherwise the filter could only dim pixels.
+
+## Emitter radiance units (ray_scene.cpp _store_material, di_resample.glsl emitter reads)
+Masked emission without texture ranges: the raster OpenPBR path computes
+`emission_color x emission_luminance x tex.rgb x tex.a x openpbr_emission_scale`; the ray
+path used `tex.rgb x tex.a x openpbr_emission_scale`, dropping the nits while the pick pdf
+used the material's full nits, so textured emitters came out short by about
+1/emission_luminance. `emission_texel_scale` now carries `emission_luminance x bounce x
+openpbr_emission_scale` for those materials. The emission_color tint, oc_emission_scale and
+flicker are still not on the ray path (no room in the material struct).
+The emitter term is now multiplied by `ray_scene_emissive_exposure_normalization()` at both
+emitter reads, as lamps (light_energy) and raster emission already are.

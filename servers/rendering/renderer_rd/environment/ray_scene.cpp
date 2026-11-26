@@ -934,6 +934,10 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 			r_material.emission_flags |= EMISSION_FLAG_TEXTURE_RANGES;
 		}
 		r_material.emission_texel_scale = emission_scale;
+		if (!(r_material.emission_flags & EMISSION_FLAG_TEXTURE_RANGES) && authored_luminance > 0.0f) {
+			const float bounce = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_bounce_weight")), 1.0f);
+			r_material.emission_texel_scale = authored_luminance * bounce * emission_scale;
+		}
 		if (!(r_material.emission_mean_luminance > 0.0f) && r_material.emission_texture != 0) {
 			if (gi_present) {
 				r_material.emission_mean_luminance = (0.2126f * gi_emission.r + 0.7152f * gi_emission.g + 0.0722f * gi_emission.b) * emission_scale;

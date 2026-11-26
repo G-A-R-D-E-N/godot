@@ -476,7 +476,7 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal, uint p_seed) {
 	float c = root * r2;
 	vec3 sample_point = v0 * (1.0 - root) + v1 * b + v2 * c;
 	vec2 emitter_uv = ray_scene_triangle_emitter_uv(emitter.uv_index, vec3(b, c, 0.0));
-	vec3 texel_emission = ray_scene_triangle_emitter_emission_texel(emitter.material, emitter_uv);
+	vec3 texel_emission = ray_scene_triangle_emitter_emission_texel(emitter.material, emitter_uv) * ray_scene_emissive_exposure_normalization();
 	vec3 rel = sample_point - p_vertex;
 	float distance = length(rel);
 	if (!(distance > 1e-5)) {
@@ -1138,7 +1138,7 @@ vec2 di_emitter_uv_at(RaySceneTriangleEmitter p_emitter, vec3 p_point) {
 vec3 di_emitter_color_at(uint p_index, vec3 p_point, out float r_luminance_weight) {
 	RaySceneTriangleEmitter emitter = ray_scene_triangle_emitter(p_index);
 	vec2 uv = di_emitter_uv_at(emitter, p_point);
-	vec3 emission = uv == vec2(-1.0) ? ray_scene_triangle_emitter_emission(emitter.material) : ray_scene_triangle_emitter_emission_texel(emitter.material, uv);
+	vec3 emission = (uv == vec2(-1.0) ? ray_scene_triangle_emitter_emission(emitter.material) : ray_scene_triangle_emitter_emission_texel(emitter.material, uv)) * ray_scene_emissive_exposure_normalization();
 	float luminance = dot(max(emission, vec3(0.0)), luminance_weights);
 	float selection = di_emitter_selection_luminance(emitter.material);
 	r_luminance_weight = luminance;
