@@ -540,6 +540,8 @@ private:
 	RID triangle_uv_buffer;
 	RID triangle_emitter_buffer;
 	RID emission_dummy;
+	RID room_grid_texture;
+	RID room_grid_dummy;
 	RID emission_texture_array;
 	uint32_t emission_texture_count = 0;
 	uint32_t blas_node_capacity = 0;
@@ -625,6 +627,7 @@ private:
 	static void _ensure_buffer(RID &r_buffer, uint32_t &r_capacity, uint32_t p_count, uint32_t p_stride, const char *p_name);
 	void _update_triangle_emitters(const LocalVector<TriangleEmitterSource> &p_sources, const LocalVector<uint32_t> &p_order);
 	void _refresh_emitter_room_grid();
+	void _poll_room_grid();
 	uint32_t _emitter_room_at(const Vector3 &p_position) const;
 	void _backend_tick();
 	void _hw_begin();

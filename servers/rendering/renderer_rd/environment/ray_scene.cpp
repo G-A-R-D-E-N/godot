@@ -93,12 +93,22 @@ RayScene::RayScene() {
 			RD::get_singleton()->texture_update(emission_dummy, layer, Vector<uint8_t>({ 255, 255, 255, 255 }));
 		}
 	}
+	RD::TextureFormat room_format;
+	room_format.format = RD::DATA_FORMAT_R8_UNORM;
+	room_format.width = 1;
+	room_format.height = 1;
+	room_format.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_UPDATE_BIT;
+	room_grid_dummy = RD::get_singleton()->texture_create(room_format, RD::TextureView());
+	RD::get_singleton()->set_resource_name(room_grid_dummy, "Ray Scene Room Grid Dummy");
+	if (room_grid_dummy.is_valid()) {
+		RD::get_singleton()->texture_update(room_grid_dummy, 0, Vector<uint8_t>({ 0 }));
+	}
 }
 
 RayScene::~RayScene() {
 	_print_tlas_rebuilds(true);
 	_hw_free();
-	RID *owned[] = { &blas_node_buffer, &triangle_buffer, &instance_buffer, &tlas_node_buffer, &material_buffer, &light_buffer, &scene_data_buffer, &triangle_uv_buffer, &triangle_emitter_buffer, &emission_dummy };
+	RID *owned[] = { &blas_node_buffer, &triangle_buffer, &instance_buffer, &tlas_node_buffer, &material_buffer, &light_buffer, &scene_data_buffer, &triangle_uv_buffer, &triangle_emitter_buffer, &emission_dummy, &room_grid_dummy };
 	for (RID *rid : owned) {
 		if (rid->is_valid()) {
 			RD::get_singleton()->free_rid(*rid);
@@ -469,6 +479,19 @@ void RayScene::_ensure_buffer(RID &r_buffer, uint32_t &r_capacity, uint32_t p_co
 	r_capacity = MAX(MAX(p_count, r_capacity * 2), 64u);
 	r_buffer = RD::get_singleton()->storage_buffer_create(r_capacity * p_stride);
 	RD::get_singleton()->set_resource_name(r_buffer, p_name);
+}
+
+void RayScene::_poll_room_grid() {
+	const Variant value = MaterialStorage::get_singleton()->global_shader_parameter_get_internal(SNAME("ray_room_grid"));
+	const RID rid = value.get_type() == Variant::RID ? RID(value) : RID();
+	if (rid == room_grid_texture) {
+		return;
+	}
+	room_grid_texture = rid;
+	triangle_emitters_built = false;
+	if (!rid.is_valid()) {
+		print_line(vformat("Ray scene room grid: the global is %s", Variant::get_type_name(value.get_type())));
+	}
 }
 
 void RayScene::_refresh_emitter_room_grid() {
@@ -2289,6 +2312,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	}
 	_print_tlas_rebuilds(false);
 
+	_poll_room_grid();
 	SceneData scene_data = {};
 	const Vector3 camera_to_anchor = p_camera_position - anchor;
 	scene_data.camera_to_anchor[0] = camera_to_anchor.x;

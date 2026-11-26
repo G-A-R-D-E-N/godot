@@ -334,7 +334,7 @@ bool di_emitter_visible(vec3 p_vertex, vec3 p_normal, vec3 p_point, uint p_insta
 }
 
 #ifdef DI_EMITTER_ROOM_PICK
-global uniform sampler2D ray_room_grid;
+layout(set = RAY_SCENE_SET, binding = 16) uniform sampler2D ray_room_grid;
 
 vec3 di_emitter_ray_space(vec3 p_view) {
 	mat3 to_ray = mat3(params.camera_basis[0].xyz, params.camera_basis[1].xyz, params.camera_basis[2].xyz);
