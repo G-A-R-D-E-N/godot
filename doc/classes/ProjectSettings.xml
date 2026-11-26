@@ -966,7 +966,7 @@
 			Windows override for [member display/display_server/driver].
 		</member>
 		<member name="display/mouse_cursor/custom_image" type="String" setter="" getter="" default="&quot;&quot;">
-			Custom image for the mouse cursor (limited to 256Ã—256).
+			Custom image for the mouse cursor (limited to 256×256).
 		</member>
 		<member name="display/mouse_cursor/custom_image_hotspot" type="Vector2" setter="" getter="" default="Vector2(0, 0)">
 			Hotspot for the custom mouse cursor image.
@@ -2890,7 +2890,7 @@
 			[b]Note:[/b] It is not recommended to use this setting together with [member rendering/2d/snap/snap_2d_transforms_to_pixel], as movement may appear even less smooth. Prefer only enabling that setting instead.
 		</member>
 		<member name="rendering/anti_aliasing/quality/garden_taa" type="bool" setter="" getter="" default="false">
-			If [code]true[/code] and [member rendering/anti_aliasing/quality/temporal_transition_metadata] is enabled, temporal antialiasing uses the transition mask and object ID that surfaces write to the velocity buffer ([code]TEMPORAL_MASK[/code] and [code]TEMPORAL_ID[/code] in spatial shaders). Where a pixel or the front-most pixel around it is masked, the history is reprojected with the velocity of that front-most pixel and neither a change in velocity nor a change in brightness reduces how much history is kept, so a dithered cross-fade (such as [member rendering/visibility/dithered_instance_fade] with its per-frame noise) averages into a blend. Where the current and the reprojected object IDs are both non-zero and differ, the history is discarded. The closest velocity in each 3Ã—3 neighborhood is taken from the nearest surface.
+			If [code]true[/code] and [member rendering/anti_aliasing/quality/temporal_transition_metadata] is enabled, temporal antialiasing uses the transition mask and object ID that surfaces write to the velocity buffer ([code]TEMPORAL_MASK[/code] and [code]TEMPORAL_ID[/code] in spatial shaders). Where a pixel or the front-most pixel around it is masked, the history is reprojected with the velocity of that front-most pixel and neither a change in velocity nor a change in brightness reduces how much history is kept, so a dithered cross-fade (such as [member rendering/visibility/dithered_instance_fade] with its per-frame noise) averages into a blend. Where the current and the reprojected object IDs are both non-zero and differ, the history is discarded. The closest velocity in each 3×3 neighborhood is taken from the nearest surface.
 			Without [member rendering/anti_aliasing/quality/temporal_transition_metadata], this setting has no effect. Can be changed at run-time.
 			[b]Note:[/b] Only supported in the Forward+ rendering method, with [member rendering/anti_aliasing/quality/use_taa] or [member Viewport.use_taa]. MSAA averages the object IDs at polygon edges; use it together with this setting with care.
 		</member>
@@ -3360,10 +3360,10 @@
 			Applies while [member rendering/global_illumination/direct/resampled/reservoirs] is [code]B1[/code] or [code]U1[/code] and [member rendering/global_illumination/direct/resampled/tail_samples] is [code]1[/code]. If [code]true[/code], a pixel combines its fresh pick with the pick stored for the same surface in the previous frame, found by reprojection where the previous frame's depth and normal match. If [code]false[/code], every frame's pick starts fresh and only the spatial pass reuses picks.
 		</member>
 		<member name="rendering/global_illumination/direct/trace_resolution" type="int" setter="" getter="" default="0">
-			Full traces and filters the shadow entries at every pixel. Quarter traces and filters one pixel of each 2Ã—2 block, chosen from the block's depths and normals, and a resolve pass then writes every pixel's entries from the nearby blocks on the same surface. Quarter costs less and is softer on hard shadow edges. A change starts the shadow history over. Quarter is not used while [member rendering/global_illumination/direct/reference] is on or [member rendering/global_illumination/direct/history_cap] is [code]0[/code], or while [member rendering/global_illumination/direct/resampled/enabled] supplies the entries, since the Quarter trace has no variant that reads resampled entries.
+			Full traces and filters the shadow entries at every pixel. Quarter traces and filters one pixel of each 2×2 block, chosen from the block's depths and normals, and a resolve pass then writes every pixel's entries from the nearby blocks on the same surface. Quarter costs less and is softer on hard shadow edges. A change starts the shadow history over. Quarter is not used while [member rendering/global_illumination/direct/reference] is on or [member rendering/global_illumination/direct/history_cap] is [code]0[/code], or while [member rendering/global_illumination/direct/resampled/enabled] supplies the entries, since the Quarter trace has no variant that reads resampled entries.
 		</member>
 		<member name="rendering/global_illumination/gi/use_half_resolution" type="bool" setter="" getter="" default="false" keywords="size">
-			If [code]true[/code], renders [VoxelGI] and SDFGI ([member Environment.sdfgi_enabled]) buffers at halved resolution (e.g. 960Ã—540 when the viewport size is 1920Ã—1080). This improves performance significantly when VoxelGI or SDFGI is enabled, at the cost of artifacts that may be visible on polygon edges. The loss in quality becomes less noticeable as the viewport resolution increases. [LightmapGI] rendering is not affected by this setting.
+			If [code]true[/code], renders [VoxelGI] and SDFGI ([member Environment.sdfgi_enabled]) buffers at halved resolution (e.g. 960×540 when the viewport size is 1920×1080). This improves performance significantly when VoxelGI or SDFGI is enabled, at the cost of artifacts that may be visible on polygon edges. The loss in quality becomes less noticeable as the viewport resolution increases. [LightmapGI] rendering is not affected by this setting.
 			[b]Note:[/b] This property is only read when the project starts. To set half-resolution GI at run-time, call [method RenderingServer.gi_set_use_half_resolution] instead.
 		</member>
 		<member name="rendering/global_illumination/ray_scene/alpha_fill_texels_per_frame" type="int" setter="" getter="" default="67108864">
@@ -3593,7 +3593,7 @@
 		<member name="rendering/lights_and_shadows/directional_shadow/soft_shadow_filter_quality" type="int" setter="" getter="" default="2">
 			Quality setting for shadows cast by [DirectionalLight3D]s. Higher quality settings use more samples when reading from shadow maps and are thus slower. Low quality settings may result in shadows looking grainy.
 			[b]Note:[/b] The [b]Soft Very Low[/b] option will automatically multiply all [i]constant[/i] shadow blur by [code]0.75[/code] to reduce the amount of noticeable noise. This automatic blur change only affects the constant blur factor defined in [member Light3D.shadow_blur], not the variable blur performed by [DirectionalLight3D]'s [member Light3D.light_angular_distance].
-			[b]Note:[/b] The Soft High and Soft Ultra settings will automatically multiply [i]constant[/i] shadow blur by 1.5Ã— and 2Ã— respectively to make better use of the increased sample count. This increased blur also improves stability of dynamic object shadows.
+			[b]Note:[/b] The Soft High and Soft Ultra settings will automatically multiply [i]constant[/i] shadow blur by 1.5× and 2× respectively to make better use of the increased sample count. This increased blur also improves stability of dynamic object shadows.
 		</member>
 		<member name="rendering/lights_and_shadows/directional_shadow/soft_shadow_filter_quality.mobile" type="int" setter="" getter="" default="0">
 			Lower-end override for [member rendering/lights_and_shadows/directional_shadow/soft_shadow_filter_quality] on mobile devices, due to performance concerns or driver support.
@@ -3630,7 +3630,7 @@
 		<member name="rendering/lights_and_shadows/positional_shadow/soft_shadow_filter_quality" type="int" setter="" getter="" default="2">
 			Quality setting for shadows cast by [OmniLight3D]s and [SpotLight3D]s. Higher quality settings use more samples when reading from shadow maps and are thus slower. Low quality settings may result in shadows looking grainy.
 			[b]Note:[/b] The [b]Soft Very Low[/b] option will automatically multiply all [i]constant[/i] shadow blur by [code]0.75[/code] to reduce the amount of noticeable noise. This automatic blur change only affects the constant blur factor defined in [member Light3D.shadow_blur], not the variable blur performed by [DirectionalLight3D]'s [member Light3D.light_angular_distance].
-			[b]Note:[/b] The Soft High and Soft Ultra settings will automatically multiply shadow blur by 1.5Ã— and 2Ã— respectively to make better use of the increased sample count. This increased blur also improves stability of dynamic object shadows.
+			[b]Note:[/b] The Soft High and Soft Ultra settings will automatically multiply shadow blur by 1.5× and 2× respectively to make better use of the increased sample count. This increased blur also improves stability of dynamic object shadows.
 		</member>
 		<member name="rendering/lights_and_shadows/positional_shadow/soft_shadow_filter_quality.mobile" type="int" setter="" getter="" default="0">
 			Lower-end override for [member rendering/lights_and_shadows/positional_shadow/soft_shadow_filter_quality] on mobile devices, due to performance concerns or driver support.
@@ -3992,7 +3992,7 @@
 			[b]Note:[/b] Currently this only affects certain compressed formats (BC1, BC3, BC4, BC5, and BC6), all of which are exclusive to desktop platforms and consoles.
 		</member>
 		<member name="rendering/textures/vram_compression/import_etc2_astc" type="bool" setter="" getter="" default="false">
-			If [code]true[/code], the texture importer will import VRAM-compressed textures using the Ericsson Texture Compression 2 algorithm for lower quality textures and normal maps and Adaptable Scalable Texture Compression algorithm for high quality textures (in 4Ã—4 block size).
+			If [code]true[/code], the texture importer will import VRAM-compressed textures using the Ericsson Texture Compression 2 algorithm for lower quality textures and normal maps and Adaptable Scalable Texture Compression algorithm for high quality textures (in 4×4 block size).
 			[b]Note:[/b] This setting is an override. The texture importer will always import the format the host platform needs, even if this is set to [code]false[/code].
 			[b]Note:[/b] Changing this setting does [i]not[/i] impact textures that were already imported before. To make this setting apply to textures that were already imported, exit the editor, remove the [code].godot/imported/[/code] folder located inside the project folder then restart the editor (see [member application/config/use_hidden_project_data_directory]).
 		</member>
@@ -4035,16 +4035,16 @@
 			If [member rendering/vrs/mode] is set to [b]Texture[/b], this is the path to default texture loaded as the VRS image.
 			The texture [i]must[/i] use a lossless compression format so that colors can be matched precisely. The following VRS densities are mapped to various colors, with brighter colors representing a lower level of shading precision:
 			[codeblock lang=text]
-			- 1Ã—1 = rgb(0, 0, 0)     - #000000
-			- 1Ã—2 = rgb(0, 85, 0)    - #005500
-			- 2Ã—1 = rgb(85, 0, 0)    - #550000
-			- 2Ã—2 = rgb(85, 85, 0)   - #555500
-			- 2Ã—4 = rgb(85, 170, 0)  - #55aa00
-			- 4Ã—2 = rgb(170, 85, 0)  - #aa5500
-			- 4Ã—4 = rgb(170, 170, 0) - #aaaa00
-			- 4Ã—8 = rgb(170, 255, 0) - #aaff00 - Not supported on most hardware
-			- 8Ã—4 = rgb(255, 170, 0) - #ffaa00 - Not supported on most hardware
-			- 8Ã—8 = rgb(255, 255, 0) - #ffff00 - Not supported on most hardware
+			- 1×1 = rgb(0, 0, 0)     - #000000
+			- 1×2 = rgb(0, 85, 0)    - #005500
+			- 2×1 = rgb(85, 0, 0)    - #550000
+			- 2×2 = rgb(85, 85, 0)   - #555500
+			- 2×4 = rgb(85, 170, 0)  - #55aa00
+			- 4×2 = rgb(170, 85, 0)  - #aa5500
+			- 4×4 = rgb(170, 170, 0) - #aaaa00
+			- 4×8 = rgb(170, 255, 0) - #aaff00 - Not supported on most hardware
+			- 8×4 = rgb(255, 170, 0) - #ffaa00 - Not supported on most hardware
+			- 8×8 = rgb(255, 255, 0) - #ffff00 - Not supported on most hardware
 			[/codeblock]
 		</member>
 		<member name="threading/worker_pool/low_priority_thread_ratio" type="float" setter="" getter="" default="0.3">
