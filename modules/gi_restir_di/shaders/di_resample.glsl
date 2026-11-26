@@ -413,15 +413,28 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal, uint p_seed) {
 			float room_base = room_first > 0u ? emitter_cdf.data[room_first - 1u] : 0.0;
 			float room_span = emitter_cdf.data[room_last - 1u] - room_base;
 			float room_target = room_base + di_emitter_hash(p_seed, 0x27d4eb2fu) * room_span;
-			low = room_first;
-			uint high = room_last - 1u;
-			while (low < high) {
-				uint mid = (low + high) >> 1u;
+			uint candidate = room_first;
+			uint room_low = room_first;
+			uint room_high = room_last - 1u;
+			while (room_low < room_high) {
+				uint mid = (room_low + room_high) >> 1u;
 				if (emitter_cdf.data[mid] < room_target) {
-					low = mid + 1u;
+					room_low = mid + 1u;
 				} else {
-					high = mid;
+					room_high = mid;
 				}
+			}
+			candidate = room_low;
+			while (candidate + 1u < room_last) {
+				float previous = candidate > room_first ? emitter_cdf.data[candidate - 1u] : room_base;
+				if (emitter_cdf.data[candidate] > previous) {
+					break;
+				}
+				candidate++;
+			}
+			float previous = candidate > room_first ? emitter_cdf.data[candidate - 1u] : room_base;
+			if (emitter_cdf.data[candidate] > previous) {
+				low = candidate;
 			}
 		}
 	}
