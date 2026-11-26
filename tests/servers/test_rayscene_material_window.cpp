@@ -28,11 +28,12 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "servers/rendering/renderer_rd/environment/ray_scene.h"
-
 #include "tests/test_macros.h"
 
 TEST_FORCE_LINK(test_rayscene_material_window)
+
+#ifdef RD_ENABLED
+#include "servers/rendering/renderer_rd/environment/ray_scene.h"
 
 TEST_CASE("[RayScene] The material window never leaves the material list") {
 	CHECK_EQ(RendererRD::RayScene::material_window(0, 0, 3), 0u);
@@ -44,3 +45,4 @@ TEST_CASE("[RayScene] The material window never leaves the material list") {
 	CHECK_EQ(RendererRD::RayScene::material_window(9, 8, 4), 1u);
 	CHECK_EQ(RendererRD::RayScene::material_window(9, 0, 0), 0u);
 }
+#endif
