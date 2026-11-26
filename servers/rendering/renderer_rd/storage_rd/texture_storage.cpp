@@ -1901,6 +1901,12 @@ void TextureStorage::texture_drawable_blit_rect(const TypedArray<RID> &p_texture
 
 	RD::get_singleton()->draw_list_end();
 	RD::get_singleton()->draw_command_end_label();
+	for (int target = 0; target < MIN(p_textures.size(), 4); target++) {
+		Texture *base = _texture_get_base(get_texture(p_textures[target]));
+		if (base != nullptr) {
+			base->data_version++;
+		}
+	}
 	i = 0;
 	while (i < p_textures.size()) {
 		decal_atlas_mark_draw_on_texture(p_textures[i]);

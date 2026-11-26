@@ -19,3 +19,7 @@ Alpha-layer source changes are detected by comparing the RD texture, dimensions,
 ### `servers/rendering/renderer_rd/storage_rd/texture_storage.cpp:TextureStorage::_texture_2d_update`
 
 CPU uploads advance the backing texture's content version even when the upload is made through a proxy. Version reads follow proxy chains so sibling aliases observe the same update. GPU-written content is not covered by this CPU-upload counter.
+
+### `servers/rendering/renderer_rd/storage_rd/texture_storage.cpp:TextureStorage::texture_drawable_blit_rect`
+
+Drawable blits advance the backing textures' content versions after the draw is submitted, so later ray-alpha cache updates refill changed targets. Render targets and externally written RD textures need separate invalidation.
