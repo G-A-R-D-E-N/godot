@@ -2746,11 +2746,15 @@ void fragment_shader(in SceneData scene_data) {
 #endif
 			specular_occlusion = specular_occlusion_cone(specular_ao, roughness, occlusion_bent_normal, reflect(-view, normal));
 #if defined(INDIRECT_COAT_USED) && !defined(AMBIENT_LIGHT_DISABLED)
+#ifdef SPECULAR_OCCLUSION_COMBINED
+			cc_specular_occlusion = specular_occlusion_cone(specular_ao, indirect_coat_roughness, occlusion_bent_normal, reflect(-view, CLEARCOAT_NORMAL));
+#else
 			cc_specular_occlusion = specular_occlusion;
 #ifdef INDIRECT_COAT_NORMAL_ACTIVE
 			if (cc_custom) {
 				cc_specular_occlusion = specular_occlusion_cone(specular_ao, indirect_coat_roughness, occlusion_bent_normal, reflect(-view, cc_normal));
 			}
+#endif
 #endif
 #endif
 		}
