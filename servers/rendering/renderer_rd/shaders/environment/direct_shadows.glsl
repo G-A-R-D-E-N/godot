@@ -265,8 +265,8 @@ void read_entries(ivec2 p_pixel) {
 		tail_count--;
 		emitter_tail_factor = params.entries + 2u;
 		uint sample_index = uint(p_pixel.y) * uint(params.full_size[0]) + uint(p_pixel.x);
-		emitter_geometry = direct_emitter_samples.data[sample_index * 2u];
-		emitter_color = direct_emitter_samples.data[sample_index * 2u + 1u];
+		emitter_geometry = direct_emitter_samples.data[sample_index * 3u];
+		emitter_color = direct_emitter_samples.data[sample_index * 3u + 1u];
 	}
 	for (uint k = 0u; k < tail_count; k++) {
 		uint base = own_limit + 3u * k;

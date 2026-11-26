@@ -3610,8 +3610,8 @@ void fragment_shader(in SceneData scene_data) {
 		if (emitter_record.x == 0xFFFFFFFFu && emitter_weight > 0.0) {
 			ivec3 emitter_size = textureSize(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), 0);
 			uint emitter_index = uint(emitter_pixel.y) * uint(emitter_size.x) + uint(emitter_pixel.x);
-			vec4 emitter_geometry = direct_emitter_samples.data[emitter_index * 2u];
-			vec4 emitter_color = direct_emitter_samples.data[emitter_index * 2u + 1u];
+			vec4 emitter_geometry = direct_emitter_samples.data[emitter_index * 3u];
+			vec4 emitter_color = direct_emitter_samples.data[emitter_index * 3u + 1u];
 			if (emitter_geometry.w > 0.0) {
 				int emitter_layer = direct_record_heads + direct_record_tails + 3;
 				float emitter_visible = texelFetch(sampler2DArray(direct_shadow_factors, SAMPLER_NEAREST_CLAMP), ivec3(emitter_pixel, emitter_layer), 0).r;
@@ -3636,8 +3636,8 @@ void fragment_shader(in SceneData scene_data) {
 							binormal, tangent, anisotropy,
 #endif
 							emitter_diffuse, emitter_specular);
-					diffuse_light += emitter_diffuse * hvec3(emitter_scale);
-					direct_specular_light += emitter_specular * hvec3(emitter_scale);
+					diffuse_light += hvec3(vec3(emitter_diffuse) * emitter_scale);
+					direct_specular_light += hvec3(vec3(emitter_specular) * emitter_scale);
 				}
 			}
 		}

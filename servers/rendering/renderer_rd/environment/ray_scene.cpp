@@ -1839,8 +1839,8 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	LocalVector<BuildPrimitive> primitives;
 	uint32_t signature = HASH_MURMUR3_SEED;
 	uint64_t scene_signature = 0;
-	uint32_t emitter_state = HASH_MURMUR3_SEED;
-	uint32_t emission_state = HASH_MURMUR3_SEED;
+	uint32_t emitter_state = hash_murmur3_one_64(uint64_t(int64_t(GLOBAL_GET("rendering/global_illumination/ray_scene/emitter_instance"))), HASH_MURMUR3_SEED);
+	uint32_t emission_state = hash_murmur3_one_32(int(GLOBAL_GET("rendering/global_illumination/ray_scene/proxy_emitters")) != 0 ? 1u : 0u, HASH_MURMUR3_SEED);
 	LocalVector<TriangleEmitterSource> emitter_sources;
 	scene_members.clear();
 	for (uint32_t i = 0; i < p_instances.size(); i++) {
@@ -1936,9 +1936,11 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			instance_emissive = instance_emissive || emissive;
 			emitter_state = hash_murmur3_one_32(emissive ? 1u : 0u, emitter_state);
 			emission_state = hash_murmur3_buffer(surface_material.emission, sizeof(surface_material.emission), emission_state);
+			emission_state = hash_murmur3_buffer(&surface_material.emission_mean_luminance, sizeof(surface_material.emission_mean_luminance), emission_state);
 			emission_state = hash_murmur3_one_32(surface_material.emission_texture, emission_state);
 			emission_state = hash_murmur3_one_32(surface_material.emission_flags, emission_state);
 		}
+		emitter_state = hash_murmur3_one_32(instance_proxied ? 1u : 0u, emitter_state);
 		if (instance_emissive) {
 			TriangleEmitterSource emitter_source;
 			emitter_source.transform = transform;
