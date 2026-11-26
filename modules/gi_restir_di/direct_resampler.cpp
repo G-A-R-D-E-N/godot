@@ -187,7 +187,8 @@ bool DirectResamplerRD::_ensure_device() {
 	Vector<String> modes;
 	modes.push_back("\n");
 	modes.push_back("\n#define MODE_SPATIAL\n");
-	modes.push_back("\n#define DI_EMITTERS\n");
+	const String room_pick_define = ROOM_PICK_AVAILABLE ? "#define DI_EMITTER_ROOM_PICK\n" : "";
+	modes.push_back("\n#define DI_EMITTERS\n" + room_pick_define);
 	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TABLE\n#define MODE_EMITTER_SUM\n");
 	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TABLE\n#define MODE_EMITTER_SCAN\n");
 	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TABLE\n#define MODE_EMITTER_PREFIX\n");
@@ -643,8 +644,9 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	}
 #endif
 	if (emitter_active) {
-		main_variant = emitter_temporal ? VARIANT_MAIN_EMITTER_TEMPORAL : VARIANT_MAIN_EMITTER;
-		main_pipeline = emitter_temporal ? &emitter_temporal_pipeline : &emitter_main_pipeline;
+		const bool emitter_room = emitter_temporal && settings.emitter_room_pick && emitter_room_pipeline.get_rid().is_valid();
+		main_variant = emitter_room ? VARIANT_MAIN_EMITTER_TEMPORAL_ROOM : (emitter_temporal ? VARIANT_MAIN_EMITTER_TEMPORAL : VARIANT_MAIN_EMITTER);
+		main_pipeline = emitter_room ? &emitter_room_pipeline : (emitter_temporal ? &emitter_temporal_pipeline : &emitter_main_pipeline);
 	}
 	if (emitter_active) {
 		const uint32_t emitter_groups = Math::division_round_up(ray_scene->get_triangle_emitter_count(), EMITTER_CHUNK);
@@ -856,6 +858,7 @@ void DirectResamplerRD::free_device_resources() {
 	spatial_pipeline.free();
 	emitter_main_pipeline.free();
 	emitter_temporal_pipeline.free();
+	emitter_room_pipeline.free();
 	emitter_spatial_pipeline.free();
 	emitter_sum_pipeline.free();
 	emitter_scan_pipeline.free();

@@ -242,6 +242,7 @@ private:
 	PipelineDeferredRD spatial_pipeline;
 	PipelineDeferredRD emitter_main_pipeline;
 	PipelineDeferredRD emitter_temporal_pipeline;
+	PipelineDeferredRD emitter_room_pipeline;
 	PipelineDeferredRD emitter_spatial_pipeline;
 	PipelineDeferredRD emitter_sum_pipeline;
 	PipelineDeferredRD emitter_scan_pipeline;
