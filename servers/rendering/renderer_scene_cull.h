@@ -285,7 +285,24 @@ public:
 			FLAG_IGNORE_ALL_CULLING = (1 << 24),
 			FLAG_RAY_SCENE_ONLY = (1 << 25),
 			FLAG_RAY_SCENE_EXCLUDE = (1 << 26),
+			FLAG_NO_RASTER_SHADOW = (1 << 27),
 		};
+
+		static constexpr bool draws_in_camera(uint32_t p_flags) {
+			return !(p_flags & FLAG_RAY_SCENE_ONLY);
+		}
+
+		static constexpr bool enters_ray_scene(uint32_t p_flags) {
+			return (p_flags & FLAG_BASE_TYPE_MASK) == RSE::INSTANCE_MESH;
+		}
+
+		static constexpr bool casts_raster_shadow(bool p_casts_shadows, bool p_no_raster_shadow) {
+			return p_casts_shadows && !p_no_raster_shadow;
+		}
+
+		static constexpr bool casts_raster_shadow(uint32_t p_flags) {
+			return casts_raster_shadow(bool(p_flags & FLAG_CAST_SHADOWS), bool(p_flags & FLAG_NO_RASTER_SHADOW));
+		}
 
 		uint32_t flags = 0;
 		uint32_t layer_mask = 0; //for fast layer-mask discard
@@ -427,6 +444,7 @@ public:
 		bool ray_scene_only = false;
 		bool ray_scene_occluder = false;
 		bool ray_scene_exclude = false;
+		bool no_raster_shadow = false;
 		bool ignore_all_culling;
 
 		Vector<RID> materials;

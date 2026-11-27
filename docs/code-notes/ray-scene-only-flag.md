@@ -23,7 +23,7 @@ off). It keeps a mesh instance out of the camera draw lists while the global ill
   test `LAYER_CHECK` against the same camera `visible_layers`, so no layer assignment can hide an instance from the
   camera and keep it in the ray scene.
 - `doc/classes/RenderingServer.xml:INSTANCE_FLAG_RAY_SCENE_ONLY`: enum constant entry. With the two flags below,
-  `INSTANCE_FLAG_MAX` is 7.
+  `INSTANCE_FLAG_MAX` is 8 (the no-raster-shadow flag takes 7).
 - `servers/rendering/renderer_rd/environment/ray_scene.cpp:RayScene::shadow_cast_flags`: with shadow casting off, the
   ray scene tags every surface of the instance `MATERIAL_FLAG_SHADOW_PASS`, so shadow rays pass it. A flagged instance
   with casting off is therefore neither drawn nor a shadow caster, while bounce rays still stop on it. A caller that
