@@ -99,6 +99,21 @@ public:
 		LIGHT_PICK_STABLE,
 	};
 
+	enum AlphaCutoffCoverage {
+		ALPHA_CUTOFF_TEXTURE,
+		ALPHA_CUTOFF_SOLID,
+		ALPHA_CUTOFF_SKIP,
+	};
+
+	static AlphaCutoffCoverage classify_alpha_cutoff(float p_cutoff, bool p_invert) {
+		if (p_invert) {
+			return p_cutoff < 0.0f ? ALPHA_CUTOFF_SKIP : p_cutoff >= 1.0f ? ALPHA_CUTOFF_SOLID
+																		  : ALPHA_CUTOFF_TEXTURE;
+		}
+		return p_cutoff > 1.0f ? ALPHA_CUTOFF_SKIP : p_cutoff <= 0.0f ? ALPHA_CUTOFF_SOLID
+																	  : ALPHA_CUTOFF_TEXTURE;
+	}
+
 	enum MaterialFlags {
 		MATERIAL_FLAG_TWO_SIDED = 1,
 		MATERIAL_FLAG_SKIP = 2,
@@ -292,6 +307,13 @@ public:
 	static uint32_t alpha_slot_flags(uint32_t p_flags, bool p_alpha_on) { return p_alpha_on ? p_flags : p_flags & ~MATERIAL_ALPHA_MASK; }
 	static uint64_t alpha_split_bits(uint32_t p_surface, uint32_t p_flags, uint32_t p_alpha_flags) { return surface_candidates(p_surface, p_flags | p_alpha_flags) & ~surface_candidates(p_surface, p_flags & ~MATERIAL_ALPHA_MASK); }
 	static bool hw_split_stale(uint64_t p_hw_generation, bool p_hw_alpha_on, bool p_alpha_on, uint64_t p_alpha_split_bits) { return p_hw_generation != 0 && p_hw_alpha_on != p_alpha_on && p_alpha_split_bits != 0; }
+	static uint32_t alpha_far_hash(uint32_t p_hash, const RayAlphaStore::TableEntry &p_entry) {
+		if (RayAlphaStore::uses_far(p_entry.bits)) {
+			p_hash = hash_murmur3_one_32(p_entry.far_state, p_hash);
+			p_hash = hash_murmur3_one_float(p_entry.density, p_hash);
+		}
+		return p_hash;
+	}
 	static uint64_t alpha_scene_signature(uint64_t p_signature, bool p_alpha_on) { return p_alpha_on ? GISceneTracker::add_instance(p_signature, ALPHA_ON_SALT) : p_signature; }
 	static uint32_t instance_class(uint64_t p_candidates, uint64_t p_split);
 	static uint32_t hw_instance_mask(uint32_t p_layer_mask, const uint32_t *p_groups, uint32_t p_group_count);

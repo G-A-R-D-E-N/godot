@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -21,6 +22,13 @@ namespace Godot
             catch (Exception e)
             {
                 ExceptionUtils.LogException(e);
+            }
+            finally
+            {
+                CloseFinalizerAdmission();
+                WaitForInFlightFinalizerDisposals();
+                lock (FinalizerAdmissionGate)
+                    ShutdownRegistrations.Clear();
             }
         }
 
@@ -44,9 +52,9 @@ namespace Godot
             GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: false);
             bool drained = WaitForPendingFinalizers(DrainWaitMilliseconds);
 
-            ShuttingDown = true;
-
+            List<GodotObject> godotObjects = BeginFinalizerShutdown(out var seen);
             bool settled = WaitForPendingFinalizers(SettleWaitMilliseconds);
+            AppendTrackedGodotObjects(godotObjects, seen);
 
             if (!drained || !settled)
             {
@@ -61,12 +69,25 @@ namespace Godot
             // like StringName, NodePath, Godot.Collections.Array/Dictionary, etc.
             // The Godot Object Dispose() method may need any of the later instances.
 
-            foreach (WeakReference<GodotObject> item in GodotObjectInstances.Keys)
+            DisposeGodotObjects(godotObjects);
+            DrainShutdownRegistrations();
+
+            foreach (WeakReference<IDisposable> item in OtherInstances.Keys)
             {
                 try
                 {
-                    if (item.TryGetTarget(out GodotObject? self))
-                        self.Dispose();
+                    if (item.TryGetTarget(out IDisposable? self))
+                    {
+                        ShutdownDisposalDepth++;
+                        try
+                        {
+                            self.Dispose();
+                        }
+                        finally
+                        {
+                            ShutdownDisposalDepth--;
+                        }
+                    }
                 }
                 catch (Exception e)
                 {
@@ -74,18 +95,7 @@ namespace Godot
                 }
             }
 
-            foreach (WeakReference<IDisposable> item in OtherInstances.Keys)
-            {
-                try
-                {
-                    if (item.TryGetTarget(out IDisposable? self))
-                        self.Dispose();
-                }
-                catch (Exception e)
-                {
-                    ExceptionUtils.LogException(e);
-                }
-            }
+            DrainShutdownRegistrations();
 
             if (isStdoutVerbose)
                 GD.Print("Unloading: Finished disposing tracked instances.");
@@ -95,6 +105,125 @@ namespace Godot
         private const int SettleWaitMilliseconds = 1000;
 
         internal static volatile bool ShuttingDown;
+        private static readonly object FinalizerAdmissionGate = new();
+        private static int InFlightFinalizerDisposals;
+        private static List<GodotObject> ShutdownRegistrations = new();
+        private static readonly Dictionary<WeakReference<GodotObject>, GodotObject> PendingFinalizerRegistrations = new();
+        [ThreadStatic] private static int FinalizerAdmissionDepth;
+        [ThreadStatic] private static List<WeakReference<GodotObject>>? PendingFinalizerKeys;
+        [ThreadStatic] private static int ShutdownDisposalDepth;
+
+        private static List<GodotObject> BeginFinalizerShutdown(out HashSet<WeakReference<GodotObject>> seen)
+        {
+            lock (FinalizerAdmissionGate)
+            {
+                var objects = new List<GodotObject>();
+                seen = new HashSet<WeakReference<GodotObject>>();
+                AppendTrackedGodotObjects(objects, seen);
+                ShuttingDown = true;
+                return objects;
+            }
+        }
+
+        private static void AppendTrackedGodotObjects(List<GodotObject> objects, HashSet<WeakReference<GodotObject>> seen)
+        {
+            lock (FinalizerAdmissionGate)
+            {
+                foreach (WeakReference<GodotObject> item in GodotObjectInstances.Keys)
+                {
+                    if (!PendingFinalizerRegistrations.ContainsKey(item) && seen.Add(item) && item.TryGetTarget(out GodotObject? self))
+                        objects.Add(self);
+                }
+            }
+        }
+
+        private static void DisposeGodotObjects(List<GodotObject> objects)
+        {
+            foreach (GodotObject self in objects)
+            {
+                try
+                {
+                    ShutdownDisposalDepth++;
+                    try
+                    {
+                        self.DisposeForShutdown();
+                    }
+                    finally
+                    {
+                        ShutdownDisposalDepth--;
+                    }
+                }
+                catch (Exception e)
+                {
+                    ExceptionUtils.LogException(e);
+                }
+            }
+        }
+
+        private static void DrainShutdownRegistrations()
+        {
+            while (true)
+            {
+                WaitForInFlightFinalizerDisposals();
+                List<GodotObject> objects;
+                lock (FinalizerAdmissionGate)
+                {
+                    if (ShutdownRegistrations.Count == 0)
+                        return;
+                    objects = ShutdownRegistrations;
+                    ShutdownRegistrations = new List<GodotObject>();
+                }
+                DisposeGodotObjects(objects);
+            }
+        }
+
+        internal static bool TryEnterFinalizerDisposal()
+        {
+            lock (FinalizerAdmissionGate)
+            {
+                if (ShuttingDown)
+                    return false;
+                InFlightFinalizerDisposals++;
+                FinalizerAdmissionDepth++;
+                return true;
+            }
+        }
+
+        internal static void ExitFinalizerDisposal()
+        {
+            lock (FinalizerAdmissionGate)
+            {
+                FinalizerAdmissionDepth--;
+                if (FinalizerAdmissionDepth == 0 && PendingFinalizerKeys != null)
+                {
+                    foreach (WeakReference<GodotObject> key in PendingFinalizerKeys)
+                    {
+                        if (PendingFinalizerRegistrations.Remove(key, out GodotObject? self) && ShuttingDown)
+                            ShutdownRegistrations.Add(self);
+                    }
+                    PendingFinalizerKeys = null;
+                }
+                InFlightFinalizerDisposals--;
+                Monitor.PulseAll(FinalizerAdmissionGate);
+            }
+        }
+
+        private static void CloseFinalizerAdmission()
+        {
+            lock (FinalizerAdmissionGate)
+            {
+                ShuttingDown = true;
+            }
+        }
+
+        private static void WaitForInFlightFinalizerDisposals()
+        {
+            lock (FinalizerAdmissionGate)
+            {
+                while (InFlightFinalizerDisposals > 0)
+                    Monitor.Wait(FinalizerAdmissionGate);
+            }
+        }
 
         private sealed class FinalizerWait
         {
@@ -138,11 +267,21 @@ namespace Godot
         private static ConcurrentDictionary<WeakReference<IDisposable>, byte> OtherInstances { get; } =
             new();
 
-        public static WeakReference<GodotObject> RegisterGodotObject(GodotObject godotObject)
+        public static void RegisterGodotObject(GodotObject godotObject, out WeakReference<GodotObject>? weakReferenceToSelf)
         {
-            var weakReferenceToSelf = new WeakReference<GodotObject>(godotObject, trackResurrection: true);
-            GodotObjectInstances.TryAdd(weakReferenceToSelf, 0);
-            return weakReferenceToSelf;
+            lock (FinalizerAdmissionGate)
+            {
+                var reference = new WeakReference<GodotObject>(godotObject, trackResurrection: true);
+                weakReferenceToSelf = reference;
+                GodotObjectInstances.TryAdd(reference, 0);
+                if (FinalizerAdmissionDepth > 0)
+                {
+                    PendingFinalizerRegistrations.Add(reference, godotObject);
+                    (PendingFinalizerKeys ??= new List<WeakReference<GodotObject>>()).Add(reference);
+                }
+                else if (ShuttingDown && ShutdownDisposalDepth > 0)
+                    ShutdownRegistrations.Add(godotObject);
+            }
         }
 
         public static WeakReference<IDisposable> RegisterDisposable(IDisposable disposable)

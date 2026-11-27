@@ -503,12 +503,13 @@ apply cut-outs. A cut-out surface casts a solid shadow there, while DDGI and ReS
   indirectly by `Material::flags`, because any change to a key field allocates a new entry index in `acquire` while the
   old entry remains live for one frame (`last_used + 1 < frame`). Only `far_state` and `density` mutate in place on a
   live entry.
-- Both `density` and `far_state` are published only in `RayAlphaStore::begin_update` and `RayAlphaStore::acquire`
-  (never in `update()` or `sync_entries()`), which both run before the walk. A far-chain readiness flip or dimension
-  change therefore bumps `GIEpochs::SOURCE_SCENE` in the exact same frame that `alpha_store.update()` uploads the
-  updated `TableEntry` to the GPU.
-- Slots with `alpha_enabled` false, index 0, or far mode 0 add no words, preserving byte-identical scene hashes for all
-  non-far scenes.
+- Static-source `density` and `far_state` retain their `begin_update`/`acquire` publication timing. For externally
+  writable sources, `RayAlphaStore::sync_entries` publishes the current observation after fill scheduling. The scene
+  hash is assembled after `alpha_store.update`, so a far readiness or density change reaches `GIEpochs::SOURCE_SCENE`
+  in the same update that publishes the table used by rendering.
+- `RayScene::update` adds no alpha words for disabled alpha or index 0. Each ready alpha layer also contributes its fill
+  revision, including far mode 0, so changes to near coverage invalidate the scene epoch. Pending layers contribute no
+  fill revision. Externally writable sources can advance the epoch each time they are serviced even if pixels are unchanged.
 - DDGI does not read `GIEpochs::SOURCE_SCENE` and keys its moved-instance reset (`RayScene::collect_moved_instances`) on
   `instance_signature` (which hashes `Instance` records only, not `Material` flags or alpha table fields), so neither
   DDGI resets nor TLAS rebuilds are triggered by cull, cast-bit, far-key, `density`, or `far_state` transitions.
