@@ -48,6 +48,7 @@ layout(set = 2, binding = 1) uniform sampler sky_sampler;
 #define SKY_FLAGS_MODE_COLOR 0x01
 #define SKY_FLAGS_MODE_SKY 0x02
 #define SKY_FLAGS_ORIENTATION_SIGN 0x04
+#define SKY_FLAGS_PORTAL_SKY 0x08
 
 #define DDGI_MISS_DISTANCE 65504.0
 #define DDGI_MAX_RADIANCE 60000.0
@@ -68,22 +69,33 @@ layout(push_constant, std430) uniform Params {
 }
 params;
 
+vec3 sample_sky_map(vec3 p_direction) {
+	float sky_sign = bool(params.sky_flags & SKY_FLAGS_ORIENTATION_SIGN) ? 1.0 : -1.0;
+	vec4 sky_quat = vec4(params.sky_color_or_orientation, sky_sign * sqrt(max(0.0, 1.0 - dot(params.sky_color_or_orientation, params.sky_color_or_orientation))));
+	vec3 sky_dir = cross(sky_quat.xyz, p_direction);
+	sky_dir = p_direction + ((sky_dir * sky_quat.w) + cross(sky_quat.xyz, sky_dir)) * 2.0;
+#ifdef USE_RADIANCE_OCTMAP_ARRAY
+	return textureLod(sampler2DArray(sky_radiance, sky_sampler), vec3(vec3_to_oct_with_border(sky_dir, params.sky_border_size), 0.0), 2.0).rgb * params.sky_energy;
+#else
+	return textureLod(sampler2D(sky_radiance, sky_sampler), vec3_to_oct_with_border(sky_dir, params.sky_border_size), 2.0).rgb * params.sky_energy;
+#endif
+}
+
 vec3 sky_radiance_in(vec3 p_direction) {
 	if (bool(params.sky_flags & SKY_FLAGS_MODE_SKY)) {
-		float sky_sign = bool(params.sky_flags & SKY_FLAGS_ORIENTATION_SIGN) ? 1.0 : -1.0;
-		vec4 sky_quat = vec4(params.sky_color_or_orientation, sky_sign * sqrt(max(0.0, 1.0 - dot(params.sky_color_or_orientation, params.sky_color_or_orientation))));
-		vec3 sky_dir = cross(sky_quat.xyz, p_direction);
-		sky_dir = p_direction + ((sky_dir * sky_quat.w) + cross(sky_quat.xyz, sky_dir)) * 2.0;
-#ifdef USE_RADIANCE_OCTMAP_ARRAY
-		return textureLod(sampler2DArray(sky_radiance, sky_sampler), vec3(vec3_to_oct_with_border(sky_dir, params.sky_border_size), 0.0), 2.0).rgb * params.sky_energy;
-#else
-		return textureLod(sampler2D(sky_radiance, sky_sampler), vec3_to_oct_with_border(sky_dir, params.sky_border_size), 2.0).rgb * params.sky_energy;
-#endif
+		return sample_sky_map(p_direction);
 	}
 	if (bool(params.sky_flags & SKY_FLAGS_MODE_COLOR)) {
 		return params.sky_color_or_orientation * params.sky_energy;
 	}
 	return vec3(0.0);
+}
+
+vec3 portal_sky_radiance_in(vec3 p_direction) {
+	if (bool(params.sky_flags & (SKY_FLAGS_MODE_SKY | SKY_FLAGS_PORTAL_SKY))) {
+		return sample_sky_map(p_direction);
+	}
+	return sky_radiance_in(p_direction);
 }
 
 #ifdef MODE_SURFEL_TRACE
@@ -131,6 +143,7 @@ vec3 origin_surfel_normal = vec3(0.0, 1.0, 0.0);
 #define RAY_SCENE_SHADE_BOUNCE_ENERGY params.bounce_energy
 #define RAY_SCENE_SHADE_EMISSION_EXPOSURE params.emission_exposure
 #define RAY_SCENE_SHADE_MAX_RADIANCE DDGI_MAX_RADIANCE
+#define RAY_SCENE_PORTAL_SKY(dir) portal_sky_radiance_in(dir)
 #include "ray_scene_hit_shade_inc.glsl"
 
 vec4 shade_ray(vec3 p_origin, vec3 p_direction, float p_max_distance, uint p_seed) {
@@ -549,7 +562,8 @@ void main() {
 		if (shaded.a < 0.0) {
 			flags |= RTGI_FLAG_BACKFACE;
 		}
-		if (dot(ray_scene_hit_material(hit).emission, vec3(1.0)) > 0.0) {
+		const RaySceneMaterial hit_mat = ray_scene_hit_material(hit);
+		if (dot(hit_mat.emission, vec3(1.0)) > 0.0 || bool(hit_mat.flags & RAY_SCENE_MATERIAL_SKY_PORTAL)) {
 			flags |= RTGI_FLAG_EMISSIVE;
 		}
 	} else {

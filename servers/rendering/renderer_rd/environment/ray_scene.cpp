@@ -1024,6 +1024,18 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 	if (shadow_pass.get_type() == Variant::BOOL ? bool(shadow_pass) : _param_float(shadow_pass, 0.0f) > 0.5f) {
 		r_material.flags |= MATERIAL_FLAG_SHADOW_PASS;
 	}
+	const Variant sky_portal = material_storage->material_get_param(p_material, SNAME("gi_sky_portal"));
+	if (sky_portal.get_type() == Variant::BOOL ? bool(sky_portal) : _param_float(sky_portal, 0.0f) > 0.5f) {
+		r_material.flags |= MATERIAL_FLAG_SKY_PORTAL;
+		Color portal_tint(1.0f, 1.0f, 1.0f);
+		if (_param_color(material_storage->material_get_param(p_material, SNAME("gi_portal_tint")), portal_tint)) {
+			r_material.albedo[0] = CLAMP(portal_tint.r, 0.0f, 1.0f);
+			r_material.albedo[1] = CLAMP(portal_tint.g, 0.0f, 1.0f);
+			r_material.albedo[2] = CLAMP(portal_tint.b, 0.0f, 1.0f);
+		} else {
+			r_material.albedo[0] = r_material.albedo[1] = r_material.albedo[2] = 1.0f;
+		}
+	}
 	const Variant scissor = material_storage->material_get_declared_param(p_material, SNAME("alpha_scissor_threshold"));
 	const Variant body_alpha_test = material_storage->material_get_declared_param(p_material, SNAME("alpha_test"));
 	if (scissor.get_type() != Variant::NIL) {

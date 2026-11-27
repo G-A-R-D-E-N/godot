@@ -62,6 +62,8 @@ float rs_shade_emission_exposure = 0.0;
 #define RAY_SCENE_SHADE_BOUNCE_ENERGY rs_shade_bounce_energy
 #define RAY_SCENE_SHADE_EMISSION_EXPOSURE rs_shade_emission_exposure
 #define RAY_SCENE_SHADE_MAX_RADIANCE RS_LO_CLAMP
+vec3 rs_portal_sky_radiance(vec3 p_direction);
+#define RAY_SCENE_PORTAL_SKY(dir) rs_portal_sky_radiance(dir)
 #include "restir_core_ray_scene_hit_shade_inc.glsl"
 
 void rs_shade_setup() {
@@ -77,28 +79,43 @@ void rs_shade_setup() {
 #define RS_SKY_COLOR 1u
 #define RS_SKY_SKY 2u
 #define RS_SKY_SIGN 4u
+#define RS_SKY_PORTAL 8u
 #endif
 
 #if defined(RESTIR_SHADE) || defined(RS_SKY_REREAD)
+vec3 rs_sample_sky_map(vec3 p_direction) {
+	float sky_sign = (rf.shade_sky_flags & RS_SKY_SIGN) != 0u ? 1.0 : -1.0;
+	vec4 sky_quat = vec4(rf.shade_sky, sky_sign * sqrt(max(0.0, 1.0 - dot(rf.shade_sky, rf.shade_sky))));
+	vec3 sky_dir = cross(sky_quat.xyz, p_direction);
+	sky_dir = p_direction + ((sky_dir * sky_quat.w) + cross(sky_quat.xyz, sky_dir)) * 2.0;
+#ifdef USE_RADIANCE_OCTMAP_ARRAY
+	return textureLod(sampler2DArray(sky_radiance, sky_sampler), vec3(vec3_to_oct_with_border(sky_dir, rf.shade_sky_border), 0.0), rf.sky_blur_lod).rgb * rf.shade_sky_energy;
+#else
+	return textureLod(sampler2D(sky_radiance, sky_sampler), vec3_to_oct_with_border(sky_dir, rf.shade_sky_border), rf.sky_blur_lod).rgb * rf.shade_sky_energy;
+#endif
+}
+
 vec3 rs_sky_radiance(vec3 p_direction) {
 	if ((rf.flags & F_REAL_SKY) == 0u) {
 		return min(rf.test_sky.xyz, vec3(RS_LO_CLAMP));
 	}
 	vec3 radiance = vec3(0.0);
 	if ((rf.shade_sky_flags & RS_SKY_SKY) != 0u) {
-		float sky_sign = (rf.shade_sky_flags & RS_SKY_SIGN) != 0u ? 1.0 : -1.0;
-		vec4 sky_quat = vec4(rf.shade_sky, sky_sign * sqrt(max(0.0, 1.0 - dot(rf.shade_sky, rf.shade_sky))));
-		vec3 sky_dir = cross(sky_quat.xyz, p_direction);
-		sky_dir = p_direction + ((sky_dir * sky_quat.w) + cross(sky_quat.xyz, sky_dir)) * 2.0;
-#ifdef USE_RADIANCE_OCTMAP_ARRAY
-		radiance = textureLod(sampler2DArray(sky_radiance, sky_sampler), vec3(vec3_to_oct_with_border(sky_dir, rf.shade_sky_border), 0.0), rf.sky_blur_lod).rgb * rf.shade_sky_energy;
-#else
-		radiance = textureLod(sampler2D(sky_radiance, sky_sampler), vec3_to_oct_with_border(sky_dir, rf.shade_sky_border), rf.sky_blur_lod).rgb * rf.shade_sky_energy;
-#endif
+		radiance = rs_sample_sky_map(p_direction);
 	} else if ((rf.shade_sky_flags & RS_SKY_COLOR) != 0u) {
 		radiance = rf.shade_sky * rf.shade_sky_energy;
 	}
 	return min(radiance, vec3(RS_LO_CLAMP));
+}
+
+vec3 rs_portal_sky_radiance(vec3 p_direction) {
+	if ((rf.flags & F_REAL_SKY) == 0u) {
+		return min(rf.test_sky.xyz, vec3(RS_LO_CLAMP));
+	}
+	if ((rf.shade_sky_flags & (RS_SKY_SKY | RS_SKY_PORTAL)) != 0u) {
+		return min(rs_sample_sky_map(p_direction), vec3(RS_LO_CLAMP));
+	}
+	return rs_sky_radiance(p_direction);
 }
 #endif
 
@@ -1014,13 +1031,17 @@ vec3 rs_fresh_lo(vec3 p_origin, vec3 p_dir, float p_dist, uint p_seed, uint p_ta
 	if (hit.backface && !two_sided) {
 		return vec3(0.0);
 	}
+	bool ddgi_shade = (rf.flags & F_OWN_SAMPLER) == 0u && (rf.flags & F_SHADE_DDGI) != 0u;
+	if (bool(material.flags & RAY_SCENE_MATERIAL_SKY_PORTAL)) {
+		float em_exp = ddgi_shade ? rf.shade_exposure : rf.emission_exposure;
+		return min(material.emission * em_exp + material.albedo * rs_portal_sky_radiance(p_dir), vec3(RS_LO_CLAMP));
+	}
 	vec3 normal = ray_scene_hit_normal(hit);
 	if (hit.backface) {
 		normal = -normal;
 	}
 	vec3 position = p_origin + p_dir * hit.t;
 	float bias = 0.01 + hit.t * 0.001;
-	bool ddgi_shade = (rf.flags & F_OWN_SAMPLER) == 0u && (rf.flags & F_SHADE_DDGI) != 0u;
 	if (!ddgi_shade) {
 		vec3 irradiance = gi_hit_direct_light(position, normal, bias, rf.sky_distance, p_seed);
 		return min(ray_scene_hit_emission(hit, position) * rf.emission_exposure + material.albedo * irradiance, vec3(RS_LO_CLAMP));
@@ -1472,7 +1493,7 @@ void rs_sky_row_luma(uint p_row, out float r_sum, out uint r_count) {
 
 void main() {
 	uint lid = gl_LocalInvocationIndex;
-	bool texture_sky = (rf.flags & F_REAL_SKY) != 0u && (rf.shade_sky_flags & RS_SKY_SKY) != 0u;
+	bool texture_sky = (rf.flags & F_REAL_SKY) != 0u && (rf.shade_sky_flags & (RS_SKY_SKY | RS_SKY_PORTAL)) != 0u;
 	float row_sum = 0.0;
 	uint row_count = 0u;
 	if (texture_sky) {
