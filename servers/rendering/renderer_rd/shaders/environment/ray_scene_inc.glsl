@@ -59,7 +59,18 @@ struct RaySceneMaterial {
 	float coverage;
 	vec3 emission;
 	uint flags;
+	uint emission_texture;
+	uint emission_uv_set;
+	vec2 emission_uv_scale;
+	vec2 emission_uv_offset;
+	vec2 emission_nits_range;
+	float emission_texel_scale;
+	uint emission_flags;
+	float emission_mean_luminance;
+	float pad;
 };
+
+#define RAY_SCENE_EMISSION_TEXTURE_RANGES 1
 
 struct RaySceneLight {
 	vec3 color;
@@ -77,6 +88,22 @@ struct RaySceneLight {
 	vec3 half_b;
 	uint pad;
 };
+
+// Ray scene space is world minus the anchor; layout must match RayScene::TriangleEmitter: v0 at offset 0, instance at 12, v1 at 16, material at 28, v2 at 32, uv_index at 44.
+struct RaySceneTriangleEmitter {
+	vec3 v0;
+	uint instance;
+	vec3 v1;
+	uint material;
+	vec3 v2;
+	uint uv_index;
+	uint flags;
+	uint pad0;
+	uint pad1;
+	uint pad2;
+};
+
+#define RAY_SCENE_EMITTER_PROXIED 1u
 
 #ifndef RAY_SCENE_HW
 layout(set = RAY_SCENE_SET, binding = 0, std430) restrict readonly buffer RaySceneBlasNodes {
@@ -121,8 +148,12 @@ layout(set = RAY_SCENE_SET, binding = 6, std140) uniform RaySceneData {
 	vec3 camera_to_anchor;
 	uint instance_count;
 	uint light_count;
-	uint pad0;
-	uint pad1;
+	uint triangle_emitter_count;
+	uint triangle_emitters_capped;
+	float emissive_exposure_normalization;
+	uint triangle_emitter_generation;
+	uint emission_texture_count;
+	uint proxy_emitters_traced;
 	uint pad2;
 }
 ray_scene;
@@ -131,17 +162,24 @@ ray_scene;
 layout(set = RAY_SCENE_SET, binding = 7) uniform accelerationStructureEXT ray_scene_tlas;
 #endif
 
+layout(set = RAY_SCENE_SET, binding = 8, std430) restrict readonly buffer RaySceneTriangleEmitters {
+	RaySceneTriangleEmitter data[];
+}
+ray_scene_triangle_emitters;
+
+layout(set = RAY_SCENE_SET, binding = 15) uniform sampler2DArray ray_scene_emission_textures;
+
+layout(set = RAY_SCENE_SET, binding = 9, std430) restrict readonly buffer RaySceneTriangleUvs {
+	uint data[];
+}
+ray_scene_triangle_uvs;
+
 #ifdef RAY_SCENE_ALPHA
 #define RAY_SCENE_ALPHA_SHIFT 8u
 #define RAY_SCENE_ALPHA_STATE_READY 2u
 #define RAY_SCENE_MATERIAL_SHADOW_TWO_SIDED 32u
 #define RAY_SCENE_ALPHA_CULL_MASK 3u
 #define RAY_SCENE_ALPHA_CULL_BACK 2u
-
-layout(set = RAY_SCENE_SET, binding = 9, std430) restrict readonly buffer RaySceneTriangleUvs {
-	uint data[];
-}
-ray_scene_triangle_uvs;
 
 layout(set = RAY_SCENE_SET, binding = 10) uniform sampler2DArray ray_scene_alpha_mean;
 
@@ -174,6 +212,58 @@ struct RaySceneHit {
 	bool backface;
 	bool blend;
 };
+
+RaySceneTriangleEmitter ray_scene_triangle_emitter(uint p_index) {
+	return ray_scene_triangle_emitters.data[p_index];
+}
+
+bool ray_scene_triangle_emitter_proxied(uint p_index) {
+	return (ray_scene_triangle_emitters.data[p_index].flags & RAY_SCENE_EMITTER_PROXIED) != 0u;
+}
+
+vec3 ray_scene_triangle_emitter_emission(uint p_material) {
+	return ray_scene_materials.data[p_material].emission;
+}
+
+vec2 ray_scene_triangle_emitter_uv(uint p_uv_index, vec3 p_bary) {
+	uint base = p_uv_index * 4u;
+	return unpackHalf2x16(ray_scene_triangle_uvs.data[base]) * p_bary.x + unpackHalf2x16(ray_scene_triangle_uvs.data[base + 1u]) * p_bary.y + unpackHalf2x16(ray_scene_triangle_uvs.data[base + 2u]) * p_bary.z;
+}
+
+vec3 ray_scene_triangle_emitter_emission_texel(uint p_material, vec2 p_uv) {
+	RaySceneMaterial material = ray_scene_materials.data[p_material];
+	if (material.emission_texture == 0u || material.emission_texture > ray_scene.emission_texture_count) {
+		return material.emission;
+	}
+	vec2 uv = p_uv * material.emission_uv_scale + material.emission_uv_offset;
+	vec4 texel = textureLod(ray_scene_emission_textures, vec3(uv, float(material.emission_texture - 1u)), 0.0);
+	float nits = (material.emission_flags & RAY_SCENE_EMISSION_TEXTURE_RANGES) != 0u ? mix(material.emission_nits_range.x, material.emission_nits_range.y, texel.a) : texel.a;
+	return texel.rgb * nits * material.emission_texel_scale;
+}
+
+float ray_scene_triangle_emitter_mean_luminance(uint p_material) {
+	return ray_scene_materials.data[p_material].emission_mean_luminance;
+}
+
+float ray_scene_emissive_exposure_normalization() {
+	return ray_scene.emissive_exposure_normalization;
+}
+
+vec3 ray_scene_triangle_emitter_emission_light_space(uint p_material) {
+	return ray_scene_triangle_emitter_emission(p_material) * ray_scene.emissive_exposure_normalization;
+}
+
+uint ray_scene_triangle_emitter_count() {
+	return ray_scene.triangle_emitter_count;
+}
+
+bool ray_scene_triangle_emitters_capped() {
+	return ray_scene.triangle_emitters_capped != 0u;
+}
+
+uint ray_scene_triangle_emitter_generation() {
+	return ray_scene.triangle_emitter_generation;
+}
 
 uint ray_scene_hash(uint p_value) {
 	p_value ^= p_value >> 16u;
@@ -468,6 +558,40 @@ bool ray_scene_trace_masked_near(vec3 p_origin, vec3 p_direction, float p_t_max,
 #else
 #include "ray_scene_hw_inc.glsl"
 #endif
+
+// Ray scene space only; the caller biases p_from off the emitter surface. Requires the ray scene TLAS bindings when RAY_SCENE_HW is set.
+bool ray_scene_sampled_visibility(vec3 p_from, vec3 p_to, uint p_instance_mask, uint p_seed) {
+	vec3 offset = p_to - p_from;
+	float distance = length(offset);
+	if (distance <= 0.0) {
+		return true;
+	}
+	RaySceneHit hit;
+	return !ray_scene_trace_masked_near(p_from, offset / distance, distance, true, true, 0u, p_instance_mask, p_seed, 0.0, hit);
+}
+bool ray_scene_sampled_visibility_skipping(vec3 p_from, vec3 p_to, uint p_instance_mask, uint p_seed, int p_skip_instance) {
+	vec3 offset = p_to - p_from;
+	float distance = length(offset);
+	if (distance <= 0.0) {
+		return true;
+	}
+	vec3 direction = offset / distance;
+	float travelled = 0.0;
+	for (int i = 0; i < 4; i++) {
+		RaySceneHit hit;
+		if (!ray_scene_trace_masked_near(p_from + direction * travelled, direction, distance - travelled, true, true, 0u, p_instance_mask, p_seed, 0.0, hit)) {
+			return true;
+		}
+		if (p_skip_instance < 0 || int(hit.instance) != p_skip_instance) {
+			return false;
+		}
+		travelled += hit.t + 1e-4;
+		if (travelled >= distance) {
+			return true;
+		}
+	}
+	return true;
+}
 
 bool ray_scene_trace_masked(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any, bool p_shadow, uint p_skip, uint p_caster_mask, uint p_seed, out RaySceneHit r_hit) {
 	return ray_scene_trace_masked_near(p_origin, p_direction, p_t_max, p_any, p_shadow, p_skip, p_caster_mask, p_seed, 0.0, r_hit);

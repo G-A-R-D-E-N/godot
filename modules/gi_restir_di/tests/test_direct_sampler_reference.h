@@ -381,6 +381,39 @@ TEST_CASE("[DirectSampler] Stratum weights at 2 C_full + 3, the separable identi
 	CHECK(derived == 134);
 }
 
+TEST_CASE("[DirectSampler] Emitter reservoir keeps visibility with the selected color") {
+	const Rational floor_target(1, 1000000);
+	for (int blocked = 0; blocked < 2; blocked++) {
+		const Rational targets[2] = { Rational(1) + floor_target, floor_target };
+		const Rational contributions[2] = { blocked ? Rational(0) : Rational(4), Rational(6) };
+		const Rational total = targets[0] + targets[1];
+		Rational mean;
+		for (int i = 0; i < 2; i++) {
+			const Rational probability = targets[i] / total;
+			const Rational weight = total / (Rational(2) * targets[i]);
+			mean += probability * weight * contributions[i];
+		}
+		CHECK(mean == (contributions[0] + contributions[1]) / Rational(2));
+	}
+}
+
+TEST_CASE("[DirectSampler] Emitter donor masses retain normalized contribution") {
+	const Rational masses[2] = { Rational(2), Rational(3) };
+	const Rational donor_weights[2] = { Rational(3, 2), Rational(2, 3) };
+	const Rational targets[2] = { Rational(7), Rational(1, 1000) };
+	const Rational values[2] = { Rational(0), Rational(5) };
+	const Rational candidate[2] = { masses[0] * donor_weights[0] * targets[0], masses[1] * donor_weights[1] * targets[1] };
+	const Rational sum = candidate[0] + candidate[1];
+	const Rational mass = masses[0] + masses[1];
+	Rational selected;
+	Rational expected;
+	for (int i = 0; i < 2; i++) {
+		selected += (candidate[i] / sum) * (sum / (mass * targets[i])) * values[i];
+		expected += masses[i] * donor_weights[i] * values[i] / mass;
+	}
+	CHECK(selected == expected);
+}
+
 static void check_source_pdf(const int64_t *p_targets, const int64_t *p_sources, uint32_t p_count, uint32_t p_draws) {
 	int64_t source_total = 0;
 	for (uint32_t i = 0; i < p_count; i++) {

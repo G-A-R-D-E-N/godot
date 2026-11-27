@@ -79,12 +79,26 @@ RayScene::RayScene() {
 	singleton = this;
 	alpha_enabled = GLOBAL_GET("rendering/global_illumination/ray_scene/alpha_test");
 	alpha_store.set_liveness(&_alpha_texture_live);
+	RD::TextureFormat emission_format;
+	emission_format.format = RD::DATA_FORMAT_R8G8B8A8_UNORM;
+	emission_format.texture_type = RD::TEXTURE_TYPE_2D_ARRAY;
+	emission_format.width = 1;
+	emission_format.height = 1;
+	emission_format.array_layers = 2;
+	emission_format.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_UPDATE_BIT;
+	emission_dummy = RD::get_singleton()->texture_create(emission_format, RD::TextureView());
+	RD::get_singleton()->set_resource_name(emission_dummy, "Ray Scene Emission Dummy");
+	if (emission_dummy.is_valid()) {
+		for (int64_t layer = 0; layer < 2; layer++) {
+			RD::get_singleton()->texture_update(emission_dummy, layer, Vector<uint8_t>({ 255, 255, 255, 255 }));
+		}
+	}
 }
 
 RayScene::~RayScene() {
 	_print_tlas_rebuilds(true);
 	_hw_free();
-	RID *owned[] = { &blas_node_buffer, &triangle_buffer, &instance_buffer, &tlas_node_buffer, &material_buffer, &light_buffer, &scene_data_buffer, &triangle_uv_buffer };
+	RID *owned[] = { &blas_node_buffer, &triangle_buffer, &instance_buffer, &tlas_node_buffer, &material_buffer, &light_buffer, &scene_data_buffer, &triangle_uv_buffer, &triangle_emitter_buffer, &emission_dummy };
 	for (RID *rid : owned) {
 		if (rid->is_valid()) {
 			RD::get_singleton()->free_rid(*rid);
@@ -457,6 +471,121 @@ void RayScene::_ensure_buffer(RID &r_buffer, uint32_t &r_capacity, uint32_t p_co
 	RD::get_singleton()->set_resource_name(r_buffer, p_name);
 }
 
+void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource> &p_sources, const LocalVector<uint32_t> &p_order) {
+	triangle_emitters.clear();
+	const int64_t emitter_filter = int64_t(GLOBAL_GET("rendering/global_illumination/ray_scene/emitter_instance"));
+	bool capped = false;
+	for (const TriangleEmitterSource &source : p_sources) {
+		const MeshEntry *mesh = meshes.getptr(source.mesh);
+		if (!mesh || !mesh->built || source.instance >= p_order.size()) {
+			continue;
+		}
+		for (uint32_t t = 0; t < uint32_t(mesh->bvh_triangles.size()); t++) {
+			const Triangle &triangle = mesh->bvh_triangles[t];
+			const uint32_t surface = triangle.surface;
+			if (surface >= source.surface_count || source.material_offset + surface >= materials.size()) {
+				continue;
+			}
+			const Material &material = materials[source.material_offset + surface];
+			if (!(material.emission[0] > 0.0f || material.emission[1] > 0.0f || material.emission[2] > 0.0f) && material.emission_texture == 0) {
+				continue;
+			}
+			if (triangle_emitters.size() >= MAX_TRIANGLE_EMITTERS) {
+				capped = true;
+				break;
+			}
+			TriangleEmitter emitter = {};
+			float *const corners[3] = { emitter.v0, emitter.v1, emitter.v2 };
+			for (uint32_t v = 0; v < 3; v++) {
+				const Vector3 local_position(triangle.v0[0] + (v == 1 ? triangle.e1[0] : v == 2 ? triangle.e2[0]
+																								: 0.0f),
+						triangle.v0[1] + (v == 1 ? triangle.e1[1] : v == 2 ? triangle.e2[1]
+																		   : 0.0f),
+						triangle.v0[2] + (v == 1 ? triangle.e1[2] : v == 2 ? triangle.e2[2]
+																		   : 0.0f));
+				const Vector3 position = source.transform.xform(local_position);
+				corners[v][0] = position.x;
+				corners[v][1] = position.y;
+				corners[v][2] = position.z;
+			}
+			emitter.instance = p_order[source.instance];
+			if (emitter_filter >= 0 && int64_t(emitter.instance) != emitter_filter) {
+				continue;
+			}
+			emitter.material = source.material_offset + surface;
+			emitter.uv_index = mesh->triangle_offset + t;
+			emitter.flags = source.proxied ? TRIANGLE_EMITTER_PROXIED : 0u;
+			triangle_emitters.push_back(emitter);
+		}
+		if (capped) {
+			break;
+		}
+	}
+	triangle_emitter_count = triangle_emitters.size();
+	triangle_emitters_capped = capped;
+	if (GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ray_scene/print_instances")) {
+		uint32_t emitter_instances = 0;
+		uint32_t emitter_proxied_instances = 0;
+		{
+			HashSet<uint32_t> unique_instances;
+			for (const TriangleEmitter &emitter : triangle_emitters) {
+				if (unique_instances.has(emitter.instance)) {
+					continue;
+				}
+				unique_instances.insert(emitter.instance);
+				emitter_instances++;
+				if ((emitter.flags & TRIANGLE_EMITTER_PROXIED) != 0u) {
+					emitter_proxied_instances++;
+				}
+			}
+		}
+		print_line(vformat("Ray scene triangle emitters: %d triangles across %d instances (%d proxied)%s", triangle_emitter_count, emitter_instances, emitter_proxied_instances, triangle_emitters_capped ? " (capped)" : ""));
+		if (emitter_filter >= 0) {
+			print_line(vformat("Ray scene emitter filter: instance %d, %d triangles kept", int(emitter_filter), int(triangle_emitter_count)));
+		}
+		if (triangles_logged < 64) {
+			triangles_logged++;
+			for (const TriangleEmitterSource &source : p_sources) {
+				const MeshEntry *mesh = meshes.getptr(source.mesh);
+				if (!mesh || !mesh->built || source.instance >= p_order.size()) {
+					continue;
+				}
+				uint32_t instance_triangles = 0;
+				HashSet<uint32_t> surfaces;
+				for (uint32_t t = 0; t < uint32_t(mesh->triangle_surface.size()); t++) {
+					const uint32_t surface = mesh->triangle_surface[t];
+					if (surface >= source.surface_count || source.material_offset + surface >= materials.size()) {
+						continue;
+					}
+					const Material &material = materials[source.material_offset + surface];
+					if (!(material.emission[0] > 0.0f || material.emission[1] > 0.0f || material.emission[2] > 0.0f) && material.emission_texture == 0) {
+						continue;
+					}
+					instance_triangles++;
+					surfaces.insert(surface);
+				}
+				if (instance_triangles == 0) {
+					continue;
+				}
+				String surface_list;
+				for (const uint32_t &surface : surfaces) {
+					const Material &material = materials[source.material_offset + surface];
+					if (!surface_list.is_empty()) {
+						surface_list += ",";
+					}
+					surface_list += vformat("%d(layer %d scale %.4f flat %.3f)", surface, int(material.emission_texture), material.emission_texel_scale, material.emission_mean_luminance);
+				}
+				print_line(vformat("Ray scene emitter: mesh \"%s\" instance %d triangles %d surfaces %s proxied %s", MeshStorage::get_singleton()->mesh_get_path(source.mesh), int(p_order[source.instance]), int(instance_triangles), surface_list, source.proxied ? "yes" : "no"));
+			}
+		}
+	}
+	if (triangle_emitters.is_empty()) {
+		triangle_emitters.push_back(TriangleEmitter());
+	}
+	_ensure_buffer(triangle_emitter_buffer, triangle_emitter_capacity, triangle_emitters.size(), sizeof(TriangleEmitter), "Ray Scene Triangle Emitters");
+	RD::get_singleton()->buffer_update(triangle_emitter_buffer, 0, triangle_emitters.size() * sizeof(TriangleEmitter), triangle_emitters.ptr());
+}
+
 void RayScene::_assemble(const LocalVector<RID> &p_meshes) {
 	blas_nodes.clear();
 	triangles.clear();
@@ -573,9 +702,15 @@ void RayScene::_warn_albedo_fallback(RID p_material, RID p_texture, RID p_mesh, 
 	WARN_PRINT(vformat("Ray scene: a material without gi_albedo takes the texture-mean albedo fallback (mesh \"%s\", surface %d, texture \"%s\").", MeshStorage::get_singleton()->mesh_get_path(p_mesh), p_surface, TextureStorage::get_singleton()->texture_get_path(p_texture)));
 }
 
+bool RayScene::emission_has_value(const Color &p_emission) {
+	return p_emission.r >= 0.0f && p_emission.g >= 0.0f && p_emission.b >= 0.0f && (p_emission.r > 0.0f || p_emission.g > 0.0f || p_emission.b > 0.0f);
+}
+
 void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, Material &r_material, float &r_alpha_threshold, uint32_t &r_cull) {
 	r_material = {};
 	r_material.albedo[0] = r_material.albedo[1] = r_material.albedo[2] = 0.48f;
+	r_material.emission_uv_scale[0] = 1.0f;
+	r_material.emission_uv_scale[1] = 1.0f;
 	r_alpha_threshold = -1.0f;
 	r_cull = uint32_t(RSE::CULL_MODE_DISABLED);
 	if (p_material.is_null()) {
@@ -626,8 +761,11 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 		albedo_sources[ALBEDO_DEFAULT]++;
 	}
 
-	if (_param_color(material_storage->material_get_param(p_material, SNAME("gi_emission")), emission) && emission.r >= 0.0f && emission.g >= 0.0f && emission.b >= 0.0f) {
-		_store_color(r_material.emission, emission, emission_scale);
+	const Variant gi_value = material_storage->material_get_param(p_material, SNAME("gi_emission"));
+	Color gi_emission;
+	const bool gi_present = _param_color(gi_value, gi_emission);
+	if (RayScene::emission_has_value(gi_present ? gi_emission : Color())) {
+		_store_color(r_material.emission, gi_emission, emission_scale);
 	} else if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("emission_color")), emission)) {
 		const float luminance = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_luminance")), 0.0f);
 		const float bounce = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_bounce_weight")), 1.0f);
@@ -638,6 +776,44 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 		const float multiplier = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_energy")), 1.0f);
 		emission = emission.srgb_to_linear();
 		_store_color(r_material.emission, emission, multiplier);
+	}
+	r_material.emission_mean_luminance = 0.2126f * r_material.emission[0] + 0.7152f * r_material.emission[1] + 0.0722f * r_material.emission[2];
+	if (material_storage->material_get_declared_param(p_material, SNAME("use_emission_mask_texture")).booleanize()) {
+		const Variant atlas_index = material_storage->material_get_declared_param(p_material, SNAME("oc_emission_atlas_index"));
+		if (atlas_index.get_type() == Variant::INT) {
+			r_material.emission_texture = uint32_t(MAX(int(atlas_index), 0));
+		}
+		const Variant scale_value = material_storage->material_get_declared_param(p_material, SNAME("uv_scale"));
+		if (scale_value.get_type() == Variant::VECTOR2) {
+			const Vector2 scale = scale_value;
+			r_material.emission_uv_scale[0] = scale.x;
+			r_material.emission_uv_scale[1] = scale.y;
+		}
+		const Variant offset_value = material_storage->material_get_declared_param(p_material, SNAME("uv_offset"));
+		if (offset_value.get_type() == Variant::VECTOR2) {
+			const Vector2 offset = offset_value;
+			r_material.emission_uv_offset[0] = offset.x;
+			r_material.emission_uv_offset[1] = offset.y;
+		}
+		r_material.emission_nits_range[0] = 0.0f;
+		r_material.emission_nits_range[1] = 1.0f;
+		const Variant nits_value = material_storage->material_get_declared_param(p_material, SNAME("emission_luminance_texture_range"));
+		if (nits_value.get_type() == Variant::VECTOR2) {
+			const Vector2 nits = nits_value;
+			r_material.emission_nits_range[0] = nits.x;
+			r_material.emission_nits_range[1] = nits.y;
+		}
+		if (material_storage->material_get_declared_param(p_material, SNAME("use_texture_ranges")).booleanize()) {
+			r_material.emission_flags |= EMISSION_FLAG_TEXTURE_RANGES;
+		}
+		r_material.emission_texel_scale = emission_scale;
+		if (!(r_material.emission_mean_luminance > 0.0f) && r_material.emission_texture != 0) {
+			if (gi_present && RayScene::emission_has_value(gi_emission)) {
+				r_material.emission_mean_luminance = (0.2126f * gi_emission.r + 0.7152f * gi_emission.g + 0.0722f * gi_emission.b) * emission_scale;
+			} else {
+				r_material.emission_mean_luminance = 0.5f * (r_material.emission_nits_range[0] + r_material.emission_nits_range[1]) * r_material.emission_texel_scale;
+			}
+		}
 	}
 
 	const RSE::CullMode cull_mode = material_storage->material_get_cull_mode(p_material);
@@ -700,7 +876,7 @@ void RayScene::_alpha_entry(RID p_material, Material &r_material, float p_alpha_
 		if (offset_value.get_type() == Variant::VECTOR2) {
 			offset = offset_value;
 		}
-		if (_param_bool(material_storage->material_get_declared_param(p_material, SNAME("use_texture_ranges")))) {
+		if (material_storage->material_get_declared_param(p_material, SNAME("use_texture_ranges")).booleanize()) {
 			Vector2 range(0.0f, 1.0f);
 			const Variant range_value = material_storage->material_get_declared_param(p_material, SNAME("geometry_opacity_texture_range"));
 			if (range_value.get_type() == Variant::VECTOR2) {
@@ -1623,11 +1799,24 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 
 	MeshStorage *mesh_storage = MeshStorage::get_singleton();
 	instances.clear();
+	instance_mesh_names.clear();
+	instance_mesh_positions.clear();
 	materials.clear();
 	material_cache.clear();
 	memset(albedo_sources, 0, sizeof(albedo_sources));
 	additive_skipped = 0;
 	emission_scale = _param_float(MaterialStorage::get_singleton()->global_shader_parameter_get_internal(SNAME("openpbr_emission_scale")), 1.0f);
+	const Variant atlas_value = MaterialStorage::get_singleton()->global_shader_parameter_get_internal(SNAME("ray_emission_atlas"));
+	const Variant::Type atlas_type = atlas_value.get_type();
+	const RID atlas_rid = (atlas_type == Variant::RID || atlas_type == Variant::OBJECT) ? RID(atlas_value) : RID();
+	const RID atlas = atlas_rid.is_valid() ? TextureStorage::get_singleton()->texture_get_rd_texture(atlas_rid) : RID();
+	if (atlas != emission_texture_array) {
+		emission_texture_array = atlas;
+		emission_texture_count = 0;
+		if (atlas.is_valid()) {
+			emission_texture_count = RD::get_singleton()->texture_get_format(atlas).array_layers;
+		}
+	}
 	skip_additive = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ray_scene/skip_additive_surfaces");
 	shell_ranges.clear();
 	HashMap<RenderGeometryInstance *, RID> shell_geometry;
@@ -1649,6 +1838,9 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	LocalVector<BuildPrimitive> primitives;
 	uint32_t signature = HASH_MURMUR3_SEED;
 	uint64_t scene_signature = 0;
+	uint32_t emitter_state = hash_murmur3_one_64(uint64_t(int64_t(GLOBAL_GET("rendering/global_illumination/ray_scene/emitter_instance"))), HASH_MURMUR3_SEED);
+	uint32_t emission_state = hash_murmur3_one_32(int(GLOBAL_GET("rendering/global_illumination/ray_scene/proxy_emitters")) != 0 ? 1u : 0u, HASH_MURMUR3_SEED);
+	LocalVector<TriangleEmitterSource> emitter_sources;
 	scene_members.clear();
 	for (uint32_t i = 0; i < p_instances.size(); i++) {
 		RenderGeometryInstanceBase *geometry = static_cast<RenderGeometryInstanceBase *>(p_instances[i]);
@@ -1687,6 +1879,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		uint64_t candidates = 0;
 		uint64_t alpha_split = 0;
 		uint32_t feed_state = hash_murmur3_one_32(geometry->layer_mask);
+		bool instance_proxied = false;
 
 		for (uint32_t s = 0; s < mesh->surface_count; s++) {
 			RID material = geometry->data->material_override;
@@ -1721,13 +1914,41 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 				candidates |= surface_candidates(s, materials[materials.size() - 1].flags);
 				alpha_split |= alpha_split_bits(s, cached->entry.flags, cached->alpha_flags);
 			}
-			const float factor = MAX(_instance_float(geometry->shader_uniforms_offset, cached->scale_index), 0.0f) * MAX(_instance_float(geometry->shader_uniforms_offset, cached->bounce_index), 0.0f);
+			const float instance_scale = _instance_float(geometry->shader_uniforms_offset, cached->scale_index);
+			const float instance_bounce = _instance_float(geometry->shader_uniforms_offset, cached->bounce_index);
+			if (instance_bounce <= 0.0f) {
+				instance_proxied = true;
+			}
+			const float factor = MAX(instance_scale, 0.0f);
 			if (factor != 1.0f) {
 				Material &instance_material = materials[materials.size() - 1];
 				for (int k = 0; k < 3; k++) {
 					instance_material.emission[k] *= factor;
 				}
+				instance_material.emission_mean_luminance *= factor;
 			}
+		}
+		bool instance_emissive = false;
+		for (uint32_t s = instance.material_offset; s < materials.size(); s++) {
+			const Material &surface_material = materials[s];
+			const bool emissive = surface_material.emission[0] > 0.0f || surface_material.emission[1] > 0.0f || surface_material.emission[2] > 0.0f || surface_material.emission_texture != 0;
+			instance_emissive = instance_emissive || emissive;
+			emitter_state = hash_murmur3_one_32(emissive ? 1u : 0u, emitter_state);
+			emission_state = hash_murmur3_buffer(surface_material.emission, sizeof(surface_material.emission), emission_state);
+			emission_state = hash_murmur3_buffer(&surface_material.emission_mean_luminance, sizeof(surface_material.emission_mean_luminance), emission_state);
+			emission_state = hash_murmur3_one_32(surface_material.emission_texture, emission_state);
+			emission_state = hash_murmur3_one_32(surface_material.emission_flags, emission_state);
+		}
+		emitter_state = hash_murmur3_one_32(instance_proxied ? 1u : 0u, emitter_state);
+		if (instance_emissive) {
+			TriangleEmitterSource emitter_source;
+			emitter_source.transform = transform;
+			emitter_source.mesh = mesh_rid;
+			emitter_source.instance = instances.size();
+			emitter_source.material_offset = instance.material_offset;
+			emitter_source.surface_count = mesh->surface_count;
+			emitter_source.proxied = instance_proxied;
+			emitter_sources.push_back(emitter_source);
 		}
 		bool hw_instance_usable = true;
 		if (accel) {
@@ -1755,6 +1976,8 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			_feed_observe(geometry, geometry->transform, mesh_rid, *mesh, hw_instance_usable, feed_state);
 		}
 		primitives.push_back(primitive);
+		instance_mesh_names.push_back(MeshStorage::get_singleton()->mesh_get_path(mesh_rid));
+		instance_mesh_positions.push_back(geometry->transform.origin);
 		instances.push_back(instance);
 		signature = hash_murmur3_buffer(&instance, sizeof(Instance), signature);
 
@@ -1799,6 +2022,17 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		for (uint32_t i = 0; i < primitives.size(); i++) {
 			ordered[i] = instances[primitives[i].index];
 		}
+		if (!ray_scene_instance_table_printed && GLOBAL_GET("rendering/global_illumination/ray_scene/print_instances")) {
+			ray_scene_instance_table_printed = true;
+			for (uint32_t order_index = 0; order_index < primitives.size(); order_index++) {
+				const uint32_t source_index = primitives[order_index].index;
+				if (source_index >= instance_mesh_names.size()) {
+					continue;
+				}
+				const Vector3 origin = instance_mesh_positions[source_index];
+				print_line(vformat("Ray scene instance table: %d mesh \"%s\" position %.2f %.2f %.2f", int(order_index), instance_mesh_names[source_index], origin.x, origin.y, origin.z));
+			}
+		}
 		if (instances.is_empty()) {
 			ordered[0] = Instance();
 		}
@@ -1806,6 +2040,22 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		_ensure_buffer(instance_buffer, instance_capacity, ordered.size(), sizeof(Instance), "Ray Scene Instances");
 		RD::get_singleton()->buffer_update(tlas_node_buffer, 0, tlas_nodes.size() * sizeof(Node), tlas_nodes.ptr());
 		RD::get_singleton()->buffer_update(instance_buffer, 0, ordered.size() * sizeof(Instance), ordered.ptr());
+	}
+
+	const bool emitters_dirty = !triangle_emitters_built || rebuilt || emitter_state != triangle_emitter_state;
+	if (emitters_dirty) {
+		LocalVector<uint32_t> instance_order;
+		instance_order.resize(instances.size());
+		for (uint32_t i = 0; i < primitives.size(); i++) {
+			instance_order[primitives[i].index] = i;
+		}
+		_update_triangle_emitters(emitter_sources, instance_order);
+		triangle_emitter_state = emitter_state;
+		triangle_emitters_built = true;
+	}
+	if (emitters_dirty || emission_state != triangle_emitter_emission_state) {
+		triangle_emitter_emission_state = emission_state;
+		triangle_emitter_generation++;
 	}
 
 	const int64_t additive_state = skip_additive ? int64_t(additive_skipped) : -1;
@@ -1947,6 +2197,13 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	scene_data.camera_to_anchor[2] = camera_to_anchor.z;
 	scene_data.instance_count = instances.size();
 	scene_data.light_count = lights.size();
+	scene_data.triangle_emitter_count = triangle_emitter_count;
+	scene_data.triangle_emitters_capped = triangle_emitters_capped ? 1u : 0u;
+	const float emissive_exposure_normalization = p_camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes) : 1.0f;
+	scene_data.emissive_exposure_normalization = emissive_exposure_normalization > 0.0f ? emissive_exposure_normalization : 1.0f;
+	scene_data.triangle_emitter_generation = triangle_emitter_generation;
+	scene_data.emission_texture_count = emission_texture_count;
+	scene_data.proxy_emitters_traced = int(GLOBAL_GET("rendering/global_illumination/ray_scene/proxy_emitters")) != 0 ? 1u : 0u;
 	if (scene_data_buffer.is_null()) {
 		scene_data_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(SceneData));
 		RD::get_singleton()->set_resource_name(scene_data_buffer, "Ray Scene Data");

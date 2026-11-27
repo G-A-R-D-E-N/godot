@@ -3602,6 +3602,47 @@ void fragment_shader(in SceneData scene_data) {
 			}
 		}
 	}
+#ifdef DIRECT_RESAMPLED_ROUTE
+	if (sc_use_direct_resampled() && sc_use_direct_emitters() && direct_record_ok && direct_record_tails > 0) {
+		ivec2 emitter_pixel = ivec2(gl_FragCoord.xy);
+		uvec2 emitter_record = texelFetch(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), ivec3(emitter_pixel, direct_record_tails), 0).xy;
+		float emitter_weight = abs(uintBitsToFloat(emitter_record.y));
+		if (emitter_record.x == 0xFFFFFFFFu && emitter_weight > 0.0) {
+			ivec3 emitter_size = textureSize(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), 0);
+			uint emitter_index = uint(emitter_pixel.y) * uint(emitter_size.x) + uint(emitter_pixel.x);
+			vec4 emitter_geometry = direct_emitter_samples.data[emitter_index * 3u];
+			vec4 emitter_color = direct_emitter_samples.data[emitter_index * 3u + 1u];
+			if (emitter_geometry.w > 0.0) {
+				int emitter_layer = direct_record_heads + direct_record_tails + 3;
+				float emitter_visible = texelFetch(sampler2DArray(direct_shadow_factors, SAMPLER_NEAREST_CLAMP), ivec3(emitter_pixel, emitter_layer), 0).r;
+				float emitter_scale = emitter_visible * emitter_weight / float(direct_record_tails);
+				if (emitter_scale > 0.0) {
+					hvec3 emitter_diffuse = hvec3(0.0);
+					hvec3 emitter_specular = hvec3(0.0);
+					light_process_emitter(emitter_geometry.xyz, hvec3(emitter_color.rgb), half(emitter_geometry.w), vertex, view, normal, f0, roughness, metallic, albedo, alpha, screen_uv, energy_compensation,
+#ifdef LIGHT_BACKLIGHT_USED
+							backlight,
+#endif
+#ifdef LIGHT_TRANSMITTANCE_USED
+							transmittance_color, transmittance_depth, transmittance_boost,
+#endif
+#ifdef LIGHT_RIM_USED
+							rim, rim_tint,
+#endif
+#ifdef LIGHT_CLEARCOAT_USED
+							clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
+#endif
+#ifdef LIGHT_ANISOTROPY_USED
+							binormal, tangent, anisotropy,
+#endif
+							emitter_diffuse, emitter_specular);
+					diffuse_light += hvec3(vec3(emitter_diffuse) * emitter_scale);
+					direct_specular_light += hvec3(vec3(emitter_specular) * emitter_scale);
+				}
+			}
+		}
+	}
+#endif
 #endif // !USE_VERTEX_LIGHTING
 #endif //!defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED)
 

@@ -32,6 +32,13 @@ if "RD_GLSL" in env["BUILDERS"]:
                 "#glsl_builders.py",
             ],
         )
+    env_gi_restir_di.Depends(
+        "shaders/di_resample.glsl.gen.h",
+        [
+            "#servers/rendering/renderer_rd/shaders/environment/ray_scene_inc.glsl",
+            "#servers/rendering/renderer_rd/shaders/half_inc.glsl",
+        ],
+    )
 
 if lab:
     env_gi_restir_di.add_source_files(env.modules_sources, "*.cpp")
