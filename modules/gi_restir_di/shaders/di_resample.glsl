@@ -407,114 +407,138 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal, uint p_seed) {
 		di_emitter_clear_block(p_pixel, 1u);
 		return;
 	}
-	uint low = di_emitter_pick_index(di_emitter_hash(p_seed, 0x27d4eb2fu) * total, count);
-	uint room_taken = 0u;
+	const uint DI_EMITTER_RIS_M = 16u;
+	uint room_first = 0u;
+	uint room_last = 0u;
+	float room_base = 0.0;
+	float room_span = 0.0;
+	bool has_room = false;
 #ifdef DI_EMITTER_ROOM_PICK
-	if (params.emitter_room_pick != 0u) {
-		uint room_first = 0u;
-		uint room_last = 0u;
+	{
 		const uint room_id = di_emitter_room_of(p_vertex);
 		if (di_emitter_room_window(room_id, room_first, room_last) && room_last <= count) {
-			room_taken = room_id + 1u;
-			float room_base = room_first > 0u ? emitter_cdf.data[room_first - 1u] : 0.0;
-			float room_span = emitter_cdf.data[room_last - 1u] - room_base;
-			if (!(room_span > 0.0)) {
-				room_first = 0u;
-				room_last = 0u;
-				room_taken = 0u;
-			}
-		}
-		if (room_last > room_first) {
-			float room_base = room_first > 0u ? emitter_cdf.data[room_first - 1u] : 0.0;
-			float room_span = emitter_cdf.data[room_last - 1u] - room_base;
-			float room_target = room_base + di_emitter_hash(p_seed, 0x27d4eb2fu) * room_span;
-			uint candidate = room_first;
-			uint room_low = room_first;
-			uint room_high = room_last - 1u;
-			while (room_low < room_high) {
-				uint mid = (room_low + room_high) >> 1u;
-				if (emitter_cdf.data[mid] < room_target) {
-					room_low = mid + 1u;
-				} else {
-					room_high = mid;
-				}
-			}
-			candidate = room_low;
-			while (candidate + 1u < room_last) {
-				float previous = candidate > room_first ? emitter_cdf.data[candidate - 1u] : room_base;
-				if (emitter_cdf.data[candidate] > previous) {
-					break;
-				}
-				candidate++;
-			}
-			float previous = candidate > room_first ? emitter_cdf.data[candidate - 1u] : room_base;
-			if (emitter_cdf.data[candidate] > previous) {
-				low = candidate;
-			}
+			room_base = room_first > 0u ? emitter_cdf.data[room_first - 1u] : 0.0;
+			room_span = emitter_cdf.data[room_last - 1u] - room_base;
+			has_room = room_span > 0.0;
 		}
 	}
 #endif
-	if (params.emitter_pick_radius > 0.0) {
-		uint nearest = low;
-		float nearest_distance = di_emitter_distance(p_vertex, low);
-		for (uint attempt = 1u; attempt < 4u; attempt++) {
-			if (nearest_distance <= params.emitter_pick_radius) {
-				break;
+	float w_sum = 0.0;
+	uint best_low = 0u;
+	vec3 best_point = vec3(0.0);
+	vec3 best_texel = vec3(0.0);
+	float best_geometric = 0.0;
+	float best_p_hat = 0.0;
+	uint best_instance = 0u;
+	uint best_uv_index = 0u;
+	float best_dist_sq = 0.0;
+	for (uint k = 0u; k < DI_EMITTER_RIS_M; k++) {
+		uint cseed = p_seed ^ (0x9e3779b9u * (k + 1u));
+		uint cand_idx = 0u;
+		bool use_room = has_room && (params.emitter_room_pick != 0u || (k & 1u) != 0u);
+		if (use_room) {
+			float room_target = room_base + di_emitter_hash(cseed, 0x27d4eb2fu) * room_span;
+			uint r_low = room_first;
+			uint r_high = room_last - 1u;
+			while (r_low < r_high) {
+				uint mid = (r_low + r_high) >> 1u;
+				if (emitter_cdf.data[mid] < room_target) {
+					r_low = mid + 1u;
+				} else {
+					r_high = mid;
+				}
 			}
-			uint candidate = di_emitter_pick_index(di_emitter_hash(p_seed ^ (0x9e3779b9u * attempt), 0x27d4eb2fu) * total, count);
-			float candidate_distance = di_emitter_distance(p_vertex, candidate);
-			if (candidate_distance < nearest_distance) {
-				nearest = candidate;
-				nearest_distance = candidate_distance;
+			while (r_low + 1u < room_last) {
+				float prev = r_low > room_first ? emitter_cdf.data[r_low - 1u] : room_base;
+				if (emitter_cdf.data[r_low] > prev) {
+					break;
+				}
+				r_low++;
+			}
+			cand_idx = r_low;
+		} else {
+			cand_idx = di_emitter_pick_index(di_emitter_hash(cseed, 0x27d4eb2fu) * total, count);
+		}
+		float inv_density = total;
+		if (has_room) {
+			if (params.emitter_room_pick != 0u) {
+				inv_density = room_span;
+			} else {
+				bool in_room = cand_idx >= room_first && cand_idx < room_last;
+				inv_density = 1.0 / (0.5 / total + (in_room ? 0.5 / room_span : 0.0));
 			}
 		}
-		low = nearest;
+		RaySceneTriangleEmitter emitter = ray_scene_triangle_emitter(cand_idx);
+		vec3 v0 = di_emitter_to_view(emitter.v0);
+		vec3 v1 = di_emitter_to_view(emitter.v1);
+		vec3 v2 = di_emitter_to_view(emitter.v2);
+		vec3 e1 = v1 - v0;
+		vec3 e2 = v2 - v0;
+		vec3 cross_e1e2 = cross(e2, e1);
+		float normal_length = length(cross_e1e2);
+		float area = 0.5 * normal_length;
+		float luminance = di_emitter_selection_luminance(emitter.material);
+		if (!(area > 0.0) || !(luminance > 0.0)) {
+			continue;
+		}
+		float r1 = di_emitter_hash(cseed, 0x68e31da4u);
+		float r2 = di_emitter_hash(cseed, 0x1b56c4e9u);
+		float root = sqrt(r1);
+		float b = root * (1.0 - r2);
+		float c = root * r2;
+		vec3 sample_point = v0 * (1.0 - root) + v1 * b + v2 * c;
+		vec3 rel = sample_point - p_vertex;
+		float dist_sq = dot(rel, rel);
+		if (!(dist_sq > 1e-10)) {
+			continue;
+		}
+		float distance = sqrt(dist_sq);
+		vec3 to_light = rel / distance;
+		float cos_surface = dot(p_normal, to_light);
+		if (!(cos_surface > 0.0)) {
+			continue;
+		}
+		vec3 light_normal = cross_e1e2 / normal_length;
+		float cos_light = dot(light_normal, -to_light);
+		if ((ray_scene_materials.data[emitter.material].flags & RAY_SCENE_MATERIAL_TWO_SIDED) != 0u) {
+			cos_light = abs(cos_light);
+		}
+		if (!(cos_light > 0.0)) {
+			continue;
+		}
+		float geometric = min(cos_light / max(dist_sq, 1e-8), 60000.0) * di_emitter_window(emitter, distance);
+		if (!(geometric > 0.0)) {
+			continue;
+		}
+		vec2 emitter_uv = ray_scene_triangle_emitter_uv(emitter.uv_index, vec3(b, c, 0.0));
+		vec3 texel_emission = ray_scene_triangle_emitter_emission_texel(emitter.material, emitter_uv) * ray_scene_emissive_exposure_normalization();
+		float p_hat = max(dot(texel_emission, vec3(0.2126, 0.7152, 0.0722)), 0.0) * geometric * cos_surface;
+		if (!(p_hat > 0.0)) {
+			continue;
+		}
+		float w = p_hat * (inv_density / luminance);
+		w_sum += w;
+		if (di_emitter_hash(cseed, 0x517cc1b7u) * w_sum < w) {
+			best_low = cand_idx;
+			best_point = sample_point;
+			best_texel = texel_emission;
+			best_geometric = geometric;
+			best_p_hat = p_hat;
+			best_instance = emitter.instance;
+			best_uv_index = emitter.uv_index;
+			best_dist_sq = dist_sq;
+		}
 	}
-	RaySceneTriangleEmitter emitter = ray_scene_triangle_emitter(low);
-	vec3 v0 = di_emitter_to_view(emitter.v0);
-	vec3 v1 = di_emitter_to_view(emitter.v1);
-	vec3 v2 = di_emitter_to_view(emitter.v2);
-	vec3 e1 = v1 - v0;
-	vec3 e2 = v2 - v0;
-	vec3 cross_e1e2 = cross(e2, e1);
-	float normal_length = length(cross_e1e2);
-	float area = 0.5 * normal_length;
-	float luminance = di_emitter_selection_luminance(emitter.material);
-	if (!(area > 0.0) || !(luminance > 0.0)) {
-		di_emitter_clear_block(p_pixel, 1u);
+	if (!(w_sum > 0.0) || !(best_p_hat > 0.0)) {
+		di_emitter_clear_block(p_pixel, 3u);
 		return;
 	}
-	float r1 = di_emitter_hash(p_seed, 0x68e31da4u);
-	float r2 = di_emitter_hash(p_seed, 0x1b56c4e9u);
-	float root = sqrt(r1);
-	float b = root * (1.0 - r2);
-	float c = root * r2;
-	vec3 sample_point = v0 * (1.0 - root) + v1 * b + v2 * c;
-	vec2 emitter_uv = ray_scene_triangle_emitter_uv(emitter.uv_index, vec3(b, c, 0.0));
-	vec3 texel_emission = ray_scene_triangle_emitter_emission_texel(emitter.material, emitter_uv) * ray_scene_emissive_exposure_normalization();
-	vec3 rel = sample_point - p_vertex;
-	float distance = length(rel);
-	if (!(distance > 1e-5)) {
-		di_emitter_clear_block(p_pixel, 2u);
-		return;
-	}
-	vec3 to_light = rel / distance;
-	vec3 light_normal = cross_e1e2 / normal_length;
-	float cos_light = dot(light_normal, -to_light);
-	if ((ray_scene_materials.data[emitter.material].flags & RAY_SCENE_MATERIAL_TWO_SIDED) != 0u) {
-		cos_light = abs(cos_light);
-	}
-	if (!(cos_light > 0.0)) {
-		di_emitter_clear_block(p_pixel, room_taken != 0u ? (100u + room_taken) : 3u);
-		return;
-	}
-	float geometric = min(cos_light / max(distance * distance, 1e-8), 60000.0) * di_emitter_window(emitter, distance);
-	vec3 color = texel_emission * (total / luminance);
+	vec3 color = best_texel * ((w_sum / float(DI_EMITTER_RIS_M)) / best_p_hat);
 	float clamp_scale = di_emitter_clamped_luminance(color, total);
 	if (clamp_scale > 0.0) {
 		color *= clamp_scale;
 	}
-	if (params.emitter_visibility != 0u && !di_emitter_visible(p_vertex, p_normal, sample_point, emitter.instance, distance * distance, p_seed)) {
+	if (params.emitter_visibility != 0u && !di_emitter_visible(p_vertex, p_normal, best_point, best_instance, best_dist_sq, p_seed)) {
 		di_emitter_clear_block(p_pixel, 2u);
 		return;
 	}
@@ -522,7 +546,7 @@ void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal, uint p_seed) {
 		di_emitter_clear_block(p_pixel, 4u);
 		return;
 	}
-	di_emitter_commit(p_pixel, sample_point, color, geometric, emitter.instance, emitter.uv_index, low);
+	di_emitter_commit(p_pixel, best_point, color, best_geometric, best_instance, best_uv_index, best_low);
 	imageStore(record_image, ivec3(p_pixel, int(params.tail_samples + 1u)), uvec4(DI_EMITTER_MARK, floatBitsToUint(float(params.tail_samples + 1u)), 0u, 0u));
 }
 
@@ -1224,8 +1248,7 @@ void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
 					cos_light = abs(cos_light);
 				}
 				held_geometric = cos_light > 0.0 ? min(cos_light / max(distance_sq, 1e-8), 60000.0) * di_emitter_window(emitter, sqrt(distance_sq)) : 0.0;
-				float held_luminance = 0.0;
-				held_color = di_emitter_color_at(held_index, held_point, held_luminance);
+				held_color = di_emitter_history_load(p_pixel, 2).rgb;
 				held_target = di_emitter_target(held_color, held_geometric);
 				held_m = min(uintBitsToFloat(surface.z), 20.0);
 				held_hit = di_emitter_hit_fraction(surface);
