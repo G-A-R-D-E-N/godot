@@ -306,6 +306,14 @@ void main() {
 	vec3 sample_light = surfel_eval_irradiance(estimate_r, estimate_g, estimate_b, normal);
 	float sample_luma = dot(sample_light, luminance_weights);
 	float current = dot(surfel_eval_irradiance(sh_r, sh_g, sh_b, normal), luminance_weights);
+	float surfel_cap = max(max(probe_luma, current) * 6.0, 2.0);
+	if (sample_luma > surfel_cap) {
+		float scale_cap = surfel_cap / sample_luma;
+		estimate_r *= scale_cap;
+		estimate_g *= scale_cap;
+		estimate_b *= scale_cap;
+		sample_luma = surfel_cap;
+	}
 	float probe_reference = samples == 0u ? probe_luma : stored_state.y;
 	float smoothed_luma = mix(stored_state.x, sample_luma, 0.25);
 	if (samples != 0u && probe_light.a > 0.5) {
@@ -333,7 +341,7 @@ void main() {
 	vec4 next_sh_b = mix(sh_b, estimate_b, blend);
 	SurfelLookup neighbors = surfel_lookup(surfels.data[index].position, normal, index);
 	if (neighbors.light_weight > 0.0) {
-		float share = 0.2 * clamp(neighbors.light_weight / SURFEL_FULL_WEIGHT, 0.0, 1.0);
+		float share = 0.35 * clamp(neighbors.light_weight / SURFEL_FULL_WEIGHT, 0.0, 1.0);
 		next_sh_r = mix(next_sh_r, neighbors.sh_r, share);
 		next_sh_g = mix(next_sh_g, neighbors.sh_g, share);
 		next_sh_b = mix(next_sh_b, neighbors.sh_b, share);

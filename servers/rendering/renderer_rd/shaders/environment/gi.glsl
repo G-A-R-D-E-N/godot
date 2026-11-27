@@ -798,7 +798,7 @@ void process_gi(ivec2 pos, vec3 vertex, inout vec4 ambient_light, inout vec4 ref
 #endif
 
 #ifdef USE_DDGI
-		reflection_light = vec4(ambient_light.rgb, ambient_light.a * smoothstep(0.5, 1.0, roughness));
+		reflection_light = vec4(ddgi_light.rgb * ddgi.energy, ddgi_light.a * smoothstep(0.5, 1.0, roughness));
 #endif
 
 #ifdef USE_VOXEL_GI_INSTANCES
