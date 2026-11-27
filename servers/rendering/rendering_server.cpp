@@ -36,6 +36,7 @@
 #include "core/object/class_db.h"
 #include "core/os/os.h"
 #include "core/variant/typed_array.h"
+#include "servers/rendering/renderer_rd/environment/fog_ddgi.h"
 #include "servers/rendering/rendering_device.h"
 #include "servers/rendering/rendering_server_types.h"
 #include "servers/rendering/shader_language.h"
@@ -3981,6 +3982,9 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/energy", PROPERTY_HINT_RANGE, "0.0,16.0,0.01"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/bounce_energy", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/debug_view", PROPERTY_HINT_ENUM, "Disabled,Irradiance,Ray Hits,Normals,Probe State,Probe Visibility"), 0);
+	GLOBAL_DEF("rendering/global_illumination/ddgi/volumetric_fog", RendererRD::FOG_DDGI_DEFAULT_ENABLED);
+	GLOBAL_DEF("rendering/global_illumination/ddgi/volumetric_fog_visibility", RendererRD::FOG_DDGI_DEFAULT_VISIBILITY);
+	GLOBAL_DEF("rendering/global_illumination/ddgi/volumetric_fog_directional", RendererRD::FOG_DDGI_DEFAULT_DIRECTIONAL);
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/backend", PROPERTY_HINT_ENUM, "Software,Hardware,Auto"), 2);
 	GLOBAL_DEF("rendering/global_illumination/ray_scene/skip_additive_surfaces", true);

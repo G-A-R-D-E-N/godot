@@ -149,6 +149,20 @@ layout(set = 1, binding = 2) uniform texture3D sdfgi_occlusion_texture;
 
 #endif //SDFGI
 
+#ifdef ENABLE_DDGI
+#define DDGI_SET 1
+#define DDGI_UBO_BINDING 0
+#define DDGI_MEDIUM_SAMPLING
+#define ddgi_linear_sampler linear_sampler
+layout(set = 1, binding = 1) uniform utexture2DArray ddgi_probe_texture;
+layout(set = 1, binding = 3) uniform texture2DArray ddgi_distance_texture;
+layout(set = 1, binding = 4) uniform texture2DArray ddgi_mean_texture;
+#ifdef DDGI_MEDIUM_DIRECTIONAL
+layout(set = 1, binding = 5) uniform texture2DArray ddgi_moment_texture;
+#endif
+#include "ddgi_inc.glsl"
+#endif
+
 layout(set = 0, binding = 15, std140) uniform Params {
 	vec2 fog_frustum_size_begin;
 	vec2 fog_frustum_size_end;
@@ -452,6 +466,16 @@ void main() {
 			}
 		}
 
+#ifdef ENABLE_DDGI
+		vec3 ddgi_world_pos = mat3(params.cam_rotation) * view_pos;
+#ifdef DDGI_MEDIUM_DIRECTIONAL
+		vec3 ddgi_moment[3];
+		vec4 ddgi_medium = ddgi_sample_medium(ddgi_world_pos, ddgi_moment);
+#else
+		vec4 ddgi_medium = ddgi_sample_medium(ddgi_world_pos);
+#endif
+#endif
+
 		// Compute light from sky
 		if (params.ambient_inject > 0.0) {
 			vec3 isotropic = vec3(0.0);
@@ -468,8 +492,23 @@ void main() {
 #endif //USE_RADIANCE_OCTMAP_ARRAY
 			}
 
+#ifdef ENABLE_DDGI
+			total_light += mix(params.ambient_color, mix(isotropic, anisotropic, abs(params.phase_g)), params.sky_contribution) * params.ambient_inject * (1.0 - ddgi_medium.a);
+#else
 			total_light += mix(params.ambient_color, mix(isotropic, anisotropic, abs(params.phase_g)), params.sky_contribution) * params.ambient_inject;
+#endif
 		}
+
+#ifdef ENABLE_DDGI
+#ifdef DDGI_MEDIUM_DIRECTIONAL
+		vec3 ddgi_view = safe_normalize(ddgi_world_pos);
+		vec3 ddgi_first = vec3(dot(ddgi_view, ddgi_moment[0]), dot(ddgi_view, ddgi_moment[1]), dot(ddgi_view, ddgi_moment[2]));
+		vec3 ddgi_light = max(ddgi_medium.rgb + 3.0 * params.phase_g * ddgi_first, vec3(0.0));
+		total_light += ddgi_light * ddgi_medium.a * ddgi.energy * params.gi_inject;
+#else
+		total_light += ddgi_medium.rgb * ddgi_medium.a * ddgi.energy * params.gi_inject;
+#endif
+#endif
 
 		//compute lights from cluster
 

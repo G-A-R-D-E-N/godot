@@ -3257,6 +3257,15 @@
 		<member name="rendering/global_illumination/ddgi/view_bias" type="float" setter="" getter="" default="0.25">
 			Offset of the sample point towards the camera, in units of probe spacing, to reduce light leaking and self-shadowing.
 		</member>
+		<member name="rendering/global_illumination/ddgi/volumetric_fog" type="bool" setter="" getter="" default="true">
+			If [code]true[/code] and [member rendering/global_illumination/ddgi/enabled] is on, DDGI lights the volumetric fog: each froxel gets the mean incident light of the probes around it, scaled by [member rendering/global_illumination/ddgi/energy] and [member Environment.volumetric_fog_gi_inject]. Where the probes cover the froxel, this light replaces the fog's ambient light in the same proportion, as on surfaces. While it is in use the fog takes no SDFGI or VoxelGI light, which matches the surface choice. The fog shader variants that read DDGI are compiled the first frame they are needed. Has no effect while [member Environment.volumetric_fog_gi_inject] is [code]0.0001[/code] or less. Above that threshold the covered share of the ambient light is replaced in full whatever the [member Environment.volumetric_fog_gi_inject] value, so a very small value darkens the fog compared to [code]0.0001[/code].
+		</member>
+		<member name="rendering/global_illumination/ddgi/volumetric_fog_directional" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], the DDGI light in the volumetric fog follows the fog's phase function to first order: it gets brighter when the camera looks toward where the bounce light comes from and dimmer when it looks away, using [member Environment.volumetric_fog_anisotropy]. With an anisotropy of [code]0.0[/code] it has no effect and costs nothing. Needs [member rendering/global_illumination/ddgi/volumetric_fog].
+		</member>
+		<member name="rendering/global_illumination/ddgi/volumetric_fog_visibility" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], the DDGI light in the volumetric fog uses the probes' distance test, so fog behind a wall does not get light from probes in the next room. There the fog falls back to its ambient light. [code]false[/code] is cheaper but lets light leak through walls. Needs [member rendering/global_illumination/ddgi/volumetric_fog].
+		</member>
 		<member name="rendering/global_illumination/direct/clamp_sigmas" type="float" setter="" getter="" default="3.0">
 			How far, in standard deviations of the rays nearby, a lamp's history may stay from those rays before it is pulled back, while that lamp or something in its range has moved recently. [code]0[/code] turns the clamp off.
 		</member>
