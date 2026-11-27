@@ -43,6 +43,11 @@ void DirectResamplerRD::register_settings() {
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/enabled"), false);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/temporal"), false);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/spatial"), false);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/half_res"), false);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/visibility"), false);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/firefly_clamp"), 0.0);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/pick_radius"), 0.0);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/room_pick"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("head"), PROPERTY_HINT_RANGE, "0,6,1"), 4);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("tail_samples"), PROPERTY_HINT_RANGE, "1,7,1"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, DI_RESAMPLED_SETTING("floor"), PROPERTY_HINT_RANGE, "0.0001,1,0.0001"), 0.0625);
@@ -106,6 +111,10 @@ DirectResamplerRD::Settings DirectResamplerRD::get_project_settings() {
 	settings.emitters = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/enabled"));
 	settings.emitter_temporal = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/temporal"));
 	settings.emitter_spatial = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/spatial"));
+	settings.emitter_visibility = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/visibility"));
+	settings.emitter_clamp = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/firefly_clamp"));
+	settings.emitter_pick_radius = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/pick_radius"));
+	settings.emitter_room_pick = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/room_pick"));
 	settings.stale_prior = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/stale_prior"));
 	settings.debug_log = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/log"));
 #ifdef DI_RESAMPLER_LAB
@@ -178,7 +187,8 @@ bool DirectResamplerRD::_ensure_device() {
 	Vector<String> modes;
 	modes.push_back("\n");
 	modes.push_back("\n#define MODE_SPATIAL\n");
-	modes.push_back("\n#define DI_EMITTERS\n");
+	const String room_pick_define = ROOM_PICK_AVAILABLE ? "#define DI_EMITTER_ROOM_PICK\n" : "";
+	modes.push_back("\n#define DI_EMITTERS\n" + room_pick_define);
 	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TABLE\n#define MODE_EMITTER_SUM\n");
 	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TABLE\n#define MODE_EMITTER_SCAN\n");
 	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TABLE\n#define MODE_EMITTER_PREFIX\n");
@@ -186,8 +196,12 @@ bool DirectResamplerRD::_ensure_device() {
 #ifdef DI_RESAMPLER_LAB
 	modes.push_back("\n#define LAB_COUNTS\n");
 	modes.push_back("\n#define MODE_SPATIAL\n#define LAB_COUNTS\n");
+#else
+	modes.push_back("\n");
+	modes.push_back("\n");
 #endif
 	modes.push_back("\n#define DI_EMITTERS\n#define MODE_EMITTER_SPATIAL\n");
+	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TEMPORAL\n" + room_pick_define);
 	const String defines = vformat("\n#define RAY_SCENE_BLAS_STACK_SIZE %d\n#define RAY_SCENE_TLAS_STACK_SIZE %d\n%s", int(RendererRD::RayScene::BLAS_MAX_DEPTH), int(RendererRD::RayScene::TLAS_MAX_DEPTH), RendererRD::RayScene::get_singleton()->uses_hardware() ? "#define SHADER_GLSL_VERSION_460\n#extension GL_EXT_ray_query : require\n#define RAY_SCENE_HW\n" : "");
 	shader->initialize(modes, defines);
 	shader_version = shader->version_create();
@@ -201,6 +215,9 @@ bool DirectResamplerRD::_ensure_device() {
 	emitter_scan_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_EMITTER_SCAN));
 	emitter_prefix_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_EMITTER_PREFIX));
 	emitter_temporal_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_MAIN_EMITTER_TEMPORAL));
+	if (ROOM_PICK_AVAILABLE) {
+		emitter_room_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_MAIN_EMITTER_TEMPORAL_ROOM));
+	}
 	emitter_spatial_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_EMITTER_SPATIAL));
 	emitter_device_ready = emitter_main_pipeline.get_rid().is_valid() && emitter_sum_pipeline.get_rid().is_valid() && emitter_scan_pipeline.get_rid().is_valid() && emitter_prefix_pipeline.get_rid().is_valid();
 	if (!emitter_device_ready) {
@@ -352,7 +369,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		static bool rdi_settings_printed = false;
 		if (!rdi_settings_printed) {
 			rdi_settings_printed = true;
-			print_line(vformat("DIRECT_EMITTERS settings: master %s resampled %s emitters %s temporal %s spatial %s", GLOBAL_GET("rendering/global_illumination/direct/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/temporal"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial")));
+			print_line(vformat("DIRECT_EMITTERS settings: master %s resampled %s emitters %s temporal %s spatial %s visibility %s room_pick %s room_count %d", GLOBAL_GET("rendering/global_illumination/direct/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/temporal"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/visibility"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/room_pick"), int(RendererRD::RayScene::get_singleton()->get_emitter_room_count())));
 		}
 	}
 
@@ -556,6 +573,17 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	params.head_swap_frames = settings.head_swap_frames;
 	params.temporal_reuse = settings.temporal_reuse ? 1 : 0;
 	params.head_window = settings.head_window ? 1 : 0;
+	params.emitter_clamp = MAX(0.0f, settings.emitter_clamp);
+	params.emitter_pick_radius = MAX(0.0f, settings.emitter_pick_radius);
+	params.emitter_room_pick = settings.emitter_room_pick ? 1u : 0u;
+	params.emitter_half = settings.emitters && !settings.emitter_temporal && GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/half_res")) ? 1u : 0u;
+	params.pad_emitter_a = 0u;
+	params.pad_emitter_b = 0u;
+	params.pad_emitter_c = 0u;
+	params.emitter_visibility = settings.emitters && settings.emitter_visibility ? 1u : 0u;
+	params.pad_visibility_a = 0u;
+	params.pad_visibility_b = 0u;
+	params.pad_visibility_c = 0u;
 	rd->buffer_update(params_buffer, 0, sizeof(Params), &params);
 
 	RID sampler = RendererRD::MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
@@ -619,8 +647,9 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	}
 #endif
 	if (emitter_active) {
-		main_variant = emitter_temporal ? VARIANT_MAIN_EMITTER_TEMPORAL : VARIANT_MAIN_EMITTER;
-		main_pipeline = emitter_temporal ? &emitter_temporal_pipeline : &emitter_main_pipeline;
+		const bool emitter_room = emitter_temporal && settings.emitter_room_pick && emitter_room_pipeline.get_rid().is_valid();
+		main_variant = emitter_room ? VARIANT_MAIN_EMITTER_TEMPORAL_ROOM : (emitter_temporal ? VARIANT_MAIN_EMITTER_TEMPORAL : VARIANT_MAIN_EMITTER);
+		main_pipeline = emitter_room ? &emitter_room_pipeline : (emitter_temporal ? &emitter_temporal_pipeline : &emitter_main_pipeline);
 	}
 	if (emitter_active) {
 		const uint32_t emitter_groups = Math::division_round_up(ray_scene->get_triangle_emitter_count(), EMITTER_CHUNK);
@@ -670,6 +699,8 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 			uint32_t nonzero = 0;
 			uint32_t rejected_area = 0;
 			uint32_t rejected_cos = 0;
+			uint32_t rejected_cos_room = 0;
+			uint32_t room_cos[257] = {};
 			uint32_t rejected_shadow = 0;
 			uint32_t rejected_other = 0;
 			float best = 0.0f;
@@ -700,13 +731,28 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 						rejected_shadow++;
 					} else if (reason == 3) {
 						rejected_cos++;
+					} else if (reason >= 100u && reason < 400u) {
+						rejected_cos_room++;
+						room_cos[reason - 100u]++;
 					} else if (reason != 0) {
 						rejected_other++;
 					}
 				}
 			}
 			const double sum_lum = sum_r * 0.2126 + sum_g * 0.7152 + sum_b * 0.0722;
-			print_line(vformat("DIRECT_EMITTERS samples: pixels %d nonzero %d best_lum %.4f best_rgb %.3f %.3f %.3f rejected_area %d rejected_cos %d rejected_shadow %d rejected_other %d sample_sum_rgb %.6f %.6f %.6f sample_sum_lum %.6f", int(pixels), int(nonzero), best, best_color.x, best_color.y, best_color.z, int(rejected_area), int(rejected_cos), int(rejected_shadow), int(rejected_other), sum_r, sum_g, sum_b, sum_lum));
+			uint32_t room_ids = 0;
+			uint32_t top_room = 0;
+			uint32_t top_room_count = 0;
+			for (uint32_t i = 0; i < 257; i++) {
+				if (room_cos[i] != 0) {
+					room_ids++;
+					if (room_cos[i] > top_room_count) {
+						top_room_count = room_cos[i];
+						top_room = i;
+					}
+				}
+			}
+			print_line(vformat("DIRECT_EMITTERS samples: pixels %d nonzero %d best_lum %.4f best_rgb %.3f %.3f %.3f rejected_area %d rejected_cos %d rejected_cos_room %d room_ids %d top_room %d top_room_count %d rejected_shadow %d rejected_other %d sample_sum_rgb %.6f %.6f %.6f sample_sum_lum %.6f", int(pixels), int(nonzero), best, best_color.x, best_color.y, best_color.z, int(rejected_area), int(rejected_cos), int(rejected_cos_room), int(room_ids), top_room > 0 ? int(top_room - 1) : -1, int(top_room_count), int(rejected_shadow), int(rejected_other), sum_r, sum_g, sum_b, sum_lum));
 			emitter_samples_before = data;
 		}
 	}
@@ -832,6 +878,7 @@ void DirectResamplerRD::free_device_resources() {
 	spatial_pipeline.free();
 	emitter_main_pipeline.free();
 	emitter_temporal_pipeline.free();
+	emitter_room_pipeline.free();
 	emitter_spatial_pipeline.free();
 	emitter_sum_pipeline.free();
 	emitter_scan_pipeline.free();

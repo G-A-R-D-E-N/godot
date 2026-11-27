@@ -294,6 +294,8 @@ public:
 		uint32_t packed_out = 0;
 	};
 
+	static constexpr uint32_t MAX_EMITTER_ROOMS = 256;
+
 	struct SceneData {
 		float camera_to_anchor[3];
 		uint32_t instance_count;
@@ -304,10 +306,14 @@ public:
 		uint32_t triangle_emitter_generation;
 		uint32_t emission_texture_count;
 		uint32_t proxy_emitters_traced;
-		uint32_t pad;
+		uint32_t hit_emission_texel;
+		float room_grid_origin[2];
+		float room_grid_cell;
+		uint32_t room_count;
+		uint32_t room_start[(MAX_EMITTER_ROOMS + 2) * 4];
 	};
 
-	static_assert(sizeof(SceneData) == 48);
+	static_assert(sizeof(SceneData) == 4192);
 
 	struct BuildPrimitive {
 		float bmin[3];
@@ -388,6 +394,7 @@ private:
 		uint32_t material_offset = 0;
 		uint32_t surface_count = 0;
 		bool proxied = false;
+		float window_range = 0.0f;
 	};
 
 	Mutex mesh_mutex;
@@ -440,6 +447,8 @@ private:
 		uint32_t alpha_flags = 0;
 		int32_t scale_index = -1;
 		int32_t bounce_index = -1;
+		int32_t color_index = -1;
+		float emission_color_luminance = 0.0f;
 	};
 
 	struct AlphaCounts {
@@ -534,6 +543,9 @@ private:
 	RID triangle_uv_buffer;
 	RID triangle_emitter_buffer;
 	RID emission_dummy;
+	RID room_grid_source;
+	RID room_grid_texture;
+	RID room_grid_dummy;
 	RID emission_texture_array;
 	uint32_t emission_texture_count = 0;
 	uint32_t blas_node_capacity = 0;
@@ -551,6 +563,19 @@ private:
 	bool triangle_emitters_capped = false;
 	bool triangle_emitters_built = false;
 	LocalVector<TriangleEmitter> triangle_emitters;
+
+	struct EmitterRoomGrid {
+		Vector2 origin;
+		float cell_size = 1.0f;
+		Vector2i size;
+		uint32_t room_count = 0;
+		PackedByteArray ids;
+		bool valid = false;
+	};
+	EmitterRoomGrid emitter_room_grid;
+	uint32_t emitter_room_count = 0;
+	uint32_t emitter_room_table_generation = 0;
+	LocalVector<uint32_t> emitter_room_starts;
 	bool alpha_enabled = false;
 	uint32_t alpha_generation = 0;
 	bool alpha_edge = false;
@@ -605,6 +630,9 @@ private:
 	void _pick_settings(float p_cell, bool p_stable);
 	static void _ensure_buffer(RID &r_buffer, uint32_t &r_capacity, uint32_t p_count, uint32_t p_stride, const char *p_name);
 	void _update_triangle_emitters(const LocalVector<TriangleEmitterSource> &p_sources, const LocalVector<uint32_t> &p_order);
+	void _refresh_emitter_room_grid();
+	void _poll_room_grid();
+	uint32_t _emitter_room_at(const Vector3 &p_position) const;
 	void _backend_tick();
 	void _hw_begin();
 	void _hw_instance(RID p_mesh_rid, MeshEntry &r_mesh, uint64_t p_material_candidates, uint64_t p_candidates, const Transform3D &p_transform, Instance &r_instance);
@@ -616,6 +644,9 @@ private:
 
 public:
 	static RayScene *get_singleton() { return singleton; }
+	uint32_t get_emitter_room_count() const { return emitter_room_count; }
+	const LocalVector<uint32_t> &get_emitter_room_starts() const { return emitter_room_starts; }
+	uint32_t get_emitter_room_table_generation() const { return emitter_room_table_generation; }
 	static bool is_needed();
 	static void watch_needed();
 	static void reset_needed_for_tests() { needed.clear(); }

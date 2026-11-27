@@ -65,6 +65,7 @@ public:
 		bool emitters = false;
 			bool emitter_temporal = false;
 		bool emitter_spatial = false;
+	bool emitter_visibility = false;
 		uint32_t head = 4;
 		uint32_t tail_samples = 1;
 		float floor_value = 0.0625f;
@@ -88,6 +89,9 @@ public:
 		float head_swap_margin = 0.25f;
 		uint32_t head_swap_frames = 4;
 		bool head_window = false;
+		float emitter_clamp = 0.0f;
+		float emitter_pick_radius = 0.0f;
+		bool emitter_room_pick = false;
 	};
 
 	struct Params {
@@ -124,8 +128,29 @@ public:
 		uint32_t head_swap_frames;
 		uint32_t temporal_reuse;
 		uint32_t head_window;
+		float emitter_clamp;
+		uint32_t emitter_clamp_pad0;
+		uint32_t emitter_clamp_pad1;
+		uint32_t emitter_clamp_pad2;
+		float emitter_pick_radius;
+		uint32_t emitter_pick_pad0;
+		uint32_t emitter_pick_pad1;
+		uint32_t emitter_pick_pad2;
+		uint32_t emitter_room_pick;
+		uint32_t emitter_room_pad0;
+		uint32_t emitter_room_pad1;
+		uint32_t emitter_room_pad2;
+		uint32_t emitter_half;
+		uint32_t pad_emitter_a;
+		uint32_t pad_emitter_b;
+		uint32_t pad_emitter_c;
+		uint32_t emitter_visibility;
+		uint32_t pad_visibility_a;
+		uint32_t pad_visibility_b;
+		uint32_t pad_visibility_c;
 	};
-	static_assert(sizeof(Params) == 432);
+	static_assert(sizeof(Params) == 512);
+	static_assert(sizeof(Params) % 16 == 0);
 
 	static constexpr uint32_t RESERVOIRS_OFF = 0;
 	static constexpr uint32_t RESERVOIRS_B1 = 1;
@@ -182,6 +207,7 @@ private:
 		bool emitters = false;
 			bool emitter_temporal = false;
 		bool emitter_spatial = false;
+	bool emitter_visibility = false;
 		uint32_t counter = 1;
 		uint32_t history_set = 0;
 		uint32_t head_state_set = 0;
@@ -205,7 +231,9 @@ private:
 		VARIANT_MAIN_LAB = 7,
 		VARIANT_SPATIAL_LAB = 8,
 #endif
-		VARIANT_EMITTER_SPATIAL,
+		VARIANT_EMITTER_SPATIAL = 9,
+		VARIANT_MAIN_EMITTER_TEMPORAL_ROOM = 10,
+		ROOM_PICK_AVAILABLE = true,
 	};
 
 	DiResampleShaderRD *shader = nullptr;
@@ -214,6 +242,7 @@ private:
 	PipelineDeferredRD spatial_pipeline;
 	PipelineDeferredRD emitter_main_pipeline;
 	PipelineDeferredRD emitter_temporal_pipeline;
+	PipelineDeferredRD emitter_room_pipeline;
 	PipelineDeferredRD emitter_spatial_pipeline;
 	PipelineDeferredRD emitter_sum_pipeline;
 	PipelineDeferredRD emitter_scan_pipeline;

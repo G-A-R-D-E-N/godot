@@ -154,7 +154,11 @@ layout(set = RAY_SCENE_SET, binding = 6, std140) uniform RaySceneData {
 	uint triangle_emitter_generation;
 	uint emission_texture_count;
 	uint proxy_emitters_traced;
-	uint pad2;
+	uint hit_emission_texel;
+	vec2 room_grid_origin;
+	float room_grid_cell;
+	uint room_count;
+	uint room_start[258];
 }
 ray_scene;
 
@@ -631,6 +635,45 @@ bool ray_scene_trace(vec3 p_origin, vec3 p_direction, float p_t_max, bool p_any,
 
 bool ray_scene_trace_opaque(vec3 p_origin, vec3 p_direction, float p_t_max, uint p_seed, out RaySceneHit r_hit) {
 	return ray_scene_trace_masked(p_origin, p_direction, p_t_max, false, false, RAY_SCENE_MATERIAL_BLEND, RAY_SCENE_ALL_CASTERS, p_seed, r_hit);
+}
+
+vec3 ray_scene_hit_position_object(RaySceneHit p_hit, vec3 p_position) {
+	RaySceneInstance instance = ray_scene_instances.data[p_hit.instance];
+	vec3 row0 = instance.world_to_object[0].xyz;
+	vec3 row1 = instance.world_to_object[1].xyz;
+	vec3 row2 = instance.world_to_object[2].xyz;
+	vec3 shift = vec3(instance.world_to_object[0].w, instance.world_to_object[1].w, instance.world_to_object[2].w);
+	return vec3(dot(row0, p_position), dot(row1, p_position), dot(row2, p_position)) + shift;
+}
+
+vec2 ray_scene_hit_bary(RaySceneHit p_hit, vec3 p_position) {
+	RaySceneTriangle triangle = ray_scene_triangles.data[p_hit.triangle];
+	vec3 point = ray_scene_hit_position_object(p_hit, p_position);
+	vec3 e1 = triangle.e1.xyz;
+	vec3 e2 = triangle.e2.xyz;
+	vec3 ep = point - triangle.v0;
+	float d11 = dot(e1, e1);
+	float d12 = dot(e1, e2);
+	float d22 = dot(e2, e2);
+	float dp1 = dot(ep, e1);
+	float dp2 = dot(ep, e2);
+	float denom = d11 * d22 - d12 * d12;
+	if (abs(denom) < 1e-20) {
+		return vec2(0.0);
+	}
+	return vec2((d22 * dp1 - d12 * dp2) / denom, (d11 * dp2 - d12 * dp1) / denom);
+}
+
+vec3 ray_scene_hit_emission(RaySceneHit p_hit, vec3 p_position) {
+	RaySceneInstance instance = ray_scene_instances.data[p_hit.instance];
+	RaySceneTriangle triangle = ray_scene_triangles.data[p_hit.triangle];
+	uint material_index = instance.material_offset + triangle.surface;
+	RaySceneMaterial material = ray_scene_materials.data[material_index];
+	if (ray_scene.hit_emission_texel == 0u || material.emission_texture == 0u || material.emission_texture > ray_scene.emission_texture_count) {
+		return material.emission;
+	}
+	vec2 bary = ray_scene_hit_bary(p_hit, p_position);
+	return ray_scene_triangle_emitter_emission_texel(material_index, ray_scene_triangle_emitter_uv(p_hit.triangle, vec3(bary, 0.0)));
 }
 
 vec3 ray_scene_hit_normal(RaySceneHit p_hit) {
