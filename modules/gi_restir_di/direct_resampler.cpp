@@ -48,6 +48,7 @@ void DirectResamplerRD::register_settings() {
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/firefly_clamp"), 0.0);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/pick_radius"), 0.0);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/room_pick"), false);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/debug_reuse_readback"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("head"), PROPERTY_HINT_RANGE, "0,6,1"), 4);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("tail_samples"), PROPERTY_HINT_RANGE, "1,7,1"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, DI_RESAMPLED_SETTING("floor"), PROPERTY_HINT_RANGE, "0.0001,1,0.0001"), 0.0625);
@@ -115,6 +116,7 @@ DirectResamplerRD::Settings DirectResamplerRD::get_project_settings() {
 	settings.emitter_clamp = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/firefly_clamp"));
 	settings.emitter_pick_radius = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/pick_radius"));
 	settings.emitter_room_pick = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/room_pick"));
+	settings.emitter_debug_reuse_readback = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/debug_reuse_readback"));
 	settings.stale_prior = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/stale_prior"));
 	settings.debug_log = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/log"));
 #ifdef DI_RESAMPLER_LAB
@@ -798,7 +800,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		print_line(vformat("DIRECT_EMITTERS reuse: temporal_accepted %d spatial_pixels_rewritten %d", int(temporal_merged), int(changed)));
 		}
 	}
-	if (emitter_active && p_input.frame >= 31 && p_input.frame % 30 == 1 && emitter_reuse_counters.is_valid()) {
+	if (emitter_active && settings.emitter_debug_reuse_readback && p_input.frame >= 31 && p_input.frame % 30 == 1 && emitter_reuse_counters.is_valid()) {
 		const Vector<uint8_t> reuse = rd->buffer_get_data(emitter_reuse_counters);
 		if (reuse.size() >= int(EMITTER_REUSE_COUNTER_BYTES)) {
 			const uint32_t *words = reinterpret_cast<const uint32_t *>(reuse.ptr());

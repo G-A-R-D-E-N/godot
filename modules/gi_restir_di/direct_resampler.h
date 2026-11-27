@@ -92,6 +92,7 @@ public:
 		float emitter_clamp = 0.0f;
 		float emitter_pick_radius = 0.0f;
 		bool emitter_room_pick = false;
+		bool emitter_debug_reuse_readback = false;
 	};
 
 	struct Params {
