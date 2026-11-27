@@ -37,6 +37,7 @@
 #include "core/os/os.h"
 #include "core/profiling/profiling.h"
 #include "servers/display/display_server.h"
+#include "servers/rendering/gi_light_query.h"
 #include "servers/rendering/renderer_canvas_cull.h"
 #include "servers/rendering/renderer_compositor.h"
 #include "servers/rendering/renderer_scene_occlusion_cull.h"
@@ -1687,10 +1688,23 @@ void RendererViewport::viewport_set_vrs_texture(RID p_viewport, RID p_texture) {
 	_configure_3d_render_buffers(viewport);
 }
 
+void RendererViewport::viewport_gi_light_query(RID p_viewport, const PackedFloat32Array &p_queries, const PackedInt32Array &p_slots) {
+	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
+	ERR_FAIL_NULL(viewport);
+	ERR_FAIL_COND_MSG(p_queries.size() % GiLightQuery::FLOATS_PER_QUERY != 0, GiLightQuery::validation_text(GiLightQuery::INVALID_FLOAT_COUNT));
+	ERR_FAIL_COND_MSG(p_queries.size() / GiLightQuery::FLOATS_PER_QUERY > GiLightQuery::MAX_QUERIES, GiLightQuery::validation_text(GiLightQuery::INVALID_QUERY_COUNT));
+	const GiLightQuery::Validation validation = GiLightQuery::validate(p_queries, p_slots);
+	ERR_FAIL_COND_MSG(validation != GiLightQuery::VALID, GiLightQuery::validation_text(validation));
+	LocalVector<GiLightQuery::Query> queries;
+	GiLightQuery::pack(p_queries, p_slots, queries);
+	GiLightQuery::get_singleton()->set_requests(p_viewport, viewport->render_target, queries);
+}
+
 bool RendererViewport::free(RID p_rid) {
 	if (viewport_owner.owns(p_rid)) {
 		Viewport *viewport = viewport_owner.get_or_null(p_rid);
 
+		GiLightQuery::get_singleton()->forget(p_rid);
 		RSG::texture_storage->render_target_free(viewport->render_target);
 		RSG::light_storage->shadow_atlas_free(viewport->shadow_atlas);
 		if (viewport->render_buffers.is_valid()) {

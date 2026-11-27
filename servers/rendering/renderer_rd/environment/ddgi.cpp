@@ -32,6 +32,8 @@
 
 #include "core/config/project_settings.h"
 #include "core/math/random_pcg.h"
+#include "core/object/callable_mp.h"
+#include "core/os/os.h"
 #include "servers/rendering/renderer_rd/environment/ddgi_light_tracker.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
@@ -44,6 +46,14 @@
 #include "servers/rendering/storage/utilities.h"
 
 using namespace RendererRD;
+
+static bool trace_mode_lazy(int p_mode) {
+	return p_mode == DDGI::TRACE_MODE_RTGI || p_mode == DDGI::TRACE_MODE_LIGHT_QUERY;
+}
+
+static void light_query_landed(const Vector<uint8_t> &p_data, RID p_viewport, uint64_t p_generation, uint64_t p_dispatch_usec) {
+	GiLightQuery::get_singleton()->store_results(p_viewport, p_generation, p_dispatch_usec, p_data.ptr(), uint64_t(p_data.size()));
+}
 
 bool DDGI::is_enabled() {
 	return GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/enabled");
@@ -141,7 +151,7 @@ LocalVector<RD::Uniform> DDGI::Volume::gather_uniforms() const {
 }
 
 void DDGI::Volume::free_data() {
-	RID *owned[] = { &irradiance, &distance, &probe_data, &rays, &probe_list_buffer, &schedule_groups_buffer, &dispatch_buffer, &ubo, &reset_ubo, &debug_texture };
+	RID *owned[] = { &irradiance, &distance, &probe_data, &rays, &probe_list_buffer, &schedule_groups_buffer, &dispatch_buffer, &ubo, &reset_ubo, &debug_texture, &light_query_buffer, &light_result_buffer };
 	for (RID *rid : owned) {
 		if (rid->is_valid()) {
 			RD::get_singleton()->free_rid(*rid);
@@ -239,7 +249,7 @@ void DDGI::init(SkyRD *p_sky) {
 	trace_shader.initialize(_trace_modes(), trace_defines);
 	trace_shader_version = trace_shader.version_create();
 	for (int i = 0; i < TRACE_MODE_MAX; i++) {
-		if (i == TRACE_MODE_RTGI) {
+		if (trace_mode_lazy(i)) {
 			continue;
 		}
 		trace_pipelines[i].create_compute_pipeline(trace_shader.version_get_shader(trace_shader_version, i));
@@ -252,6 +262,7 @@ Vector<ShaderRD::VariantDefine> DDGI::_trace_modes() {
 	trace_modes.push_back(ShaderRD::VariantDefine(TRACE_GROUP_BASE, "\n#define MODE_DEBUG_RAYS\n", true));
 	trace_modes.push_back(ShaderRD::VariantDefine(TRACE_GROUP_BASE, "\n#define MODE_SURFEL_TRACE\n", true));
 	trace_modes.push_back(ShaderRD::VariantDefine(TRACE_GROUP_RTGI, "\n#define MODE_RTGI\n", false));
+	trace_modes.push_back(ShaderRD::VariantDefine(TRACE_GROUP_LIGHT_QUERY, "\n#define MODE_LIGHT_QUERY\n" + GiLightQuery::shader_defines() + vformat("#define GI_LIGHT_QUERY_MAX_LIGHTS %d\n", int64_t(RayScene::MAX_LIGHTS)), false));
 	return trace_modes;
 }
 
@@ -264,13 +275,13 @@ bool DDGI::_ensure_trace_hw() {
 	trace_hw_valid = trace_shader_hw.version_is_valid(trace_shader_hw_version);
 	if (trace_hw_valid) {
 		for (int i = 0; i < TRACE_MODE_MAX; i++) {
-			if (i == TRACE_MODE_RTGI) {
+			if (trace_mode_lazy(i)) {
 				continue;
 			}
 			trace_pipelines_hw[i].create_compute_pipeline(trace_shader_hw.version_get_shader(trace_shader_hw_version, i));
 		}
 		for (int i = 0; i < TRACE_MODE_MAX; i++) {
-			trace_hw_valid = trace_hw_valid && (i == TRACE_MODE_RTGI || trace_pipelines_hw[i].get_rid().is_valid());
+			trace_hw_valid = trace_hw_valid && (trace_mode_lazy(i) || trace_pipelines_hw[i].get_rid().is_valid());
 		}
 	}
 	return trace_hw_valid;
@@ -568,6 +579,107 @@ bool DDGI::trace_rtgi(const Ref<Volume> &p_volume, RID p_output, const LocalVect
 		return false;
 	}
 	_trace(TRACE_MODE_RTGI, p_volume, p_output, p_volume->trace_constant, p_x_groups, p_y_groups, RID(), 0, &p_uniforms);
+	return true;
+}
+
+void DDGI::_fill_light_query_ambient(GiLightQuery::QueryHeader &r_header, RID p_environment, RID p_camera_attributes) const {
+	if (p_environment.is_null()) {
+		return;
+	}
+	RendererSceneRenderRD *scene_render = RendererSceneRenderRD::get_singleton();
+	const RSE::EnvironmentBG background = scene_render->environment_get_background(p_environment);
+	const RSE::EnvironmentAmbientSource source = scene_render->environment_get_ambient_source(p_environment);
+	const float exposure = p_camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes) : 1.0f;
+	Color color;
+	if (source == RSE::ENV_AMBIENT_SOURCE_BG && (background == RSE::ENV_BG_CLEAR_COLOR || background == RSE::ENV_BG_COLOR)) {
+		const Color background_color = background == RSE::ENV_BG_CLEAR_COLOR ? RSG::texture_storage->get_default_clear_color() : scene_render->environment_get_bg_color(p_environment);
+		color = background_color.srgb_to_linear() * (scene_render->environment_get_bg_energy_multiplier(p_environment) * exposure);
+	} else {
+		const bool use_sky = (source == RSE::ENV_AMBIENT_SOURCE_BG && background == RSE::ENV_BG_SKY) || source == RSE::ENV_AMBIENT_SOURCE_SKY;
+		if (!use_sky && source != RSE::ENV_AMBIENT_SOURCE_COLOR) {
+			return;
+		}
+		color = scene_render->environment_get_ambient_light(p_environment).srgb_to_linear() * (scene_render->environment_get_ambient_light_energy(p_environment) * exposure);
+		r_header.ambient_sky_mix = use_sky ? scene_render->environment_get_ambient_sky_contribution(p_environment) : 0.0f;
+	}
+	r_header.ambient_color[0] = color.r;
+	r_header.ambient_color[1] = color.g;
+	r_header.ambient_color[2] = color.b;
+}
+
+bool DDGI::_light_query_pipeline_ready(bool p_hardware) {
+	DdgiTraceShaderRD &query_shader = p_hardware ? trace_shader_hw : trace_shader;
+	const RID query_version = p_hardware ? trace_shader_hw_version : trace_shader_version;
+	PipelineDeferredRD &query_pipeline = p_hardware ? trace_pipelines_hw[TRACE_MODE_LIGHT_QUERY] : trace_pipelines[TRACE_MODE_LIGHT_QUERY];
+	if (!query_shader.is_group_enabled(TRACE_GROUP_LIGHT_QUERY)) {
+		query_shader.enable_group(TRACE_GROUP_LIGHT_QUERY);
+		const RID query_shader_rid = query_shader.version_get_shader(query_version, TRACE_MODE_LIGHT_QUERY);
+		if (query_shader_rid.is_valid()) {
+			query_pipeline.create_compute_pipeline(query_shader_rid);
+		}
+	}
+	if (!query_pipeline.get_rid().is_valid()) {
+		WARN_PRINT_ONCE("The GI light query pipeline could not be made; light queries return nothing.");
+		return false;
+	}
+	return true;
+}
+
+bool DDGI::trace_light_queries(const Ref<Volume> &p_volume, RID p_render_target, RID p_environment, RID p_camera_attributes, uint32_t p_flags) {
+	RayScene *ray_scene = RayScene::get_singleton();
+	if (p_volume.is_null() || p_volume->ubo.is_null() || !ray_scene || !ray_scene->is_ready()) {
+		return false;
+	}
+	const uint32_t frame = uint32_t(RSG::rasterizer->get_frame_number());
+	RID viewport;
+	uint64_t generation = 0;
+	LocalVector<GiLightQuery::Query> queries;
+	if (!GiLightQuery::get_singleton()->take_requests(p_render_target, frame, viewport, generation, queries) || queries.is_empty()) {
+		return false;
+	}
+	if (!_trace_usable(ray_scene) || !_light_query_pipeline_ready(ray_scene->uses_hardware())) {
+		GiLightQuery::get_singleton()->skip(viewport, frame);
+		return false;
+	}
+	const bool hardware = ray_scene->uses_hardware();
+
+	if (p_volume->light_query_buffer.is_null()) {
+		p_volume->light_query_buffer = RD::get_singleton()->storage_buffer_create(uint32_t(sizeof(GiLightQuery::QueryHeader) + GiLightQuery::MAX_QUERIES * sizeof(GiLightQuery::Query)));
+		RD::get_singleton()->set_resource_name(p_volume->light_query_buffer, "GI Light Queries");
+		p_volume->light_result_buffer = RD::get_singleton()->storage_buffer_create(uint32_t(GiLightQuery::MAX_QUERIES * sizeof(GiLightQuery::Result)));
+		RD::get_singleton()->set_resource_name(p_volume->light_result_buffer, "GI Light Query Results");
+	}
+
+	const uint32_t count = MIN(queries.size(), GiLightQuery::MAX_QUERIES);
+	GiLightQuery::QueryHeader header = {};
+	_fill_light_query_ambient(header, p_environment, p_camera_attributes);
+	header.count = count;
+	header.frame = frame;
+	header.sun_mask = ray_scene->get_cloud_mapped_mask();
+	header.flags = p_flags | (ray_scene->is_light_list_trimmed() ? uint32_t(GiLightQuery::FLAG_TRIMMED) : 0u) | (hardware ? uint32_t(GiLightQuery::FLAG_HARDWARE_RAYS) : 0u);
+
+	const Vector3 anchor = ray_scene->get_anchor();
+	LocalVector<uint8_t> data;
+	data.resize(uint32_t(sizeof(GiLightQuery::QueryHeader) + count * sizeof(GiLightQuery::Query)));
+	memcpy(data.ptr(), &header, sizeof(GiLightQuery::QueryHeader));
+	for (uint32_t i = 0; i < count; i++) {
+		GiLightQuery::Query query = queries[i];
+		for (int k = 0; k < 3; k++) {
+			query.position[k] = float(double(query.position[k]) - double(anchor[k]));
+		}
+		memcpy(data.ptr() + sizeof(GiLightQuery::QueryHeader) + i * sizeof(GiLightQuery::Query), &query, sizeof(GiLightQuery::Query));
+	}
+	RD::get_singleton()->buffer_update(p_volume->light_query_buffer, 0, data.size(), data.ptr());
+
+	LocalVector<RD::Uniform> uniforms;
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 0, p_volume->light_query_buffer));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, p_volume->light_result_buffer));
+	RD::get_singleton()->draw_command_begin_label("GI Light Query");
+	_trace(TRACE_MODE_LIGHT_QUERY, p_volume, p_volume->rays, p_volume->trace_constant, count, 1, RID(), 0, &uniforms);
+	RD::get_singleton()->draw_command_end_label();
+
+	const uint64_t dispatch_usec = OS::get_singleton()->get_ticks_usec();
+	RD::get_singleton()->buffer_get_data_async(p_volume->light_result_buffer, callable_mp_static(&light_query_landed).bind(viewport, generation, dispatch_usec), 0, uint32_t(count * sizeof(GiLightQuery::Result)));
 	return true;
 }
 

@@ -4479,6 +4479,25 @@
 				[b]Warning:[/b] Calling this from any thread other than the rendering thread will be detrimental to performance.
 			</description>
 		</method>
+		<method name="viewport_gi_light_query">
+			<return type="void" />
+			<param index="0" name="viewport" type="RID" />
+			<param index="1" name="queries" type="PackedFloat32Array" />
+			<param index="2" name="slots" type="PackedInt32Array" />
+			<description>
+				Sets the list of GI light queries for the viewport, replacing the previous list. Each query measures the light arriving at a point from one side: the luminance of a white matte card at the point facing the given direction, in candela per square meter, from the DDGI probes and the ray-traced lights.
+				[param queries] holds 7 floats per query: the world position x, y and z, the facing direction x, y and z, and a sun factor from 0 to 1 that scales the direct light of each directional light that has a cloud shadow texture bound and is above the horizon (other directional lights are not scaled). [param slots] holds one slot from 0 to 31 per query, each slot at most once. At most 32 queries can be set. An empty list stops the queries for the viewport.
+				The queries run every frame while DDGI is on and the ray scene is ready. Read the results with [method viewport_gi_light_query_results].
+			</description>
+		</method>
+		<method name="viewport_gi_light_query_results" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="viewport" type="RID" />
+			<description>
+				Returns the newest result of each requested slot of the viewport's GI light queries as an [Array] of [Array]s. Each one holds the slot, red, green and blue, the luminance Y, the DDGI coverage from 0 to 1, the luminance of the directional lights alone, the frame the result was measured in, the result flags, the age of the result in milliseconds and its age in frames.
+				Results arrive one to three frames after the query was set. A slot has no entry until its first result arrives, and every entry of the viewport is dropped in a frame in which the viewport is rendered but its queries cannot run (for example with DDGI turned off). A viewport that is not rendered keeps its last entries; use the age in milliseconds to tell how old they are. This call does not wait for the rendering thread.
+			</description>
+		</method>
 		<method name="viewport_remove_canvas">
 			<return type="void" />
 			<param index="0" name="viewport" type="RID" />

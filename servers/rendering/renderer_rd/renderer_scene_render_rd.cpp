@@ -1638,9 +1638,13 @@ void RendererSceneRenderRD::_post_prepass_render(RenderDataRD *p_render_data, bo
 	if (p_render_data->render_buffers->has_custom_data(RB_SCOPE_DDGI)) {
 		Ref<RendererRD::DDGI::Volume> volume = p_render_data->render_buffers->get_custom_data(RB_SCOPE_DDGI);
 		ddgi.process(volume, p_render_data->environment, render_sky, p_render_data->camera_attributes, p_render_data->scene_data->cam_projection, p_render_data->scene_data->cam_transform, p_render_data->render_buffers->get_internal_size());
-		if (p_render_data->render_buffers->has_custom_data(RB_SCOPE_SURFELS)) {
+		const bool surfels_on = p_render_data->render_buffers->has_custom_data(RB_SCOPE_SURFELS);
+		if (surfels_on) {
 			Ref<RendererRD::SurfelGI::SurfelVolume> surfels = p_render_data->render_buffers->get_custom_data(RB_SCOPE_SURFELS);
 			surfel_gi.process(surfels, ddgi, volume);
+		}
+		if (GiLightQuery::get_singleton()->is_active()) {
+			ddgi.trace_light_queries(volume, p_render_data->render_buffers->get_render_target(), p_render_data->environment, p_render_data->camera_attributes, surfels_on ? uint32_t(GiLightQuery::FLAG_SURFELS_ON) : 0u);
 		}
 	}
 }
@@ -1827,6 +1831,10 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 
 	//calls _pre_opaque_render between depth pre-pass and opaque pass
 	_render_scene(&render_data, clear_color);
+
+	if (p_render_buffers.is_valid() && p_reflection_probe.is_null() && GiLightQuery::get_singleton()->is_active()) {
+		GiLightQuery::get_singleton()->finish_frame(rb->get_render_target(), uint32_t(RSG::rasterizer->get_frame_number()));
+	}
 }
 
 void RendererSceneRenderRD::render_material(const Transform3D &p_cam_transform, const Projection &p_cam_projection, bool p_cam_orthogonal, const PagedArray<RenderGeometryInstance *> &p_instances, RID p_framebuffer, const Rect2i &p_region) {

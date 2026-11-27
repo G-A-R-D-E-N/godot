@@ -837,6 +837,9 @@ public:
 	FUNC2(viewport_set_vrs_update_mode, RID, RSE::ViewportVRSUpdateMode)
 	FUNC2(viewport_set_vrs_texture, RID, RID)
 
+	FUNC3(viewport_gi_light_query, RID, const PackedFloat32Array &, const PackedInt32Array &)
+	virtual Array viewport_gi_light_query_results(RID p_viewport) const override;
+
 	/* COMPOSITOR EFFECT */
 
 #undef server_name
