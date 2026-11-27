@@ -49,6 +49,30 @@ public:
 	static constexpr uint32_t ENTRY_CULL_MASK = 3u;
 	static constexpr uint32_t ENTRY_FAR_MODE_SHIFT = 2u;
 	static constexpr uint32_t ENTRY_FAR_MODE_MASK = 3u;
+	static constexpr uint32_t ENTRY_ALPHA_INVERT_SHIFT = 4u;
+	static constexpr uint32_t ENTRY_ALPHA_INVERT_MASK = 1u << ENTRY_ALPHA_INVERT_SHIFT;
+	static constexpr uint32_t LAYER_CUTOFF_INVERT = 0x100u;
+	static constexpr uint32_t LAYER_CUTOFF_MASK = 0xFFu;
+
+	struct SourceIdentity {
+		RID rd;
+		uint32_t width = 0;
+		uint32_t height = 0;
+		uint64_t data_version = 0;
+		uint64_t observation = 0;
+
+		bool operator==(const SourceIdentity &p_other) const {
+			return rd == p_other.rd && width == p_other.width && height == p_other.height && data_version == p_other.data_version && observation == p_other.observation;
+		}
+	};
+
+	struct FillRequest {
+		uint64_t cost = 0;
+		bool needs_near = false;
+		bool needs_far = false;
+	};
+
+	static void plan_fills(const LocalVector<FillRequest> &p_requests, uint64_t p_budget, uint64_t p_used, uint32_t &r_cursor, LocalVector<uint32_t> &r_selected);
 
 	struct EntryKey {
 		float scale[2] = {};
@@ -114,19 +138,24 @@ public:
 		key.offset[1] = float(p_offset.y);
 		return acquire(p_source, p_cutoff, key);
 	}
-	void update();
+	void update(bool p_refresh_dynamic = true);
 	void commit_fill(uint32_t p_layer, uint64_t p_signature);
 	bool layer_needs_far(uint32_t p_layer) const;
 	void commit_far(uint32_t p_layer, uint64_t p_signature);
 	void sync_entries();
+
+	uint64_t observe_source(uint32_t p_layer, const SourceIdentity &p_identity);
 
 	static bool uses_far(uint32_t p_bits) {
 		const uint32_t mode = (p_bits >> ENTRY_FAR_MODE_SHIFT) & ENTRY_FAR_MODE_MASK;
 		return mode == 1u || mode == 2u;
 	}
 	bool is_configured() const { return max_layers > 0; }
+	bool has_bindable_textures() const { return textures_ok || fallback_layer_texture.is_valid(); }
 	RID get_layer_texture() const { return layer_texture; }
 	RID get_mean_texture() const { return mean_texture; }
+	RID bind_layer_texture() const { return textures_ok ? layer_texture : fallback_layer_texture; }
+	RID bind_mean_texture() const { return textures_ok ? mean_texture : fallback_mean_texture; }
 	RID get_table_buffer() const { return table_buffer; }
 	uint32_t get_layer_size() const { return layer_size; }
 	const TableEntry &get_entry(uint32_t p_index) const { return entries[p_index]; }
@@ -136,8 +165,16 @@ public:
 	uint32_t get_layer_count() const { return layers.size(); }
 	uint32_t get_live_layer_count() const { return layers.size() - free_layers.size(); }
 	RID get_layer_source(uint32_t p_layer) const { return layers[p_layer].source; }
-	uint32_t get_layer_cutoff(uint32_t p_layer) const { return layers[p_layer].cutoff; }
+	uint32_t get_layer_cutoff(uint32_t p_layer) const { return layers[p_layer].cutoff & LAYER_CUTOFF_MASK; }
+	uint64_t get_content_revision(uint32_t p_entry) const {
+		if (p_entry >= entries.size() || entries[p_entry].layer >= layers.size()) {
+			return 0;
+		}
+		const Layer &layer = layers[entries[p_entry].layer];
+		return layer.state == LAYER_READY ? layer.filled_signature : 0;
+	}
 	uint32_t get_layer_state(uint32_t p_layer) const { return layers[p_layer].state; }
+	bool layer_requested(uint32_t p_layer) const { return layers[p_layer].last_observation == observation_revision; }
 	uint32_t get_layer_generation(uint32_t p_layer) const { return layers[p_layer].generation; }
 	uint32_t get_max_layers() const { return max_layers; }
 	uint64_t get_change_serial() const { return change_serial; }
@@ -146,16 +183,15 @@ public:
 private:
 	struct Layer {
 		RID source;
-		RID source_rd;
+		SourceIdentity source_identity;
 		uint32_t cutoff = 0;
 		uint32_t state = LAYER_EMPTY;
-		uint32_t width = 0;
-		uint32_t height = 0;
 		uint64_t signature = 0;
 		uint64_t filled_signature = 0;
 		uint64_t far_filled_signature = 0;
 		uint32_t generation = 0;
 		uint64_t last_used = 0;
+		uint64_t last_observation = 0;
 		bool far_wanted = false;
 	};
 
@@ -189,17 +225,22 @@ private:
 	void _mark_state_changed();
 	bool _ensure_pipeline();
 	bool _ensure_texture();
+	bool _ensure_fallback_textures();
 	void _free_textures();
-	void _update_far_mips();
+	void _free_fallback_textures();
+	void _update_far_mips(const LocalVector<uint32_t> &p_pending);
 	void _ensure_table_capacity(uint32_t p_count);
 	void _upload_table();
 
 	uint32_t max_layers = 0;
 	uint32_t layer_size = 256;
+	bool textures_ok = false;
 	uint64_t texels_per_frame = 0;
 	RID layer_texture;
 	RID mean_texture;
 	RID mean_mip_views[MEAN_MIP_COUNT];
+	RID fallback_layer_texture;
+	RID fallback_mean_texture;
 	RID table_buffer;
 	uint32_t table_capacity = 0;
 	LocalVector<Layer> layers;
@@ -213,6 +254,9 @@ private:
 	LivenessFunc liveness = nullptr;
 	bool table_dirty = true;
 	uint64_t change_serial = 0;
+	uint64_t source_revision = 0;
+	uint64_t observation_revision = 0;
+	uint32_t fill_cursor = 0;
 	bool state_changed = false;
 	uint64_t state_change_frame = 0;
 	RaySceneAlphaFillShaderRD *fill_shader = nullptr;

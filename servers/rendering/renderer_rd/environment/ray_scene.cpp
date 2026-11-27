@@ -1086,6 +1086,9 @@ void RayScene::_alpha_entry(RID p_material, Material &r_material, float p_alpha_
 				return;
 			}
 			cutoff = (p_alpha_threshold - float(range.x)) / span;
+			if (span < 0.0f) {
+				key.bits |= RayAlphaStore::ENTRY_ALPHA_INVERT_MASK;
+			}
 			key.far_affine[0] = span;
 			key.far_affine[1] = float(range.x);
 		} else {
@@ -1119,9 +1122,19 @@ void RayScene::_alpha_entry(RID p_material, Material &r_material, float p_alpha_
 		alpha_counts.solid_no_texture++;
 		return;
 	}
-	cutoff = CLAMP(cutoff, 0.0f, 1.0f);
-	const uint32_t cutoff_k = uint32_t(Math::ceil(cutoff * 255.0f));
-	if (cutoff_k == 0) {
+	const bool invert = (key.bits & RayAlphaStore::ENTRY_ALPHA_INVERT_MASK) != 0;
+	const AlphaCutoffCoverage coverage = classify_alpha_cutoff(cutoff, invert);
+	if (coverage == ALPHA_CUTOFF_SKIP) {
+		r_material.flags |= MATERIAL_FLAG_SKIP;
+		alpha_counts.solid_degenerate++;
+		return;
+	}
+	if (coverage == ALPHA_CUTOFF_SOLID) {
+		alpha_counts.solid_always++;
+		return;
+	}
+	const uint32_t cutoff_k = invert ? uint32_t(Math::floor(cutoff * 255.0f)) : uint32_t(Math::ceil(cutoff * 255.0f));
+	if (cutoff_k == 0 && !invert) {
 		alpha_counts.solid_always++;
 		return;
 	}
@@ -1129,7 +1142,7 @@ void RayScene::_alpha_entry(RID p_material, Material &r_material, float p_alpha_
 	key.scale[1] = float(scale.y);
 	key.offset[0] = float(offset.x);
 	key.offset[1] = float(offset.y);
-	key.bits = p_cull & RayAlphaStore::ENTRY_CULL_MASK;
+	key.bits = (p_cull & RayAlphaStore::ENTRY_CULL_MASK) | (key.bits & RayAlphaStore::ENTRY_ALPHA_INVERT_MASK);
 	const Variant far_mode_value = material_storage->material_get_declared_param(p_material, SNAME("alpha_far_mode"));
 	const int64_t far_mode = far_mode_value.get_type() == Variant::INT ? int64_t(far_mode_value) : 0;
 	if (far_mode == 1 || far_mode == 2) {
@@ -1170,11 +1183,17 @@ bool RayScene::_alpha_live(uint32_t p_flags) const {
 }
 
 bool RayScene::_alpha_ready() const {
-	return triangle_uv_buffer.is_valid() && alpha_store.get_table_buffer().is_valid() && alpha_store.get_layer_texture().is_valid() && alpha_store.get_mean_texture().is_valid();
+	if (!triangle_uv_buffer.is_valid() || !alpha_store.get_table_buffer().is_valid()) {
+		return false;
+	}
+	if (!alpha_enabled) {
+		return true;
+	}
+	return alpha_store.has_bindable_textures();
 }
 
 String RayScene::alpha_shader_defines() {
-	if (!singleton) {
+	if (!singleton || !singleton->alpha_enabled) {
 		return String();
 	}
 	String defines = "\n#define RAY_SCENE_ALPHA\n";
@@ -2054,6 +2073,7 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	uint32_t emitter_state = HASH_MURMUR3_SEED;
 	uint32_t emission_state = HASH_MURMUR3_SEED;
 	LocalVector<TriangleEmitterSource> emitter_sources;
+	LocalVector<uint32_t> scene_hashes;
 	scene_members.clear();
 	for (uint32_t i = 0; i < p_instances.size(); i++) {
 		RenderGeometryInstanceBase *geometry = static_cast<RenderGeometryInstanceBase *>(p_instances[i]);
@@ -2217,24 +2237,29 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		scene_hash = hash_murmur3_one_32(geometry->layer_mask, scene_hash);
 		scene_hash = hash_murmur3_one_32(mesh->build_serial, scene_hash);
 		scene_hash = hash_murmur3_buffer(materials.ptr() + instance.material_offset, sizeof(Material) * mesh->surface_count, scene_hash);
+		scene_hashes.push_back(scene_hash);
+		scene_members.push_back(GISceneTracker::member_key(p_instances[i], mesh_rid.get_id()));
+	}
+	alpha_store.update(alpha_enabled);
+	for (uint32_t i = 0; i < instances.size(); i++) {
+		uint32_t scene_hash = scene_hashes[i];
 		if (alpha_enabled) {
-			for (uint32_t s = 0; s < mesh->surface_count; s++) {
-				const uint32_t index = materials[instance.material_offset + s].flags >> MATERIAL_ALPHA_SHIFT;
+			const uint32_t end = i + 1u < instances.size() ? instances[i + 1u].material_offset : materials.size();
+			for (uint32_t s = instances[i].material_offset; s < end; s++) {
+				const uint32_t index = materials[s].flags >> MATERIAL_ALPHA_SHIFT;
 				if (index != 0) {
-					const RayAlphaStore::TableEntry &entry = alpha_store.get_entry(index);
-					if (RayAlphaStore::uses_far(entry.bits)) {
-						scene_hash = hash_murmur3_one_32(entry.far_state, scene_hash);
-						scene_hash = hash_murmur3_one_float(entry.density, scene_hash);
+					scene_hash = alpha_far_hash(scene_hash, alpha_store.get_entry(index));
+					const uint64_t revision = alpha_store.get_content_revision(index);
+					if (revision != 0) {
+						scene_hash = hash_murmur3_one_64(revision, scene_hash);
 					}
 				}
 			}
 		}
 		scene_signature = GISceneTracker::add_instance(scene_signature, scene_hash);
-		scene_members.push_back(GISceneTracker::member_key(p_instances[i], mesh_rid.get_id()));
 	}
 	scene_signature = alpha_scene_signature(scene_signature, alpha_enabled);
 	GIEpochs::get_singleton()->apply(scene_tracker.update(scene_signature, scene_members));
-	alpha_store.update();
 	if (alpha_enabled) {
 		_print_alpha();
 	}

@@ -265,7 +265,18 @@ public:
 
 	FUNC2(texture_set_force_redraw_if_visible, RID, bool)
 	FUNCRIDTEX2(texture_rd, const RID &, const RSE::TextureLayeredType)
-	FUNC2RC(RID, texture_get_rd_texture, RID, bool)
+	virtual RID texture_get_rd_texture(RID p_texture, bool p_srgb) const override {
+		if (ASYNC_COND_PUSH_AND_RET) {
+			RID ret;
+			command_queue.push_and_ret(server_name, &ServerName::texture_get_rd_texture_for_export, &ret, p_texture, p_srgb);
+			SYNC_DEBUG
+			MAIN_THREAD_SYNC_CHECK
+			return ret;
+		} else {
+			command_queue.flush_if_pending();
+			return server_name->texture_get_rd_texture_for_export(p_texture, p_srgb);
+		}
+	}
 	FUNC2RC(uint64_t, texture_get_native_handle, RID, bool)
 
 	FUNC2(texture_2d_attach_streaming_state, RID, RID);

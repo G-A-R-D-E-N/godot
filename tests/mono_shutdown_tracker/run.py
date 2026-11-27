@@ -57,6 +57,9 @@ LEGACY = {
     "running-drained": ["--running-finalizer", "--release-before-quit"],
 }
 OWNERSHIP = {
+    "finalizer-registration": "--finalizer-registration",
+    "shutdown-after-finalizer-timeout": "--shutdown-after-finalizer-timeout",
+    "shutdown-resume-after-check": "--shutdown-resume-after-check",
     "overlap": "--overlap-finalizer",
     "prebase": "--prebase-finalizer",
     "race": "--race-dispose",
@@ -76,6 +79,9 @@ OWNERSHIP = {
 }
 CONTROL = ["throw-shutdown", "throw-finalizer", "owner-api"]
 READY = {
+    "finalizer-registration": "READY finalizer-registration constructor held.",
+    "shutdown-after-finalizer-timeout": "READY shutdown-after-finalizer-timeout held.",
+    "shutdown-resume-after-check": "READY shutdown-resume-after-check held.",
     "overlap": "READY overlap finalizer held inside base disposal.",
     "prebase": "READY prebase finalizer held before base disposal.",
     "throw-shutdown": "READY throw-shutdown disposal failed before base disposal;",
@@ -323,6 +329,7 @@ def main():
     identities = [
         identity(project / "ShutdownTrackerProbe.cs"),
         identity(project / "FinalizerOverlap.cs"),
+        identity(project / "FinalizerRegistration.cs"),
         identity(project / ".godot/mono/temp/bin/Debug/ShutdownTrackerProbe.dll"),
     ]
     for package_id, file_name in [

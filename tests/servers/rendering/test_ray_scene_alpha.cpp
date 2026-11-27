@@ -35,6 +35,7 @@ TEST_FORCE_LINK(test_ray_scene_alpha)
 #ifdef RD_ENABLED
 
 #include "core/io/file_access.h"
+#include "core/io/image.h"
 #include "core/math/basis.h"
 #include "core/math/transform_3d.h"
 #include "core/math/vector2.h"
@@ -45,6 +46,10 @@ TEST_FORCE_LINK(test_ray_scene_alpha)
 #include "core/templates/local_vector.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/environment/ray_scene_alpha.h"
+#include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
+#include "servers/rendering/rendering_device.h"
+
+using RendererRD::TextureStorage;
 
 #include <type_traits>
 
@@ -276,7 +281,7 @@ Vector2 vertex_barycentrics(const Vector3 &p_point, const Vector3 &p_a, const Ve
 	return Vector2(ap.cross(ac).dot(normal) / area, ab.cross(ap).dot(normal) / area);
 }
 
-float fill_texel(const LocalVector<uint8_t> &p_source, uint32_t p_source_width, uint32_t p_source_height, uint32_t p_layer_size, uint32_t p_cutoff, uint32_t p_x, uint32_t p_y) {
+float fill_texel(const LocalVector<uint8_t> &p_source, uint32_t p_source_width, uint32_t p_source_height, uint32_t p_layer_size, uint32_t p_cutoff, uint32_t p_x, uint32_t p_y, bool p_invert = false) {
 	const uint32_t x0 = (p_x * p_source_width) / p_layer_size;
 	const uint32_t x1 = ((p_x + 1u) * p_source_width) / p_layer_size;
 	const uint32_t y0 = (p_y * p_source_height) / p_layer_size;
@@ -285,10 +290,33 @@ float fill_texel(const LocalVector<uint8_t> &p_source, uint32_t p_source_width, 
 	for (uint32_t y = y0; y < y1; y++) {
 		for (uint32_t x = x0; x < x1; x++) {
 			const float alpha = float(p_source[y * p_source_width + x]) / 255.0f;
-			count += uint32_t(Math::round(alpha * 255.0f)) >= p_cutoff ? 1u : 0u;
+			const uint32_t sample = uint32_t(Math::round(alpha * 255.0f));
+			const bool pass = p_invert ? sample <= p_cutoff : sample >= p_cutoff;
+			count += pass ? 1u : 0u;
 		}
 	}
 	return float(count) / float((x1 - x0) * (y1 - y0));
+}
+
+bool raster_visible(float p_texture_alpha, float p_threshold, float p_opacity) {
+	return p_texture_alpha * p_opacity >= p_threshold;
+}
+
+bool raster_visible_range(float p_texture_alpha, float p_threshold, const Vector2 &p_range) {
+	const float span = float(p_range.y - p_range.x);
+	const float mapped = float(p_range.x) + p_texture_alpha * span;
+	return mapped >= p_threshold;
+}
+
+float ray_cutoff_from_range(float p_threshold, const Vector2 &p_range, bool &r_invert) {
+	const float span = float(p_range.y - p_range.x);
+	r_invert = span < 0.0f;
+	const float cutoff = (p_threshold - float(p_range.x)) / span;
+	return CLAMP(cutoff, 0.0f, 1.0f);
+}
+
+uint32_t ray_cutoff_k(float p_cutoff, bool p_invert) {
+	return p_invert ? uint32_t(Math::floor(p_cutoff * 255.0f)) : uint32_t(Math::ceil(p_cutoff * 255.0f));
 }
 
 TEST_CASE("[RayScene] Half float known answers") {
@@ -1454,7 +1482,7 @@ TEST_CASE("[RayScene] Alpha entry key equality, canonicalisation and invalid far
 	{
 		bool far_invalid = true;
 		RayAlphaStore::EntryKey raw = make_key(uint32_t(RSE::CULL_MODE_BACK), 1u, -1.0f, -2.5f, 1.5f, 0.75f, -0.25f);
-		raw.bits |= 0xFFFFFFF0u;
+		raw.bits |= 0xFFFFFFE0u;
 		const RayAlphaStore::EntryKey clamped = RayAlphaStore::canonical_key(raw, far_invalid);
 		CHECK_FALSE(far_invalid);
 		CHECK(clamped.bits == (uint32_t(RSE::CULL_MODE_BACK) | (1u << RayAlphaStore::ENTRY_FAR_MODE_SHIFT)));
@@ -1470,7 +1498,7 @@ TEST_CASE("[RayScene] Alpha entry key equality, canonicalisation and invalid far
 		CHECK(clamped.offset[1] == 0.0f);
 
 		RayAlphaStore::EntryKey mode2 = make_key(uint32_t(RSE::CULL_MODE_FRONT), 2u, 2.0f, 4.0f, -0.5f, 1.0f, 0.0f);
-		mode2.bits |= 0xFFFFFFF0u;
+		mode2.bits |= 0xFFFFFFE0u;
 		const RayAlphaStore::EntryKey mode2_out = RayAlphaStore::canonical_key(mode2, far_invalid);
 		CHECK_FALSE(far_invalid);
 		CHECK(mode2_out.bits == (uint32_t(RSE::CULL_MODE_FRONT) | (2u << RayAlphaStore::ENTRY_FAR_MODE_SHIFT)));
@@ -1479,7 +1507,7 @@ TEST_CASE("[RayScene] Alpha entry key equality, canonicalisation and invalid far
 		CHECK(to_bits(mode2_out.far_veil_alpha) == 0u);
 
 		RayAlphaStore::EntryKey upper;
-		upper.bits = 0xFFFFFFF0u;
+		upper.bits = 0xFFFFFFE0u;
 		const RayAlphaStore::EntryKey upper_out = RayAlphaStore::canonical_key(upper, far_invalid);
 		CHECK_FALSE(far_invalid);
 		CHECK(upper_out.bits == 0u);
@@ -2477,6 +2505,360 @@ TEST_CASE("[RayScene] Alpha far state publishes on the next begin_update") {
 	CHECK(settled_store.get_entry(s_mode2).far_state == RayAlphaStore::LAYER_EMPTY);
 	CHECK(settled_store.get_entry(s_mode0).far_state == RayAlphaStore::LAYER_EMPTY);
 	CHECK(settled_store.get_change_serial() != refill_serial);
+}
+
+TEST_CASE("[RayScene] Alpha cutoff above one keeps fully discarded surfaces from blocking rays") {
+	const float threshold = 0.5f;
+	const float opacity = 0.1f;
+	const float cutoff = threshold / opacity;
+	CHECK(cutoff > 1.0f);
+	CHECK_FALSE(raster_visible(1.0f, threshold, opacity));
+	const uint32_t skip_flags = RayScene::MATERIAL_FLAG_SKIP;
+	const LocalVector<TraceTriangle> triangles = make_unit_quad();
+	const LocalVector<RayAlphaStore::TableEntry> table;
+	const LocalVector<RayScene::TriangleUv> uvs;
+	CoverageSample coverage;
+	coverage.constant = 1.0f;
+	TraceHit hit;
+	CHECK(trace_instance(triangles, Transform3D(), 0, Vector3(0.25, 0.25, 1), Vector3(0, 0, -1), 10, true, true, 1, table, uvs, coverage, false, hit));
+	CHECK_FALSE(trace_instance(triangles, Transform3D(), skip_flags, Vector3(0.25, 0.25, 1), Vector3(0, 0, -1), 10, true, true, 1, table, uvs, coverage, false, hit));
+	CHECK_FALSE(trace_instance(triangles, Transform3D(), skip_flags | (1u << RayScene::MATERIAL_ALPHA_SHIFT), Vector3(0.25, 0.25, 1), Vector3(0, 0, -1), 10, true, true, 1, table, uvs, coverage, false, hit));
+}
+
+TEST_CASE("[RayScene] Alpha source identity compares each field") {
+	const RID rd = RID::from_uint64(0x100000003ull);
+	const RayAlphaStore::SourceIdentity base{ rd, 8, 1, 0 };
+	CHECK(base == (RayAlphaStore::SourceIdentity{ rd, 8, 1, 0 }));
+	CHECK_FALSE(base == (RayAlphaStore::SourceIdentity{ rd, 8, 2, 4096 }));
+	CHECK_FALSE(base == (RayAlphaStore::SourceIdentity{ rd, 9, 1, 0 }));
+	CHECK_FALSE(base == (RayAlphaStore::SourceIdentity{ rd, 8, 1, 1 }));
+	CHECK_FALSE(base == (RayAlphaStore::SourceIdentity{ RID::from_uint64(0x100000004ull), 8, 1, 0 }));
+}
+
+TEST_CASE("[RayScene] Alpha source revisions invalidate coverage and far mips") {
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	const RID source = RID::from_uint64(0x100000003ull);
+	const uint32_t entry = store.acquire(source, 128, make_key(uint32_t(RSE::CULL_MODE_BACK), 1u, 1.15f, 6.0f, 0.25f, 1.0f, 0.0f));
+	REQUIRE(entry != 0);
+	const uint32_t layer = store.get_entry(entry).layer;
+	const RayAlphaStore::SourceIdentity first{ RID::from_uint64(0x100000004ull), 8, 1, 0 };
+	const RayAlphaStore::SourceIdentity changed{ first.rd, 8, 2, 4096 };
+	const uint64_t first_revision = store.observe_source(layer, first);
+	CHECK(first_revision != 0);
+	store.commit_fill(layer, first_revision);
+	store.commit_far(layer, first_revision);
+	CHECK_FALSE(store.layer_needs_far(layer));
+	CHECK(store.observe_source(layer, first) == first_revision);
+	CHECK(store.get_layer_state(layer) == RayAlphaStore::LAYER_READY);
+	const uint64_t changed_revision = store.observe_source(layer, changed);
+	CHECK(changed_revision != first_revision);
+	CHECK(store.get_layer_state(layer) == RayAlphaStore::LAYER_PENDING);
+	store.commit_fill(layer, changed_revision);
+	CHECK(store.layer_needs_far(layer));
+	store.commit_far(layer, changed_revision);
+	CHECK_FALSE(store.layer_needs_far(layer));
+	store.observe_source(layer, RayAlphaStore::SourceIdentity());
+	CHECK(store.get_layer_state(layer) == RayAlphaStore::LAYER_PENDING);
+	const uint64_t restored_revision = store.observe_source(layer, changed);
+	CHECK(restored_revision != changed_revision);
+	store.commit_fill(layer, restored_revision);
+	CHECK(store.layer_needs_far(layer));
+}
+
+TEST_CASE("[RayScene] Near-only alpha content changes move the scene epoch") {
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	const RID source = RID::from_uint64(0x100000003ull);
+	const uint32_t entry = store.acquire(source, 128, Vector2(1, 1), Vector2());
+	REQUIRE(entry != 0);
+	const uint32_t layer = store.get_entry(entry).layer;
+	const RayAlphaStore::SourceIdentity first{ RID::from_uint64(0x100000004ull), 8, 8, 1 };
+	RayAlphaStore::SourceIdentity changed = first;
+	changed.data_version = 2;
+	const uint64_t first_revision = store.observe_source(layer, first);
+	store.commit_fill(layer, first_revision);
+	const uint32_t first_hash = hash_murmur3_one_64(store.get_content_revision(entry), 17);
+	RendererRD::GISceneTracker tracker;
+	RendererRD::GIEpochs epochs;
+	epochs.apply(tracker.update(RendererRD::GISceneTracker::add_instance(0, first_hash), { 1 }));
+	const uint32_t epoch = epochs.get(RendererRD::GIEpochs::SOURCE_SCENE);
+	const uint64_t next_revision = store.observe_source(layer, changed);
+	CHECK(store.get_content_revision(entry) == 0);
+	store.commit_fill(layer, next_revision);
+	const uint32_t next_hash = hash_murmur3_one_64(store.get_content_revision(entry), 17);
+	CHECK(first_hash != next_hash);
+	epochs.apply(tracker.update(RendererRD::GISceneTracker::add_instance(0, next_hash), { 1 }));
+	CHECK(epochs.get(RendererRD::GIEpochs::SOURCE_SCENE) != epoch);
+}
+
+TEST_CASE("[RayScene] Alpha fill plan rotates fairly across frames and views") {
+	LocalVector<RayAlphaStore::FillRequest> requests;
+	requests.resize(3);
+	for (uint32_t i = 0; i < requests.size(); i++) {
+		requests[i].cost = 6;
+		requests[i].needs_near = true;
+		requests[i].needs_far = true;
+	}
+	LocalVector<uint32_t> selected;
+	uint32_t cursor = 0;
+	for (uint32_t expected = 0; expected < 3; expected++) {
+		RayAlphaStore::plan_fills(requests, 6, 0, cursor, selected);
+		REQUIRE(selected.size() == 1);
+		CHECK(selected[0] == expected);
+		const uint32_t saved_cursor = cursor;
+		RayAlphaStore::plan_fills(requests, 6, 6, cursor, selected);
+		CHECK(selected.is_empty());
+		CHECK(cursor == saved_cursor);
+	}
+	requests[0].cost = 20;
+	RayAlphaStore::plan_fills(requests, 6, 0, cursor, selected);
+	REQUIRE(selected.size() == 1);
+	CHECK(selected[0] == 0);
+	RayAlphaStore::plan_fills(requests, 6, 0, cursor, selected);
+	REQUIRE(selected.size() == 1);
+	CHECK(selected[0] == 1);
+}
+
+TEST_CASE("[RayScene] Alpha requests distinguish views sharing a frame") {
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	const RID first = RID::from_uint64(0x100000003ull);
+	const RID second = RID::from_uint64(0x100000004ull);
+	store.begin_update(1);
+	const uint32_t first_entry = store.acquire(first, 128, Vector2(1, 1), Vector2());
+	const uint32_t second_entry = store.acquire(second, 128, Vector2(1, 1), Vector2());
+	REQUIRE(first_entry != 0);
+	REQUIRE(second_entry != 0);
+	const uint32_t first_layer = store.get_entry(first_entry).layer;
+	const uint32_t second_layer = store.get_entry(second_entry).layer;
+	CHECK(store.layer_requested(first_layer));
+	CHECK(store.layer_requested(second_layer));
+	store.begin_update(1);
+	CHECK(store.acquire(second, 128, Vector2(1, 1), Vector2()) == second_entry);
+	CHECK_FALSE(store.layer_requested(first_layer));
+	CHECK(store.layer_requested(second_layer));
+}
+
+TEST_CASE("[RayScene] Dynamic alpha revisions publish only their current far mip") {
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	store.begin_update(1);
+	const RID source = RID::from_uint64(0x100000003ull);
+	const uint32_t entry = store.acquire(source, 128, make_key(uint32_t(RSE::CULL_MODE_BACK), 1u, 1.15f, 6.0f, 0.25f, 1.0f, 0.0f));
+	REQUIRE(entry != 0);
+	const uint32_t layer = store.get_entry(entry).layer;
+	const RayAlphaStore::SourceIdentity first{ RID::from_uint64(0x100000004ull), 8, 8, 0, 1 };
+	RayAlphaStore::SourceIdentity next = first;
+	next.observation = 2;
+	const uint64_t first_revision = store.observe_source(layer, first);
+	store.commit_fill(layer, first_revision);
+	store.commit_far(layer, first_revision);
+	store.sync_entries();
+	CHECK(store.get_entry(entry).far_state == RayAlphaStore::LAYER_READY);
+	CHECK(store.get_content_revision(entry) == first_revision);
+	const uint32_t ready_hash = RayScene::alpha_far_hash(17, store.get_entry(entry));
+	const uint64_t next_revision = store.observe_source(layer, next);
+	store.sync_entries();
+	CHECK(store.get_entry(entry).state == RayAlphaStore::LAYER_PENDING);
+	CHECK(store.get_entry(entry).far_state == RayAlphaStore::LAYER_EMPTY);
+	CHECK(store.get_content_revision(entry) == 0);
+	CHECK(RayScene::alpha_far_hash(17, store.get_entry(entry)) != ready_hash);
+	store.commit_far(layer, next_revision);
+	store.sync_entries();
+	CHECK(store.get_entry(entry).far_state == RayAlphaStore::LAYER_EMPTY);
+	store.commit_fill(layer, next_revision);
+	store.sync_entries();
+	CHECK(store.get_content_revision(entry) == next_revision);
+	CHECK(store.get_entry(entry).far_state == RayAlphaStore::LAYER_EMPTY);
+	store.commit_far(layer, next_revision);
+	store.sync_entries();
+	CHECK(store.get_entry(entry).far_state == RayAlphaStore::LAYER_READY);
+	CHECK(RayScene::alpha_far_hash(17, store.get_entry(entry)) == ready_hash);
+	store.observe_source(layer, RayAlphaStore::SourceIdentity{ RID(), 0, 0, 0, 3 });
+	store.sync_entries();
+	CHECK(store.get_entry(entry).state == RayAlphaStore::LAYER_PENDING);
+	CHECK(store.get_entry(entry).far_state == RayAlphaStore::LAYER_EMPTY);
+}
+
+TEST_CASE("[RayScene] Alpha cutoff coverage honors inverted range boundaries") {
+	CHECK(RayScene::classify_alpha_cutoff(-0.6f, true) == RayScene::ALPHA_CUTOFF_SKIP);
+	CHECK(RayScene::classify_alpha_cutoff(0.0f, true) == RayScene::ALPHA_CUTOFF_TEXTURE);
+	CHECK(RayScene::classify_alpha_cutoff(1.0f, true) == RayScene::ALPHA_CUTOFF_SOLID);
+	CHECK(RayScene::classify_alpha_cutoff(1.5f, true) == RayScene::ALPHA_CUTOFF_SOLID);
+	CHECK(RayScene::classify_alpha_cutoff(0.0f, false) == RayScene::ALPHA_CUTOFF_SOLID);
+	CHECK(RayScene::classify_alpha_cutoff(1.0f, false) == RayScene::ALPHA_CUTOFF_TEXTURE);
+	CHECK(RayScene::classify_alpha_cutoff(1.5f, false) == RayScene::ALPHA_CUTOFF_SKIP);
+	for (bool invert : { false, true }) {
+		const Vector2 range = invert ? Vector2(1.0f, 0.0f) : Vector2(0.0f, 1.0f);
+		for (float cutoff : { -0.25f, 0.0f, 1.0f, 1.25f }) {
+			const float threshold = float(range.x) + cutoff * float(range.y - range.x);
+			const RayScene::AlphaCutoffCoverage coverage = RayScene::classify_alpha_cutoff(cutoff, invert);
+			for (uint32_t sample : { 0u, 128u, 255u }) {
+				LocalVector<uint8_t> source;
+				source.push_back(uint8_t(sample));
+				const bool raster = raster_visible_range(float(sample) / 255.0f, threshold, range);
+				const bool ray = coverage == RayScene::ALPHA_CUTOFF_SOLID || (coverage == RayScene::ALPHA_CUTOFF_TEXTURE && fill_texel(source, 1, 1, 1, ray_cutoff_k(cutoff, invert), 0, 0, invert) >= 0.5f);
+				CHECK(raster == ray);
+			}
+		}
+	}
+}
+
+TEST_CASE("[RayScene] Inverted opacity texture range matches raster visibility") {
+	bool invert = false;
+	const Vector2 range(1.0f, 0.0f);
+	const float threshold = 0.5f;
+	const float cutoff = ray_cutoff_from_range(threshold, range, invert);
+	CHECK(invert);
+	CHECK(Math::is_equal_approx(cutoff, 0.5f));
+	const uint32_t cutoff_k = ray_cutoff_k(cutoff, invert);
+	LocalVector<uint8_t> source;
+	source.resize(8 * 8);
+	for (uint32_t i = 0; i < source.size(); i++) {
+		source[i] = uint8_t((i * 29u) % 256u);
+	}
+	for (uint32_t sample : { 0u, 32u, 64u, 127u, 128u, 200u, 255u }) {
+		const float alpha = float(sample) / 255.0f;
+		const bool raster = raster_visible_range(alpha, threshold, range);
+		LocalVector<uint8_t> plane;
+		plane.resize(8 * 8);
+		for (uint32_t i = 0; i < plane.size(); i++) {
+			plane[i] = uint8_t(sample);
+		}
+		const float layer = fill_texel(plane, 8, 8, 8, cutoff_k, 4, 4, true);
+		const bool ray = layer >= 0.5f;
+		CHECK(raster == ray);
+	}
+}
+
+TEST_CASE("[RayScene] Inverted alpha range gets its own cache layer") {
+	RayAlphaStore store;
+	store.configure(16, 256, 1u << 20);
+	const RID source = RID::from_uint64(0x100000003ull);
+	const Vector2 one(1.0f, 1.0f);
+	const Vector2 zero(0.0f, 0.0f);
+	const uint32_t forward = store.acquire(source, 128, one, zero);
+	RayAlphaStore::EntryKey inverted = {};
+	inverted.scale[0] = 1.0f;
+	inverted.scale[1] = 1.0f;
+	inverted.bits = RayAlphaStore::ENTRY_ALPHA_INVERT_MASK;
+	const uint32_t flipped = store.acquire(source, 128, inverted);
+	REQUIRE(forward != 0);
+	REQUIRE(flipped != 0);
+	CHECK(forward != flipped);
+	CHECK(store.get_entry(forward).layer != store.get_entry(flipped).layer);
+}
+
+TEST_CASE("[RayScene] Alpha store clamps requested layers to the device array limit") {
+#ifdef RD_ENABLED
+	RD *rd = RD::get_singleton();
+	if (rd == nullptr) {
+		MESSAGE("SKIP: no RenderingDevice singleton.");
+		return;
+	}
+	const uint32_t device_limit = uint32_t(rd->limit_get(RD::LIMIT_MAX_TEXTURE_ARRAY_LAYERS));
+	REQUIRE(device_limit >= 16u);
+	RayAlphaStore store;
+	store.configure(device_limit + 512, 256, 1u << 20);
+	CHECK(store.get_max_layers() == device_limit);
+#else
+	MESSAGE("SKIP: RD_DISABLED.");
+#endif
+}
+
+TEST_CASE("[RayScene] Texture data version bumps after a same-RID image update") {
+#ifdef RD_ENABLED
+	TextureStorage *texture_storage = TextureStorage::get_singleton();
+	RD *rd = RD::get_singleton();
+	if (texture_storage == nullptr || rd == nullptr) {
+		MESSAGE("SKIP: renderer texture storage unavailable.");
+		return;
+	}
+	Ref<Image> image = Image::create_empty(4, 4, false, Image::FORMAT_RGBA8);
+	image->fill(Color(1.0f, 0.0f, 0.0f, 1.0f));
+	const RID texture = texture_storage->texture_allocate();
+	texture_storage->texture_2d_initialize(texture, image);
+	CHECK(texture_storage->texture_get_data_version(texture) == 0);
+	image->fill(Color(0.0f, 1.0f, 0.0f, 0.5f));
+	texture_storage->texture_2d_update(texture, image);
+	CHECK(texture_storage->texture_get_data_version(texture) == 1);
+	texture_storage->texture_2d_update(texture, image);
+	CHECK(texture_storage->texture_get_data_version(texture) == 2);
+	texture_storage->texture_free(texture);
+#else
+	MESSAGE("SKIP: RD_DISABLED.");
+#endif
+}
+
+TEST_CASE("[RayScene] Externally writable texture status follows the backing source") {
+	TextureStorage *texture_storage = TextureStorage::get_singleton();
+	if (texture_storage == nullptr || RD::get_singleton() == nullptr) {
+		MESSAGE("SKIP: renderer texture storage unavailable.");
+		return;
+	}
+	Ref<Image> image = Image::create_empty(4, 4, false, Image::FORMAT_RGBA8);
+	const RID base = texture_storage->texture_allocate();
+	texture_storage->texture_2d_initialize(base, image);
+	const RID proxy = texture_storage->texture_allocate();
+	texture_storage->texture_proxy_initialize(proxy, base);
+	CHECK_FALSE(texture_storage->texture_has_external_writes(base));
+	CHECK_FALSE(texture_storage->texture_has_external_writes(proxy));
+	const RID borrowed = texture_storage->texture_allocate();
+	texture_storage->texture_rd_initialize(borrowed, texture_storage->texture_get_rd_texture(base));
+	CHECK(texture_storage->texture_has_external_writes(borrowed));
+	texture_storage->texture_free(borrowed);
+	const RID render_target = texture_storage->render_target_create();
+	CHECK(texture_storage->texture_has_external_writes(texture_storage->render_target_get_texture(render_target)));
+	texture_storage->render_target_free(render_target);
+	CHECK(texture_storage->texture_get_rd_texture(proxy).is_valid());
+	CHECK_FALSE(texture_storage->texture_has_external_writes(base));
+	CHECK(texture_storage->texture_get_rd_texture_for_export(proxy).is_valid());
+	CHECK(texture_storage->texture_has_external_writes(base));
+	CHECK(texture_storage->texture_has_external_writes(proxy));
+	texture_storage->texture_free(proxy);
+	texture_storage->texture_free(base);
+}
+
+TEST_CASE("[RayScene] Proxy textures follow source data version updates") {
+#ifdef RD_ENABLED
+	TextureStorage *texture_storage = TextureStorage::get_singleton();
+	RD *rd = RD::get_singleton();
+	if (texture_storage == nullptr || rd == nullptr) {
+		MESSAGE("SKIP: renderer texture storage unavailable.");
+		return;
+	}
+	Ref<Image> image = Image::create_empty(4, 4, false, Image::FORMAT_RGBA8);
+	image->fill(Color(1.0f, 1.0f, 1.0f, 0.0f));
+	const RID base = texture_storage->texture_allocate();
+	texture_storage->texture_2d_initialize(base, image);
+	const RID proxy = texture_storage->texture_allocate();
+	texture_storage->texture_proxy_initialize(proxy, base);
+	CHECK(texture_storage->texture_get_data_version(proxy) == 0);
+	image->fill(Color(1.0f, 1.0f, 1.0f, 1.0f));
+	texture_storage->texture_2d_update(base, image);
+	CHECK(texture_storage->texture_get_data_version(base) == 1);
+	CHECK(texture_storage->texture_get_data_version(proxy) == 1);
+	const RID sibling = texture_storage->texture_allocate();
+	texture_storage->texture_proxy_initialize(sibling, base);
+	const RID nested = texture_storage->texture_allocate();
+	texture_storage->texture_proxy_initialize(nested, proxy);
+	texture_storage->texture_2d_update(proxy, image);
+	CHECK(texture_storage->texture_get_data_version(base) == 2);
+	CHECK(texture_storage->texture_get_data_version(proxy) == 2);
+	CHECK(texture_storage->texture_get_data_version(sibling) == 2);
+	CHECK(texture_storage->texture_get_data_version(nested) == 2);
+	texture_storage->texture_2d_update(nested, image);
+	CHECK(texture_storage->texture_get_data_version(base) == 3);
+	CHECK(texture_storage->texture_get_data_version(sibling) == 3);
+	CHECK(texture_storage->texture_get_data_version(nested) == 3);
+	texture_storage->texture_free(nested);
+	texture_storage->texture_free(sibling);
+	texture_storage->texture_free(proxy);
+	texture_storage->texture_free(base);
+#else
+	MESSAGE("SKIP: RD_DISABLED.");
+#endif
 }
 
 } // namespace TestRaySceneAlpha
