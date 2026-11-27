@@ -2677,7 +2677,7 @@ void fragment_shader(in SceneData scene_data) {
 			ssil = textureLod(sampler2D(ssil_buffer, SAMPLER_LINEAR_CLAMP), screen_uv, 0.0);
 #endif
 			ssil.rgb = max(ssil.rgb, vec3(0.0));
-			ambient_occlusion = min(ambient_ao, 1.0 - ssil.a);
+			ambient_occlusion = min(ambient_ao, mix(1.0 - ssil.a, 1.0, ambient_source.y));
 		}
 		vec3 policy_ambient_light = ambient_light;
 #ifdef MULTI_BOUNCE_OCCLUSION_ENABLED
@@ -2777,7 +2777,7 @@ void fragment_shader(in SceneData scene_data) {
 		ambient_light *= ambient_weight;
 
 		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSIL)) {
-			ambient_light *= lighting_sources ? 1.0 : 1.0 - ssil.a;
+			ambient_light *= lighting_sources ? 1.0 : mix(1.0 - ssil.a, 1.0, ambient_source.y);
 			ambient_light += ssil.rgb * ambient_weight;
 			float ssil_share = dot(ssil.rgb * ambient_weight, vec3(0.2126, 0.7152, 0.0722)) / max(dot(ambient_light, vec3(0.2126, 0.7152, 0.0722)), 1e-6);
 			ambient_source = ambient_source * (1.0 - ssil_share) + vec4(0.0, 0.0, 0.0, ssil_share);

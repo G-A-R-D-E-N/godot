@@ -323,14 +323,24 @@ void main() {
 	float short_luma = samples == 0u ? sample_luma : smoothed_luma;
 	float delta = sample_luma - short_luma;
 	float variance = samples == 0u ? 0.0 : mix(surfels.data[index].variance, delta * delta, 0.25);
-	if (samples > 4u && abs(short_luma - current) > sqrt(variance) + 0.1 * current) {
-		samples = 2u;
+	if (samples > 4u && abs(short_luma - current) > 2.5 * sqrt(variance) + 0.25 * current) {
+		samples = min(samples, 8u);
 	}
 
 	float blend = 1.0 / float(min(samples, surfel_data.max_samples) + 1u);
-	surfels.data[index].sh_r = mix(sh_r, estimate_r, blend);
-	surfels.data[index].sh_g = mix(sh_g, estimate_g, blend);
-	surfels.data[index].sh_b = mix(sh_b, estimate_b, blend);
+	vec4 next_sh_r = mix(sh_r, estimate_r, blend);
+	vec4 next_sh_g = mix(sh_g, estimate_g, blend);
+	vec4 next_sh_b = mix(sh_b, estimate_b, blend);
+	SurfelLookup neighbors = surfel_lookup(surfels.data[index].position, normal, index);
+	if (neighbors.light_weight > 0.0) {
+		float share = 0.2 * clamp(neighbors.light_weight / SURFEL_FULL_WEIGHT, 0.0, 1.0);
+		next_sh_r = mix(next_sh_r, neighbors.sh_r, share);
+		next_sh_g = mix(next_sh_g, neighbors.sh_g, share);
+		next_sh_b = mix(next_sh_b, neighbors.sh_b, share);
+	}
+	surfels.data[index].sh_r = next_sh_r;
+	surfels.data[index].sh_g = next_sh_g;
+	surfels.data[index].sh_b = next_sh_b;
 	surfels.data[index].short_mean = vec3(short_luma, probe_reference, 0.0);
 	surfels.data[index].variance = variance;
 	surfels.data[index].samples = min(samples + 1u, surfel_data.max_samples);
