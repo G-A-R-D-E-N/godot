@@ -1816,7 +1816,6 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		if (atlas.is_valid()) {
 			emission_texture_count = RD::get_singleton()->texture_get_format(atlas).array_layers;
 		}
-		print_line(vformat("Ray scene emission atlas: %d layers", emission_texture_count));
 	}
 	skip_additive = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ray_scene/skip_additive_surfaces");
 	shell_ranges.clear();

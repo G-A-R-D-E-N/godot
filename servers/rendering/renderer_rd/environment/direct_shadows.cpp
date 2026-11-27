@@ -61,11 +61,6 @@ DirectShadows::Settings DirectShadows::get_project_settings() {
 	settings.second_pass = GLOBAL_GET("rendering/global_illumination/direct/filter_second_pass");
 	settings.emitter_shorten = GLOBAL_GET("rendering/global_illumination/direct/emitter_ray_shorten");
 	settings.emitter_skip_instance = int(GLOBAL_GET("rendering/global_illumination/direct/emitter_skip_instance"));
-	static bool direct_settings_printed = false;
-	if (!direct_settings_printed) {
-		direct_settings_printed = true;
-		print_line(vformat("DIRECT_SHADOWS settings: force_factor_one %s block_resolve %s entries %d quarter %s bias %.4f emitter_skip %d alpha_test %s", settings.force_one ? "true" : "false", GLOBAL_GET("rendering/global_illumination/direct/block_resolve") ? "true" : "false", int(settings.entries), settings.quarter ? "true" : "false", settings.emitter_shorten + float(GLOBAL_GET("rendering/global_illumination/direct/ray_bias")), int(settings.emitter_skip_instance), GLOBAL_GET("rendering/global_illumination/ray_scene/alpha_test") ? "true" : "false"));
-	}
 	return settings;
 }
 
