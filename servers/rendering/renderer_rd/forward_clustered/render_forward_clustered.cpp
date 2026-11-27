@@ -1487,11 +1487,12 @@ void RenderForwardClustered::_update_volumetric_fog(Ref<RenderSceneBuffersRD> p_
 	float ratio = float(size.x) / float((size.x + size.y) / 2);
 	uint32_t target_width = uint32_t(float(get_volumetric_fog_size()) * ratio);
 	uint32_t target_height = uint32_t(float(get_volumetric_fog_size()) / ratio);
+	const bool exact_color = GLOBAL_GET_CACHED(bool, "rendering/environment/volumetric_fog/exact_volume_color");
 
 	if (p_render_buffers->has_custom_data(RB_SCOPE_FOG)) {
 		Ref<RendererRD::Fog::VolumetricFog> fog = p_render_buffers->get_custom_data(RB_SCOPE_FOG);
 		//validate
-		if (p_environment.is_null() || !environment_get_volumetric_fog_enabled(p_environment) || fog->width != target_width || fog->height != target_height || fog->depth != get_volumetric_fog_depth()) {
+		if (p_environment.is_null() || !environment_get_volumetric_fog_enabled(p_environment) || fog->width != target_width || fog->height != target_height || fog->depth != get_volumetric_fog_depth() || fog->exact_color_requested != exact_color) {
 			p_render_buffers->set_custom_data(RB_SCOPE_FOG, Ref<RenderBufferCustomDataRD>());
 		}
 	}
@@ -1506,7 +1507,7 @@ void RenderForwardClustered::_update_volumetric_fog(Ref<RenderSceneBuffersRD> p_
 		Ref<RendererRD::Fog::VolumetricFog> fog;
 
 		fog.instantiate();
-		fog->init(Vector3i(target_width, target_height, get_volumetric_fog_depth()), sky.sky_shader.default_shader_rd);
+		fog->init(Vector3i(target_width, target_height, get_volumetric_fog_depth()), sky.sky_shader.default_shader_rd, exact_color);
 
 		p_render_buffers->set_custom_data(RB_SCOPE_FOG, fog);
 	}

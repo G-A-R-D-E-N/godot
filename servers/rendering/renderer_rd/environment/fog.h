@@ -312,6 +312,8 @@ public:
 		float length;
 		float spread;
 
+		bool exact_color_requested = false;
+
 		RID light_density_map;
 		RID prev_light_density_map;
 		RID fog_map;
@@ -344,7 +346,7 @@ public:
 
 		bool sync_gi_dependent_sets_validity(bool p_ensure_freed = false);
 
-		void init(const Vector3i &fog_size, RID p_sky_shader);
+		void init(const Vector3i &fog_size, RID p_sky_shader, bool p_exact_color);
 		~VolumetricFog();
 	};
 

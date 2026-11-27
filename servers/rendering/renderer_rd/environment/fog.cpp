@@ -32,6 +32,7 @@
 
 #include "core/config/project_settings.h"
 #include "servers/rendering/renderer_rd/cluster_builder_rd.h"
+#include "servers/rendering/renderer_rd/environment/fog_precision.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
@@ -463,11 +464,16 @@ bool Fog::VolumetricFog::sync_gi_dependent_sets_validity(bool p_ensure_freed) {
 	return valid;
 }
 
-void Fog::VolumetricFog::init(const Vector3i &fog_size, RID p_sky_shader) {
+void Fog::VolumetricFog::init(const Vector3i &fog_size, RID p_sky_shader, bool p_exact_color) {
 	width = fog_size.x;
 	height = fog_size.y;
 	depth = fog_size.z;
 	atomic_type = RD::get_singleton()->has_feature(RD::SUPPORTS_IMAGE_ATOMIC_32_BIT) ? RD::UNIFORM_TYPE_IMAGE : RD::UNIFORM_TYPE_STORAGE_BUFFER;
+	exact_color_requested = p_exact_color;
+	const bool exact_color_active = p_exact_color && atomic_type == RD::UNIFORM_TYPE_IMAGE && uint64_t(fog_size.z) * FogPrecision::LIGHT_WORDS <= RD::get_singleton()->limit_get(RD::LIMIT_MAX_TEXTURE_SIZE_3D);
+	if (p_exact_color && !exact_color_active) {
+		WARN_PRINT_ONCE("Exact volumetric fog color needs image atomics and a 3D texture depth of 4 times the fog volume depth; using packed fog color instead.");
+	}
 
 	RD::TextureFormat tf;
 	tf.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
@@ -507,9 +513,11 @@ void Fog::VolumetricFog::init(const Vector3i &fog_size, RID p_sky_shader) {
 		density_map = RD::get_singleton()->texture_create(tf, RD::TextureView());
 		RD::get_singleton()->set_resource_name(density_map, "Fog density map");
 		RD::get_singleton()->texture_clear(density_map, Color(0, 0, 0, 0), 0, 1, 0, 1);
+		tf.depth = exact_color_active ? uint32_t(fog_size.z) * FogPrecision::LIGHT_WORDS : uint32_t(fog_size.z);
 		light_map = RD::get_singleton()->texture_create(tf, RD::TextureView());
 		RD::get_singleton()->set_resource_name(light_map, "Fog light map");
 		RD::get_singleton()->texture_clear(light_map, Color(0, 0, 0, 0), 0, 1, 0, 1);
+		tf.depth = exact_color_active ? uint32_t(fog_size.z) * FogPrecision::EMISSION_WORDS : uint32_t(fog_size.z);
 		emissive_map = RD::get_singleton()->texture_create(tf, RD::TextureView());
 		RD::get_singleton()->set_resource_name(emissive_map, "Fog emissive map");
 		RD::get_singleton()->texture_clear(emissive_map, Color(0, 0, 0, 0), 0, 1, 0, 1);

@@ -22,7 +22,7 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 #define M_TAU 6.28318530718
 #define M_PI 3.14159265359
 
-#define DENSITY_SCALE 1024.0
+#define DENSITY_SCALE 1048576.0
 
 layout(set = 0, binding = 1) uniform texture2D shadow_atlas;
 layout(set = 0, binding = 2) uniform texture2D directional_shadow_atlas;
@@ -398,10 +398,26 @@ void main() {
 	vec3 emission = vec3(emission_u >> 21, (emission_u << 11) >> 21, emission_u % 1024) / vec3(511.0, 511.0, 255.0);
 	emission += params.base_emission * params.base_density;
 
+	bool exact_color = false;
+#ifndef NO_IMAGE_ATOMICS
+	exact_color = imageSize(light_only_map).z > params.fog_volume_size.z;
+	if (exact_color) {
+		ivec3 light_pos = ivec3(pos.xy, pos.z * 4);
+		ivec3 emission_pos = ivec3(pos.xy, pos.z * 3);
+		vec3 volume_scattering = vec3(imageLoad(light_only_map, light_pos).x, imageLoad(light_only_map, light_pos + ivec3(0, 0, 1)).x, imageLoad(light_only_map, light_pos + ivec3(0, 0, 2)).x) / DENSITY_SCALE;
+		float positive_density = float(imageLoad(light_only_map, light_pos + ivec3(0, 0, 3)).x) / DENSITY_SCALE;
+		vec3 volume_emission = vec3(imageLoad(emissive_only_map, emission_pos).x, imageLoad(emissive_only_map, emission_pos + ivec3(0, 0, 1)).x, imageLoad(emissive_only_map, emission_pos + ivec3(0, 0, 2)).x) / DENSITY_SCALE;
+		float medium = params.base_density + positive_density;
+		float carve = medium > 0.0 ? min(1.0, total_density / medium) : 0.0;
+		scattering = (volume_scattering + params.base_scattering * params.base_density) * carve;
+		emission = (volume_emission + params.base_emission * params.base_density) * carve;
+	}
+#endif
+
 	float cell_depth_size = abs(view_pos.z - get_depth_at_pos(fog_cell_size.z, pos.z + 1));
 	//compute directional lights
 
-	if (total_density > 0.00005) {
+	if (total_density > 1e-6) {
 		for (uint i = 0; i < params.directional_light_count; i++) {
 			if (directional_lights.data[i].volumetric_fog_energy > 0.001) {
 				vec3 shadow_attenuation = vec3(1.0);
@@ -829,8 +845,17 @@ void main() {
 	emissive_only_map[lpos] = 0;
 #else
 	imageStore(density_only_map, pos, uvec4(0));
-	imageStore(light_only_map, pos, uvec4(0));
-	imageStore(emissive_only_map, pos, uvec4(0));
+	if (exact_color) {
+		for (int c = 0; c < 4; c++) {
+			imageStore(light_only_map, ivec3(pos.xy, pos.z * 4 + c), uvec4(0));
+		}
+		for (int c = 0; c < 3; c++) {
+			imageStore(emissive_only_map, ivec3(pos.xy, pos.z * 3 + c), uvec4(0));
+		}
+	} else {
+		imageStore(light_only_map, pos, uvec4(0));
+		imageStore(emissive_only_map, pos, uvec4(0));
+	}
 #endif
 #endif
 
@@ -845,6 +870,10 @@ void main() {
 	vec4 fog_accum = vec4(0.0, 0.0, 0.0, 1.0);
 	float prev_z = 0.0;
 
+	vec2 column_ndc = (vec2(pos.xy) + 0.5) / vec2(params.fog_volume_size.xy) * 2.0 - 1.0;
+	vec2 column_slope = column_ndc * (params.fog_frustum_size_end - params.fog_frustum_size_begin) / params.fog_frustum_end;
+	float path_scale = sqrt(1.0 + dot(column_slope, column_slope));
+
 	for (int i = 0; i < params.fog_volume_size.z; i++) {
 		//compute fog position
 		ivec3 fog_pos = pos + ivec3(0, 0, i);
@@ -854,11 +883,13 @@ void main() {
 		//get depth at cell pos
 		float z = get_depth_at_pos(fog_cell_size.z, i);
 		//get distance from previous pos
-		float d = abs(prev_z - z);
+		float d = abs(prev_z - z) * path_scale;
 		//compute transmittance using beer's law
 		float transmittance = exp(-d * fog.a);
 
-		fog_accum.rgb += ((fog.rgb - fog.rgb * transmittance) / max(fog.a, 0.00001)) * fog_accum.a;
+		float tau = d * fog.a;
+		vec3 in_scatter = tau > 0.05 ? (fog.rgb - fog.rgb * transmittance) / fog.a : fog.rgb * (d * (1.0 - tau * (0.5 - tau * (1.0 / 6.0 - tau * (1.0 / 24.0)))));
+		fog_accum.rgb += (fog.a > 0.0 ? in_scatter : vec3(0.0)) * fog_accum.a;
 		fog_accum.a *= transmittance;
 
 		prev_z = z;
