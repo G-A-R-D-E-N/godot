@@ -226,6 +226,7 @@ public:
 	void optimize_indices_for_cache();
 	AABB get_aabb() const;
 	Vector<int> generate_lod(float p_threshold, int p_target_index_count = 3);
+	Vector<int> simplify_with_attributes(float p_threshold, int p_target_index_count = 3, float p_normal_weight = 1.0f, float p_uv_weight = 0.0f, float p_color_weight = 0.0f, bool p_lock_border = true, bool p_preserve_folds = true);
 
 	void set_material(const Ref<Material> &p_material);
 	Ref<Material> get_material() const;
