@@ -41,8 +41,8 @@
 void DirectResamplerRD::register_settings() {
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("enabled"), false);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/enabled"), false);
-	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/temporal"), false);
-	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/spatial"), false);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/temporal"), true);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/spatial"), true);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/half_res"), false);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/visibility"), false);
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/firefly_clamp"), 0.0);
