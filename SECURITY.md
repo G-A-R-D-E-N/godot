@@ -6,7 +6,7 @@ This repository is the G-A-R-D-E-N Godot fork. Security fixes for this fork are 
 
 ## Reporting a vulnerability
 
-Please report security issues privately using [Report a vulnerability](https://github.com/G-A-R-D-E-N/godot/security/advisories/new). Do not publish vulnerability details, credentials, or proof-of-concept exploits in issues or pull requests. If that form is unavailable, contact [NomadsReach](https://github.com/NomadsReach) on GitHub to arrange a private channel, without including the details publicly.
+Please report security issues privately using the **Report a vulnerability** feature on the repository's Security tab ([report here](https://github.com/G-A-R-D-E-N/godot/security/advisories/new)), once private vulnerability reporting is enabled. Do not publish vulnerability details, credentials, or proof-of-concept exploits in public issues or pull requests.
 
 Include the affected version or commit, the potential impact, and steps to reproduce. Please avoid including personal data or game files.
 
