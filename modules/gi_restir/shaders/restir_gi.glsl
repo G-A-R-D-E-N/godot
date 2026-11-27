@@ -62,6 +62,8 @@ float rs_shade_emission_exposure = 0.0;
 #define RAY_SCENE_SHADE_BOUNCE_ENERGY rs_shade_bounce_energy
 #define RAY_SCENE_SHADE_EMISSION_EXPOSURE rs_shade_emission_exposure
 #define RAY_SCENE_SHADE_MAX_RADIANCE RS_LO_CLAMP
+vec3 rs_portal_sky_radiance(vec3 p_direction);
+#define RAY_SCENE_PORTAL_SKY(dir) rs_portal_sky_radiance(dir)
 #include "restir_core_ray_scene_hit_shade_inc.glsl"
 
 void rs_shade_setup() {
@@ -77,28 +79,43 @@ void rs_shade_setup() {
 #define RS_SKY_COLOR 1u
 #define RS_SKY_SKY 2u
 #define RS_SKY_SIGN 4u
+#define RS_SKY_PORTAL 8u
 #endif
 
 #if defined(RESTIR_SHADE) || defined(RS_SKY_REREAD)
+vec3 rs_sample_sky_map(vec3 p_direction) {
+	float sky_sign = (rf.shade_sky_flags & RS_SKY_SIGN) != 0u ? 1.0 : -1.0;
+	vec4 sky_quat = vec4(rf.shade_sky, sky_sign * sqrt(max(0.0, 1.0 - dot(rf.shade_sky, rf.shade_sky))));
+	vec3 sky_dir = cross(sky_quat.xyz, p_direction);
+	sky_dir = p_direction + ((sky_dir * sky_quat.w) + cross(sky_quat.xyz, sky_dir)) * 2.0;
+#ifdef USE_RADIANCE_OCTMAP_ARRAY
+	return textureLod(sampler2DArray(sky_radiance, sky_sampler), vec3(vec3_to_oct_with_border(sky_dir, rf.shade_sky_border), 0.0), rf.sky_blur_lod).rgb * rf.shade_sky_energy;
+#else
+	return textureLod(sampler2D(sky_radiance, sky_sampler), vec3_to_oct_with_border(sky_dir, rf.shade_sky_border), rf.sky_blur_lod).rgb * rf.shade_sky_energy;
+#endif
+}
+
 vec3 rs_sky_radiance(vec3 p_direction) {
 	if ((rf.flags & F_REAL_SKY) == 0u) {
 		return min(rf.test_sky.xyz, vec3(RS_LO_CLAMP));
 	}
 	vec3 radiance = vec3(0.0);
 	if ((rf.shade_sky_flags & RS_SKY_SKY) != 0u) {
-		float sky_sign = (rf.shade_sky_flags & RS_SKY_SIGN) != 0u ? 1.0 : -1.0;
-		vec4 sky_quat = vec4(rf.shade_sky, sky_sign * sqrt(max(0.0, 1.0 - dot(rf.shade_sky, rf.shade_sky))));
-		vec3 sky_dir = cross(sky_quat.xyz, p_direction);
-		sky_dir = p_direction + ((sky_dir * sky_quat.w) + cross(sky_quat.xyz, sky_dir)) * 2.0;
-#ifdef USE_RADIANCE_OCTMAP_ARRAY
-		radiance = textureLod(sampler2DArray(sky_radiance, sky_sampler), vec3(vec3_to_oct_with_border(sky_dir, rf.shade_sky_border), 0.0), rf.sky_blur_lod).rgb * rf.shade_sky_energy;
-#else
-		radiance = textureLod(sampler2D(sky_radiance, sky_sampler), vec3_to_oct_with_border(sky_dir, rf.shade_sky_border), rf.sky_blur_lod).rgb * rf.shade_sky_energy;
-#endif
+		radiance = rs_sample_sky_map(p_direction);
 	} else if ((rf.shade_sky_flags & RS_SKY_COLOR) != 0u) {
 		radiance = rf.shade_sky * rf.shade_sky_energy;
 	}
 	return min(radiance, vec3(RS_LO_CLAMP));
+}
+
+vec3 rs_portal_sky_radiance(vec3 p_direction) {
+	if ((rf.flags & F_REAL_SKY) == 0u) {
+		return min(rf.test_sky.xyz, vec3(RS_LO_CLAMP));
+	}
+	if ((rf.shade_sky_flags & (RS_SKY_SKY | RS_SKY_PORTAL)) != 0u) {
+		return min(rs_sample_sky_map(p_direction), vec3(RS_LO_CLAMP));
+	}
+	return rs_sky_radiance(p_direction);
 }
 #endif
 
@@ -1014,23 +1031,27 @@ vec3 rs_fresh_lo(vec3 p_origin, vec3 p_dir, float p_dist, uint p_seed, uint p_ta
 	if (hit.backface && !two_sided) {
 		return vec3(0.0);
 	}
+	bool ddgi_shade = (rf.flags & F_OWN_SAMPLER) == 0u && (rf.flags & F_SHADE_DDGI) != 0u;
+	if (bool(material.flags & RAY_SCENE_MATERIAL_SKY_PORTAL)) {
+		float em_exp = ddgi_shade ? rf.shade_exposure : rf.emission_exposure;
+		return min(material.emission * em_exp + material.albedo * rs_portal_sky_radiance(p_dir), vec3(RS_LO_CLAMP));
+	}
 	vec3 normal = ray_scene_hit_normal(hit);
 	if (hit.backface) {
 		normal = -normal;
 	}
 	vec3 position = p_origin + p_dir * hit.t;
 	float bias = 0.01 + hit.t * 0.001;
-	bool ddgi_shade = (rf.flags & F_OWN_SAMPLER) == 0u && (rf.flags & F_SHADE_DDGI) != 0u;
 	if (!ddgi_shade) {
 		vec3 irradiance = gi_hit_direct_light(position, normal, bias, rf.sky_distance, p_seed);
-		return min(material.emission * rf.emission_exposure + material.albedo * irradiance, vec3(RS_LO_CLAMP));
+		return min(ray_scene_hit_emission(hit, position) * rf.emission_exposure + material.albedo * irradiance, vec3(RS_LO_CLAMP));
 	}
 	vec3 irradiance = gi_hit_direct_light(position, normal, bias, ddgi.max_distance, p_seed);
 	if (rf.shade_bounce_energy > 0.0) {
 		vec3 bounce = ddgi_sample_direction(position - ray_scene.camera_to_anchor, normal, -p_dir, normal, 0.0, hit.t * 0.5).rgb;
 		irradiance += bounce * rf.shade_bounce_energy;
 	}
-	return min(material.emission * rf.shade_exposure + material.albedo * irradiance, vec3(RS_LO_CLAMP));
+	return min(ray_scene_hit_emission(hit, position) * rf.shade_exposure + material.albedo * irradiance, vec3(RS_LO_CLAMP));
 }
 
 vec3 rs_fresh_lo_replay(vec3 p_origin, vec3 p_dir, float p_dist, uint p_seed, out bool r_hit_here) {
@@ -1097,6 +1118,39 @@ float rs_median_w(ivec2 p_pixel, out int r_count) {
 			if (m > 0u && w > 0.0 && !isinf(w)) {
 				values[count] = w;
 				count++;
+			}
+		}
+	}
+	for (int i = 1; i < count; i++) {
+		float key = values[i];
+		int j = i - 1;
+		while (j >= 0 && values[j] > key) {
+			values[j + 1] = values[j];
+			j--;
+		}
+		values[j + 1] = key;
+	}
+	r_count = count;
+	return count > 0 ? values[count / 2] : 0.0;
+}
+
+float rs_median_rad(ivec2 p_pixel, vec3 p_origin, vec3 p_nrm, out int r_count) {
+	float values[9];
+	int count = 0;
+	for (int dy = -1; dy <= 1; dy++) {
+		for (int dx = -1; dx <= 1; dx++) {
+			ivec2 np = p_pixel + ivec2(dx, dy);
+			if (any(lessThan(np, ivec2(0))) || any(greaterThanEqual(np, rf.trace_size))) {
+				continue;
+			}
+			Reservoir n = rs_load(np);
+			if (n.m > 0u && (n.flags & RF_VALID) != 0u && n.w > 0.0 && !isinf(n.w) && !isnan(n.w)) {
+				float c = max(dot(p_nrm, rs_dir_to(n, p_origin)), 0.0);
+				float lum = rs_luma(n.lo) * (c * n.w / RS_PI);
+				if (!isinf(lum) && !isnan(lum)) {
+					values[count] = lum;
+					count++;
+				}
 			}
 		}
 	}
@@ -1206,6 +1260,16 @@ void main() {
 			if (!rs_finite3(radiance)) {
 				radiance = vec3(0.0);
 				w = 0.0;
+			}
+			if (has && visible && (rf.flags & F_UNBIASED) == 0u) {
+				int rcount;
+				float med_rad = rs_median_rad(px, r.origin, r.nrm, rcount);
+				float rad_lum = rs_luma(radiance);
+				float rad_cap = min(rf.w_clamp, 4.0) * max(med_rad, 1e-4);
+				if (rcount >= 3 && rad_lum > rad_cap) {
+					radiance *= rad_cap / rad_lum;
+					clamped = true;
+				}
 			}
 			coverage = (held && (!(has && !visible) || (rf.flags & F_KEEP_BLOCKED) != 0u)) ? clamp(float(s.m) / float(max(rf.n_target, 1u)), 0.0, 1.0) : 0.0;
 
@@ -1353,9 +1417,9 @@ void main() {
 		} else {
 			float bias = 0.01 + hit.t * 0.001;
 			vec3 irradiance = gi_hit_direct_light(point, normal, bias, rf.sky_distance, shade_seed);
-			radiance = min(material.emission * rf.emission_exposure + material.albedo * irradiance, vec3(RS_LO_CLAMP));
+			radiance = min(ray_scene_hit_emission(hit, point) * rf.emission_exposure + material.albedo * irradiance, vec3(RS_LO_CLAMP));
 		}
-		if (dot(material.emission, vec3(1.0)) > 0.0) {
+		if (dot(ray_scene_hit_emission(hit, point), vec3(1.0)) > 0.0) {
 			flags |= RTGI_FLAG_EMISSIVE;
 		}
 	} else {
@@ -1472,7 +1536,7 @@ void rs_sky_row_luma(uint p_row, out float r_sum, out uint r_count) {
 
 void main() {
 	uint lid = gl_LocalInvocationIndex;
-	bool texture_sky = (rf.flags & F_REAL_SKY) != 0u && (rf.shade_sky_flags & RS_SKY_SKY) != 0u;
+	bool texture_sky = (rf.flags & F_REAL_SKY) != 0u && (rf.shade_sky_flags & (RS_SKY_SKY | RS_SKY_PORTAL)) != 0u;
 	float row_sum = 0.0;
 	uint row_count = 0u;
 	if (texture_sky) {

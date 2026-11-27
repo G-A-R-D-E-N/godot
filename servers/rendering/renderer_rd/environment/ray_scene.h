@@ -69,9 +69,12 @@ public:
 	static constexpr uint32_t MAX_LIGHTS = 256;
 	static constexpr uint32_t RESERVED_AREA_LIGHTS = 16;
 	static constexpr uint32_t MAX_CANDIDATE_LIGHTS = 16384;
+	static constexpr uint32_t MAX_TRIANGLE_EMITTERS = 1u << 20;
 	static constexpr uint32_t MIN_LIGHTS = 16;
 	static constexpr uint32_t PICK_CELL_SLOTS = 4;
 	static constexpr double ANCHOR_GRID = 64.0;
+
+	static bool emission_has_value(const Color &p_emission);
 
 	enum FeedConsumer : uint32_t {
 		FEED_MODULE = 16,
@@ -121,10 +124,12 @@ public:
 		MATERIAL_FLAG_SHADOW_PASS = 8,
 		MATERIAL_FLAG_SHADOW_ONLY = 16,
 		MATERIAL_FLAG_SHADOW_TWO_SIDED = 32,
+		MATERIAL_FLAG_SKY_PORTAL = 64,
 	};
 
 	static constexpr uint32_t MATERIAL_ALPHA_SHIFT = 8;
 	static constexpr uint32_t MATERIAL_ALPHA_MASK = 0xFFFFFF00;
+	static constexpr uint32_t EMISSION_FLAG_TEXTURE_RANGES = 1;
 	static constexpr uint32_t CANDIDATE_FLAGS = MATERIAL_FLAG_SKIP | MATERIAL_FLAG_BLEND | MATERIAL_FLAG_SHADOW_PASS | MATERIAL_FLAG_SHADOW_ONLY | MATERIAL_ALPHA_MASK;
 	static constexpr uint32_t ALPHA_ON_SALT = 0x9e3779b9u;
 
@@ -173,7 +178,30 @@ public:
 		float coverage;
 		float emission[3];
 		uint32_t flags;
+		uint32_t emission_texture;
+		uint32_t emission_uv_set;
+		float emission_uv_scale[2];
+		float emission_uv_offset[2];
+		float emission_nits_range[2];
+		float emission_texel_scale;
+		uint32_t emission_flags;
+		float emission_mean_luminance;
+		float pad;
 	};
+
+	// Ray scene space is world position minus the anchor. Layout must match ray_scene_inc.glsl: v0 at offset 0, instance at 12, v1 at 16, material at 28, v2 at 32, uv_index at 44, flags at 48, stride 64 (std430 rounds the 52-byte tail up to the 16-byte alignment of vec3).
+	struct TriangleEmitter {
+		float v0[3];
+		uint32_t instance;
+		float v1[3];
+		uint32_t material;
+		float v2[3];
+		uint32_t uv_index;
+		uint32_t flags;
+		uint32_t pad[3];
+	};
+
+	static constexpr uint32_t TRIANGLE_EMITTER_PROXIED = 1u;
 
 	struct Light {
 		float color[3];
@@ -193,6 +221,8 @@ public:
 	};
 
 	static_assert(sizeof(Light) == 96);
+	static_assert(sizeof(Material) == 80);
+	static_assert(sizeof(TriangleEmitter) == 64, "TriangleEmitter must match the std430 64-byte stride");
 	static_assert(sizeof(Instance) == 64);
 	static_assert(sizeof(TriangleUv) == 16);
 	static_assert((uint64_t(TLAS_LEAF_SIZE) << TLAS_MAX_DEPTH) <= (uint64_t(1) << 24), "A hardware instance custom index is 24 bits.");
@@ -280,12 +310,26 @@ public:
 		uint32_t packed_out = 0;
 	};
 
+	static constexpr uint32_t MAX_EMITTER_ROOMS = 256;
+
 	struct SceneData {
 		float camera_to_anchor[3];
 		uint32_t instance_count;
 		uint32_t light_count;
-		uint32_t pad[3];
+		uint32_t triangle_emitter_count;
+		uint32_t triangle_emitters_capped;
+		float emissive_exposure_normalization;
+		uint32_t triangle_emitter_generation;
+		uint32_t emission_texture_count;
+		uint32_t proxy_emitters_traced;
+		uint32_t hit_emission_texel;
+		float room_grid_origin[2];
+		float room_grid_cell;
+		uint32_t room_count;
+		uint32_t room_start[(MAX_EMITTER_ROOMS + 2) * 4];
 	};
+
+	static_assert(sizeof(SceneData) == 4192);
 
 	struct BuildPrimitive {
 		float bmin[3];
@@ -366,6 +410,16 @@ private:
 		LocalVector<uint32_t> hw_order;
 	};
 
+	struct TriangleEmitterSource {
+		Transform3D transform;
+		RID mesh;
+		uint32_t instance = 0;
+		uint32_t material_offset = 0;
+		uint32_t surface_count = 0;
+		bool proxied = false;
+		float window_range = 0.0f;
+	};
+
 	Mutex mesh_mutex;
 	HashMap<RID, MeshEntry> meshes;
 	HashSet<RID> assembled_meshes;
@@ -416,6 +470,8 @@ private:
 		uint32_t alpha_flags = 0;
 		int32_t scale_index = -1;
 		int32_t bounce_index = -1;
+		int32_t color_index = -1;
+		float emission_color_luminance = 0.0f;
 	};
 
 	struct AlphaCounts {
@@ -463,6 +519,8 @@ private:
 	float emission_scale = 1.0f;
 	bool skip_additive = true;
 	uint32_t additive_skipped = 0;
+	uint32_t emission_debug_logged = 0;
+	uint32_t pipboy_scan_logged = 0;
 	int64_t reported_additive_state = -2;
 	LocalVector<Light> lights;
 	LocalVector<Light> local_lights;
@@ -506,9 +564,41 @@ private:
 	RID light_buffer;
 	RID scene_data_buffer;
 	RID triangle_uv_buffer;
+	RID triangle_emitter_buffer;
+	RID emission_dummy;
+	RID room_grid_source;
+	RID room_grid_texture;
+	RID room_grid_dummy;
+	RID emission_texture_array;
+	uint32_t emission_texture_count = 0;
 	uint32_t blas_node_capacity = 0;
 	uint32_t triangle_capacity = 0;
 	uint32_t triangle_uv_capacity = 0;
+	uint32_t triangle_emitter_capacity = 0;
+	uint32_t triangle_emitter_count = 0;
+	uint32_t triangle_emitter_generation = 0;
+	uint32_t triangle_emitter_state = 0;
+	uint32_t triangles_logged = 0;
+	bool ray_scene_instance_table_printed = false;
+	LocalVector<String> instance_mesh_names;
+	LocalVector<Vector3> instance_mesh_positions;
+	uint32_t triangle_emitter_emission_state = 0;
+	bool triangle_emitters_capped = false;
+	bool triangle_emitters_built = false;
+	LocalVector<TriangleEmitter> triangle_emitters;
+
+	struct EmitterRoomGrid {
+		Vector2 origin;
+		float cell_size = 1.0f;
+		Vector2i size;
+		uint32_t room_count = 0;
+		PackedByteArray ids;
+		bool valid = false;
+	};
+	EmitterRoomGrid emitter_room_grid;
+	uint32_t emitter_room_count = 0;
+	uint32_t emitter_room_table_generation = 0;
+	LocalVector<uint32_t> emitter_room_starts;
 	bool alpha_enabled = false;
 	uint32_t alpha_generation = 0;
 	bool alpha_edge = false;
@@ -562,6 +652,10 @@ private:
 	void _candidate_changes(double p_inv_exposure, uint32_t &r_in, uint32_t &r_out, uint32_t &r_changed);
 	void _pick_settings(float p_cell, bool p_stable);
 	static void _ensure_buffer(RID &r_buffer, uint32_t &r_capacity, uint32_t p_count, uint32_t p_stride, const char *p_name);
+	void _update_triangle_emitters(const LocalVector<TriangleEmitterSource> &p_sources, const LocalVector<uint32_t> &p_order);
+	void _refresh_emitter_room_grid();
+	void _poll_room_grid();
+	uint32_t _emitter_room_at(const Vector3 &p_position) const;
 	void _backend_tick();
 	void _hw_begin();
 	void _hw_instance(RID p_mesh_rid, MeshEntry &r_mesh, uint64_t p_material_candidates, uint64_t p_candidates, const Transform3D &p_transform, Instance &r_instance);
@@ -573,6 +667,9 @@ private:
 
 public:
 	static RayScene *get_singleton() { return singleton; }
+	uint32_t get_emitter_room_count() const { return emitter_room_count; }
+	const LocalVector<uint32_t> &get_emitter_room_starts() const { return emitter_room_starts; }
+	uint32_t get_emitter_room_table_generation() const { return emitter_room_table_generation; }
 	static bool is_needed();
 	static void watch_needed();
 	static void reset_needed_for_tests() { needed.clear(); }
@@ -588,7 +685,7 @@ public:
 	uint32_t get_structure_generation() const { return structure_generation; }
 	AABB get_light_region(const Vector3 &p_camera_world, const Vector3 &p_region_half);
 
-	bool is_ready() const { return scene_data_buffer.is_valid() && blas_node_buffer.is_valid() && tlas_node_buffer.is_valid() && (!accel || _hw_ready()) && _alpha_ready(); }
+	bool is_ready() const { return scene_data_buffer.is_valid() && blas_node_buffer.is_valid() && tlas_node_buffer.is_valid() && triangle_emitter_buffer.is_valid() && (!accel || _hw_ready()) && _alpha_ready(); }
 	bool uses_hardware() const { return accel != nullptr; }
 	void refuse_hardware(const String &p_reason);
 	RID get_tlas() const;
@@ -605,6 +702,12 @@ public:
 	RID get_light_buffer() const { return light_buffer; }
 	RID get_scene_data_buffer() const { return scene_data_buffer; }
 	RID get_triangle_uv_buffer() const { return triangle_uv_buffer; }
+	RID get_triangle_emitters() const { return triangle_emitter_buffer; }
+	RID get_emission_textures() const { return emission_texture_array.is_valid() ? emission_texture_array : emission_dummy; }
+	uint32_t get_emission_texture_count() const { return emission_texture_count; }
+	uint32_t get_triangle_emitter_count() const { return triangle_emitter_count; }
+	bool get_triangle_emitters_capped() const { return triangle_emitters_capped; }
+	uint32_t get_triangle_emitter_generation() const { return triangle_emitter_generation; }
 	bool is_alpha_enabled() const { return alpha_enabled; }
 	uint32_t get_alpha_generation() const { return alpha_generation; }
 	static String alpha_shader_defines();

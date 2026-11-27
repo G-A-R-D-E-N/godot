@@ -102,7 +102,7 @@ SSEffects::SSEffects() {
 	}
 
 	// Initialize Screen Space Indirect Lighting (SSIL)
-	ssil_set_quality(RSE::EnvironmentSSILQuality(int(GLOBAL_GET("rendering/environment/ssil/quality"))), GLOBAL_GET("rendering/environment/ssil/half_size"), GLOBAL_GET("rendering/environment/ssil/adaptive_target"), GLOBAL_GET("rendering/environment/ssil/blur_passes"), GLOBAL_GET("rendering/environment/ssil/fadeout_from"), GLOBAL_GET("rendering/environment/ssil/fadeout_to"));
+	ssil_set_quality(RSE::EnvironmentSSILQuality(int(GLOBAL_GET("rendering/environment/ssgi/quality"))), GLOBAL_GET("rendering/environment/ssgi/half_size"), GLOBAL_GET("rendering/environment/ssgi/adaptive_target"), GLOBAL_GET("rendering/environment/ssgi/blur_passes"), GLOBAL_GET("rendering/environment/ssgi/fadeout_from"), GLOBAL_GET("rendering/environment/ssgi/fadeout_to"));
 
 	{
 		Vector<String> ssil_modes;
@@ -1723,7 +1723,7 @@ void SSEffects::generate_gtao(Ref<RenderSceneBuffersRD> p_render_buffers, GTAORe
 	push_constant.final_value_power = MAX(2.2f * (p_settings.power / 1.5f) * (p_settings.intensity / 2.0f), 0.01f);
 	push_constant.denoise_blur_beta = p_settings.denoise_passes == 0 ? 1e4f : 1.2f;
 	push_constant.sample_distribution_power = 2.0f;
-	push_constant.thin_occluder_compensation = 0.0f;
+	push_constant.thin_occluder_compensation = CLAMP(GLOBAL_GET_CACHED(float, "rendering/environment/gtao/thin_occluder_compensation"), 0.0f, 0.7f);
 	push_constant.depth_mip_sampling_offset = 3.30f;
 	push_constant.noise_index = p_settings.denoise_passes > 0 ? int32_t(p_settings.noise_index % 64) : 0;
 
@@ -2366,7 +2366,7 @@ void SSEffects::screen_space_reflection_stochastic(Ref<RenderSceneBuffersRD> p_r
 }
 
 bool SSEffects::ssil_traced_available(Ref<RenderSceneBuffersRD> p_render_buffers) const {
-	return GLOBAL_GET_CACHED(int, "rendering/environment/ssil/backend") == 1 && p_render_buffers->has_texture(RB_SCOPE_BOUNCE_SOURCE, RB_SOURCE);
+	return GLOBAL_GET_CACHED(int, "rendering/environment/ssgi/backend") == 1 && p_render_buffers->has_texture(RB_SCOPE_BOUNCE_SOURCE, RB_SOURCE);
 }
 
 RID SSEffects::ssil_get_output(Ref<RenderSceneBuffersRD> p_render_buffers, const SSILRenderBuffers &p_ssil_buffers, int p_view) const {
@@ -2379,8 +2379,8 @@ RID SSEffects::ssil_get_output(Ref<RenderSceneBuffersRD> p_render_buffers, const
 }
 
 void SSEffects::ssgi_allocate_buffers(Ref<RenderSceneBuffersRD> p_render_buffers, SSILRenderBuffers &p_ssil_buffers) {
-	const bool half_size = GLOBAL_GET_CACHED(bool, "rendering/environment/ssil/traced/half_size");
-	const uint32_t rays = CLAMP(GLOBAL_GET_CACHED(int, "rendering/environment/ssil/traced/rays_per_pixel"), 1, 4);
+	const bool half_size = GLOBAL_GET_CACHED(bool, "rendering/environment/ssgi/traced/half_size");
+	const uint32_t rays = CLAMP(GLOBAL_GET_CACHED(int, "rendering/environment/ssgi/traced/rays_per_pixel"), 1, 4);
 	const Size2i internal_size = p_render_buffers->get_internal_size();
 	const Size2i trace_size = half_size ? Size2i(MAX(1, internal_size.width / 2), MAX(1, internal_size.height / 2)) : internal_size;
 
@@ -2440,11 +2440,11 @@ void SSEffects::screen_space_gi(Ref<RenderSceneBuffersRD> p_render_buffers, SSIL
 	const int32_t rays = p_ssil_buffers.rays;
 	const bool half_size = p_ssil_buffers.traced_half_size;
 	const RD::TextureFormat source_format = p_render_buffers->get_texture_format(RB_SCOPE_BOUNCE_SOURCE, RB_SOURCE);
-	const bool temporal = GLOBAL_GET_CACHED(bool, "rendering/environment/ssil/traced/temporal") && p_settings.debug_mode == 0;
-	const int32_t num_steps = CLAMP(GLOBAL_GET_CACHED(int, "rendering/environment/ssil/traced/max_steps"), 8, 256);
-	const float thickness = MAX(GLOBAL_GET_CACHED(float, "rendering/environment/ssil/traced/thickness"), 0.01f);
-	const float firefly_luminance = MAX(GLOBAL_GET_CACHED(float, "rendering/environment/ssil/traced/firefly_luminance"), 1.0f);
-	const int32_t history_frames = CLAMP(GLOBAL_GET_CACHED(int, "rendering/environment/ssil/traced/history_frames"), 1, 255);
+	const bool temporal = GLOBAL_GET_CACHED(bool, "rendering/environment/ssgi/traced/temporal") && p_settings.debug_mode == 0;
+	const int32_t num_steps = CLAMP(GLOBAL_GET_CACHED(int, "rendering/environment/ssgi/traced/max_steps"), 8, 256);
+	const float thickness = MAX(GLOBAL_GET_CACHED(float, "rendering/environment/ssgi/traced/thickness"), 0.01f);
+	const float firefly_luminance = MAX(GLOBAL_GET_CACHED(float, "rendering/environment/ssgi/traced/firefly_luminance"), 1.0f);
+	const int32_t history_frames = CLAMP(GLOBAL_GET_CACHED(int, "rendering/environment/ssgi/traced/history_frames"), 1, 255);
 
 	_update_scene_data_ubo(ssgi.ubo, view_count, p_settings.projections, p_settings.reprojections, p_settings.eye_offsets, p_settings.prev_projections, p_settings.cur_to_prev);
 	_build_depth_pyramid(p_render_buffers, RB_SCOPE_SSGI, trace_size, p_ssil_buffers.mipmaps, half_size, p_normal_roughness_slices, p_copy_effects, "SSGI");

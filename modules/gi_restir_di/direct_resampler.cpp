@@ -31,6 +31,7 @@
 #include "direct_resampler.h"
 
 #include "core/config/project_settings.h"
+#include "servers/rendering/renderer_rd/environment/ray_scene.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
 #include "servers/rendering/rendering_server_globals.h"
@@ -39,6 +40,15 @@
 
 void DirectResamplerRD::register_settings() {
 	GLOBAL_DEF(DI_RESAMPLED_SETTING("enabled"), false);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/enabled"), false);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/temporal"), true);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/spatial"), true);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/half_res"), false);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/visibility"), false);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/firefly_clamp"), 0.0);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/pick_radius"), 0.0);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/room_pick"), false);
+	GLOBAL_DEF(DI_RESAMPLED_SETTING("emitters/debug_reuse_readback"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("head"), PROPERTY_HINT_RANGE, "0,6,1"), 4);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, DI_RESAMPLED_SETTING("tail_samples"), PROPERTY_HINT_RANGE, "1,7,1"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, DI_RESAMPLED_SETTING("floor"), PROPERTY_HINT_RANGE, "0.0001,1,0.0001"), 0.0625);
@@ -99,6 +109,14 @@ uint32_t DirectResamplerRD::advance_counter(uint32_t p_counter, bool p_continuou
 DirectResamplerRD::Settings DirectResamplerRD::get_project_settings() {
 	Settings settings = clamp_settings(GLOBAL_GET(DI_RESAMPLED_SETTING("enabled")), GLOBAL_GET(DI_RESAMPLED_SETTING("head")), GLOBAL_GET(DI_RESAMPLED_SETTING("tail_samples")), GLOBAL_GET(DI_RESAMPLED_SETTING("floor")), GLOBAL_GET(DI_RESAMPLED_SETTING("energy_arm")));
 	settings.tail_visibility = uint32_t(CLAMP(int(GLOBAL_GET(DI_RESAMPLED_SETTING("debug/tail_visibility"))), 0, 2));
+	settings.emitters = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/enabled"));
+	settings.emitter_temporal = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/temporal"));
+	settings.emitter_spatial = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/spatial"));
+	settings.emitter_visibility = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/visibility"));
+	settings.emitter_clamp = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/firefly_clamp"));
+	settings.emitter_pick_radius = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/pick_radius"));
+	settings.emitter_room_pick = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/room_pick"));
+	settings.emitter_debug_reuse_readback = GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/debug_reuse_readback"));
 	settings.stale_prior = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/stale_prior"));
 	settings.debug_log = GLOBAL_GET(DI_RESAMPLED_SETTING("debug/log"));
 #ifdef DI_RESAMPLER_LAB
@@ -171,17 +189,42 @@ bool DirectResamplerRD::_ensure_device() {
 	Vector<String> modes;
 	modes.push_back("\n");
 	modes.push_back("\n#define MODE_SPATIAL\n");
+	const String room_pick_define = ROOM_PICK_AVAILABLE ? "#define DI_EMITTER_ROOM_PICK\n" : "";
+	modes.push_back("\n#define DI_EMITTERS\n" + room_pick_define);
+	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TABLE\n#define MODE_EMITTER_SUM\n");
+	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TABLE\n#define MODE_EMITTER_SCAN\n");
+	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TABLE\n#define MODE_EMITTER_PREFIX\n");
+	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TEMPORAL\n");
 #ifdef DI_RESAMPLER_LAB
 	modes.push_back("\n#define LAB_COUNTS\n");
 	modes.push_back("\n#define MODE_SPATIAL\n#define LAB_COUNTS\n");
+#else
+	modes.push_back("\n");
+	modes.push_back("\n");
 #endif
-	shader->initialize(modes);
+	modes.push_back("\n#define DI_EMITTERS\n#define MODE_EMITTER_SPATIAL\n");
+	modes.push_back("\n#define DI_EMITTERS\n#define DI_EMITTER_TEMPORAL\n" + room_pick_define);
+	const String defines = vformat("\n#define RAY_SCENE_BLAS_STACK_SIZE %d\n#define RAY_SCENE_TLAS_STACK_SIZE %d\n%s", int(RendererRD::RayScene::BLAS_MAX_DEPTH), int(RendererRD::RayScene::TLAS_MAX_DEPTH), RendererRD::RayScene::get_singleton()->uses_hardware() ? "#define SHADER_GLSL_VERSION_460\n#extension GL_EXT_ray_query : require\n#define RAY_SCENE_HW\n" : "");
+	shader->initialize(modes, defines);
 	shader_version = shader->version_create();
 	if (!shader->version_is_valid(shader_version)) {
 		return false;
 	}
 	pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_MAIN));
 	spatial_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_SPATIAL));
+	emitter_main_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_MAIN_EMITTER));
+	emitter_sum_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_EMITTER_SUM));
+	emitter_scan_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_EMITTER_SCAN));
+	emitter_prefix_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_EMITTER_PREFIX));
+	emitter_temporal_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_MAIN_EMITTER_TEMPORAL));
+	if (ROOM_PICK_AVAILABLE) {
+		emitter_room_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_MAIN_EMITTER_TEMPORAL_ROOM));
+	}
+	emitter_spatial_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_EMITTER_SPATIAL));
+	emitter_device_ready = emitter_main_pipeline.get_rid().is_valid() && emitter_sum_pipeline.get_rid().is_valid() && emitter_scan_pipeline.get_rid().is_valid() && emitter_prefix_pipeline.get_rid().is_valid();
+	if (!emitter_device_ready) {
+		WARN_PRINT("The direct resampler's emitter shaders could not be made, so traced emitters stay off.");
+	}
 #ifdef DI_RESAMPLER_LAB
 	lab_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_MAIN_LAB));
 	lab_spatial_pipeline.create_compute_pipeline(shader->version_get_shader(shader_version, VARIANT_SPATIAL_LAB));
@@ -196,6 +239,56 @@ bool DirectResamplerRD::_ensure_device() {
 	history_array_dummy = _dummy(RD::DATA_FORMAT_R16_UNORM, RD::TEXTURE_TYPE_2D_ARRAY, "Direct Resampled History Array Dummy");
 	history_guide_dummy = _dummy(RD::DATA_FORMAT_R32G32_UINT, RD::TEXTURE_TYPE_2D, "Direct Resampled History Guide Dummy");
 	return true;
+}
+
+bool DirectResamplerRD::_ensure_emitter_buffers(uint32_t p_count) {
+	RD *rd = RD::get_singleton();
+	const uint32_t floats = MAX(p_count, 1u);
+	if (emitter_cdf.is_null() || floats > emitter_cdf_capacity) {
+		if (emitter_cdf.is_valid()) {
+			rd->free_rid(emitter_cdf);
+		}
+		emitter_cdf_capacity = MAX(floats * 2, 4096u);
+		emitter_cdf = rd->storage_buffer_create(emitter_cdf_capacity * uint32_t(sizeof(float)));
+		rd->set_resource_name(emitter_cdf, "Direct Resampler Emitter Cdf");
+	}
+	if (emitter_scan.is_null()) {
+		emitter_scan = rd->storage_buffer_create(EMITTER_SCAN_FLOATS * uint32_t(sizeof(float)));
+		rd->set_resource_name(emitter_scan, "Direct Resampler Emitter Scan");
+	}
+	return emitter_cdf.is_valid() && emitter_scan.is_valid();
+}
+
+bool DirectResamplerRD::_ensure_emitter_samples(uint32_t p_pixels) {
+	RD *rd = RD::get_singleton();
+	const uint32_t bytes = MAX(p_pixels, 1u) * EMITTER_SAMPLE_FLOATS * uint32_t(sizeof(float));
+	if (emitter_samples.is_valid() && emitter_samples_bytes == bytes) {
+		return true;
+	}
+	if (emitter_samples.is_valid()) {
+		rd->free_rid(emitter_samples);
+	}
+	emitter_samples = rd->storage_buffer_create(bytes);
+	rd->set_resource_name(emitter_samples, "Direct Resampler Emitter Samples");
+	emitter_samples_bytes = emitter_samples.is_valid() ? bytes : 0;
+	if (!emitter_reuse_counters.is_valid()) {
+		emitter_reuse_counters = rd->storage_buffer_create(EMITTER_REUSE_COUNTER_BYTES);
+		rd->set_resource_name(emitter_reuse_counters, "Direct Resampler Emitter Reuse Counters");
+	}
+	return emitter_samples.is_valid();
+}
+
+void DirectResamplerRD::_free_emitter_buffers() {
+	RD *rd = RD::get_singleton();
+	RID *owned[] = { &emitter_cdf, &emitter_scan, &emitter_samples, &emitter_reuse_counters };
+	for (RID *rid : owned) {
+		if (rid->is_valid()) {
+			rd->free_rid(*rid);
+			*rid = RID();
+		}
+	}
+	emitter_cdf_capacity = 0;
+	emitter_samples_bytes = 0;
 }
 
 void DirectResamplerRD::_write_debug_line() {
@@ -274,6 +367,14 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	sampler_lab.serve();
 #endif
 	const Settings settings = get_project_settings();
+	{
+		static bool rdi_settings_printed = false;
+		if (!rdi_settings_printed) {
+			rdi_settings_printed = true;
+			print_line(vformat("DIRECT_EMITTERS settings: master %s resampled %s emitters %s temporal %s spatial %s visibility %s room_pick %s room_count %d", GLOBAL_GET("rendering/global_illumination/direct/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/enabled"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/temporal"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/spatial"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/visibility"), GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/room_pick"), int(RendererRD::RayScene::get_singleton()->get_emitter_room_count())));
+		}
+	}
+
 	const Ref<RenderSceneBuffersRD> &rb = p_input.render_buffers;
 	if (!settings.enabled || rb.is_null() || !_ensure_device()) {
 		return false;
@@ -325,6 +426,16 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	}
 #endif
 
+	RendererRD::RayScene *ray_scene = RendererRD::RayScene::get_singleton();
+	bool emitter_active = settings.emitters && emitter_device_ready && ray_scene && ray_scene->is_ready() && ray_scene->uses_hardware() && ray_scene->get_triangle_emitter_count() > 0 && settings.head + settings.tail_samples <= MAX_EMITTER_TAIL_SUM;
+#ifdef DI_RESAMPLER_LAB
+	emitter_active = emitter_active && !lab;
+#endif
+	if (emitter_active) {
+		emitter_active = _ensure_emitter_samples(uint32_t(size.x) * uint32_t(size.y)) && _ensure_emitter_buffers(ray_scene->get_triangle_emitter_count());
+	}
+	const bool emitter_temporal = emitter_active && settings.emitter_temporal && emitter_temporal_pipeline.get_rid().is_valid();
+
 	Ref<ResampledViewportData> viewport;
 	if (rb->has_custom_data(RB_SCOPE_DI_RESAMPLED)) {
 		viewport = rb->get_custom_data(RB_SCOPE_DI_RESAMPLED);
@@ -334,13 +445,15 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	}
 	const bool reservoir_sets = settings.reservoirs != RESERVOIRS_OFF;
 	const bool head_state = settings.head_rank_visible && settings.head > 0;
-	if (viewport->size != size || viewport->head != settings.head || viewport->tail_samples != settings.tail_samples || viewport->reservoir_sets != reservoir_sets || viewport->head_state != head_state || !rb->has_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_RECORD)) {
+	if (viewport->size != size || viewport->head != settings.head || viewport->tail_samples != settings.tail_samples || viewport->reservoir_sets != reservoir_sets || viewport->head_state != head_state || viewport->emitters != emitter_active || viewport->emitter_temporal != emitter_temporal || !rb->has_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_RECORD)) {
 		rb->clear_context(RB_SCOPE_DI_RESAMPLED);
 		viewport->size = size;
 		viewport->head = settings.head;
 		viewport->tail_samples = settings.tail_samples;
 		viewport->reservoir_sets = reservoir_sets;
 		viewport->head_state = head_state;
+		viewport->emitters = emitter_active;
+		viewport->emitter_temporal = emitter_temporal;
 		viewport->counter = 1;
 		viewport->history_set = 0;
 		viewport->head_state_set = 0;
@@ -361,10 +474,22 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 			rd->texture_clear(rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_HEAD_STATE_1, RD::DATA_FORMAT_R32_UINT, private_usage, RD::TEXTURE_SAMPLES_1, size, 1, 1, true), Color(0, 0, 0, 0), 0, 1, 0, 1);
 		}
 		rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_ENTRIES, RD::DATA_FORMAT_R32_UINT, RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, size, settings.head + 3 * settings.tail_samples, 1, true);
-		rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_RECORD, RD::DATA_FORMAT_R32G32_UINT, RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT, RD::TEXTURE_SAMPLES_1, size, settings.tail_samples + 1, 1, true);
+		rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_RECORD, RD::DATA_FORMAT_R32G32_UINT, RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT, RD::TEXTURE_SAMPLES_1, size, settings.tail_samples + 1 + (emitter_active ? 1 : 0), 1, true);
+	{
+		static bool rdi_temporal_printed = false;
+		if (!rdi_temporal_printed) {
+			rdi_temporal_printed = true;
+			const bool want_temporal = GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/temporal");
+			print_line(vformat("DIRECT_EMITTERS temporal: setting %s history %s", want_temporal, want_temporal ? "allocated" : "off"));
+		}
+	}
+		if (emitter_temporal) {
+			rd->texture_clear(rb->create_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_EMITTER_HISTORY, RD::DATA_FORMAT_R32G32B32A32_UINT, private_usage, RD::TEXTURE_SAMPLES_1, size, 4, 1, true), Color(0, 0, 0, 0), 0, 1, 0, 4);
+		}
 	}
 	const RID entries = rb->get_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_ENTRIES);
 	const RID record = rb->get_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_RECORD);
+	const RID emitter_history = emitter_temporal ? rb->get_texture(RB_SCOPE_DI_RESAMPLED, RB_DI_EMITTER_HISTORY) : RID();
 
 	bool history = p_input.history_slots.is_valid() && p_input.history_factors.is_valid() && p_input.history_guide.is_valid();
 	if (history) {
@@ -450,6 +575,17 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 	params.head_swap_frames = settings.head_swap_frames;
 	params.temporal_reuse = settings.temporal_reuse ? 1 : 0;
 	params.head_window = settings.head_window ? 1 : 0;
+	params.emitter_clamp = MAX(0.0f, settings.emitter_clamp);
+	params.emitter_pick_radius = MAX(0.0f, settings.emitter_pick_radius);
+	params.emitter_room_pick = settings.emitter_room_pick ? 1u : 0u;
+	params.emitter_half = settings.emitters && !settings.emitter_temporal && GLOBAL_GET(DI_RESAMPLED_SETTING("emitters/half_res")) ? 1u : 0u;
+	params.pad_emitter_a = 0u;
+	params.pad_emitter_b = 0u;
+	params.pad_emitter_c = 0u;
+	params.emitter_visibility = settings.emitters && settings.emitter_visibility ? 1u : 0u;
+	params.pad_visibility_a = 0u;
+	params.pad_visibility_b = 0u;
+	params.pad_visibility_c = 0u;
 	rd->buffer_update(params_buffer, 0, sizeof(Params), &params);
 
 	RID sampler = RendererRD::MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
@@ -485,6 +621,20 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 21, lab_mask_buffer));
 	}
 #endif
+	LocalVector<RD::Uniform> ray_uniforms;
+	if (emitter_active) {
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 22, emitter_cdf));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 23, emitter_scan));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 24, emitter_samples));
+		ray_uniforms.reserve(8);
+		ray_scene->append_uniforms(ray_uniforms);
+	}
+	if (emitter_active && emitter_reuse_counters.is_valid()) {
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 26, emitter_reuse_counters));
+	}
+	if (emitter_temporal) {
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 25, emitter_history));
+	}
 
 	int main_variant = VARIANT_MAIN;
 	int spatial_variant = VARIANT_SPATIAL;
@@ -498,15 +648,170 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 		active_spatial_pipeline = &lab_spatial_pipeline;
 	}
 #endif
+	if (emitter_active) {
+		const bool emitter_room = emitter_temporal && settings.emitter_room_pick && emitter_room_pipeline.get_rid().is_valid();
+		main_variant = emitter_room ? VARIANT_MAIN_EMITTER_TEMPORAL_ROOM : (emitter_temporal ? VARIANT_MAIN_EMITTER_TEMPORAL : VARIANT_MAIN_EMITTER);
+		main_pipeline = emitter_room ? &emitter_room_pipeline : (emitter_temporal ? &emitter_temporal_pipeline : &emitter_main_pipeline);
+	}
+	if (emitter_active) {
+		const uint32_t emitter_groups = Math::division_round_up(ray_scene->get_triangle_emitter_count(), EMITTER_CHUNK);
+		const int build_variants[3] = { VARIANT_EMITTER_SUM, VARIANT_EMITTER_SCAN, VARIANT_EMITTER_PREFIX };
+		PipelineDeferredRD *build_pipelines[3] = { &emitter_sum_pipeline, &emitter_scan_pipeline, &emitter_prefix_pipeline };
+		const uint32_t build_groups[3] = { emitter_groups, 1u, emitter_groups };
+		RENDER_TIMESTAMP("Direct Resample Emitter Table");
+		rd->draw_command_begin_label("Direct Resample Emitter Table");
+		for (int pass = 0; pass < 3; pass++) {
+			const RID build_shader = shader->version_get_shader(shader_version, build_variants[pass]);
+			RD::ComputeListID build_list = rd->compute_list_begin();
+			rd->compute_list_bind_compute_pipeline(build_list, build_pipelines[pass]->get_rid());
+			{
+				const RID set0 = UniformSetCacheRD::get_singleton()->get_cache_vec(build_shader, 0, uniforms); 
+				const RID set1 = UniformSetCacheRD::get_singleton()->get_cache_vec(build_shader, 1, ray_uniforms);
+				if (set0.is_null() || set1.is_null()) { print_line(vformat("DIRECT_EMITTERS set null: set0 %s set1 %s uniforms %d ray_uniforms %d emitters %d", set0.is_null() ? "NULL" : "ok", set1.is_null() ? "NULL" : "ok", uniforms.size(), ray_uniforms.size(), int(ray_scene->get_triangle_emitter_count()))); }
+				print_line(vformat("DIRECT_EMITTERS dispatch pass %d emitters %d", pass, int(ray_scene->get_triangle_emitter_count())));
+			}
+			rd->compute_list_bind_uniform_set(build_list, UniformSetCacheRD::get_singleton()->get_cache_vec(build_shader, 0, uniforms), 0);
+			rd->compute_list_bind_uniform_set(build_list, UniformSetCacheRD::get_singleton()->get_cache_vec(build_shader, 1, ray_uniforms), 1);
+			rd->compute_list_dispatch(build_list, build_groups[pass], 1, 1);
+			rd->compute_list_end();
+		}
+		rd->draw_command_end_label();
+	}
+	if (emitter_active && emitter_reuse_counters.is_valid()) {
+		rd->buffer_clear(emitter_reuse_counters, 0, EMITTER_REUSE_COUNTER_BYTES);
+	}
 	const RID shader_rid = shader->version_get_shader(shader_version, main_variant);
 	RENDER_TIMESTAMP("Direct Resample Entries");
 	rd->draw_command_begin_label("Direct Resample Entries");
 	RD::ComputeListID list = rd->compute_list_begin();
 	rd->compute_list_bind_compute_pipeline(list, main_pipeline->get_rid());
 	rd->compute_list_bind_uniform_set(list, UniformSetCacheRD::get_singleton()->get_cache_vec(shader_rid, 0, uniforms), 0);
+	if (emitter_active) {
+		rd->compute_list_bind_uniform_set(list, UniformSetCacheRD::get_singleton()->get_cache_vec(shader_rid, 1, ray_uniforms), 1);
+	}
 	rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
 	rd->compute_list_end();
 	rd->draw_command_end_label();
+	if (emitter_active && p_input.frame >= 30) {
+		static bool rdi_samples_printed = false;
+		if (!rdi_samples_printed) {
+			rdi_samples_printed = true;
+			const Vector<uint8_t> data = rd->buffer_get_data(emitter_samples);
+			const uint32_t pixels = uint32_t(size.x) * uint32_t(size.y);
+			uint32_t nonzero = 0;
+			uint32_t rejected_area = 0;
+			uint32_t rejected_cos = 0;
+			uint32_t rejected_cos_room = 0;
+			uint32_t room_cos[257] = {};
+			uint32_t rejected_shadow = 0;
+			uint32_t rejected_other = 0;
+			float best = 0.0f;
+			Vector3 best_color;
+			double sum_r = 0.0;
+			double sum_g = 0.0;
+			double sum_b = 0.0;
+			const float *floats = reinterpret_cast<const float *>(data.ptr());
+			if (data.size() >= int(pixels) * 32) {
+				for (uint32_t i = 0; i < pixels; i++) {
+					const int o = int(i) * 8;
+					const float geometric = floats[o + 3];
+					const float lum = floats[o + 4] + floats[o + 5] + floats[o + 6];
+					if (geometric > 0.0f && lum > 0.0f) {
+						nonzero++;
+						sum_r += double(floats[o + 4]);
+						sum_g += double(floats[o + 5]);
+						sum_b += double(floats[o + 6]);
+						if (lum > best) {
+							best = lum;
+							best_color = Vector3(floats[o + 4], floats[o + 5], floats[o + 6]);
+						}
+					}
+					const uint32_t reason = uint32_t(floats[o + 7]);
+					if (reason == 1) {
+						rejected_area++;
+					} else if (reason == 2) {
+						rejected_shadow++;
+					} else if (reason == 3) {
+						rejected_cos++;
+					} else if (reason >= 100u && reason < 400u) {
+						rejected_cos_room++;
+						room_cos[reason - 100u]++;
+					} else if (reason != 0) {
+						rejected_other++;
+					}
+				}
+			}
+			const double sum_lum = sum_r * 0.2126 + sum_g * 0.7152 + sum_b * 0.0722;
+			uint32_t room_ids = 0;
+			uint32_t top_room = 0;
+			uint32_t top_room_count = 0;
+			for (uint32_t i = 0; i < 257; i++) {
+				if (room_cos[i] != 0) {
+					room_ids++;
+					if (room_cos[i] > top_room_count) {
+						top_room_count = room_cos[i];
+						top_room = i;
+					}
+				}
+			}
+			print_line(vformat("DIRECT_EMITTERS samples: pixels %d nonzero %d best_lum %.4f best_rgb %.3f %.3f %.3f rejected_area %d rejected_cos %d rejected_cos_room %d room_ids %d top_room %d top_room_count %d rejected_shadow %d rejected_other %d sample_sum_rgb %.6f %.6f %.6f sample_sum_lum %.6f", int(pixels), int(nonzero), best, best_color.x, best_color.y, best_color.z, int(rejected_area), int(rejected_cos), int(rejected_cos_room), int(room_ids), top_room > 0 ? int(top_room - 1) : -1, int(top_room_count), int(rejected_shadow), int(rejected_other), sum_r, sum_g, sum_b, sum_lum));
+			emitter_samples_before = data;
+		}
+	}
+	if (emitter_active && settings.emitter_spatial && emitter_spatial_pipeline.get_rid().is_valid()) {
+		const RID emitter_spatial_rid = shader->version_get_shader(shader_version, VARIANT_EMITTER_SPATIAL);
+		RENDER_TIMESTAMP("Direct Resample Emitter Spatial");
+		rd->draw_command_begin_label("Direct Resample Emitter Spatial");
+		list = rd->compute_list_begin();
+		rd->compute_list_bind_compute_pipeline(list, emitter_spatial_pipeline.get_rid());
+		rd->compute_list_bind_uniform_set(list, UniformSetCacheRD::get_singleton()->get_cache_vec(emitter_spatial_rid, 0, uniforms), 0);
+		rd->compute_list_bind_uniform_set(list, UniformSetCacheRD::get_singleton()->get_cache_vec(emitter_spatial_rid, 1, ray_uniforms), 1);
+		rd->compute_list_dispatch(list, Math::division_round_up(uint32_t(size.x), 8u), Math::division_round_up(uint32_t(size.y), 8u), 1);
+		rd->compute_list_end();
+		rd->draw_command_end_label();
+	}
+	if (emitter_active && settings.emitter_spatial && p_input.frame >= 30) {
+		static bool spatial_change_printed = false;
+		if (!spatial_change_printed && emitter_samples_before.size() >= int(uint32_t(size.x) * uint32_t(size.y)) * 32) {
+			spatial_change_printed = true;
+			const Vector<uint8_t> after = rd->buffer_get_data(emitter_samples);
+			const uint32_t pixels = uint32_t(size.x) * uint32_t(size.y);
+			uint32_t changed = 0;
+			if (after.size() >= int(pixels) * 32) {
+				const float *before_floats = reinterpret_cast<const float *>(emitter_samples_before.ptr());
+				const float *after_floats = reinterpret_cast<const float *>(after.ptr());
+				for (uint32_t i = 0; i < pixels; i++) {
+					const int o = int(i) * 8;
+					for (int k = 0; k < 8; k++) {
+						if (before_floats[o + k] != after_floats[o + k]) {
+							changed++;
+							break;
+						}
+					}
+				}
+			}
+			uint32_t temporal_merged = 0;
+		if (emitter_reuse_counters.is_valid()) {
+			const Vector<uint8_t> reuse = rd->buffer_get_data(emitter_reuse_counters);
+			if (reuse.size() >= 8) {
+				temporal_merged = reinterpret_cast<const uint32_t *>(reuse.ptr())[0];
+			}
+		}
+		print_line(vformat("DIRECT_EMITTERS reuse: temporal_accepted %d spatial_pixels_rewritten %d", int(temporal_merged), int(changed)));
+		}
+	}
+	if (emitter_active && settings.emitter_debug_reuse_readback && p_input.frame >= 31 && p_input.frame % 30 == 1 && emitter_reuse_counters.is_valid()) {
+		const Vector<uint8_t> reuse = rd->buffer_get_data(emitter_reuse_counters);
+		if (reuse.size() >= int(EMITTER_REUSE_COUNTER_BYTES)) {
+			const uint32_t *words = reinterpret_cast<const uint32_t *>(reuse.ptr());
+			const uint32_t events = words[0] + words[8];
+			const float mean_age = events > 0 ? float(words[1]) / float(events) : 0.0f;
+			const float mean_mass = events > 0 ? float(words[7]) / float(events) : 0.0f;
+			const float held_share = events > 0 ? float(words[6]) / float(events) : 0.0f;
+			const float mean_damp = events > 0 ? float(words[11]) / 65536.0 / float(events) : 0.0f;
+			print_line(vformat("DIRECT_EMITTERS reuse: temporal_accepted %d mean_age %.2f plain_writes %d instance_mismatch %d depth_reject %d normal_reject %d mean_mass %.2f held_share %.2f held_only %d held_blocked %d new_blocked %d mean_damp %.3f", int(words[0]), mean_age, int(words[2]), int(words[3]), int(words[4]), int(words[5]), mean_mass, held_share, int(words[8]), int(words[9]), int(words[10]), mean_damp));
+		}
+	}
 	if (spatial) {
 		const RID spatial_rid = shader->version_get_shader(shader_version, spatial_variant);
 		RENDER_TIMESTAMP("Direct Resample Spatial");
@@ -535,6 +840,7 @@ bool DirectResamplerRD::run(const Input &p_input, Output &r_output) {
 
 	r_output.entries = entries;
 	r_output.record = record;
+	r_output.emitter_samples = emitter_active ? emitter_samples : RID();
 	r_output.head_entries = settings.head;
 	r_output.tail_samples = settings.tail_samples;
 	r_output.tail_visibility = settings.tail_visibility;
@@ -556,6 +862,10 @@ void DirectResamplerRD::release(const Ref<RenderSceneBuffersRD> &p_render_buffer
 	viewport->size = Size2i();
 	viewport->head = 0;
 	viewport->tail_samples = 0;
+	viewport->emitters = false;
+	if (device_ready) {
+		_free_emitter_buffers();
+	}
 }
 
 void DirectResamplerRD::free_device_resources() {
@@ -568,6 +878,14 @@ void DirectResamplerRD::free_device_resources() {
 	RD *rd = RD::get_singleton();
 	pipeline.free();
 	spatial_pipeline.free();
+	emitter_main_pipeline.free();
+	emitter_temporal_pipeline.free();
+	emitter_room_pipeline.free();
+	emitter_spatial_pipeline.free();
+	emitter_sum_pipeline.free();
+	emitter_scan_pipeline.free();
+	emitter_prefix_pipeline.free();
+	emitter_device_ready = false;
 #ifdef DI_RESAMPLER_LAB
 	lab_pipeline.free();
 	lab_spatial_pipeline.free();
@@ -585,6 +903,7 @@ void DirectResamplerRD::free_device_resources() {
 	_write_lab_mask();
 	_flush_lab_line();
 #endif
+	_free_emitter_buffers();
 	for (RID *rid : {
 				 &params_buffer,
 				 &debug_buffer,
@@ -607,3 +926,6 @@ void DirectResamplerRD::free_device_resources() {
 DirectResamplerRD::~DirectResamplerRD() {
 	ERR_FAIL_COND_MSG(device_ready, "The direct resampler's device resources were not freed before shutdown.");
 }
+
+
+

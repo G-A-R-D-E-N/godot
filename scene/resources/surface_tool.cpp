@@ -1310,6 +1310,73 @@ Vector<int> SurfaceTool::generate_lod(float p_threshold, int p_target_index_coun
 	return lod;
 }
 
+Vector<int> SurfaceTool::simplify_with_attributes(float p_threshold, int p_target_index_count, float p_normal_weight, float p_uv_weight, float p_color_weight, bool p_lock_border, bool p_preserve_folds) {
+	Vector<int> lod;
+
+	ERR_FAIL_NULL_V(simplify_with_attrib_func, lod);
+	ERR_FAIL_COND_V(p_target_index_count < 0, lod);
+	ERR_FAIL_COND_V(vertex_array.is_empty(), lod);
+	ERR_FAIL_COND_V(index_array.is_empty(), lod);
+	ERR_FAIL_COND_V(index_array.size() % 3 != 0, lod);
+	ERR_FAIL_COND_V(index_array.size() < (unsigned int)p_target_index_count, lod);
+
+	const uint32_t vcount = vertex_array.size();
+	lod.resize(index_array.size());
+	LocalVector<float> vertices;
+	vertices.resize(vcount * 3);
+	constexpr uint32_t attrib_count = 8;
+	LocalVector<float> attributes;
+	attributes.resize(vcount * attrib_count);
+	for (uint32_t i = 0; i < vcount; i++) {
+		const Vertex &v = vertex_array[i];
+		vertices[i * 3 + 0] = v.vertex.x;
+		vertices[i * 3 + 1] = v.vertex.y;
+		vertices[i * 3 + 2] = v.vertex.z;
+		attributes[i * attrib_count + 0] = v.normal.x;
+		attributes[i * attrib_count + 1] = v.normal.y;
+		attributes[i * attrib_count + 2] = v.normal.z;
+		attributes[i * attrib_count + 3] = v.uv.x;
+		attributes[i * attrib_count + 4] = v.uv.y;
+		attributes[i * attrib_count + 5] = v.color.r;
+		attributes[i * attrib_count + 6] = v.color.g;
+		attributes[i * attrib_count + 7] = v.color.b;
+	}
+
+	const float nw = MAX(p_normal_weight, 0.0f);
+	const float uw = MAX(p_uv_weight, 0.0f);
+	const float cw = MAX(p_color_weight, 0.0f);
+	const float weights[attrib_count] = { nw, nw, nw, uw, uw, cw, cw, cw };
+	unsigned int options = SIMPLIFY_ERROR_CLAMPED;
+	if (p_lock_border) {
+		options |= SIMPLIFY_LOCK_BORDER;
+	}
+	if (p_preserve_folds) {
+		options |= SIMPLIFY_PRESERVE_FOLDS;
+	}
+
+	float error = 0.0f;
+	uint32_t index_count = simplify_with_attrib_func(
+			(unsigned int *)lod.ptrw(),
+			(unsigned int *)index_array.ptr(),
+			index_array.size(),
+			vertices.ptr(),
+			vcount,
+			sizeof(float) * 3,
+			attributes.ptr(),
+			sizeof(float) * attrib_count,
+			weights,
+			attrib_count,
+			nullptr,
+			p_target_index_count,
+			p_threshold,
+			options,
+			&error);
+	ERR_FAIL_COND_V(index_count == 0, lod);
+	lod.resize(index_count);
+
+	return lod;
+}
+
 void SurfaceTool::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_skin_weight_count", "count"), &SurfaceTool::set_skin_weight_count);
 	ClassDB::bind_method(D_METHOD("get_skin_weight_count"), &SurfaceTool::get_skin_weight_count);
@@ -1343,6 +1410,7 @@ void SurfaceTool::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("get_aabb"), &SurfaceTool::get_aabb);
 	ClassDB::bind_method(D_METHOD("generate_lod", "nd_threshold", "target_index_count"), &SurfaceTool::generate_lod, DEFVAL(3));
+	ClassDB::bind_method(D_METHOD("simplify_with_attributes", "nd_threshold", "target_index_count", "normal_weight", "uv_weight", "color_weight", "lock_border", "preserve_folds"), &SurfaceTool::simplify_with_attributes, DEFVAL(3), DEFVAL(1.0f), DEFVAL(0.0f), DEFVAL(0.0f), DEFVAL(true), DEFVAL(true));
 
 	ClassDB::bind_method(D_METHOD("set_material", "material"), &SurfaceTool::set_material);
 	ClassDB::bind_method(D_METHOD("get_primitive_type"), &SurfaceTool::get_primitive_type);

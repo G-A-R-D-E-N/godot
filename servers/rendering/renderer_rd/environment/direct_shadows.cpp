@@ -59,6 +59,13 @@ DirectShadows::Settings DirectShadows::get_project_settings() {
 	settings.range_sigmas = GLOBAL_GET("rendering/global_illumination/direct/filter_range_sigmas");
 	settings.quarter = int(GLOBAL_GET("rendering/global_illumination/direct/trace_resolution")) == 1;
 	settings.second_pass = GLOBAL_GET("rendering/global_illumination/direct/filter_second_pass");
+	settings.emitter_shorten = GLOBAL_GET("rendering/global_illumination/direct/emitter_ray_shorten");
+	settings.emitter_skip_instance = int(GLOBAL_GET("rendering/global_illumination/direct/emitter_skip_instance"));
+	static bool direct_settings_printed = false;
+	if (!direct_settings_printed) {
+		direct_settings_printed = true;
+		print_line(vformat("DIRECT_SHADOWS settings: force_factor_one %s block_resolve %s entries %d quarter %s bias %.4f emitter_skip %d alpha_test %s", settings.force_one ? "true" : "false", GLOBAL_GET("rendering/global_illumination/direct/block_resolve") ? "true" : "false", int(settings.entries), settings.quarter ? "true" : "false", settings.emitter_shorten + float(GLOBAL_GET("rendering/global_illumination/direct/ray_bias")), int(settings.emitter_skip_instance), GLOBAL_GET("rendering/global_illumination/ray_scene/alpha_test") ? "true" : "false"));
+	}
 	return settings;
 }
 
@@ -89,7 +96,7 @@ Vector<String> DirectShadows::_trace_modes() {
 }
 
 DirectShadows::DirectShadows() {
-	defines = vformat("\n#define RAY_SCENE_BLAS_STACK_SIZE %d\n#define RAY_SCENE_TLAS_STACK_SIZE %d\n", RayScene::BLAS_MAX_DEPTH, RayScene::TLAS_MAX_DEPTH);
+	defines = vformat("\n#define RAY_SCENE_BLAS_STACK_SIZE %d\n#define RAY_SCENE_TLAS_STACK_SIZE %d\n", RayScene::BLAS_MAX_DEPTH, RayScene::TLAS_MAX_DEPTH) + RayScene::alpha_shader_defines();
 	shader.initialize(_trace_modes(), defines);
 	shader_version = shader.version_create();
 	for (int i = 0; i < TRACE_MAX; i++) {
@@ -135,6 +142,19 @@ DirectShadows::DirectShadows() {
 	}
 	params_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(Params));
 	counter_buffer = RD::get_singleton()->storage_buffer_create(COUNTER_BYTES);
+	emitter_hit_hist = RD::get_singleton()->storage_buffer_create((EMITTER_HIT_INSTANCES + 1) * 16 * uint32_t(sizeof(uint32_t)));
+	{
+		const int hist_bytes = int((EMITTER_HIT_INSTANCES + 1) * 16 * uint32_t(sizeof(uint32_t)));
+		Vector<uint8_t> hist_init;
+		hist_init.resize(hist_bytes);
+		for (int i = 0; i <= int(EMITTER_HIT_INSTANCES); i++) {
+			const int base = i * 16;
+			memset(hist_init.ptrw() + base * int(sizeof(uint32_t)), 0, 16 * int(sizeof(uint32_t)));
+			memset(hist_init.ptrw() + (base + 2) * int(sizeof(uint32_t)), 0xFF, int(sizeof(uint32_t)));
+			memset(hist_init.ptrw() + (base + 6) * int(sizeof(uint32_t)), 0xFF, int(sizeof(uint32_t)));
+		}
+		RD::get_singleton()->buffer_update(emitter_hit_hist, 0, hist_init.size(), hist_init.ptr());
+	}
 	RD::TextureFormat format;
 	format.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
 	format.width = 1;
@@ -158,6 +178,8 @@ DirectShadows::DirectShadows() {
 	RD::get_singleton()->set_resource_name(lamp_buffer, "Direct Shadows Lamps");
 	lamp_dummy = RD::get_singleton()->storage_buffer_create(sizeof(DirectLightTable::GpuSlot));
 	RD::get_singleton()->set_resource_name(lamp_dummy, "Direct Shadows Lamps Dummy");
+	emitter_dummy = RD::get_singleton()->storage_buffer_create(8 * sizeof(float));
+	RD::get_singleton()->set_resource_name(emitter_dummy, "Direct Shadows Emitter Samples Dummy");
 	tier_unused = unused_storage_texture(RD::DATA_FORMAT_R8_UINT, "Direct Shadows Unused Tier");
 	depth_unused = unused_storage_texture(RD::DATA_FORMAT_R32_SFLOAT, "Direct Shadows Unused Depth");
 	normal_unused = unused_storage_texture(RD::DATA_FORMAT_R32_UINT, "Direct Shadows Unused Normal");
@@ -209,6 +231,9 @@ DirectShadows::~DirectShadows() {
 	}
 	if (counter_buffer.is_valid()) {
 		rd->free_rid(counter_buffer);
+	if (emitter_hit_hist.is_valid()) {
+		rd->free_rid(emitter_hit_hist);
+	}
 	}
 	if (lamp_buffer.is_valid()) {
 		rd->free_rid(lamp_buffer);
@@ -224,6 +249,9 @@ DirectShadows::~DirectShadows() {
 	}
 	if (lamp_dummy.is_valid()) {
 		rd->free_rid(lamp_dummy);
+	}
+	if (emitter_dummy.is_valid()) {
+		rd->free_rid(emitter_dummy);
 	}
 }
 
@@ -426,8 +454,9 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	RD *rd = RD::get_singleton();
 	Settings settings = get_project_settings();
 	const bool external = p_input.entries.is_valid();
+	const bool emitters = external && p_input.emitter_samples.is_valid();
 	if (external) {
-		const uint32_t entries = p_input.head_entries + p_input.tail_samples + 1;
+		const uint32_t entries = p_input.head_entries + p_input.tail_samples + 1 + (emitters ? 1 : 0);
 		ERR_FAIL_COND_V_MSG(p_input.tail_samples == 0 || entries > 8, false, "External direct entries need at least one tail sample and at most 7 head and tail entries.");
 		settings.entries = entries;
 	}
@@ -474,7 +503,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 		params.camera_basis[r * 4 + 2] = float(p_input.camera.basis.rows[r][2]);
 		params.region_half[r] = float(p_input.region_half[r]);
 	}
-	params.bias = float(GLOBAL_GET("rendering/global_illumination/direct/ray_bias"));
+	params.bias = float(GLOBAL_GET("rendering/global_illumination/direct/ray_bias")) + settings.emitter_shorten;
 	params.size[0] = viewport->grid.x;
 	params.size[1] = viewport->grid.y;
 	params.full_size[0] = size.x;
@@ -496,6 +525,9 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	params.entries = settings.entries;
 	params.head_entries = external ? p_input.head_entries : settings.entries - 1;
 	params.tail_visibility = external ? p_input.tail_visibility : 0;
+	const bool emitter_visibility_traced = emitters && bool(GLOBAL_GET("rendering/global_illumination/direct/resampled/emitters/visibility"));
+	params.pad[0] = (emitters ? 1u : 0u) | (emitter_visibility_traced ? 2u : 0u);
+	params.pad[1] = uint32_t(settings.emitter_skip_instance + 1);
 	params.rays = settings.rays;
 	params.reference = settings.reference ? 1 : 0;
 	params.debug_view = settings.debug_view;
@@ -512,9 +544,90 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	params.range_scale = settings.range_sigmas > 0.0f ? 0.5f / (settings.range_sigmas * settings.range_sigmas) : 0.0f;
 	params.world_per_pixel = (quarter ? 4.0f : 2.0f) * Math::abs(float(inverse.columns[1][1])) / float(size.y);
 	params.count = viewport->counted ? 1 : 0;
+	const Vector3 ray_anchor = RayScene::get_singleton()->get_anchor();
+	params.anchor[0] = ray_anchor.x;
+	params.anchor[1] = ray_anchor.y;
+	params.anchor[2] = ray_anchor.z;
+	params.anchor[3] = 0.0f;
 	rd->buffer_update(params_buffer, 0, sizeof(Params), &params);
 	if (viewport->counted) {
 		rd->buffer_clear(counter_buffer, 0, COUNTER_BYTES);
+	}
+	{
+		static bool factor_layers_printed = false;
+		if (!factor_layers_printed) {
+			factor_layers_printed = true;
+			const uint32_t own_limit = external ? p_input.head_entries : settings.entries - 1;
+			const uint32_t rest_layer = settings.entries - 1;
+			const uint32_t emitter_write = settings.entries + 2;
+			const uint32_t forward_read = settings.entries + 2;
+			print_line(vformat("DIRECT_SHADOW_FACTOR layers: entries %d head %d rest %d tail %d emitter_write %d forward_read %d pad0 %d", int(settings.entries), int(own_limit), int(rest_layer), int(rest_layer > own_limit ? rest_layer - own_limit : 0), int(emitter_write), int(forward_read), emitters ? 1 : 0));
+			ERR_FAIL_COND_V_MSG(emitter_write != forward_read, false, "The emitter factor write layer must equal the layer the forward shader reads.");
+		}
+		if (p_input.frame >= 31) {
+			static bool emitter_counters_printed = false;
+			if (!emitter_counters_printed) {
+				emitter_counters_printed = true;
+				const Vector<uint8_t> counters = rd->buffer_get_data(counter_buffer);
+				if (counters.size() >= int(COUNTER_BYTES)) {
+					const uint32_t *values = reinterpret_cast<const uint32_t *>(counters.ptr());
+					print_line(vformat("DIRECT_SHADOWS counters: frames %d emitter_pixels %d emitter_rays %d emitter_blocked %d", int(p_input.frame), int(values[13]), int(values[14]), int(values[15])));
+					print_line(vformat("DIRECT_EMITTERS blocked: backface %d front %d unblocked_front %d hist005 %d hist030 %d hist200 %d histfar %d emitter_end 005 %d 030 %d 200 %d far %d", int(values[16]), int(values[17]), int(values[22]), int(values[18]), int(values[19]), int(values[20]), int(values[21]), int(values[23]), int(values[24]), int(values[25]), int(values[26])));
+					print_line(vformat("DIRECT_EMITTERS length: <1 u %d b %d | 1-3 u %d b %d | 3-10 u %d b %d | >10 u %d b %d", int(values[27]), int(values[28]), int(values[29]), int(values[30]), int(values[31]), int(values[32]), int(values[33]), int(values[34])));
+					print_line(vformat("DIRECT_EMITTERS blockers: alpha_surface %d solid_surface %d split_unavailable %d", int(values[35]), int(values[36]), int(values[49])));
+					const float sample_min_x = float(131071u - values[41]) / 16.0f - 2048.0f;
+					const float sample_max_x = float(values[44]) / 16.0f - 2048.0f;
+					const float sample_min_y = float(131071u - values[42]) / 16.0f - 2048.0f;
+					const float sample_max_y = float(values[45]) / 16.0f - 2048.0f;
+					const float sample_min_z = float(131071u - values[43]) / 16.0f - 2048.0f;
+					const float sample_max_z = float(values[46]) / 16.0f - 2048.0f;
+					const Vector3 ray_anchor_print = RayScene::get_singleton()->get_anchor();
+					print_line(vformat("DIRECT_EMITTERS sample_points: count %d anchor (%.3f %.3f %.3f) min (%.3f %.3f %.3f) max (%.3f %.3f %.3f) center (%.3f %.3f %.3f)", int(values[47]), ray_anchor_print.x, ray_anchor_print.y, ray_anchor_print.z, sample_min_x + ray_anchor_print.x, sample_min_y + ray_anchor_print.y, sample_min_z + ray_anchor_print.z, sample_max_x + ray_anchor_print.x, sample_max_y + ray_anchor_print.y, sample_max_z + ray_anchor_print.z, (sample_min_x + sample_max_x) * 0.5f + ray_anchor_print.x, (sample_min_y + sample_max_y) * 0.5f + ray_anchor_print.y, (sample_min_z + sample_max_z) * 0.5f + ray_anchor_print.z));
+					print_line(vformat("DIRECT_EMITTERS receiver_omni: <1 %d 1-3 %d 3-10 %d >10 %d min_ray %.3f", int(values[37]), int(values[38]), int(values[39]), int(values[40]), float(4095u - values[48]) / 4.0f));
+					print_line(vformat("DIRECT_EMITTERS receiver_camera: <1 %d 1-3 %d 3-10 %d >10 %d", int(values[50]), int(values[51]), int(values[52]), int(values[53])));
+					print_line(vformat("DIRECT_EMITTERS backface_by_distance: <1 %d 1-3 %d 3-10 %d >10 %d", int(values[54]), int(values[55]), int(values[56]), int(values[57])));
+					print_line(vformat("DIRECT_EMITTERS near_normals: within3m total %d facing_cam %d back_cam %d | backface within3m facing_cam %d back_cam %d", int(values[59]) + int(values[58]), int(values[59]), int(values[58]), int(values[61]), int(values[60])));
+					print_line(vformat("DIRECT_EMITTERS words35_57: %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d", int(values[35]), int(values[36]), int(values[37]), int(values[38]), int(values[39]), int(values[40]), int(values[41]), int(values[42]), int(values[43]), int(values[44]), int(values[45]), int(values[46]), int(values[47]), int(values[48]), int(values[49]), int(values[50]), int(values[51]), int(values[52]), int(values[53]), int(values[54]), int(values[55]), int(values[56]), int(values[57])));
+			if (emitter_hit_hist.is_valid()) {
+				const Vector<uint8_t> hist = rd->buffer_get_data(emitter_hit_hist);
+				const int hist_bytes = int((EMITTER_HIT_INSTANCES + 1) * 16 * uint32_t(sizeof(uint32_t)));
+				if (hist.size() >= hist_bytes) {
+					const uint32_t *hits = reinterpret_cast<const uint32_t *>(hist.ptr());
+					print_line(vformat("DIRECT_EMITTERS blocker: instance 1225 hits %d", int(hits[1225 * 16])));
+					int printed[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
+					for (int pass = 0; pass < 8; pass++) {
+						int best = -1;
+						uint32_t best_count = 0;
+						for (int i = 0; i <= int(EMITTER_HIT_INSTANCES); i++) {
+							bool seen = false;
+							for (int p = 0; p < pass; p++) {
+								if (printed[p] == i) {
+									seen = true;
+								}
+							}
+							if (!seen && hits[i * 16] > best_count) {
+								best = i;
+								best_count = hits[i * 16];
+							}
+						}
+						if (best < 0 || best_count == 0u) {
+							break;
+						}
+						printed[pass] = best;
+						const uint32_t end_count = MAX(hits[best * 16 + 4], 1u);
+						const float r_mean = float(hits[best * 16 + 1]) / 4.0f / float(best_count);
+						const float r_min = float(hits[best * 16 + 2]) / 4.0f;
+						const float r_max = float(hits[best * 16 + 3]) / 4.0f;
+						const float e_mean = float(hits[best * 16 + 5]) / 4.0f / float(end_count);
+						const float e_min = float(hits[best * 16 + 6]) / 4.0f;
+						const float e_max = float(hits[best * 16 + 7]) / 4.0f;
+						print_line(vformat("DIRECT_EMITTERS blocker: instance %d hits %d receiver %.2f..%.2f mean %.2f buckets %d/%d/%d/%d emitter %.2f..%.2f mean %.2f buckets %d/%d/%d/%d", best, int(best_count), r_min, r_max, r_mean, int(hits[best * 16 + 8]), int(hits[best * 16 + 9]), int(hits[best * 16 + 10]), int(hits[best * 16 + 11]), e_min, e_max, e_mean, int(hits[best * 16 + 12]), int(hits[best * 16 + 13]), int(hits[best * 16 + 14]), int(hits[best * 16 + 15])));
+					}
+				}
+			}
+				}
+			}
+		}
 	}
 
 	RID sampler = MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
@@ -546,6 +659,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_REST_OTHER : RB_DIRECT_REST)));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 11, _debug_target(rb, settings)));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 12, counter_buffer));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 27, emitter_hit_hist));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 13, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_SLOTS : RB_DIRECT_SLOTS_OTHER)));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 14, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_ACCUM : RB_DIRECT_ACCUM_OTHER)));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 15, rb->get_texture(RB_SCOPE_DIRECT_SHADOWS, flip ? RB_DIRECT_REST : RB_DIRECT_REST_OTHER)));
@@ -555,6 +669,7 @@ bool DirectShadows::process(const FrameInput &p_input, DirectLightTable &p_table
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 19, exclude_buffer));
 	if (external) {
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 20, p_input.entries));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 21, emitters ? p_input.emitter_samples : emitter_dummy));
 	}
 
 	LocalVector<RD::Uniform> scene_uniforms;

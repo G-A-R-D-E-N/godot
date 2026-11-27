@@ -1116,6 +1116,50 @@ void light_process_spot(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 			diffuse_light, specular_light);
 }
 
+void light_process_emitter(vec3 p_position, hvec3 p_color, half p_geometric, vec3 vertex, hvec3 eye_vec, hvec3 normal, hvec3 f0, half roughness, half metallic, hvec3 albedo, inout half alpha, vec2 screen_uv, hvec3 energy_compensation,
+#ifdef LIGHT_BACKLIGHT_USED
+		hvec3 backlight,
+#endif
+#ifdef LIGHT_TRANSMITTANCE_USED
+		hvec4 transmittance_color,
+		half transmittance_depth,
+		half transmittance_boost,
+#endif
+#ifdef LIGHT_RIM_USED
+		half rim, half rim_tint,
+#endif
+#ifdef LIGHT_CLEARCOAT_USED
+		half clearcoat, half clearcoat_roughness, hvec3 vertex_normal,
+#endif
+#ifdef LIGHT_ANISOTROPY_USED
+		hvec3 binormal, hvec3 tangent, half anisotropy,
+#endif
+		inout hvec3 diffuse_light, inout hvec3 specular_light) {
+	vec3 light_rel_vec = p_position - vertex;
+	float light_length = length(light_rel_vec);
+	hvec3 light_rel_vec_norm = hvec3(light_rel_vec / max(light_length, 1e-5));
+	light_compute(normal, light_rel_vec_norm, eye_vec, half(0.0), p_color, false, p_geometric, f0, roughness, metallic, half(0.5), albedo, alpha, screen_uv, energy_compensation,
+#ifdef LIGHT_BACKLIGHT_USED
+			backlight,
+#endif
+#ifdef LIGHT_TRANSMITTANCE_USED
+			transmittance_color,
+			transmittance_depth,
+			transmittance_boost,
+			half(0.0),
+#endif
+#ifdef LIGHT_RIM_USED
+			rim * p_geometric, rim_tint,
+#endif
+#ifdef LIGHT_CLEARCOAT_USED
+			clearcoat, clearcoat_roughness, vertex_normal,
+#endif
+#ifdef LIGHT_ANISOTROPY_USED
+			binormal, tangent, anisotropy,
+#endif
+			diffuse_light, specular_light);
+}
+
 // implementation of area lights with Linearly Transformed Cosines (LTC): https://eheitzresearch.wordpress.com/415-2/
 void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3 vertex_ddx, vec3 vertex_ddy, hvec3 f0, half roughness, half metallic, float taa_frame_count, hvec3 albedo, inout half alpha, vec2 screen_uv, hvec3 energy_compensation,
 #ifdef LIGHT_BACKLIGHT_USED

@@ -56,11 +56,16 @@
 #define RB_DI_SET_VALUES_1 SNAME("set_values_1")
 #define RB_DI_HEAD_STATE_0 SNAME("head_state_0")
 #define RB_DI_HEAD_STATE_1 SNAME("head_state_1")
+#define RB_DI_EMITTER_HISTORY SNAME("emitter_history")
 
 class DirectResamplerRD : public RendererRD::DirectResampler {
 public:
 	struct Settings {
 		bool enabled = false;
+		bool emitters = false;
+			bool emitter_temporal = false;
+		bool emitter_spatial = false;
+	bool emitter_visibility = false;
 		uint32_t head = 4;
 		uint32_t tail_samples = 1;
 		float floor_value = 0.0625f;
@@ -84,6 +89,10 @@ public:
 		float head_swap_margin = 0.25f;
 		uint32_t head_swap_frames = 4;
 		bool head_window = false;
+		float emitter_clamp = 0.0f;
+		float emitter_pick_radius = 0.0f;
+		bool emitter_room_pick = false;
+		bool emitter_debug_reuse_readback = false;
 	};
 
 	struct Params {
@@ -120,8 +129,29 @@ public:
 		uint32_t head_swap_frames;
 		uint32_t temporal_reuse;
 		uint32_t head_window;
+		float emitter_clamp;
+		uint32_t emitter_clamp_pad0;
+		uint32_t emitter_clamp_pad1;
+		uint32_t emitter_clamp_pad2;
+		float emitter_pick_radius;
+		uint32_t emitter_pick_pad0;
+		uint32_t emitter_pick_pad1;
+		uint32_t emitter_pick_pad2;
+		uint32_t emitter_room_pick;
+		uint32_t emitter_room_pad0;
+		uint32_t emitter_room_pad1;
+		uint32_t emitter_room_pad2;
+		uint32_t emitter_half;
+		uint32_t pad_emitter_a;
+		uint32_t pad_emitter_b;
+		uint32_t pad_emitter_c;
+		uint32_t emitter_visibility;
+		uint32_t pad_visibility_a;
+		uint32_t pad_visibility_b;
+		uint32_t pad_visibility_c;
 	};
-	static_assert(sizeof(Params) == 432);
+	static_assert(sizeof(Params) == 512);
+	static_assert(sizeof(Params) % 16 == 0);
 
 	static constexpr uint32_t RESERVOIRS_OFF = 0;
 	static constexpr uint32_t RESERVOIRS_B1 = 1;
@@ -129,6 +159,12 @@ public:
 	static constexpr uint32_t MAX_NEIGHBORS = 4;
 	static constexpr uint32_t MAX_MASS = 255;
 	static constexpr uint32_t MAX_SWAP_FRAMES = 7;
+	static constexpr uint32_t MAX_EMITTER_TAIL_SUM = 6;
+	static constexpr uint32_t EMITTER_SAMPLE_FLOATS = 8;
+	static constexpr uint32_t EMITTER_CHUNK = 4096;
+	static constexpr uint32_t EMITTER_CHUNKS = 256;
+	static constexpr uint32_t EMITTER_SCAN_FLOATS = EMITTER_CHUNKS * 2 + 1;
+	static constexpr uint32_t EMITTER_REUSE_COUNTER_BYTES = 48;
 
 	static constexpr uint32_t DEBUG_FLAG_STALE_PRIOR = 1;
 	static constexpr uint32_t DEBUG_FLAG_COUNT = 2;
@@ -169,6 +205,10 @@ private:
 		uint32_t tail_samples = 0;
 		bool reservoir_sets = false;
 		bool head_state = false;
+		bool emitters = false;
+			bool emitter_temporal = false;
+		bool emitter_spatial = false;
+	bool emitter_visibility = false;
 		uint32_t counter = 1;
 		uint32_t history_set = 0;
 		uint32_t head_state_set = 0;
@@ -183,21 +223,44 @@ private:
 	enum ShaderVariant {
 		VARIANT_MAIN = 0,
 		VARIANT_SPATIAL = 1,
+		VARIANT_MAIN_EMITTER = 2,
+		VARIANT_EMITTER_SUM = 3,
+		VARIANT_EMITTER_SCAN = 4,
+		VARIANT_EMITTER_PREFIX = 5,
+		VARIANT_MAIN_EMITTER_TEMPORAL = 6,
 #ifdef DI_RESAMPLER_LAB
-		VARIANT_MAIN_LAB = 2,
-		VARIANT_SPATIAL_LAB = 3,
+		VARIANT_MAIN_LAB = 7,
+		VARIANT_SPATIAL_LAB = 8,
 #endif
+		VARIANT_EMITTER_SPATIAL = 9,
+		VARIANT_MAIN_EMITTER_TEMPORAL_ROOM = 10,
+		ROOM_PICK_AVAILABLE = true,
 	};
 
 	DiResampleShaderRD *shader = nullptr;
 	RID shader_version;
 	PipelineDeferredRD pipeline;
 	PipelineDeferredRD spatial_pipeline;
+	PipelineDeferredRD emitter_main_pipeline;
+	PipelineDeferredRD emitter_temporal_pipeline;
+	PipelineDeferredRD emitter_room_pipeline;
+	PipelineDeferredRD emitter_spatial_pipeline;
+	PipelineDeferredRD emitter_sum_pipeline;
+	PipelineDeferredRD emitter_scan_pipeline;
+	PipelineDeferredRD emitter_prefix_pipeline;
 	RID params_buffer;
 	RID header_dummy;
 	RID history_array_dummy;
 	RID history_guide_dummy;
 	RID debug_buffer;
+	RID emitter_cdf;
+	RID emitter_scan;
+	RID emitter_samples;
+	Vector<uint8_t> emitter_samples_before;
+	RID emitter_reuse_counters;
+	uint32_t emitter_cdf_capacity = 0;
+	uint32_t emitter_samples_bytes = 0;
+	bool emitter_device_ready = false;
 	bool device_ready = false;
 	Ref<FileAccess> debug_file;
 	String debug_path;
@@ -219,6 +282,9 @@ private:
 #endif
 
 	bool _ensure_device();
+	bool _ensure_emitter_buffers(uint32_t p_count);
+	bool _ensure_emitter_samples(uint32_t p_pixels);
+	void _free_emitter_buffers();
 	void _write_debug_line();
 	void _flush_debug_line();
 #ifdef DI_RESAMPLER_LAB
@@ -228,3 +294,4 @@ private:
 #endif
 	RID _dummy(RD::DataFormat p_format, RD::TextureType p_type, const char *p_name);
 };
+

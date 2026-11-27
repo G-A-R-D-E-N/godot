@@ -3012,7 +3012,9 @@ void RenderingServer::_bind_methods() {
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_DIRECTIONAL_SHADOW_ATLAS);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SCENE_LUMINANCE);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SSAO);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_GTAO);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SSIL);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SSGI);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_PSSM_SPLITS);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_DECAL_ATLAS);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SDFGI);
@@ -3803,7 +3805,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF_RST("rendering/driver/depth_prepass/disable_for_vendors", "PowerVR,Mali,Adreno,Apple");
 
 	GLOBAL_DEF_RST("rendering/textures/default_filters/use_nearest_mipmap_filter", false);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/textures/default_filters/anisotropic_filtering_level", PROPERTY_HINT_ENUM, String::utf8("Disabled (Fastest),2× (Faster),4× (Fast),8× (Average),16× (Slow)")), 2);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/textures/default_filters/anisotropic_filtering_level", PROPERTY_HINT_ENUM, String::utf8("Disabled (Fastest),2ÃƒÆ’Ã¢â‚¬â€ (Faster),4ÃƒÆ’Ã¢â‚¬â€ (Fast),8ÃƒÆ’Ã¢â‚¬â€ (Average),16ÃƒÆ’Ã¢â‚¬â€ (Slow)")), 2);
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/camera/depth_of_field/depth_of_field_bokeh_shape", PROPERTY_HINT_ENUM, "Box (Fast),Hexagon (Average),Circle (Slowest)"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/camera/depth_of_field/depth_of_field_bokeh_quality", PROPERTY_HINT_ENUM, "Very Low (Fastest),Low (Fast),Medium (Average),High (Slow)"), 1);
@@ -3826,21 +3828,22 @@ void RenderingServer::init() {
 	GLOBAL_DEF("rendering/environment/gtao/half_size", true);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/gtao/denoise_passes", PROPERTY_HINT_RANGE, "0,4,1"), 2);
 	GLOBAL_DEF("rendering/environment/gtao/bent_normals", false);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/gtao/thin_occluder_compensation", PROPERTY_HINT_RANGE, "0.0,0.7,0.01"), 0.0);
 
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/quality", PROPERTY_HINT_ENUM, "Very Low (Fast),Low (Fast),Medium (Average),High (Slow),Ultra (Custom)"), 2);
-	GLOBAL_DEF("rendering/environment/ssil/half_size", true);
-	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssil/adaptive_target", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), 0.5);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/blur_passes", PROPERTY_HINT_RANGE, "0,6"), 4);
-	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssil/fadeout_from", PROPERTY_HINT_RANGE, "0.0,512,0.1,or_greater"), 50.0);
-	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssil/fadeout_to", PROPERTY_HINT_RANGE, "64,65536,0.1,or_greater"), 300.0);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/backend", PROPERTY_HINT_ENUM, "Gather,Traced"), 0);
-	GLOBAL_DEF("rendering/environment/ssil/traced/half_size", true);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/traced/rays_per_pixel", PROPERTY_HINT_RANGE, "1,4,1"), 1);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/traced/max_steps", PROPERTY_HINT_RANGE, "8,256,1"), 48);
-	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssil/traced/thickness", PROPERTY_HINT_RANGE, "0.01,4.0,0.01,suffix:m"), 0.5);
-	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssil/traced/firefly_luminance", PROPERTY_HINT_RANGE, "1.0,1024.0,0.1,or_greater"), 32.0);
-	GLOBAL_DEF("rendering/environment/ssil/traced/temporal", true);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/traced/history_frames", PROPERTY_HINT_RANGE, "1,255,1"), 32);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssgi/quality", PROPERTY_HINT_ENUM, "Very Low (Fast),Low (Fast),Medium (Average),High (Slow),Ultra (Custom)"), 2);
+	GLOBAL_DEF("rendering/environment/ssgi/half_size", true);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssgi/adaptive_target", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), 0.5);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssgi/blur_passes", PROPERTY_HINT_RANGE, "0,6"), 4);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssgi/fadeout_from", PROPERTY_HINT_RANGE, "0.0,512,0.1,or_greater"), 50.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssgi/fadeout_to", PROPERTY_HINT_RANGE, "64,65536,0.1,or_greater"), 300.0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssgi/backend", PROPERTY_HINT_ENUM, "Gather,Traced"), 0);
+	GLOBAL_DEF("rendering/environment/ssgi/traced/half_size", true);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssgi/traced/rays_per_pixel", PROPERTY_HINT_RANGE, "1,4,1"), 1);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssgi/traced/max_steps", PROPERTY_HINT_RANGE, "8,256,1"), 48);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssgi/traced/thickness", PROPERTY_HINT_RANGE, "0.01,4.0,0.01,suffix:m"), 0.5);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssgi/traced/firefly_luminance", PROPERTY_HINT_RANGE, "1.0,1024.0,0.1,or_greater"), 32.0);
+	GLOBAL_DEF("rendering/environment/ssgi/traced/temporal", true);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssgi/traced/history_frames", PROPERTY_HINT_RANGE, "1,255,1"), 32);
 
 	GLOBAL_DEF("rendering/environment/screen_space_lighting/legacy_last_frame_source", true);
 	GLOBAL_DEF("rendering/environment/screen_space_lighting/temporal_validation", false);
@@ -3854,8 +3857,8 @@ void RenderingServer::init() {
 	// Move the project setting definitions here so they are available when we init the rendering internals.
 	GLOBAL_DEF_BASIC("rendering/viewport/hdr_2d", false);
 
-	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "rendering/anti_aliasing/quality/msaa_2d", PROPERTY_HINT_ENUM, String::utf8("Disabled (Fastest),2× (Average),4× (Slow),8× (Slowest)")), 0);
-	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "rendering/anti_aliasing/quality/msaa_3d", PROPERTY_HINT_ENUM, String::utf8("Disabled (Fastest),2× (Average),4× (Slow),8× (Slowest)")), 0);
+	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "rendering/anti_aliasing/quality/msaa_2d", PROPERTY_HINT_ENUM, String::utf8("Disabled (Fastest),2ÃƒÆ’Ã¢â‚¬â€ (Average),4ÃƒÆ’Ã¢â‚¬â€ (Slow),8ÃƒÆ’Ã¢â‚¬â€ (Slowest)")), 0);
+	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "rendering/anti_aliasing/quality/msaa_3d", PROPERTY_HINT_ENUM, String::utf8("Disabled (Fastest),2ÃƒÆ’Ã¢â‚¬â€ (Average),4ÃƒÆ’Ã¢â‚¬â€ (Slow),8ÃƒÆ’Ã¢â‚¬â€ (Slowest)")), 0);
 
 	GLOBAL_DEF("rendering/anti_aliasing/screen_space_roughness_limiter/enabled", true);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/anti_aliasing/screen_space_roughness_limiter/amount", PROPERTY_HINT_RANGE, "0.01,4.0,0.01"), 0.25);
@@ -3988,6 +3991,9 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ray_scene/dirty_merge_distance", PROPERTY_HINT_RANGE, "0,16,0.01,suffix:m"), 0.5);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/mover_frames", PROPERTY_HINT_RANGE, "1,8,1"), 3);
 	GLOBAL_DEF("rendering/global_illumination/ray_scene/alpha_test", false);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/proxy_emitters", PROPERTY_HINT_ENUM, "Skip,Trace"), 0);
+	GLOBAL_DEF("rendering/global_illumination/ray_scene/hit_emission_texel", true);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/emitter_instance", PROPERTY_HINT_RANGE, "-1,2147483647,1"), -1);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/max_alpha_layers", PROPERTY_HINT_RANGE, "16,2048,1"), 512);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/alpha_mode", PROPERTY_HINT_ENUM, "Stochastic,Threshold"), 0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ray_scene/alpha_layer_size", PROPERTY_HINT_RANGE, "256,512,256"), 256);
@@ -4006,7 +4012,10 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/trace_resolution", PROPERTY_HINT_ENUM, "Full,Quarter"), 0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/rays_per_pixel", PROPERTY_HINT_RANGE, "1,2,1"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/direct/ray_bias", PROPERTY_HINT_RANGE, "0,0.2,0.001"), 0.02);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/direct/emitter_ray_shorten", PROPERTY_HINT_RANGE, "0,0.2,0.001"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/emitter_skip_instance", PROPERTY_HINT_RANGE, "-1,1048575,1"), -1);
 	GLOBAL_DEF("rendering/global_illumination/direct/reference", false);
+	GLOBAL_DEF("rendering/global_illumination/ray_scene/print_instances", false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/debug_view", PROPERTY_HINT_ENUM, "Off,First Entry,All Lamps,First Slot,Lamp Count,Samples,Filtered First Entry"), 0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/history_cap", PROPERTY_HINT_RANGE, "0,256,1"), 32);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/direct/dynamic_history_cap", PROPERTY_HINT_RANGE, "1,256,1"), 2);

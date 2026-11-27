@@ -52,6 +52,7 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	vec2 jitter_delta;
 	uint pad0;
 	uint pad1;
+	vec4 anchor;
 }
 params;
 

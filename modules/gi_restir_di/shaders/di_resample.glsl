@@ -8,6 +8,10 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 #include "../../../servers/rendering/renderer_rd/shaders/environment/di_sampler_inc.glsl"
 #include "../../../servers/rendering/renderer_rd/shaders/light_data_inc.glsl"
+#ifdef DI_EMITTERS
+#define RAY_SCENE_SET 1
+#include "../../../servers/rendering/renderer_rd/shaders/environment/ray_scene_inc.glsl"
+#endif
 
 #define MAX_ENTRIES 8
 #define MAX_NEIGHBORS 4
@@ -81,6 +85,26 @@ layout(set = 0, binding = 4, std140) uniform Params {
 	uint head_swap_frames;
 	uint temporal_reuse;
 	uint head_window;
+	float emitter_clamp;
+	uint emitter_clamp_pad0;
+	uint emitter_clamp_pad1;
+	uint emitter_clamp_pad2;
+	float emitter_pick_radius;
+	uint emitter_pick_pad0;
+	uint emitter_pick_pad1;
+	uint emitter_pick_pad2;
+	uint emitter_room_pick;
+	uint emitter_room_pad0;
+	uint emitter_room_pad1;
+	uint emitter_room_pad2;
+	uint emitter_half;
+	uint pad_emitter_a;
+	uint pad_emitter_b;
+	uint pad_emitter_c;
+	uint emitter_visibility;
+	uint pad_visibility_a;
+	uint pad_visibility_b;
+	uint pad_visibility_c;
 }
 params;
 
@@ -136,6 +160,412 @@ lab_mask;
 #define LAB_DROPPED_MASS 3
 #define LAB_TOTAL_MASS 4
 #define LAB_DYNAMIC_CAPPED 5
+#endif
+
+#ifdef DI_EMITTERS
+#define DI_EMITTER_CHUNK 4096u
+#define DI_EMITTER_ITEMS 64u
+#define DI_EMITTER_SUMS 0u
+#define DI_EMITTER_PREFIX 256u
+#define DI_EMITTER_TOTAL 512u
+#define DI_EMITTER_MARK 0xFFFFFFFFu
+#define DI_EMITTER_RAY_BIAS 0.02
+
+layout(set = 0, binding = 22, std430) buffer EmitterCdf {
+	float data[];
+}
+emitter_cdf;
+
+layout(set = 0, binding = 23, std430) buffer EmitterScan {
+	float data[];
+}
+emitter_scan;
+
+#if defined(MODE_EMITTER_SPATIAL)
+layout(set = 0, binding = 24, std430) restrict buffer EmitterSamples {
+#else
+layout(set = 0, binding = 24, std430) restrict writeonly buffer EmitterSamples {
+#endif
+	vec4 data[];
+}
+emitter_samples;
+
+layout(set = 0, binding = 26, std430) restrict buffer EmitterReuseCounters {
+	uint temporal_accepted;
+	uint age_sum;
+	uint plain_writes;
+	uint instance_mismatch;
+	uint depth_reject;
+	uint normal_reject;
+	uint held_selected;
+	uint mass_sum;
+	uint held_only;
+	uint held_blocked;
+	uint new_blocked;
+	uint damp_sum;
+}
+emitter_reuse_counters;
+
+#ifdef DI_EMITTER_TEMPORAL
+layout(rgba32ui, set = 0, binding = 25) uniform restrict uimage2DArray emitter_history;
+
+bool di_emitter_pending = false;
+vec3 di_emitter_point = vec3(0.0);
+vec3 di_emitter_color = vec3(0.0);
+float di_emitter_geometric = 0.0;
+uint di_emitter_instance = 0u;
+uint di_emitter_triangle = 0u;
+uint di_emitter_index = 0u;
+#endif
+
+float di_emitter_clamped_luminance(vec3 p_color, float p_total) {
+	float unit = p_total * params.emitter_clamp;
+	if (!(unit > 0.0)) {
+		return 0.0;
+	}
+	float luminance = dot(max(p_color, vec3(0.0)), luminance_weights);
+	return luminance > unit ? unit / luminance : 0.0;
+}
+
+float di_emitter_selection_luminance(uint p_material) {
+	float luminance = dot(max(ray_scene_triangle_emitter_emission(p_material), vec3(0.0)), luminance_weights);
+	return luminance > 0.0 ? luminance : ray_scene_triangle_emitter_mean_luminance(p_material);
+}
+
+float di_emitter_weight(uint p_index) {
+	if (ray_scene_triangle_emitter_proxied(p_index) && ray_scene.proxy_emitters_traced == 0u) {
+		return 0.0;
+	}
+	RaySceneTriangleEmitter emitter = ray_scene_triangle_emitter(p_index);
+	vec3 e1 = emitter.v1 - emitter.v0;
+	vec3 e2 = emitter.v2 - emitter.v0;
+	return 0.5 * length(cross(e1, e2)) * di_emitter_selection_luminance(emitter.material);
+}
+
+float di_emitter_window(RaySceneTriangleEmitter p_emitter, float p_distance) {
+	float range = uintBitsToFloat(p_emitter.pad1);
+	if (!(range > 0.0)) {
+		return 1.0;
+	}
+	float x = p_distance / range;
+	x *= x;
+	x *= x;
+	float w = max(1.0 - x, 0.0);
+	return w * w;
+}
+
+vec3 di_emitter_to_view(vec3 p_ray) {
+	vec3 relative = p_ray - ray_scene.camera_to_anchor;
+	return vec3(
+			dot(vec3(params.camera_basis[0].x, params.camera_basis[1].x, params.camera_basis[2].x), relative),
+			dot(vec3(params.camera_basis[0].y, params.camera_basis[1].y, params.camera_basis[2].y), relative),
+			dot(vec3(params.camera_basis[0].z, params.camera_basis[1].z, params.camera_basis[2].z), relative));
+}
+
+float di_emitter_hash(uint p_seed, uint p_salt) {
+	return float(di_hash(p_seed ^ di_hash(p_salt)) >> 8u) / 16777216.0;
+}
+
+void di_emitter_write(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geometric) {
+	uint index = uint(p_pixel.y) * uint(params.size.x) + uint(p_pixel.x);
+	emitter_samples.data[index * 2u] = vec4(p_point, p_geometric);
+	emitter_samples.data[index * 2u + 1u] = vec4(p_color, 0.0);
+}
+
+void di_emitter_clear(ivec2 p_pixel, uint p_reason) {
+	uint index = uint(p_pixel.y) * uint(params.size.x) + uint(p_pixel.x);
+	emitter_samples.data[index * 2u] = vec4(0.0);
+	emitter_samples.data[index * 2u + 1u] = vec4(0.0, 0.0, 0.0, float(p_reason));
+	imageStore(record_image, ivec3(p_pixel, int(params.tail_samples + 1u)), uvec4(0u, 0u, 0u, 0u));
+}
+
+void di_emitter_clear_block(ivec2 p_pixel, uint p_reason) {
+	if (params.emitter_half == 0u) {
+		di_emitter_clear(p_pixel, p_reason);
+		return;
+	}
+	for (int dy = 0; dy < 2; dy++) {
+		for (int dx = 0; dx < 2; dx++) {
+			di_emitter_clear(min(p_pixel + ivec2(dx, dy), params.size - ivec2(1)), p_reason);
+		}
+	}
+}
+
+void di_emitter_write_block(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geometric) {
+	uint layer = params.tail_samples + 1u;
+	if (params.emitter_half == 0u) {
+		di_emitter_write(p_pixel, p_point, p_color, p_geometric);
+		imageStore(record_image, ivec3(p_pixel, int(layer)), uvec4(DI_EMITTER_MARK, floatBitsToUint(float(layer)), 0u, 0u));
+		return;
+	}
+	for (int dy = 0; dy < 2; dy++) {
+		for (int dx = 0; dx < 2; dx++) {
+			ivec2 q = min(p_pixel + ivec2(dx, dy), params.size - ivec2(1));
+			di_emitter_write(q, p_point, p_color, p_geometric);
+			imageStore(record_image, ivec3(q, int(layer)), uvec4(DI_EMITTER_MARK, floatBitsToUint(float(layer)), 0u, 0u));
+		}
+	}
+}
+
+#ifdef DI_EMITTER_TEMPORAL
+void di_emitter_commit(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geometric, uint p_instance, uint p_triangle, uint p_index) {
+	di_emitter_pending = true;
+	di_emitter_point = p_point;
+	di_emitter_color = p_color;
+	di_emitter_geometric = p_geometric;
+	di_emitter_instance = p_instance;
+	di_emitter_triangle = p_triangle;
+	di_emitter_index = p_index;
+}
+#else
+void di_emitter_commit(ivec2 p_pixel, vec3 p_point, vec3 p_color, float p_geometric, uint p_instance, uint p_triangle, uint p_index) {
+	atomicAdd(emitter_reuse_counters.plain_writes, 1u);
+	di_emitter_write_block(p_pixel, p_point, p_color, p_geometric);
+}
+#endif
+
+vec3 di_emitter_to_world(vec3 p_view) {
+	vec3 offset = params.camera_basis[0].xyz * p_view.x + params.camera_basis[1].xyz * p_view.y + params.camera_basis[2].xyz * p_view.z;
+	return ray_scene.camera_to_anchor + offset;
+}
+
+bool di_emitter_visible(vec3 p_vertex, vec3 p_normal, vec3 p_point, uint p_instance, float p_distance_sq, uint p_seed) {
+	float distance = sqrt(p_distance_sq);
+	if (!(distance > 2.0 * DI_EMITTER_RAY_BIAS)) {
+		return true;
+	}
+	vec3 vertex = di_emitter_to_world(p_vertex);
+	vec3 point = di_emitter_to_world(p_point);
+	vec3 normal = di_emitter_to_world(p_normal) - ray_scene.camera_to_anchor;
+	vec3 from = vertex + normal * DI_EMITTER_RAY_BIAS;
+	vec3 to = point - normalize(point - vertex) * DI_EMITTER_RAY_BIAS;
+	uint blocker = 0xFFFFFFFFu;
+	float blocker_distance = 0.0;
+	uint blocker_triangle = 0u;
+	if (ray_scene_sampled_visibility_blocker(from, to, RAY_SCENE_ALL_CASTERS, p_seed + 0x51ed270bu, -1, blocker, blocker_distance, blocker_triangle)) {
+		return true;
+	}
+	return blocker == p_instance && blocker_distance >= length(to - from) - DI_EMITTER_RAY_BIAS;
+}
+
+#ifdef DI_EMITTER_ROOM_PICK
+layout(set = RAY_SCENE_SET, binding = 16) uniform sampler2D ray_room_grid;
+
+vec3 di_emitter_ray_space(vec3 p_view) {
+	mat3 to_ray = mat3(params.camera_basis[0].xyz, params.camera_basis[1].xyz, params.camera_basis[2].xyz);
+	return ray_scene.camera_to_anchor + to_ray * p_view;
+}
+
+uint di_emitter_room_of(vec3 p_view) {
+	vec3 ray_position = di_emitter_ray_space(p_view);
+	ivec2 extent = textureSize(ray_room_grid, 0);
+	float cell = max(ray_scene.room_grid_cell, 1e-3);
+	vec2 texel = (ray_position.xz - ray_scene.room_grid_origin) / cell;
+	if (any(lessThan(texel, vec2(0.0))) || any(greaterThanEqual(texel, vec2(extent)))) {
+		return 0u;
+	}
+	return uint(texelFetch(ray_room_grid, ivec2(texel), 0).r * 255.0 + 0.5);
+}
+
+bool di_emitter_room_window(uint p_room, out uint r_first, out uint r_last) {
+	r_first = 0u;
+	r_last = 0u;
+	uint room_count = ray_scene.room_count;
+	if (room_count == 0u || p_room > room_count) {
+		return false;
+	}
+	r_first = ray_scene.room_start[p_room];
+	r_last = ray_scene.room_start[p_room + 1u];
+	return r_last > r_first;
+}
+#endif
+
+uint di_emitter_pick_index(float p_target, uint p_count) {
+	uint low = 0u;
+	uint high = p_count - 1u;
+	while (low < high) {
+		uint mid = (low + high) >> 1u;
+		if (emitter_cdf.data[mid] < p_target) {
+			low = mid + 1u;
+		} else {
+			high = mid;
+		}
+	}
+	return low;
+}
+
+float di_emitter_distance(vec3 p_vertex, uint p_index) {
+	RaySceneTriangleEmitter emitter = ray_scene_triangle_emitter(p_index);
+	vec3 centre = di_emitter_to_view((emitter.v0 + emitter.v1 + emitter.v2) * (1.0 / 3.0));
+	return length(centre - p_vertex);
+}
+
+void di_emitter_pick(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal, uint p_seed) {
+	uint count = ray_scene_triangle_emitter_count();
+	float total = count == 0u ? 0.0 : emitter_scan.data[DI_EMITTER_TOTAL];
+	if (!(total > 0.0)) {
+		di_emitter_clear_block(p_pixel, 1u);
+		return;
+	}
+	const uint DI_EMITTER_RIS_M = 16u;
+	uint room_first = 0u;
+	uint room_last = 0u;
+	float room_base = 0.0;
+	float room_span = 0.0;
+	bool has_room = false;
+#ifdef DI_EMITTER_ROOM_PICK
+	{
+		const uint room_id = di_emitter_room_of(p_vertex);
+		if (di_emitter_room_window(room_id, room_first, room_last) && room_last <= count) {
+			room_base = room_first > 0u ? emitter_cdf.data[room_first - 1u] : 0.0;
+			room_span = emitter_cdf.data[room_last - 1u] - room_base;
+			has_room = room_span > 0.0;
+		}
+	}
+#endif
+	float w_sum = 0.0;
+	uint best_low = 0u;
+	vec3 best_point = vec3(0.0);
+	vec3 best_texel = vec3(0.0);
+	float best_geometric = 0.0;
+	float best_p_hat = 0.0;
+	uint best_instance = 0u;
+	uint best_uv_index = 0u;
+	float best_dist_sq = 0.0;
+	for (uint k = 0u; k < DI_EMITTER_RIS_M; k++) {
+		uint cseed = p_seed ^ (0x9e3779b9u * (k + 1u));
+		uint cand_idx = 0u;
+		bool use_room = has_room && (params.emitter_room_pick != 0u || (k & 1u) != 0u);
+		if (use_room) {
+			float room_target = room_base + di_emitter_hash(cseed, 0x27d4eb2fu) * room_span;
+			uint r_low = room_first;
+			uint r_high = room_last - 1u;
+			while (r_low < r_high) {
+				uint mid = (r_low + r_high) >> 1u;
+				if (emitter_cdf.data[mid] < room_target) {
+					r_low = mid + 1u;
+				} else {
+					r_high = mid;
+				}
+			}
+			while (r_low + 1u < room_last) {
+				float prev = r_low > room_first ? emitter_cdf.data[r_low - 1u] : room_base;
+				if (emitter_cdf.data[r_low] > prev) {
+					break;
+				}
+				r_low++;
+			}
+			cand_idx = r_low;
+		} else {
+			cand_idx = di_emitter_pick_index(di_emitter_hash(cseed, 0x27d4eb2fu) * total, count);
+		}
+		float inv_density = total;
+		if (has_room) {
+			if (params.emitter_room_pick != 0u) {
+				inv_density = room_span;
+			} else {
+				bool in_room = cand_idx >= room_first && cand_idx < room_last;
+				inv_density = 1.0 / (0.5 / total + (in_room ? 0.5 / room_span : 0.0));
+			}
+		}
+		RaySceneTriangleEmitter emitter = ray_scene_triangle_emitter(cand_idx);
+		vec3 v0 = di_emitter_to_view(emitter.v0);
+		vec3 v1 = di_emitter_to_view(emitter.v1);
+		vec3 v2 = di_emitter_to_view(emitter.v2);
+		vec3 e1 = v1 - v0;
+		vec3 e2 = v2 - v0;
+		vec3 cross_e1e2 = cross(e2, e1);
+		float normal_length = length(cross_e1e2);
+		float area = 0.5 * normal_length;
+		float luminance = di_emitter_selection_luminance(emitter.material);
+		if (!(area > 0.0) || !(luminance > 0.0)) {
+			continue;
+		}
+		float r1 = di_emitter_hash(cseed, 0x68e31da4u);
+		float r2 = di_emitter_hash(cseed, 0x1b56c4e9u);
+		float root = sqrt(r1);
+		float b = root * (1.0 - r2);
+		float c = root * r2;
+		vec3 sample_point = v0 * (1.0 - root) + v1 * b + v2 * c;
+		vec3 rel = sample_point - p_vertex;
+		float dist_sq = dot(rel, rel);
+		if (!(dist_sq > 1e-10)) {
+			continue;
+		}
+		float distance = sqrt(dist_sq);
+		vec3 to_light = rel / distance;
+		float cos_surface = dot(p_normal, to_light);
+		if (!(cos_surface > 0.0)) {
+			continue;
+		}
+		vec3 light_normal = cross_e1e2 / normal_length;
+		float cos_light = dot(light_normal, -to_light);
+		if ((ray_scene_materials.data[emitter.material].flags & RAY_SCENE_MATERIAL_TWO_SIDED) != 0u) {
+			cos_light = abs(cos_light);
+		}
+		if (!(cos_light > 0.0)) {
+			continue;
+		}
+		float geometric = min(cos_light / max(dist_sq, 1e-8), 60000.0) * di_emitter_window(emitter, distance);
+		if (!(geometric > 0.0)) {
+			continue;
+		}
+		vec2 emitter_uv = ray_scene_triangle_emitter_uv(emitter.uv_index, vec3(b, c, 0.0));
+		vec3 texel_emission = ray_scene_triangle_emitter_emission_texel(emitter.material, emitter_uv) * ray_scene_emissive_exposure_normalization();
+		float p_hat = max(dot(texel_emission, vec3(0.2126, 0.7152, 0.0722)), 0.0) * geometric * cos_surface;
+		if (!(p_hat > 0.0)) {
+			continue;
+		}
+		float w = p_hat * (inv_density / luminance);
+		w_sum += w;
+		if (di_emitter_hash(cseed, 0x517cc1b7u) * w_sum < w) {
+			best_low = cand_idx;
+			best_point = sample_point;
+			best_texel = texel_emission;
+			best_geometric = geometric;
+			best_p_hat = p_hat;
+			best_instance = emitter.instance;
+			best_uv_index = emitter.uv_index;
+			best_dist_sq = dist_sq;
+		}
+	}
+	if (!(w_sum > 0.0) || !(best_p_hat > 0.0)) {
+		di_emitter_clear_block(p_pixel, 3u);
+		return;
+	}
+	vec3 color = best_texel * ((w_sum / float(DI_EMITTER_RIS_M)) / best_p_hat);
+	float clamp_scale = di_emitter_clamped_luminance(color, total);
+	if (clamp_scale > 0.0) {
+		color *= clamp_scale;
+	}
+	if (params.emitter_visibility != 0u && !di_emitter_visible(p_vertex, p_normal, best_point, best_instance, best_dist_sq, p_seed)) {
+		di_emitter_clear_block(p_pixel, 2u);
+		return;
+	}
+	if (any(isinf(color)) || any(isnan(color))) {
+		di_emitter_clear_block(p_pixel, 4u);
+		return;
+	}
+	di_emitter_commit(p_pixel, best_point, color, best_geometric, best_instance, best_uv_index, best_low);
+	imageStore(record_image, ivec3(p_pixel, int(params.tail_samples + 1u)), uvec4(DI_EMITTER_MARK, floatBitsToUint(float(params.tail_samples + 1u)), 0u, 0u));
+}
+
+#ifdef DI_EMITTER_TABLE
+shared float di_emitter_lane_sums[64];
+shared float di_emitter_lane_prefix[64];
+
+float di_emitter_lane_sum(uint p_base, uint p_count) {
+	float sum = 0.0;
+	for (uint i = 0u; i < DI_EMITTER_ITEMS; i++) {
+		uint index = p_base + i;
+		if (index >= p_count) {
+			break;
+		}
+		sum += di_emitter_weight(index);
+	}
+	return sum;
+}
+#endif
 #endif
 
 #define DEBUG_STALE_PRIOR 1u
@@ -685,7 +1115,225 @@ void resample_reservoir(ivec2 p_pixel, uint p_cluster_offset, uint p_cluster_z) 
 }
 #endif
 
+#ifdef DI_EMITTER_TEMPORAL
+vec4 di_emitter_history_load(ivec2 p_pixel, int p_layer) {
+	uvec4 value = imageLoad(emitter_history, ivec3(p_pixel, p_layer));
+	return vec4(uintBitsToFloat(value.x), uintBitsToFloat(value.y), uintBitsToFloat(value.z), uintBitsToFloat(value.w));
+}
+
+bool di_emitter_history_valid(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal, inout uvec4 r_header, inout uvec4 r_surface) {
+	if (params.history_valid == 0u) {
+		return false;
+	}
+	r_header = imageLoad(emitter_history, ivec3(p_pixel, 0));
+	if ((r_header.y & 0x100u) == 0u) {
+		return false;
+	}
+	r_surface = imageLoad(emitter_history, ivec3(p_pixel, 3));
+	float expected = -(params.prev_view_from_view * vec4(p_vertex, 1.0)).z;
+	float tolerance = expected * (0.01 + 0.02 / max(dot(p_normal, view), 0.05));
+	float stored_depth = uintBitsToFloat(r_surface.y);
+	vec3 stored_normal = di_oct_decode(unpackSnorm2x16(r_surface.x));
+	if (!(expected > 0.0 && abs(stored_depth - expected) < tolerance)) {
+		atomicAdd(emitter_reuse_counters.depth_reject, 1u);
+		return false;
+	}
+	if (dot(mat3(params.prev_view_from_view) * p_normal, stored_normal) <= 0.9) {
+		atomicAdd(emitter_reuse_counters.normal_reject, 1u);
+		return false;
+	}
+	return true;
+}
+
+void di_emitter_history_store(ivec2 p_pixel, uvec4 p_header, vec4 p_point, vec4 p_color, uvec4 p_surface) {
+	imageStore(emitter_history, ivec3(p_pixel, 0), p_header);
+	imageStore(emitter_history, ivec3(p_pixel, 1), uvec4(floatBitsToUint(p_point.x), floatBitsToUint(p_point.y), floatBitsToUint(p_point.z), floatBitsToUint(p_point.w)));
+	imageStore(emitter_history, ivec3(p_pixel, 2), uvec4(floatBitsToUint(p_color.x), floatBitsToUint(p_color.y), floatBitsToUint(p_color.z), 0u));
+	imageStore(emitter_history, ivec3(p_pixel, 3), p_surface);
+}
+
+vec2 di_emitter_uv_at(RaySceneTriangleEmitter p_emitter, vec3 p_point) {
+	vec3 point = di_emitter_to_view(p_point);
+	vec3 v0 = di_emitter_to_view(p_emitter.v0);
+	vec3 v1 = di_emitter_to_view(p_emitter.v1);
+	vec3 v2 = di_emitter_to_view(p_emitter.v2);
+	vec3 e1 = v1 - v0;
+	vec3 e2 = v2 - v0;
+	vec3 ep = point - v0;
+	float d11 = dot(e1, e1);
+	float d12 = dot(e1, e2);
+	float d22 = dot(e2, e2);
+	float dp1 = dot(ep, e1);
+	float dp2 = dot(ep, e2);
+	float denom = d11 * d22 - d12 * d12;
+	if (abs(denom) < 1e-20) {
+		return vec2(-1.0);
+	}
+	float v = (d22 * dp1 - d12 * dp2) / denom;
+	float w = (d11 * dp2 - d12 * dp1) / denom;
+	return ray_scene_triangle_emitter_uv(p_emitter.uv_index, vec3(v, w, 0.0));
+}
+
+vec3 di_emitter_color_at(uint p_index, vec3 p_point, out float r_luminance_weight) {
+	RaySceneTriangleEmitter emitter = ray_scene_triangle_emitter(p_index);
+	vec2 uv = di_emitter_uv_at(emitter, p_point);
+	vec3 emission = (uv == vec2(-1.0) ? ray_scene_triangle_emitter_emission(emitter.material) : ray_scene_triangle_emitter_emission_texel(emitter.material, uv)) * ray_scene_emissive_exposure_normalization();
+	float luminance = dot(max(emission, vec3(0.0)), luminance_weights);
+	float selection = di_emitter_selection_luminance(emitter.material);
+	r_luminance_weight = luminance;
+	if (!(luminance > 0.0 && selection > 0.0)) {
+		return vec3(0.0);
+	}
+	float total = emitter_scan.data[DI_EMITTER_TOTAL];
+	vec3 color = emission * (total / selection);
+	float clamp_scale = di_emitter_clamped_luminance(color, total);
+	return clamp_scale > 0.0 ? color * clamp_scale : color;
+}
+
+float di_emitter_hit_fraction(uvec4 p_surface) {
+	float hit = uintBitsToFloat(p_surface.w);
+	return p_surface.w == 0u ? 1.0 : clamp(hit, 0.0, 1.0);
+}
+
+float di_emitter_target(vec3 p_color, float p_geometric) {
+	return dot(max(p_color * p_geometric, vec3(0.0)), luminance_weights);
+}
+
+
+
+void di_emitter_accumulate(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
+	vec3 new_point = di_emitter_point;
+	vec3 new_color = di_emitter_color;
+	float new_geometric = di_emitter_geometric;
+	float new_target = di_emitter_target(new_color, new_geometric);
+	float held_target = 0.0;
+	float held_origin = 0.0;
+	float held_m = 0.0;
+	uint held_age = 0u;
+	uint held_index = 0u;
+	uint held_instance = 0u;
+	vec3 held_point = vec3(0.0);
+	vec3 held_color = vec3(0.0);
+	float held_geometric = 0.0;
+	float held_hit = 1.0;
+	bool merge = false;
+	if (params.history_valid != 0u) {
+		uvec4 header = uvec4(0u);
+		uvec4 surface = uvec4(0u);
+		if (di_emitter_history_valid(p_pixel, p_vertex, p_normal, header, surface)) {
+			held_index = header.x & 0xFFFFu;
+			held_instance = header.x >> 16u;
+			held_age = header.y & 0xFFu;
+			held_origin = uintBitsToFloat(header.w);
+			RaySceneTriangleEmitter emitter = ray_scene_triangle_emitter(held_index);
+			if (emitter.instance != held_instance) {
+				atomicAdd(emitter_reuse_counters.instance_mismatch, 1u);
+			} else {
+				if (held_instance != (di_emitter_instance & 0xFFFFu)) {
+					atomicAdd(emitter_reuse_counters.instance_mismatch, 1u);
+				}
+				vec4 held_vec = di_emitter_history_load(p_pixel, 1);
+				held_point = (inverse(params.prev_view_from_view) * vec4(held_vec.xyz, 1.0)).xyz;
+				vec3 v0 = di_emitter_to_view(emitter.v0);
+				vec3 v1 = di_emitter_to_view(emitter.v1);
+				vec3 v2 = di_emitter_to_view(emitter.v2);
+				vec3 light_normal = cross(v2 - v0, v1 - v0);
+				float normal_length = length(light_normal);
+				light_normal = normal_length > 0.0 ? light_normal / normal_length : vec3(0.0, 0.0, 1.0);
+				vec3 rel = held_point - p_vertex;
+				float distance_sq = dot(rel, rel);
+				vec3 to_light = distance_sq > 1e-12 ? rel * inversesqrt(distance_sq) : vec3(0.0);
+				float cos_light = dot(light_normal, -to_light);
+				if ((ray_scene_materials.data[emitter.material].flags & RAY_SCENE_MATERIAL_TWO_SIDED) != 0u) {
+					cos_light = abs(cos_light);
+				}
+				held_geometric = cos_light > 0.0 ? min(cos_light / max(distance_sq, 1e-8), 60000.0) * di_emitter_window(emitter, sqrt(distance_sq)) : 0.0;
+				held_color = di_emitter_history_load(p_pixel, 2).rgb;
+				held_target = di_emitter_target(held_color, held_geometric);
+				held_m = min(uintBitsToFloat(surface.z), 20.0);
+				held_hit = di_emitter_hit_fraction(surface);
+				merge = held_m > 0.0 && held_geometric > 0.0;
+			}
+		}
+	}
+
+	vec3 point = new_point;
+	vec3 color = new_color;
+	float geometric = new_geometric;
+	float target = new_target;
+	uint age = 0u;
+	uint index = di_emitter_index;
+	uint instance = di_emitter_instance;
+	uint count = 1u;
+	float hit = 1.0;
+	if (merge) {
+		float total = 1.0 + held_m;
+		color = (held_color * held_m + new_color) / total;
+		geometric = (held_geometric * held_m + new_geometric) / total;
+		hit = (held_hit * held_m + 1.0) / total;
+		target = di_emitter_target(color * hit, geometric);
+		count = uint(min(total, 21.0));
+		age = min(held_age + 1u, 0xFFu);
+		atomicAdd(emitter_reuse_counters.temporal_accepted, 1u);
+		atomicAdd(emitter_reuse_counters.age_sum, age);
+		atomicAdd(emitter_reuse_counters.mass_sum, count);
+	}
+	float damp = 1.0;
+	atomicAdd(emitter_reuse_counters.damp_sum, uint(damp * 65536.0));
+
+	uvec4 header = uvec4((index & 0xFFFFu) | ((instance & 0xFFFFu) << 16u), age | 0x100u, 0u, floatBitsToUint(target));
+	uvec4 surface = uvec4(packSnorm2x16(di_oct_encode(p_normal)), floatBitsToUint(-p_vertex.z), floatBitsToUint(float(count)), floatBitsToUint(hit));
+	di_emitter_history_store(p_pixel, header, vec4(point, geometric), vec4(color, damp), surface);
+	di_emitter_write(p_pixel, point, color * hit, geometric);
+	imageStore(record_image, ivec3(p_pixel, int(params.tail_samples + 1u)), uvec4(DI_EMITTER_MARK, floatBitsToUint(float(params.tail_samples + 1u) * damp), 0u, 0u));
+}
+
+bool di_emitter_hold(ivec2 p_pixel, vec3 p_vertex, vec3 p_normal) {
+	uvec4 header = uvec4(0u);
+	uvec4 surface = uvec4(0u);
+	if (!di_emitter_history_valid(p_pixel, p_vertex, p_normal, header, surface)) {
+		return false;
+	}
+	uint index = header.x & 0xFFFFu;
+	uint instance = header.x >> 16u;
+	RaySceneTriangleEmitter emitter = ray_scene_triangle_emitter(index);
+	if (emitter.instance != instance) {
+		return false;
+	}
+	vec4 held_vec = di_emitter_history_load(p_pixel, 1);
+	vec4 held_tail = di_emitter_history_load(p_pixel, 2);
+	vec3 point = (inverse(params.prev_view_from_view) * vec4(held_vec.xyz, 1.0)).xyz;
+	float geometric = held_vec.w;
+	float mass = uintBitsToFloat(surface.z);
+	float held_m = min(mass, 20.0);
+	float next_mass = min(held_m + 1.0, 21.0);
+	float hit = di_emitter_hit_fraction(surface) * (held_m / (held_m + 1.0));
+	if (hit < 1e-3) {
+		return false;
+	}
+	vec3 color = held_tail.rgb;
+	float target = di_emitter_target(color * hit, geometric);
+	uint age = min((header.y & 0xFFu) + 1u, 0xFFu);
+	float damp = held_tail.w;
+	uvec4 next_header = uvec4(header.x, age | 0x100u, header.z, floatBitsToUint(target));
+	uvec4 next_surface = uvec4(surface.x, surface.y, floatBitsToUint(next_mass), floatBitsToUint(hit));
+	di_emitter_history_store(p_pixel, next_header, vec4(point, geometric), vec4(color, damp), next_surface);
+	di_emitter_write(p_pixel, point, color * hit, geometric);
+	imageStore(record_image, ivec3(p_pixel, int(params.tail_samples + 1u)), uvec4(DI_EMITTER_MARK, floatBitsToUint(float(params.tail_samples + 1u) * damp), 0u, 0u));
+	atomicAdd(emitter_reuse_counters.held_only, 1u);
+	atomicAdd(emitter_reuse_counters.age_sum, age);
+	atomicAdd(emitter_reuse_counters.mass_sum, uint(mass));
+	return true;
+}
+#endif
+
 void write_empty(ivec2 p_pixel) {
+#ifdef DI_EMITTERS
+	di_emitter_clear_block(p_pixel, 0u);
+#ifdef DI_EMITTER_TEMPORAL
+	di_emitter_history_store(p_pixel, uvec4(0u), vec4(0.0), vec4(0.0), uvec4(0u));
+#endif
+#endif
 #ifndef MODE_SPATIAL
 	if (params.head_rank != 0u) {
 		imageStore(head_state, p_pixel, uvec4(0u));
@@ -722,7 +1370,141 @@ bool surface_at(ivec2 p_pixel, out vec3 r_vertex, out vec3 r_normal, out float r
 	return true;
 }
 
-#ifndef MODE_SPATIAL
+#ifdef DI_EMITTER_TABLE
+#if defined(MODE_EMITTER_SUM)
+void main() {
+	uint chunk = gl_WorkGroupID.x;
+	uint lane = gl_LocalInvocationIndex;
+	uint count = ray_scene_triangle_emitter_count();
+	di_emitter_lane_sums[lane] = di_emitter_lane_sum(chunk * DI_EMITTER_CHUNK + lane * DI_EMITTER_ITEMS, count);
+	barrier();
+	if (lane == 0u) {
+		float total = 0.0;
+		for (uint i = 0u; i < 64u; i++) {
+			total += di_emitter_lane_sums[i];
+		}
+		emitter_scan.data[DI_EMITTER_SUMS + chunk] = total;
+	}
+}
+#elif defined(MODE_EMITTER_SCAN)
+void main() {
+	if (gl_LocalInvocationIndex == 0u) {
+		uint count = ray_scene_triangle_emitter_count();
+		uint chunks = (count + DI_EMITTER_CHUNK - 1u) / DI_EMITTER_CHUNK;
+		float running = 0.0;
+		for (uint chunk = 0u; chunk < 256u; chunk++) {
+			if (chunk >= chunks) {
+				break;
+			}
+			emitter_scan.data[DI_EMITTER_PREFIX + chunk] = running;
+			running += emitter_scan.data[DI_EMITTER_SUMS + chunk];
+		}
+		emitter_scan.data[DI_EMITTER_TOTAL] = running;
+	}
+}
+#else
+void main() {
+	uint chunk = gl_WorkGroupID.x;
+	uint lane = gl_LocalInvocationIndex;
+	uint count = ray_scene_triangle_emitter_count();
+	uint base = chunk * DI_EMITTER_CHUNK + lane * DI_EMITTER_ITEMS;
+	di_emitter_lane_sums[lane] = di_emitter_lane_sum(base, count);
+	barrier();
+	if (lane == 0u) {
+		float running = 0.0;
+		for (uint i = 0u; i < 64u; i++) {
+			di_emitter_lane_prefix[i] = running;
+			running += di_emitter_lane_sums[i];
+		}
+	}
+	barrier();
+	float running = emitter_scan.data[DI_EMITTER_PREFIX + chunk] + di_emitter_lane_prefix[lane];
+	for (uint i = 0u; i < DI_EMITTER_ITEMS; i++) {
+		uint index = base + i;
+		if (index >= count) {
+			break;
+		}
+		running += di_emitter_weight(index);
+		emitter_cdf.data[index] = running;
+	}
+}
+#endif
+#else
+#if defined(MODE_EMITTER_SPATIAL)
+float di_emitter_sample_mass(vec4 p_color, vec4 p_point) {
+	return dot(max(p_color.rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722)) * max(p_point.w, 0.0);
+}
+
+#define DI_EMITTER_SPATIAL_TAPS 12u
+
+void main() {
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(pixel, params.size))) {
+		return;
+	}
+	vec3 vertex = vec3(0.0);
+	vec3 normal = vec3(0.0, 0.0, 1.0);
+	float roughness = 0.0;
+	uint packed_normal = 0u;
+	float depth = 0.0;
+	if (!surface_at(pixel, vertex, normal, roughness, packed_normal, depth)) {
+		return;
+	}
+	uint index = uint(pixel.y) * uint(params.size.x) + uint(pixel.x);
+	vec4 selected_point = emitter_samples.data[index * 2u];
+	vec4 selected_color = emitter_samples.data[index * 2u + 1u];
+	float total_mass = di_emitter_sample_mass(selected_color, selected_point);
+	vec3 total_contribution = max(selected_color.rgb, vec3(0.0)) * max(selected_point.w, 0.0);
+	float taps = 1.0;
+	float view_depth = max(-vertex.z, 0.001);
+	float tolerance = view_depth * 0.05;
+	uint seed = di_hash(uint(pixel.y) * 65537u + uint(pixel.x)) ^ di_hash(params.frame ^ 0x51ed270bu);
+	uint neighbours = max(uint(params.spatial_neighbors), DI_EMITTER_SPATIAL_TAPS);
+	for (uint i = 0u; i < neighbours; i++) {
+		float angle = (float(i) + di_emitter_hash(seed, i * 2u + 1u)) * 6.2831853 / float(max(neighbours, 1u));
+		float radius = sqrt(di_emitter_hash(seed, i * 2u + 2u)) * params.spatial_radius;
+		ivec2 other = pixel + ivec2(round(cos(angle) * radius), round(sin(angle) * radius));
+		if (any(lessThan(other, ivec2(0))) || any(greaterThanEqual(other, params.size))) {
+			continue;
+		}
+		vec3 other_vertex = vec3(0.0);
+		vec3 other_normal = vec3(0.0, 0.0, 1.0);
+		float other_roughness = 0.0;
+		uint other_packed = 0u;
+		float other_depth = 0.0;
+		if (!surface_at(other, other_vertex, other_normal, other_roughness, other_packed, other_depth)) {
+			continue;
+		}
+		if (abs(-other_vertex.z - view_depth) > tolerance) {
+			continue;
+		}
+		if (dot(normal, other_normal) < 0.9) {
+			continue;
+		}
+		uint other_index = uint(other.y) * uint(params.size.x) + uint(other.x);
+		vec4 other_point = emitter_samples.data[other_index * 2u];
+		vec4 other_color = emitter_samples.data[other_index * 2u + 1u];
+		taps += 1.0;
+		float other_mass = di_emitter_sample_mass(other_color, other_point);
+		if (!(other_mass > 0.0)) {
+			continue;
+		}
+		total_contribution += max(other_color.rgb, vec3(0.0)) * max(other_point.w, 0.0);
+		total_mass += other_mass;
+		if (di_emitter_hash(seed, i * 2u + 3u) * total_mass < other_mass) {
+			selected_point = other_point;
+		}
+	}
+	if (!(total_mass > 0.0) || !(selected_point.w > 0.0)) {
+		return;
+	}
+	vec3 mean_contribution = total_contribution / taps;
+	emitter_samples.data[index * 2u] = selected_point;
+	emitter_samples.data[index * 2u + 1u] = vec4(mean_contribution / selected_point.w, 0.0);
+	uint layer = params.tail_samples + 1u;
+	imageStore(record_image, ivec3(pixel, int(layer)), uvec4(DI_EMITTER_MARK, floatBitsToUint(float(layer)), 0u, 0u));
+}
+#elif !defined(MODE_SPATIAL)
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 	if (any(greaterThanEqual(pixel, params.size))) {
@@ -744,6 +1526,24 @@ void main() {
 		other_target[i] = vec3(0.0);
 	}
 	stream_seed = di_hash(uint(pixel.y) * 65537u + uint(pixel.x)) ^ di_hash(params.frame ^ 0x68e31da4u);
+#ifdef DI_EMITTERS
+#ifndef DI_EMITTER_TEMPORAL
+	bool di_emitter_origin = params.emitter_half == 0u || (((pixel.x & 1) == 0) && ((pixel.y & 1) == 0));
+	if (di_emitter_origin) {
+		di_emitter_pick(pixel, vertex, normal, stream_seed ^ 0x2545f491u);
+	}
+#else
+	di_emitter_pick(pixel, vertex, normal, stream_seed ^ 0x2545f491u);
+#endif
+#ifdef DI_EMITTER_TEMPORAL
+	if (di_emitter_pending) {
+		di_emitter_accumulate(pixel, vertex, normal);
+	} else if (!di_emitter_hold(pixel, vertex, normal)) {
+		di_emitter_clear(pixel, 1u);
+		di_emitter_history_store(pixel, uvec4(0u), vec4(0.0), vec4(0.0), uvec4(0u));
+	}
+#endif
+#endif
 	if (params.reservoirs != RESERVOIRS_OFF && params.temporal_reuse != 0u && has_history) {
 		uint held = imageLoad(history_header, history_pixel).r;
 #ifdef LAB_COUNTS
@@ -979,4 +1779,5 @@ void main() {
 		imageStore(history_values, pixel, uvec4(floatBitsToUint(weight), floatBitsToUint(target), 0u, 0u));
 	}
 }
+#endif
 #endif

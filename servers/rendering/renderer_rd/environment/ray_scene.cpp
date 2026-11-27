@@ -79,12 +79,36 @@ RayScene::RayScene() {
 	singleton = this;
 	alpha_enabled = GLOBAL_GET("rendering/global_illumination/ray_scene/alpha_test");
 	alpha_store.set_liveness(&_alpha_texture_live);
+	RD::TextureFormat emission_format;
+	emission_format.format = RD::DATA_FORMAT_R8G8B8A8_UNORM;
+	emission_format.texture_type = RD::TEXTURE_TYPE_2D_ARRAY;
+	emission_format.width = 1;
+	emission_format.height = 1;
+	emission_format.array_layers = 2;
+	emission_format.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_UPDATE_BIT;
+	emission_dummy = RD::get_singleton()->texture_create(emission_format, RD::TextureView());
+	RD::get_singleton()->set_resource_name(emission_dummy, "Ray Scene Emission Dummy");
+	if (emission_dummy.is_valid()) {
+		for (int64_t layer = 0; layer < 2; layer++) {
+			RD::get_singleton()->texture_update(emission_dummy, layer, Vector<uint8_t>({ 255, 255, 255, 255 }));
+		}
+	}
+	RD::TextureFormat room_format;
+	room_format.format = RD::DATA_FORMAT_R8_UNORM;
+	room_format.width = 1;
+	room_format.height = 1;
+	room_format.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_UPDATE_BIT;
+	room_grid_dummy = RD::get_singleton()->texture_create(room_format, RD::TextureView());
+	RD::get_singleton()->set_resource_name(room_grid_dummy, "Ray Scene Room Grid Dummy");
+	if (room_grid_dummy.is_valid()) {
+		RD::get_singleton()->texture_update(room_grid_dummy, 0, Vector<uint8_t>({ 0 }));
+	}
 }
 
 RayScene::~RayScene() {
 	_print_tlas_rebuilds(true);
 	_hw_free();
-	RID *owned[] = { &blas_node_buffer, &triangle_buffer, &instance_buffer, &tlas_node_buffer, &material_buffer, &light_buffer, &scene_data_buffer, &triangle_uv_buffer };
+	RID *owned[] = { &blas_node_buffer, &triangle_buffer, &instance_buffer, &tlas_node_buffer, &material_buffer, &light_buffer, &scene_data_buffer, &triangle_uv_buffer, &triangle_emitter_buffer, &emission_dummy, &room_grid_dummy };
 	for (RID *rid : owned) {
 		if (rid->is_valid()) {
 			RD::get_singleton()->free_rid(*rid);
@@ -457,6 +481,262 @@ void RayScene::_ensure_buffer(RID &r_buffer, uint32_t &r_capacity, uint32_t p_co
 	RD::get_singleton()->set_resource_name(r_buffer, p_name);
 }
 
+void RayScene::_poll_room_grid() {
+	const Variant value = MaterialStorage::get_singleton()->global_shader_parameter_get_internal(SNAME("ray_room_grid"));
+	const Variant::Type type = value.get_type();
+	const RID source = (type == Variant::RID || type == Variant::OBJECT) ? RID(value) : RID();
+	if (source == room_grid_source) {
+		return;
+	}
+	room_grid_source = source;
+	room_grid_texture = source.is_valid() ? TextureStorage::get_singleton()->texture_get_rd_texture(source) : RID();
+	triangle_emitters_built = false;
+	print_line(vformat("Ray scene room grid changed: %s", source.is_valid() ? "valid" : Variant::get_type_name(type)));
+}
+
+void RayScene::_refresh_emitter_room_grid() {
+	EmitterRoomGrid &grid = emitter_room_grid;
+	grid.valid = false;
+	MaterialStorage *material_storage = MaterialStorage::get_singleton();
+	const Variant grid_value = material_storage->global_shader_parameter_get_internal(SNAME("ray_room_grid"));
+	const Variant origin_size_value = material_storage->global_shader_parameter_get_internal(SNAME("ray_room_grid_origin_size"));
+	const Variant::Type grid_type = grid_value.get_type();
+	const bool grid_is_texture = grid_type == Variant::RID || grid_type == Variant::OBJECT;
+	if (!grid_is_texture || origin_size_value.get_type() != Variant::VECTOR4) {
+		print_line(vformat("Ray scene room grid: parameters %s %s", Variant::get_type_name(grid_type), Variant::get_type_name(origin_size_value.get_type())));
+		return;
+	}
+	const Vector4 origin_size = origin_size_value;
+	const float cell_size = MAX(origin_size.w, 0.01f);
+	Ref<Image> image = TextureStorage::get_singleton()->texture_2d_get(RID(grid_value));
+	if (image.is_null() || image->get_format() != Image::FORMAT_R8) {
+		print_line(vformat("Ray scene room grid: image %s", image.is_null() ? "null" : itos(int(image->get_format()))));
+		return;
+	}
+	PackedByteArray ids = image->get_data();
+	if (int64_t(ids.size()) != int64_t(image->get_width()) * int64_t(image->get_height())) {
+		return;
+	}
+	uint32_t max_room = 0;
+	for (int64_t i = 0; i < ids.size(); i++) {
+		max_room = MAX(max_room, uint32_t(ids[i]));
+	}
+	if (max_room == 0 || max_room > MAX_EMITTER_ROOMS) {
+		print_line(vformat("Ray scene room grid: max room %d", int(max_room)));
+		return;
+	}
+	grid.origin = Vector2(origin_size.x, origin_size.z);
+	grid.cell_size = cell_size;
+	grid.size = Vector2i(image->get_width(), image->get_height());
+	grid.room_count = max_room;
+	grid.ids = ids;
+	grid.valid = true;
+}
+
+uint32_t RayScene::_emitter_room_at(const Vector3 &p_position) const {
+	const EmitterRoomGrid &grid = emitter_room_grid;
+	if (!grid.valid) {
+		return 0u;
+	}
+	const Vector2 origin = grid.origin - Vector2(anchor.x, anchor.z);
+	const int32_t x = int32_t(Math::floor((p_position.x - origin.x) / grid.cell_size));
+	const int32_t z = int32_t(Math::floor((p_position.z - origin.y) / grid.cell_size));
+	if (x < 0 || z < 0 || x >= grid.size.x || z >= grid.size.y) {
+		return 0u;
+	}
+	return uint32_t(grid.ids[z * grid.size.x + x]);
+}
+
+void RayScene::_update_triangle_emitters(const LocalVector<TriangleEmitterSource> &p_sources, const LocalVector<uint32_t> &p_order) {
+	triangle_emitters.clear();
+	_refresh_emitter_room_grid();
+	const int64_t emitter_filter = int64_t(GLOBAL_GET("rendering/global_illumination/ray_scene/emitter_instance"));
+	bool capped = false;
+	for (const TriangleEmitterSource &source : p_sources) {
+		const MeshEntry *mesh = meshes.getptr(source.mesh);
+		if (!mesh || !mesh->built || source.instance >= p_order.size()) {
+			continue;
+		}
+		for (uint32_t t = 0; t < uint32_t(mesh->triangle_surface.size()); t++) {
+			const uint32_t surface = mesh->triangle_surface[t];
+			if (surface >= source.surface_count || source.material_offset + surface >= materials.size()) {
+				continue;
+			}
+			const Material &material = materials[source.material_offset + surface];
+			if (!(material.emission[0] > 0.0f || material.emission[1] > 0.0f || material.emission[2] > 0.0f) && material.emission_texture == 0) {
+				continue;
+			}
+			if ((material.flags & MATERIAL_FLAG_SKIP) != 0u) {
+				continue;
+			}
+			if (triangle_emitters.size() >= MAX_TRIANGLE_EMITTERS) {
+				capped = true;
+				break;
+			}
+			TriangleEmitter emitter = {};
+			float *const corners[3] = { emitter.v0, emitter.v1, emitter.v2 };
+			for (uint32_t v = 0; v < 3; v++) {
+				const Vector3 position = source.transform.xform(mesh->positions[mesh->indices[t * 3 + v]]);
+				corners[v][0] = position.x;
+				corners[v][1] = position.y;
+				corners[v][2] = position.z;
+			}
+			{
+			const Vector3 centre = (Vector3(corners[0][0], corners[0][1], corners[0][2]) + Vector3(corners[1][0], corners[1][1], corners[1][2]) + Vector3(corners[2][0], corners[2][1], corners[2][2])) / 3.0f;
+			emitter.pad[0] = _emitter_room_at(centre);
+		}
+		emitter.instance = p_order[source.instance];
+			if (emitter_filter >= 0 && int64_t(emitter.instance) != emitter_filter) {
+				continue;
+			}
+			emitter.material = source.material_offset + surface;
+			emitter.uv_index = mesh->triangle_offset + t;
+			emitter.flags = source.proxied ? TRIANGLE_EMITTER_PROXIED : 0u;
+			memcpy(&emitter.pad[1], &source.window_range, sizeof(float));
+			triangle_emitters.push_back(emitter);
+		}
+		if (capped) {
+			break;
+		}
+	}
+	const Variant debug_near = ProjectSettings::get_singleton()->get_setting("rendering/global_illumination/ray_scene/debug_emitters_near", Variant());
+	if (debug_near.get_type() == Variant::VECTOR3) {
+		const Vector3 near_world = debug_near;
+		const Vector3 near_ray = near_world - anchor;
+		const float radius = float(ProjectSettings::get_singleton()->get_setting("rendering/global_illumination/ray_scene/debug_emitters_radius", 8.0));
+		print_line(vformat("EMITTER_NEAR query world %s anchor %s radius %.2f sources %d", near_world, anchor, radius, int(p_sources.size())));
+		for (const TriangleEmitterSource &source : p_sources) {
+			const float distance = source.transform.origin.distance_to(near_ray);
+			if (distance > radius) {
+				continue;
+			}
+			const uint32_t instance = source.instance < p_order.size() ? p_order[source.instance] : 0xFFFFFFFFu;
+			print_line(vformat("EMITTER_NEAR instance %d distance %.2f origin_world %s proxied %s window_range %.2f mesh \"%s\"", int(instance), distance, source.transform.origin + anchor, source.proxied ? "yes" : "no", source.window_range, MeshStorage::get_singleton()->mesh_get_path(source.mesh)));
+			const MeshEntry *near_mesh = meshes.getptr(source.mesh);
+			for (uint32_t s = 0; s < source.surface_count && source.material_offset + s < materials.size(); s++) {
+				const Material &m = materials[source.material_offset + s];
+				if (!(m.emission[0] > 0.0f || m.emission[1] > 0.0f || m.emission[2] > 0.0f) && m.emission_texture == 0) {
+					continue;
+				}
+				double area = 0.0;
+				uint32_t surface_triangles = 0;
+				if (near_mesh && near_mesh->built) {
+					for (uint32_t t = 0; t < uint32_t(near_mesh->triangle_surface.size()); t++) {
+						if (near_mesh->triangle_surface[t] != s) {
+							continue;
+						}
+						const Vector3 a = source.transform.xform(near_mesh->positions[near_mesh->indices[t * 3 + 0]]);
+						const Vector3 b = source.transform.xform(near_mesh->positions[near_mesh->indices[t * 3 + 1]]);
+						const Vector3 c = source.transform.xform(near_mesh->positions[near_mesh->indices[t * 3 + 2]]);
+						area += 0.5 * double((b - a).cross(c - a).length());
+						surface_triangles++;
+					}
+				}
+				print_line(vformat("EMITTER_NEAR   surface %d triangles %d area_m2 %.6f flux_lm %.2f (pi x area x mean_lum)", int(s), int(surface_triangles), area, Math::PI * area * double(m.emission_mean_luminance)));
+				print_line(vformat("EMITTER_NEAR   surface %d emission %.4f %.4f %.4f mean_lum %.4f texture %d texel_scale %.4f nits_range %.2f %.2f ranges %s skip %s", int(s), m.emission[0], m.emission[1], m.emission[2], m.emission_mean_luminance, int(m.emission_texture), m.emission_texel_scale, m.emission_nits_range[0], m.emission_nits_range[1], (m.emission_flags & EMISSION_FLAG_TEXTURE_RANGES) ? "yes" : "no", (m.flags & MATERIAL_FLAG_SKIP) ? "yes" : "no"));
+			}
+		}
+	}
+	triangle_emitter_count = triangle_emitters.size();
+	triangle_emitters_capped = capped;
+	emitter_room_starts.clear();
+	if (emitter_room_grid.valid && !capped) {
+		const uint32_t room_count = emitter_room_grid.room_count;
+		LocalVector<uint32_t> counts;
+		counts.resize(room_count + 1);
+		for (uint32_t r = 0; r <= room_count; r++) {
+			counts[r] = 0;
+		}
+		for (const TriangleEmitter &emitter : triangle_emitters) {
+			counts[MIN(emitter.pad[0], room_count)]++;
+		}
+		emitter_room_starts.resize(room_count + 2);
+		uint32_t running = 0;
+		for (uint32_t r = 0; r <= room_count; r++) {
+			emitter_room_starts[r] = running;
+			running += counts[r];
+		}
+		emitter_room_starts[room_count + 1] = running;
+		LocalVector<TriangleEmitter> sorted;
+		sorted.resize(triangle_emitters.size());
+		LocalVector<uint32_t> cursor(emitter_room_starts);
+		for (const TriangleEmitter &emitter : triangle_emitters) {
+			const uint32_t room = MIN(emitter.pad[0], room_count);
+			sorted[cursor[room]++] = emitter;
+		}
+		triangle_emitters = sorted;
+		emitter_room_count = room_count;
+		emitter_room_table_generation++;
+		String histogram;
+		for (uint32_t r = 0; r <= room_count; r++) {
+			histogram += String(r > 0 ? "," : "") + itos(counts[r]);
+		}
+		print_line(vformat("Ray scene emitter rooms: %d rooms, grid %dx%d cell %.2f origin %.2f,%.2f anchor %.2f,%.2f, %d emitters sorted, %d unassigned, counts %s", int(room_count), emitter_room_grid.size.x, emitter_room_grid.size.y, emitter_room_grid.cell_size, emitter_room_grid.origin.x - anchor.x, emitter_room_grid.origin.y - anchor.z, anchor.x, anchor.z, int(triangle_emitter_count), int(counts[room_count]), histogram));
+	} else {
+		emitter_room_count = 0;
+		emitter_room_table_generation++;
+	}
+	uint32_t emitter_instances = 0;
+	uint32_t emitter_proxied_instances = 0;
+	{
+		HashSet<uint32_t> unique_instances;
+		for (const TriangleEmitter &emitter : triangle_emitters) {
+			if (unique_instances.has(emitter.instance)) {
+				continue;
+			}
+			unique_instances.insert(emitter.instance);
+			emitter_instances++;
+			if ((emitter.flags & TRIANGLE_EMITTER_PROXIED) != 0u) {
+				emitter_proxied_instances++;
+			}
+		}
+	}
+	if (triangle_emitters.is_empty()) {
+		triangle_emitters.push_back(TriangleEmitter());
+	}
+	print_line(vformat("Ray scene triangle emitters: %d triangles across %d instances (%d proxied)%s", triangle_emitter_count, emitter_instances, emitter_proxied_instances, triangle_emitters_capped ? " (capped)" : ""));
+	if (emitter_filter >= 0) {
+		print_line(vformat("Ray scene emitter filter: instance %d, %d triangles kept", int(emitter_filter), int(triangle_emitter_count)));
+	}
+	if (triangles_logged < 64) {
+		triangles_logged++;
+		for (const TriangleEmitterSource &source : p_sources) {
+			const MeshEntry *mesh = meshes.getptr(source.mesh);
+			if (!mesh || !mesh->built || source.instance >= p_order.size()) {
+				continue;
+			}
+			uint32_t instance_triangles = 0;
+			HashSet<uint32_t> surfaces;
+			for (uint32_t t = 0; t < uint32_t(mesh->triangle_surface.size()); t++) {
+				const uint32_t surface = mesh->triangle_surface[t];
+				if (surface >= source.surface_count || source.material_offset + surface >= materials.size()) {
+					continue;
+				}
+				const Material &material = materials[source.material_offset + surface];
+				if (!(material.emission[0] > 0.0f || material.emission[1] > 0.0f || material.emission[2] > 0.0f) && material.emission_texture == 0) {
+					continue;
+				}
+				instance_triangles++;
+				surfaces.insert(surface);
+			}
+			if (instance_triangles == 0) {
+				continue;
+			}
+			String surface_list;
+			for (const uint32_t &surface : surfaces) {
+				const Material &material = materials[source.material_offset + surface];
+				if (!surface_list.is_empty()) {
+					surface_list += ",";
+				}
+				surface_list += vformat("%d(layer %d scale %.4f flat %.3f)", surface, int(material.emission_texture), material.emission_texel_scale, material.emission_mean_luminance);
+			}
+			print_line(vformat("Ray scene emitter: mesh \"%s\" instance %d triangles %d surfaces %s proxied %s", MeshStorage::get_singleton()->mesh_get_path(source.mesh), int(p_order[source.instance]), int(instance_triangles), surface_list, source.proxied ? "yes" : "no"));
+		}
+	}
+	_ensure_buffer(triangle_emitter_buffer, triangle_emitter_capacity, triangle_emitters.size(), sizeof(TriangleEmitter), "Ray Scene Triangle Emitters");
+	RD::get_singleton()->buffer_update(triangle_emitter_buffer, 0, triangle_emitters.size() * sizeof(TriangleEmitter), triangle_emitters.ptr());
+}
+
 void RayScene::_assemble(const LocalVector<RID> &p_meshes) {
 	blas_nodes.clear();
 	triangles.clear();
@@ -540,6 +820,19 @@ void RayScene::_instance_slots(RID p_material, CachedMaterial &r_cached) const {
 	const MaterialStorage *material_storage = MaterialStorage::get_singleton();
 	r_cached.scale_index = material_storage->material_get_instance_float_index(p_material, SNAME("oc_emission_scale"));
 	r_cached.bounce_index = material_storage->material_get_instance_float_index(p_material, SNAME("oc_emission_bounce"));
+	r_cached.color_index = material_storage->material_get_instance_vec4_index(p_material, SNAME("oc_emission_color"));
+	Color authored;
+	if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("emission_color")), authored)) {
+		authored = authored.srgb_to_linear();
+		r_cached.emission_color_luminance = 0.2126f * authored.r + 0.7152f * authored.g + 0.0722f * authored.b;
+	}
+}
+
+static bool _instance_color(int32_t p_offset, int32_t p_index, Color &r_color) {
+	if (p_offset < 0 || p_index < 0) {
+		return false;
+	}
+	return MaterialStorage::get_singleton()->global_shader_parameters_instance_read_vec4(p_offset + p_index, r_color) && r_color.a > 0.0f;
 }
 
 static constexpr float ALBEDO_MAX = 0.9f;
@@ -573,9 +866,15 @@ void RayScene::_warn_albedo_fallback(RID p_material, RID p_texture, RID p_mesh, 
 	WARN_PRINT(vformat("Ray scene: a material without gi_albedo takes the texture-mean albedo fallback (mesh \"%s\", surface %d, texture \"%s\").", MeshStorage::get_singleton()->mesh_get_path(p_mesh), p_surface, TextureStorage::get_singleton()->texture_get_path(p_texture)));
 }
 
+bool RayScene::emission_has_value(const Color &p_emission) {
+	return p_emission.r > 0.0f || p_emission.g > 0.0f || p_emission.b > 0.0f;
+}
+
 void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, Material &r_material, float &r_alpha_threshold, uint32_t &r_cull) {
 	r_material = {};
 	r_material.albedo[0] = r_material.albedo[1] = r_material.albedo[2] = 0.48f;
+	r_material.emission_uv_scale[0] = 1.0f;
+	r_material.emission_uv_scale[1] = 1.0f;
 	r_alpha_threshold = -1.0f;
 	r_cull = uint32_t(RSE::CULL_MODE_DISABLED);
 	if (p_material.is_null()) {
@@ -626,18 +925,81 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 		albedo_sources[ALBEDO_DEFAULT]++;
 	}
 
-	if (_param_color(material_storage->material_get_param(p_material, SNAME("gi_emission")), emission) && emission.r >= 0.0f && emission.g >= 0.0f && emission.b >= 0.0f) {
-		_store_color(r_material.emission, emission, emission_scale);
+	const Variant gi_value = material_storage->material_get_param(p_material, SNAME("gi_emission"));
+	Color gi_emission;
+	const bool gi_present = _param_color(gi_value, gi_emission);
+	const Variant color_value = material_storage->material_get_declared_param(p_material, SNAME("emission_color"));
+	Color authored_color;
+	const bool color_present = _param_color(color_value, authored_color);
+	const float authored_luminance = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_luminance")), 0.0f);
+	int branch = 0;
+	if (RayScene::emission_has_value(gi_present ? gi_emission : Color())) {
+		branch = 1;
+		_store_color(r_material.emission, gi_emission, emission_scale);
 	} else if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("emission_color")), emission)) {
+		branch = 2;
 		const float luminance = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_luminance")), 0.0f);
 		const float bounce = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_bounce_weight")), 1.0f);
 		emission = emission.srgb_to_linear();
 		const float multiplier = luminance * bounce * emission_scale;
 		_store_color(r_material.emission, emission, multiplier);
 	} else if (_param_color(material_storage->material_get_declared_param(p_material, SNAME("emission")), emission)) {
+		branch = 3;
 		const float multiplier = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_energy")), 1.0f);
 		emission = emission.srgb_to_linear();
 		_store_color(r_material.emission, emission, multiplier);
+	}
+	const String scan_mesh = MeshStorage::get_singleton()->mesh_get_path(p_mesh);
+	if (pipboy_scan_logged < 64 && scan_mesh.contains("npcpipboygroundtake01")) {
+		pipboy_scan_logged++;
+		const bool mask_flag = material_storage->material_get_declared_param(p_material, SNAME("use_emission_mask_texture")).booleanize();
+		print_line(vformat("Ray scene scan: surface %d mesh \"%s\" gi_present %s gi_type %d gi_value %s color_present %s color_value %s luminance %.4f mask %s branch %d stored %.4f %.4f %.4f", int(p_surface), scan_mesh, gi_present ? "yes" : "no", int(gi_value.get_type()), String(gi_value), color_present ? "yes" : "no", String(color_value), authored_luminance, mask_flag ? "yes" : "no", branch, r_material.emission[0], r_material.emission[1], r_material.emission[2]));
+	}
+	if (emission_debug_logged < 32 && gi_present && !RayScene::emission_has_value(gi_emission) && RayScene::emission_has_value(Color(r_material.emission[0], r_material.emission[1], r_material.emission[2]))) {
+		emission_debug_logged++;
+		print_line(vformat("Ray scene emission debug: mesh \"%s\" surface %d gi_emission type %d value %s -> authored fallback %.3f %.3f %.3f", MeshStorage::get_singleton()->mesh_get_path(p_mesh), int(p_surface), int(gi_value.get_type()), String(gi_value), r_material.emission[0], r_material.emission[1], r_material.emission[2]));
+	}
+	r_material.emission_mean_luminance = 0.2126f * r_material.emission[0] + 0.7152f * r_material.emission[1] + 0.0722f * r_material.emission[2];
+	if (material_storage->material_get_declared_param(p_material, SNAME("use_emission_mask_texture")).booleanize()) {
+		const Variant atlas_index = material_storage->material_get_declared_param(p_material, SNAME("oc_emission_atlas_index"));
+		if (atlas_index.get_type() == Variant::INT) {
+			r_material.emission_texture = uint32_t(MAX(int(atlas_index), 0));
+		}
+		const Variant scale_value = material_storage->material_get_declared_param(p_material, SNAME("uv_scale"));
+		if (scale_value.get_type() == Variant::VECTOR2) {
+			const Vector2 scale = scale_value;
+			r_material.emission_uv_scale[0] = scale.x;
+			r_material.emission_uv_scale[1] = scale.y;
+		}
+		const Variant offset_value = material_storage->material_get_declared_param(p_material, SNAME("uv_offset"));
+		if (offset_value.get_type() == Variant::VECTOR2) {
+			const Vector2 offset = offset_value;
+			r_material.emission_uv_offset[0] = offset.x;
+			r_material.emission_uv_offset[1] = offset.y;
+		}
+		r_material.emission_nits_range[0] = 0.0f;
+		r_material.emission_nits_range[1] = 1.0f;
+		const Variant nits_value = material_storage->material_get_declared_param(p_material, SNAME("emission_luminance_texture_range"));
+		if (nits_value.get_type() == Variant::VECTOR2) {
+			const Vector2 nits = nits_value;
+			r_material.emission_nits_range[0] = nits.x;
+			r_material.emission_nits_range[1] = nits.y;
+		}
+		if (material_storage->material_get_declared_param(p_material, SNAME("use_texture_ranges")).booleanize()) {
+			r_material.emission_flags |= EMISSION_FLAG_TEXTURE_RANGES;
+		}
+		r_material.emission_texel_scale = emission_scale;
+		if (!(r_material.emission_flags & EMISSION_FLAG_TEXTURE_RANGES) && authored_luminance > 0.0f) {
+			const float bounce = _param_float(material_storage->material_get_declared_param(p_material, SNAME("emission_bounce_weight")), 1.0f);
+			r_material.emission_texel_scale = authored_luminance * bounce * emission_scale;
+		}
+		if (!(r_material.emission_mean_luminance > 0.0f) && r_material.emission_texture != 0) {
+			if (gi_present) {
+				r_material.emission_mean_luminance = (0.2126f * gi_emission.r + 0.7152f * gi_emission.g + 0.0722f * gi_emission.b) * emission_scale;
+			} else {
+				r_material.emission_mean_luminance = 0.5f * (r_material.emission_nits_range[0] + r_material.emission_nits_range[1]) * r_material.emission_texel_scale;
+			}
+		}
 	}
 
 	const RSE::CullMode cull_mode = material_storage->material_get_cull_mode(p_material);
@@ -661,6 +1023,18 @@ void RayScene::_material_entry(RID p_material, RID p_mesh, uint32_t p_surface, M
 	const Variant shadow_pass = material_storage->material_get_param(p_material, SNAME("gi_shadow_pass"));
 	if (shadow_pass.get_type() == Variant::BOOL ? bool(shadow_pass) : _param_float(shadow_pass, 0.0f) > 0.5f) {
 		r_material.flags |= MATERIAL_FLAG_SHADOW_PASS;
+	}
+	const Variant sky_portal = material_storage->material_get_param(p_material, SNAME("gi_sky_portal"));
+	if (sky_portal.get_type() == Variant::BOOL ? bool(sky_portal) : _param_float(sky_portal, 0.0f) > 0.5f) {
+		r_material.flags |= MATERIAL_FLAG_SKY_PORTAL;
+		Color portal_tint(1.0f, 1.0f, 1.0f);
+		if (_param_color(material_storage->material_get_param(p_material, SNAME("gi_portal_tint")), portal_tint)) {
+			r_material.albedo[0] = CLAMP(portal_tint.r, 0.0f, 1.0f);
+			r_material.albedo[1] = CLAMP(portal_tint.g, 0.0f, 1.0f);
+			r_material.albedo[2] = CLAMP(portal_tint.b, 0.0f, 1.0f);
+		} else {
+			r_material.albedo[0] = r_material.albedo[1] = r_material.albedo[2] = 1.0f;
+		}
 	}
 	const Variant scissor = material_storage->material_get_declared_param(p_material, SNAME("alpha_scissor_threshold"));
 	const Variant body_alpha_test = material_storage->material_get_declared_param(p_material, SNAME("alpha_test"));
@@ -700,7 +1074,7 @@ void RayScene::_alpha_entry(RID p_material, Material &r_material, float p_alpha_
 		if (offset_value.get_type() == Variant::VECTOR2) {
 			offset = offset_value;
 		}
-		if (_param_bool(material_storage->material_get_declared_param(p_material, SNAME("use_texture_ranges")))) {
+		if (material_storage->material_get_declared_param(p_material, SNAME("use_texture_ranges")).booleanize()) {
 			Vector2 range(0.0f, 1.0f);
 			const Variant range_value = material_storage->material_get_declared_param(p_material, SNAME("geometry_opacity_texture_range"));
 			if (range_value.get_type() == Variant::VECTOR2) {
@@ -952,6 +1326,19 @@ void RayScene::_pack_light(RID p_light_instance, bool p_physical_units, float p_
 	packed.inv_spot_attenuation = 1.0f / MAX(0.0001f, light_storage->light_get_param(light, RSE::LIGHT_PARAM_SPOT_ATTENUATION));
 	packed.caster_mask = light_storage->light_get_shadow_caster_mask(light);
 	packed.pad = p_light_instance.get_local_index();
+	{
+		static HashSet<RID> lamp_near_printed;
+		const Variant debug_near = ProjectSettings::get_singleton()->get_setting("rendering/global_illumination/ray_scene/debug_emitters_near", Variant());
+		if (debug_near.get_type() == Variant::VECTOR3 && !lamp_near_printed.has(p_light_instance)) {
+			const Vector3 near_world = debug_near;
+			const float radius = float(ProjectSettings::get_singleton()->get_setting("rendering/global_illumination/ray_scene/debug_emitters_radius", 8.0));
+			const float distance = transform.origin.distance_to(near_world);
+			if (distance <= radius) {
+				lamp_near_printed.insert(p_light_instance);
+				print_line(vformat("LAMP_NEAR type %d distance %.2f world %s intensity_lm %.2f energy %.4f indirect %.4f color %.3f %.3f %.3f range %.2f cull_mask %d", int(type), distance, transform.origin, light_storage->light_get_param(light, RSE::LIGHT_PARAM_INTENSITY), light_storage->light_get_param(light, RSE::LIGHT_PARAM_ENERGY), light_storage->light_get_param(light, RSE::LIGHT_PARAM_INDIRECT_ENERGY), color.r, color.g, color.b, light_storage->light_get_param(light, RSE::LIGHT_PARAM_RANGE), int(light_storage->light_get_cull_mask(light))));
+			}
+		}
+	}
 	pack_shape(type, transform.basis, area_size, light_storage->light_get_direct_size(light), packed);
 	if (type != RSE::LIGHT_DIRECTIONAL) {
 		census.candidates++;
@@ -1642,11 +2029,26 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 
 	MeshStorage *mesh_storage = MeshStorage::get_singleton();
 	instances.clear();
+	instance_mesh_names.clear();
+	instance_mesh_positions.clear();
 	materials.clear();
 	material_cache.clear();
 	memset(albedo_sources, 0, sizeof(albedo_sources));
 	additive_skipped = 0;
+	emission_debug_logged = 0;
 	emission_scale = _param_float(MaterialStorage::get_singleton()->global_shader_parameter_get_internal(SNAME("openpbr_emission_scale")), 1.0f);
+	const Variant atlas_value = MaterialStorage::get_singleton()->global_shader_parameter_get_internal(SNAME("ray_emission_atlas"));
+	const Variant::Type atlas_type = atlas_value.get_type();
+	const RID atlas_rid = (atlas_type == Variant::RID || atlas_type == Variant::OBJECT) ? RID(atlas_value) : RID();
+	const RID atlas = atlas_rid.is_valid() ? TextureStorage::get_singleton()->texture_get_rd_texture(atlas_rid) : RID();
+	if (atlas != emission_texture_array) {
+		emission_texture_array = atlas;
+		emission_texture_count = 0;
+		if (atlas.is_valid()) {
+			emission_texture_count = RD::get_singleton()->texture_get_format(atlas).array_layers;
+		}
+		print_line(vformat("Ray scene emission atlas: %d layers, hit emission texel %s", emission_texture_count, GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ray_scene/hit_emission_texel") ? "on" : "off"));
+	}
 	skip_additive = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ray_scene/skip_additive_surfaces");
 	shell_ranges.clear();
 	HashMap<RenderGeometryInstance *, RID> shell_geometry;
@@ -1668,6 +2070,9 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	LocalVector<BuildPrimitive> primitives;
 	uint32_t signature = HASH_MURMUR3_SEED;
 	uint64_t scene_signature = 0;
+	uint32_t emitter_state = HASH_MURMUR3_SEED;
+	uint32_t emission_state = HASH_MURMUR3_SEED;
+	LocalVector<TriangleEmitterSource> emitter_sources;
 	LocalVector<uint32_t> scene_hashes;
 	scene_members.clear();
 	for (uint32_t i = 0; i < p_instances.size(); i++) {
@@ -1707,6 +2112,8 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		uint64_t candidates = 0;
 		uint64_t alpha_split = 0;
 		uint32_t feed_state = hash_murmur3_one_32(geometry->layer_mask);
+		bool instance_proxied = false;
+		float instance_window_range = 0.0f;
 
 		for (uint32_t s = 0; s < mesh->surface_count; s++) {
 			RID material = geometry->data->material_override;
@@ -1741,13 +2148,58 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 				candidates |= surface_candidates(s, materials[materials.size() - 1].flags);
 				alpha_split |= alpha_split_bits(s, cached->entry.flags, cached->alpha_flags);
 			}
-			const float factor = MAX(_instance_float(geometry->shader_uniforms_offset, cached->scale_index), 0.0f) * MAX(_instance_float(geometry->shader_uniforms_offset, cached->bounce_index), 0.0f);
+			const float instance_scale = _instance_float(geometry->shader_uniforms_offset, cached->scale_index);
+			const float instance_bounce = _instance_float(geometry->shader_uniforms_offset, cached->bounce_index);
+			if (instance_bounce <= 0.0f) {
+				instance_proxied = true;
+			}
+			Color placed;
+			const bool has_placed = _instance_color(geometry->shader_uniforms_offset, cached->color_index, placed);
+			if (has_placed) {
+				instance_window_range = MAX(instance_window_range, placed.a);
+			}
+			if (has_placed && cached->emission_color_luminance > 0.0f && cached->entry.emission_texture == 0) {
+				Material &instance_material = materials[materials.size() - 1];
+				const float nits = instance_material.emission_mean_luminance / cached->emission_color_luminance;
+				instance_material.emission[0] = placed.r * nits;
+				instance_material.emission[1] = placed.g * nits;
+				instance_material.emission[2] = placed.b * nits;
+				instance_material.emission_mean_luminance = 0.2126f * instance_material.emission[0] + 0.7152f * instance_material.emission[1] + 0.0722f * instance_material.emission[2];
+			}
+			const float factor = MAX(instance_scale, 0.0f);
 			if (factor != 1.0f) {
 				Material &instance_material = materials[materials.size() - 1];
 				for (int k = 0; k < 3; k++) {
 					instance_material.emission[k] *= factor;
 				}
+				instance_material.emission_mean_luminance *= factor;
+				instance_material.emission_texel_scale *= factor;
 			}
+			if (pipboy_scan_logged < 96 && mesh_storage->mesh_get_path(mesh_rid).contains("npcpipboygroundtake01")) {
+				pipboy_scan_logged++;
+				print_line(vformat("Ray scene instance: surface %d instance %d scale %.4f bounce %.4f factor %.4f emission %.4f %.4f %.4f", int(s), int(p_instances[i]), instance_scale, instance_bounce, factor, materials[materials.size() - 1].emission[0], materials[materials.size() - 1].emission[1], materials[materials.size() - 1].emission[2]));
+			}
+		}
+		bool instance_emissive = false;
+		for (uint32_t s = instance.material_offset; s < materials.size(); s++) {
+			const Material &surface_material = materials[s];
+			const bool emissive = surface_material.emission[0] > 0.0f || surface_material.emission[1] > 0.0f || surface_material.emission[2] > 0.0f || surface_material.emission_texture != 0;
+			instance_emissive = instance_emissive || emissive;
+			emitter_state = hash_murmur3_one_32(emissive ? 1u : 0u, emitter_state);
+			emission_state = hash_murmur3_buffer(surface_material.emission, sizeof(surface_material.emission), emission_state);
+			emission_state = hash_murmur3_one_32(surface_material.emission_texture, emission_state);
+			emission_state = hash_murmur3_one_32(surface_material.emission_flags, emission_state);
+		}
+		if (instance_emissive) {
+			TriangleEmitterSource emitter_source;
+			emitter_source.transform = transform;
+			emitter_source.mesh = mesh_rid;
+			emitter_source.instance = instances.size();
+			emitter_source.material_offset = instance.material_offset;
+			emitter_source.surface_count = mesh->surface_count;
+			emitter_source.proxied = instance_proxied;
+			emitter_source.window_range = instance_window_range;
+			emitter_sources.push_back(emitter_source);
 		}
 		bool hw_instance_usable = true;
 		if (accel) {
@@ -1775,6 +2227,8 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 			_feed_observe(geometry, geometry->transform, mesh_rid, *mesh, hw_instance_usable, feed_state);
 		}
 		primitives.push_back(primitive);
+		instance_mesh_names.push_back(MeshStorage::get_singleton()->mesh_get_path(mesh_rid));
+		instance_mesh_positions.push_back(geometry->transform.origin);
 		instances.push_back(instance);
 		signature = hash_murmur3_buffer(&instance, sizeof(Instance), signature);
 
@@ -1824,6 +2278,17 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		for (uint32_t i = 0; i < primitives.size(); i++) {
 			ordered[i] = instances[primitives[i].index];
 		}
+		if (!ray_scene_instance_table_printed && GLOBAL_GET("rendering/global_illumination/ray_scene/print_instances")) {
+			ray_scene_instance_table_printed = true;
+			for (uint32_t order_index = 0; order_index < primitives.size(); order_index++) {
+				const uint32_t source_index = primitives[order_index].index;
+				if (source_index >= instance_mesh_names.size()) {
+					continue;
+				}
+				const Vector3 origin = instance_mesh_positions[source_index];
+				print_line(vformat("Ray scene instance table: %d mesh \"%s\" position %.2f %.2f %.2f", int(order_index), instance_mesh_names[source_index], origin.x, origin.y, origin.z));
+			}
+		}
 		if (instances.is_empty()) {
 			ordered[0] = Instance();
 		}
@@ -1831,6 +2296,23 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 		_ensure_buffer(instance_buffer, instance_capacity, ordered.size(), sizeof(Instance), "Ray Scene Instances");
 		RD::get_singleton()->buffer_update(tlas_node_buffer, 0, tlas_nodes.size() * sizeof(Node), tlas_nodes.ptr());
 		RD::get_singleton()->buffer_update(instance_buffer, 0, ordered.size() * sizeof(Instance), ordered.ptr());
+	}
+
+	_poll_room_grid();
+	const bool emitters_dirty = !triangle_emitters_built || rebuilt || emitter_state != triangle_emitter_state;
+	if (emitters_dirty) {
+		LocalVector<uint32_t> instance_order;
+		instance_order.resize(instances.size());
+		for (uint32_t i = 0; i < primitives.size(); i++) {
+			instance_order[primitives[i].index] = i;
+		}
+		_update_triangle_emitters(emitter_sources, instance_order);
+		triangle_emitter_state = emitter_state;
+		triangle_emitters_built = true;
+	}
+	if (emitters_dirty || emission_state != triangle_emitter_emission_state) {
+		triangle_emitter_emission_state = emission_state;
+		triangle_emitter_generation++;
 	}
 
 	const int64_t additive_state = skip_additive ? int64_t(additive_skipped) : -1;
@@ -1972,6 +2454,23 @@ void RayScene::update(const PagedArray<RenderGeometryInstance *> &p_instances, c
 	scene_data.camera_to_anchor[2] = camera_to_anchor.z;
 	scene_data.instance_count = instances.size();
 	scene_data.light_count = lights.size();
+	scene_data.triangle_emitter_count = triangle_emitter_count;
+	scene_data.triangle_emitters_capped = triangle_emitters_capped ? 1u : 0u;
+	const float emissive_exposure_normalization = p_camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_camera_attributes) : 1.0f;
+	scene_data.emissive_exposure_normalization = emissive_exposure_normalization > 0.0f ? emissive_exposure_normalization : 1.0f;
+	scene_data.triangle_emitter_generation = triangle_emitter_generation;
+	scene_data.emission_texture_count = emission_texture_count;
+	scene_data.proxy_emitters_traced = int(GLOBAL_GET("rendering/global_illumination/ray_scene/proxy_emitters")) != 0 ? 1u : 0u;
+	scene_data.hit_emission_texel = GLOBAL_GET("rendering/global_illumination/ray_scene/hit_emission_texel") ? 1u : 0u;
+	scene_data.room_grid_origin[0] = float(emitter_room_grid.origin.x - anchor.x);
+	scene_data.room_grid_origin[1] = float(emitter_room_grid.origin.y - anchor.z);
+	scene_data.room_grid_cell = emitter_room_grid.cell_size;
+	scene_data.room_count = emitter_room_count;
+	if (emitter_room_count > 0) {
+		for (uint32_t r = 0; r <= emitter_room_count + 1; r++) {
+			scene_data.room_start[r * 4] = emitter_room_starts[r];
+		}
+	}
 	if (scene_data_buffer.is_null()) {
 		scene_data_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(SceneData));
 		RD::get_singleton()->set_resource_name(scene_data_buffer, "Ray Scene Data");

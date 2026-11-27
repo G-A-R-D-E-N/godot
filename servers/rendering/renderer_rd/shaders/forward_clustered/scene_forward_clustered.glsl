@@ -2677,7 +2677,7 @@ void fragment_shader(in SceneData scene_data) {
 			ssil = textureLod(sampler2D(ssil_buffer, SAMPLER_LINEAR_CLAMP), screen_uv, 0.0);
 #endif
 			ssil.rgb = max(ssil.rgb, vec3(0.0));
-			ambient_occlusion = min(ambient_ao, 1.0 - ssil.a);
+			ambient_occlusion = min(ambient_ao, mix(1.0 - ssil.a, 1.0, ambient_source.y));
 		}
 		vec3 policy_ambient_light = ambient_light;
 #ifdef MULTI_BOUNCE_OCCLUSION_ENABLED
@@ -2777,7 +2777,7 @@ void fragment_shader(in SceneData scene_data) {
 		ambient_light *= ambient_weight;
 
 		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSIL)) {
-			ambient_light *= lighting_sources ? 1.0 : 1.0 - ssil.a;
+			ambient_light *= lighting_sources ? 1.0 : mix(1.0 - ssil.a, 1.0, ambient_source.y);
 			ambient_light += ssil.rgb * ambient_weight;
 			float ssil_share = dot(ssil.rgb * ambient_weight, vec3(0.2126, 0.7152, 0.0722)) / max(dot(ambient_light, vec3(0.2126, 0.7152, 0.0722)), 1e-6);
 			ambient_source = ambient_source * (1.0 - ssil_share) + vec4(0.0, 0.0, 0.0, ssil_share);
@@ -3602,6 +3602,47 @@ void fragment_shader(in SceneData scene_data) {
 			}
 		}
 	}
+#ifdef DIRECT_RESAMPLED_ROUTE
+	if (sc_use_direct_resampled() && sc_use_direct_emitters() && direct_record_ok && direct_record_tails > 0) {
+		ivec2 emitter_pixel = ivec2(gl_FragCoord.xy);
+		uvec2 emitter_record = texelFetch(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), ivec3(emitter_pixel, direct_record_tails), 0).xy;
+		float emitter_weight = abs(uintBitsToFloat(emitter_record.y));
+		if (emitter_record.x == 0xFFFFFFFFu && emitter_weight > 0.0) {
+			ivec3 emitter_size = textureSize(usampler2DArray(direct_resampled, SAMPLER_NEAREST_CLAMP), 0);
+			uint emitter_index = uint(emitter_pixel.y) * uint(emitter_size.x) + uint(emitter_pixel.x);
+			vec4 emitter_geometry = direct_emitter_samples.data[emitter_index * 2u];
+			vec4 emitter_color = direct_emitter_samples.data[emitter_index * 2u + 1u];
+			if (emitter_geometry.w > 0.0) {
+				int emitter_layer = direct_record_heads + direct_record_tails + 3;
+				float emitter_visible = texelFetch(sampler2DArray(direct_shadow_factors, SAMPLER_NEAREST_CLAMP), ivec3(emitter_pixel, emitter_layer), 0).r;
+				float emitter_scale = emitter_visible * emitter_weight / float(direct_record_tails);
+				if (emitter_scale > 0.0) {
+					hvec3 emitter_diffuse = hvec3(0.0);
+					hvec3 emitter_specular = hvec3(0.0);
+					light_process_emitter(emitter_geometry.xyz, hvec3(emitter_color.rgb), half(emitter_geometry.w), vertex, view, normal, f0, roughness, metallic, albedo, alpha, screen_uv, energy_compensation,
+#ifdef LIGHT_BACKLIGHT_USED
+							backlight,
+#endif
+#ifdef LIGHT_TRANSMITTANCE_USED
+							transmittance_color, transmittance_depth, transmittance_boost,
+#endif
+#ifdef LIGHT_RIM_USED
+							rim, rim_tint,
+#endif
+#ifdef LIGHT_CLEARCOAT_USED
+							clearcoat, clearcoat_roughness, CLEARCOAT_NORMAL,
+#endif
+#ifdef LIGHT_ANISOTROPY_USED
+							binormal, tangent, anisotropy,
+#endif
+							emitter_diffuse, emitter_specular);
+					diffuse_light += emitter_diffuse * hvec3(emitter_scale);
+					direct_specular_light += emitter_specular * hvec3(emitter_scale);
+				}
+			}
+		}
+	}
+#endif
 #endif // !USE_VERTEX_LIGHTING
 #endif //!defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED)
 
@@ -3944,3 +3985,4 @@ void main() {
 
 	fragment_shader(scene_data_block.data);
 }
+

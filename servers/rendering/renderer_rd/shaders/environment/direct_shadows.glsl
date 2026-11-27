@@ -54,6 +54,13 @@ layout(rg32ui, set = 0, binding = 16) uniform restrict readonly uimage2D history
 layout(rg32ui, set = 0, binding = 17) uniform restrict writeonly uimage2D guide_image;
 layout(r32ui, set = 0, binding = 18) uniform restrict writeonly uimage2D ray_image;
 
+#define EMITTER_HIT_INSTANCES 4096u
+
+layout(set = 0, binding = 27, std430) restrict buffer EmitterHitHist {
+	uint hits[];
+}
+emitter_hit_hist;
+
 layout(set = 0, binding = 12, std430) restrict buffer Counters {
 	uint lit_pixels;
 	uint rest_pixels;
@@ -68,6 +75,55 @@ layout(set = 0, binding = 12, std430) restrict buffer Counters {
 	uint resolve_tier2;
 	uint resolve_tier3;
 	uint resolve_cut;
+	uint emitter_pixels;
+	uint emitter_rays;
+	uint emitter_blocked;
+	uint emitter_backface;
+	uint emitter_blocked_front;
+	uint emitter_hist_005;
+	uint emitter_hist_030;
+	uint emitter_hist_200;
+	uint emitter_hist_far;
+	uint emitter_unblocked_front;
+	uint emitter_end_005;
+	uint emitter_end_030;
+	uint emitter_end_200;
+	uint emitter_end_far;
+	uint len_u_1;
+	uint len_b_1;
+	uint len_u_3;
+	uint len_b_3;
+	uint len_u_10;
+	uint len_b_10;
+	uint len_u_far;
+	uint len_b_far;
+	uint blocked_alpha_surface;
+	uint blocked_solid_surface;
+	uint recv_near_005;
+	uint recv_near_030;
+	uint recv_near_200;
+	uint recv_near_far;
+	uint sample_min_x;
+	uint sample_min_y;
+	uint sample_min_z;
+	uint sample_max_x;
+	uint sample_max_y;
+	uint sample_max_z;
+	uint sample_count;
+	uint min_ray_len;
+	uint blocked_split_unavailable;
+	uint cam_005;
+	uint cam_030;
+	uint cam_200;
+	uint cam_far;
+	uint back_005;
+	uint back_030;
+	uint back_200;
+	uint back_far;
+	uint near3_back_cam;
+	uint near3_facing_cam;
+	uint near3_backface_back_cam;
+	uint near3_backface_facing_cam;
 }
 counters;
 
@@ -78,6 +134,10 @@ direct_excludes;
 
 #ifdef EXTERNAL_ENTRIES
 layout(r32ui, set = 0, binding = 20) uniform restrict readonly uimage2DArray entry_image;
+layout(set = 0, binding = 21, std430) restrict readonly buffer DirectEmitterSamples {
+	vec4 data[];
+}
+direct_emitter_samples;
 #endif
 
 #define RAY_SCENE_EXCLUDE
@@ -119,6 +179,10 @@ vec3 tail_position[MAX_ENTRIES];
 bool tail_seen[MAX_ENTRIES];
 float tail_hits[MAX_ENTRIES];
 float tail_rays[MAX_ENTRIES];
+uint emitter_tail_factor = 0u;
+bool emitter_tail = false;
+vec4 emitter_geometry = vec4(0.0);
+vec4 emitter_color = vec4(0.0);
 #endif
 
 float rest_total = 0.0;
@@ -252,6 +316,15 @@ void read_entries(ivec2 p_pixel) {
 		head_slots[i] = imageLoad(entry_image, ivec3(p_pixel, int(i))).r & 0xFFFFu;
 	}
 	tail_count = rest_layer - own_limit;
+	emitter_tail = (params.pad0 & 1u) != 0u && tail_count > 0u;
+	if (emitter_tail) {
+		atomicAdd(counters.emitter_pixels, 1u);
+		tail_count--;
+		emitter_tail_factor = params.entries + 2u;
+		uint sample_index = uint(p_pixel.y) * uint(params.full_size[0]) + uint(p_pixel.x);
+		emitter_geometry = direct_emitter_samples.data[sample_index * 2u];
+		emitter_color = direct_emitter_samples.data[sample_index * 2u + 1u];
+	}
 	for (uint k = 0u; k < tail_count; k++) {
 		uint base = own_limit + 3u * k;
 		uint packed = imageLoad(entry_image, ivec3(p_pixel, int(base))).r;
@@ -558,7 +631,7 @@ void main() {
 	}
 	own_limit = params.head_entries;
 	rest_layer = params.entries - 1u;
-	uint factor_layers = rest_layer + 3u;
+	uint factor_layers = rest_layer + 4u;
 
 #ifdef TRACE_QUARTER
 	ivec2 pixel;
@@ -617,7 +690,8 @@ void main() {
 	for (uint k = 0u; k < tail_count; k++) {
 		tail_lit = tail_lit || tail_seen[k];
 	}
-	if (own_count + rest_count == 0u && !tail_lit) {
+	bool emitter_lit = emitter_tail && emitter_geometry.w > 0.0;
+	if (own_count + rest_count == 0u && !tail_lit && !emitter_lit) {
 #else
 	if (own_count + rest_count == 0u) {
 #endif
@@ -705,8 +779,144 @@ void main() {
 	}
 
 	vec3 anchored = relative + ray_scene.camera_to_anchor;
+	const vec3 omni_anchor = vec3(-3.720, -0.857, -1.148) - params.anchor.xyz;
+	const float receiver_omni_distance = length(anchored - omni_anchor);
+	const float receiver_camera_distance = length(anchored - ray_scene.camera_to_anchor);
+	if (receiver_omni_distance < 3.0) {
+		if (dot(normal, view) < 0.0) { atomicAdd(counters.near3_back_cam, 1u); } else { atomicAdd(counters.near3_facing_cam, 1u); }
+	}
+		if (receiver_camera_distance < 1.0) { atomicAdd(counters.cam_005, 1u); } else if (receiver_camera_distance < 3.0) { atomicAdd(counters.cam_030, 1u); } else if (receiver_camera_distance < 10.0) { atomicAdd(counters.cam_200, 1u); } else { atomicAdd(counters.cam_far, 1u); }
+	{
+		if (receiver_omni_distance < 1.0) {
+			atomicAdd(counters.recv_near_005, 1u);
+		} else if (receiver_omni_distance < 3.0) {
+			atomicAdd(counters.recv_near_030, 1u);
+		} else if (receiver_omni_distance < 10.0) {
+			atomicAdd(counters.recv_near_200, 1u);
+		} else {
+			atomicAdd(counters.recv_near_far, 1u);
+		}
+	}
 	uint traced_rays = 0u;
 	uint ray_record = 0u;
+
+#ifdef EXTERNAL_ENTRIES
+	float emitter_visible = 0.0;
+	uint emitter_traces = 0u;
+	if (emitter_tail && emitter_geometry.w > 0.0 && (params.pad0 & 2u) == 0u) {
+		vec3 emitter_point = to_world(emitter_geometry.xyz) + ray_scene.camera_to_anchor;
+		vec3 emitter_from = anchored + to_world(normal) * params.bias;
+		if (abs(emitter_point.x) < 2048.0 && abs(emitter_point.y) < 2048.0 && abs(emitter_point.z) < 2048.0) {
+			uint sx = uint(clamp((emitter_point.x + 2048.0) * 16.0, 0.0, 131071.0));
+			uint sy = uint(clamp((emitter_point.y + 2048.0) * 16.0, 0.0, 131071.0));
+			uint sz = uint(clamp((emitter_point.z + 2048.0) * 16.0, 0.0, 131071.0));
+			atomicMax(counters.sample_min_x, 131071u - sx);
+			atomicMax(counters.sample_min_y, 131071u - sy);
+			atomicMax(counters.sample_min_z, 131071u - sz);
+			atomicMax(counters.sample_max_x, sx);
+			atomicMax(counters.sample_max_y, sy);
+			atomicMax(counters.sample_max_z, sz);
+			atomicAdd(counters.sample_count, 1u);
+		}
+		vec3 emitter_offset = emitter_point - emitter_from;
+		float emitter_reach = length(emitter_offset);
+		float emitter_ndotl = dot(to_world(normal), normalize(emitter_point - anchored));
+		if (emitter_ndotl <= 0.0) {
+			emitter_visible = 1.0;
+			emitter_traces = 0u;
+			atomicAdd(counters.emitter_backface, 1u);
+			if (receiver_omni_distance < 1.0) { atomicAdd(counters.back_005, 1u); } else if (receiver_omni_distance < 3.0) { atomicAdd(counters.back_030, 1u); } else if (receiver_omni_distance < 10.0) { atomicAdd(counters.back_200, 1u); } else { atomicAdd(counters.back_far, 1u); }
+			if (receiver_omni_distance < 3.0) {
+				if (dot(normal, view) < 0.0) { atomicAdd(counters.near3_backface_back_cam, 1u); } else { atomicAdd(counters.near3_backface_facing_cam, 1u); }
+			}
+		} else if (emitter_reach <= params.bias) {
+			emitter_visible = 1.0;
+			emitter_traces = 1u;
+		} else {
+			vec3 emitter_to = emitter_from + emitter_offset * (1.0 - params.bias / emitter_reach);
+			uint emitter_rays = params.reference != 0u ? REFERENCE_RAYS : 1u;
+			float emitter_ray_length = length(emitter_to - emitter_from);
+			atomicMax(counters.min_ray_len, 4095u - uint(clamp(emitter_ray_length * 4.0, 0.0, 4095.0)));
+			for (uint r = 0u; r < emitter_rays; r++) {
+				int skip_instance = params.pad1 != 0u ? int(params.pad1) - 1 : -1;
+				uint blocker = 0xFFFFFFFFu;
+				uint blocker_triangle = 0u;
+				float blocker_distance = 0.0;
+				bool emitter_unblocked = ray_scene_sampled_visibility_blocker(emitter_from, emitter_to, RAY_SCENE_ALL_CASTERS, rng_state + r, skip_instance, blocker, blocker_distance, blocker_triangle);
+								emitter_visible += emitter_unblocked ? 1.0 : 0.0;
+				if (emitter_ray_length < 1.0) {
+					if (emitter_unblocked) { atomicAdd(counters.len_u_1, 1u); } else { atomicAdd(counters.len_b_1, 1u); }
+				} else if (emitter_ray_length < 3.0) {
+					if (emitter_unblocked) { atomicAdd(counters.len_u_3, 1u); } else { atomicAdd(counters.len_b_3, 1u); }
+				} else if (emitter_ray_length < 10.0) {
+					if (emitter_unblocked) { atomicAdd(counters.len_u_10, 1u); } else { atomicAdd(counters.len_b_10, 1u); }
+				} else {
+					if (emitter_unblocked) { atomicAdd(counters.len_u_far, 1u); } else { atomicAdd(counters.len_b_far, 1u); }
+				}
+				if (emitter_unblocked) {
+					atomicAdd(counters.emitter_unblocked_front, 1u);
+				}
+				if (!emitter_unblocked) {
+					uint hist_id = blocker < EMITTER_HIT_INSTANCES ? blocker : EMITTER_HIT_INSTANCES;
+					uint hist_base = hist_id * 16u;
+					uint hist_distance = uint(clamp(blocker_distance, 0.0, 250.0) * 4.0);
+					atomicAdd(emitter_hit_hist.hits[hist_base], 1u);
+					atomicAdd(emitter_hit_hist.hits[hist_base + 1u], hist_distance);
+					atomicMin(emitter_hit_hist.hits[hist_base + 2u], hist_distance);
+					atomicMax(emitter_hit_hist.hits[hist_base + 3u], hist_distance);
+					#ifdef RAY_SCENE_ALPHA
+					RaySceneHit blocker_hit;
+					blocker_hit.instance = blocker;
+					blocker_hit.triangle = blocker_triangle;
+					const RaySceneMaterial blocker_material = ray_scene_hit_material(blocker_hit);
+					if ((blocker_material.flags >> RAY_SCENE_ALPHA_SHIFT) != 0u) {
+						atomicAdd(counters.blocked_alpha_surface, 1u);
+					} else {
+						atomicAdd(counters.blocked_solid_surface, 1u);
+					}
+					#else
+						atomicAdd(counters.blocked_split_unavailable, 1u);
+					#endif
+					atomicAdd(counters.emitter_blocked_front, 1u);
+					if (blocker_distance < 0.05) {
+						atomicAdd(counters.emitter_hist_005, 1u);
+					} else if (blocker_distance < 0.3) {
+						atomicAdd(counters.emitter_hist_030, 1u);
+					} else if (blocker_distance < 2.0) {
+						atomicAdd(counters.emitter_hist_200, 1u);
+					} else {
+						atomicAdd(counters.emitter_hist_far, 1u);
+					}
+					float emitter_end_distance = max(emitter_ray_length - blocker_distance, 0.0);
+					uint hist_end_distance = uint(clamp(emitter_end_distance, 0.0, 250.0) * 4.0);
+					atomicAdd(emitter_hit_hist.hits[hist_base + 4u], 1u);
+					atomicAdd(emitter_hit_hist.hits[hist_base + 5u], hist_end_distance);
+					atomicMin(emitter_hit_hist.hits[hist_base + 6u], hist_end_distance);
+					atomicMax(emitter_hit_hist.hits[hist_base + 7u], hist_end_distance);
+					uint hist_rb = blocker_distance < 0.05 ? 8u : blocker_distance < 0.3 ? 9u : blocker_distance < 2.0 ? 10u : 11u;
+					uint hist_eb = emitter_end_distance < 0.05 ? 12u : emitter_end_distance < 0.3 ? 13u : emitter_end_distance < 2.0 ? 14u : 15u;
+					atomicAdd(emitter_hit_hist.hits[hist_base + hist_rb], 1u);
+					atomicAdd(emitter_hit_hist.hits[hist_base + hist_eb], 1u);
+					if (emitter_end_distance < 0.05) {
+						atomicAdd(counters.emitter_end_005, 1u);
+					} else if (emitter_end_distance < 0.3) {
+						atomicAdd(counters.emitter_end_030, 1u);
+					} else if (emitter_end_distance < 2.0) {
+						atomicAdd(counters.emitter_end_200, 1u);
+					} else {
+						atomicAdd(counters.emitter_end_far, 1u);
+					}
+				}
+				emitter_traces++;
+			}
+		}
+		traced_rays += emitter_traces;
+		atomicAdd(counters.emitter_rays, emitter_traces);
+		if (emitter_traces > 0u) {
+			atomicAdd(counters.emitter_blocked, emitter_traces - uint(emitter_visible + 0.5));
+		}
+	}
+#endif
 
 	if (params.reference != 0u) {
 		for (uint i = 0u; i < own_count; i++) {
@@ -881,6 +1091,12 @@ void main() {
 			imageStore(factor_image, ivec3(at, int(own_limit + k)), vec4(params.force_one != 0u && params.tail_visibility != 2u ? 1.0 : visible));
 		}
 	}
+	if (emitter_tail) {
+		float visible = emitter_traces > 0u ? emitter_visible / float(emitter_traces) : 1.0;
+		imageStore(factor_image, ivec3(at, int(emitter_tail_factor)), vec4(params.force_one != 0u ? 1.0 : visible));
+	} else if ((params.pad0 & 1u) != 0u) {
+		imageStore(factor_image, ivec3(at, int(params.entries + 2u)), vec4(1.0));
+	}
 #endif
 	imageStore(slot_image, ivec3(at, int(rest_layer)), vec4(has_rest ? float(rest_key_value) / 65535.0 : 0.0));
 #ifdef PRECISE_HISTORY
@@ -913,3 +1129,19 @@ void main() {
 		imageStore(debug_image, at, vec4(color, 1.0));
 	}
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
