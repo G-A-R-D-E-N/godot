@@ -1134,6 +1134,39 @@ float rs_median_w(ivec2 p_pixel, out int r_count) {
 	return count > 0 ? values[count / 2] : 0.0;
 }
 
+float rs_median_rad(ivec2 p_pixel, vec3 p_origin, vec3 p_nrm, out int r_count) {
+	float values[9];
+	int count = 0;
+	for (int dy = -1; dy <= 1; dy++) {
+		for (int dx = -1; dx <= 1; dx++) {
+			ivec2 np = p_pixel + ivec2(dx, dy);
+			if (any(lessThan(np, ivec2(0))) || any(greaterThanEqual(np, rf.trace_size))) {
+				continue;
+			}
+			Reservoir n = rs_load(np);
+			if (n.m > 0u && (n.flags & RF_VALID) != 0u && n.w > 0.0 && !isinf(n.w) && !isnan(n.w)) {
+				float c = max(dot(p_nrm, rs_dir_to(n, p_origin)), 0.0);
+				float lum = rs_luma(n.lo) * (c * n.w / RS_PI);
+				if (!isinf(lum) && !isnan(lum)) {
+					values[count] = lum;
+					count++;
+				}
+			}
+		}
+	}
+	for (int i = 1; i < count; i++) {
+		float key = values[i];
+		int j = i - 1;
+		while (j >= 0 && values[j] > key) {
+			values[j + 1] = values[j];
+			j--;
+		}
+		values[j + 1] = key;
+	}
+	r_count = count;
+	return count > 0 ? values[count / 2] : 0.0;
+}
+
 void main() {
 	ivec2 px = ivec2(gl_GlobalInvocationID.xy);
 	uint local = gl_LocalInvocationIndex;
@@ -1227,6 +1260,16 @@ void main() {
 			if (!rs_finite3(radiance)) {
 				radiance = vec3(0.0);
 				w = 0.0;
+			}
+			if (has && visible && (rf.flags & F_UNBIASED) == 0u) {
+				int rcount;
+				float med_rad = rs_median_rad(px, r.origin, r.nrm, rcount);
+				float rad_lum = rs_luma(radiance);
+				float rad_cap = min(rf.w_clamp, 4.0) * max(med_rad, 1e-4);
+				if (rcount >= 3 && rad_lum > rad_cap) {
+					radiance *= rad_cap / rad_lum;
+					clamped = true;
+				}
 			}
 			coverage = (held && (!(has && !visible) || (rf.flags & F_KEEP_BLOCKED) != 0u)) ? clamp(float(s.m) / float(max(rf.n_target, 1u)), 0.0, 1.0) : 0.0;
 
