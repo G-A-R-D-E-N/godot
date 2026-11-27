@@ -33,6 +33,7 @@
 #include "core/object/class_db.h"
 #include "core/os/os.h"
 #include "servers/rendering/renderer_rd/effects/copy_effects.h"
+#include "servers/rendering/renderer_rd/environment/ddgi.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
 #include "servers/rendering/renderer_rd/framebuffer_cache_rd.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
@@ -97,6 +98,15 @@ Dictionary RenderDataRD::get_water_lighting_data() const {
 	result["cluster_max_elements"] = cluster_max_elements;
 	result["emissive_exposure_normalization"] = scene_data->get_current_exposure_normalization();
 	result["camera_visible_layers"] = scene_data->camera_visible_layers;
+	if (render_buffers.is_valid() && render_buffers->has_custom_data(RB_SCOPE_DDGI)) {
+		Ref<RendererRD::DDGI::Volume> ddgi = render_buffers->get_custom_data(RB_SCOPE_DDGI);
+		if (ddgi.is_valid() && ddgi->irradiance.is_valid() && ddgi->distance.is_valid() && ddgi->probe_data.is_valid() && ddgi->ubo.is_valid()) {
+			result["ddgi_irradiance_texture"] = ddgi->irradiance;
+			result["ddgi_distance_texture"] = ddgi->distance;
+			result["ddgi_probe_data_texture"] = ddgi->probe_data;
+			result["ddgi_ubo"] = ddgi->ubo;
+		}
+	}
 	return result;
 }
 
