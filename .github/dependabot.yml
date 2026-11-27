@@ -1,7 +1,9 @@
 version: 2
 updates:
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - /
+      - /.github/actions/*
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
@@ -15,6 +17,9 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       web-dependencies:
         patterns:
@@ -24,10 +29,14 @@ updates:
     directories:
       - /modules/mono/editor/*/*
       - /modules/mono/glue/GodotSharp/*
-      - /tests/mono_shutdown_tracker
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "Microsoft.CodeAnalysis*"
+      - dependency-name: "Microsoft.Build*"
+      - dependency-name: "Microsoft.NETFramework.ReferenceAssemblies"
+      - dependency-name: "JetBrains.Annotations"
     groups:
       dotnet-dependencies:
         patterns:
