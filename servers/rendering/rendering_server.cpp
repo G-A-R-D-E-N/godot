@@ -3012,7 +3012,9 @@ void RenderingServer::_bind_methods() {
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_DIRECTIONAL_SHADOW_ATLAS);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SCENE_LUMINANCE);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SSAO);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_GTAO);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SSIL);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SSGI);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_PSSM_SPLITS);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_DECAL_ATLAS);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_SDFGI);
@@ -3828,20 +3830,20 @@ void RenderingServer::init() {
 	GLOBAL_DEF("rendering/environment/gtao/bent_normals", false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/gtao/thin_occluder_compensation", PROPERTY_HINT_RANGE, "0.0,0.7,0.01"), 0.0);
 
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/quality", PROPERTY_HINT_ENUM, "Very Low (Fast),Low (Fast),Medium (Average),High (Slow),Ultra (Custom)"), 2);
-	GLOBAL_DEF("rendering/environment/ssil/half_size", true);
-	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssil/adaptive_target", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), 0.5);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/blur_passes", PROPERTY_HINT_RANGE, "0,6"), 4);
-	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssil/fadeout_from", PROPERTY_HINT_RANGE, "0.0,512,0.1,or_greater"), 50.0);
-	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssil/fadeout_to", PROPERTY_HINT_RANGE, "64,65536,0.1,or_greater"), 300.0);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/backend", PROPERTY_HINT_ENUM, "Gather,Traced"), 0);
-	GLOBAL_DEF("rendering/environment/ssil/traced/half_size", true);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/traced/rays_per_pixel", PROPERTY_HINT_RANGE, "1,4,1"), 1);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/traced/max_steps", PROPERTY_HINT_RANGE, "8,256,1"), 48);
-	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssil/traced/thickness", PROPERTY_HINT_RANGE, "0.01,4.0,0.01,suffix:m"), 0.5);
-	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssil/traced/firefly_luminance", PROPERTY_HINT_RANGE, "1.0,1024.0,0.1,or_greater"), 32.0);
-	GLOBAL_DEF("rendering/environment/ssil/traced/temporal", true);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssil/traced/history_frames", PROPERTY_HINT_RANGE, "1,255,1"), 32);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssgi/quality", PROPERTY_HINT_ENUM, "Very Low (Fast),Low (Fast),Medium (Average),High (Slow),Ultra (Custom)"), 2);
+	GLOBAL_DEF("rendering/environment/ssgi/half_size", true);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssgi/adaptive_target", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), 0.5);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssgi/blur_passes", PROPERTY_HINT_RANGE, "0,6"), 4);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssgi/fadeout_from", PROPERTY_HINT_RANGE, "0.0,512,0.1,or_greater"), 50.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssgi/fadeout_to", PROPERTY_HINT_RANGE, "64,65536,0.1,or_greater"), 300.0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssgi/backend", PROPERTY_HINT_ENUM, "Gather,Traced"), 0);
+	GLOBAL_DEF("rendering/environment/ssgi/traced/half_size", true);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssgi/traced/rays_per_pixel", PROPERTY_HINT_RANGE, "1,4,1"), 1);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssgi/traced/max_steps", PROPERTY_HINT_RANGE, "8,256,1"), 48);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssgi/traced/thickness", PROPERTY_HINT_RANGE, "0.01,4.0,0.01,suffix:m"), 0.5);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/environment/ssgi/traced/firefly_luminance", PROPERTY_HINT_RANGE, "1.0,1024.0,0.1,or_greater"), 32.0);
+	GLOBAL_DEF("rendering/environment/ssgi/traced/temporal", true);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/environment/ssgi/traced/history_frames", PROPERTY_HINT_RANGE, "1,255,1"), 32);
 
 	GLOBAL_DEF("rendering/environment/screen_space_lighting/legacy_last_frame_source", true);
 	GLOBAL_DEF("rendering/environment/screen_space_lighting/temporal_validation", false);

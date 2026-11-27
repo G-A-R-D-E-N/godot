@@ -1773,7 +1773,7 @@ void RenderForwardClustered::_process_ssgi(Ref<RenderSceneBuffersRD> p_render_bu
 	settings.history_valid = was_traced && rb_data->ss_effects_data.ssgi_history && !p_render_buffers->get_history_discard();
 	settings.debug_mode = get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SSGI_TERMINATION ? 1 : (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SSGI_CONFIDENCE ? 2 : 0);
 	rb_data->ss_effects_data.ssgi_last_frame_transform = p_transform;
-	rb_data->ss_effects_data.ssgi_history = settings.debug_mode == 0 && GLOBAL_GET_CACHED(bool, "rendering/environment/ssil/traced/temporal");
+	rb_data->ss_effects_data.ssgi_history = settings.debug_mode == 0 && GLOBAL_GET_CACHED(bool, "rendering/environment/ssgi/traced/temporal");
 
 	ss_effects->screen_space_gi(p_render_buffers, rb_data->ss_effects_data.ssil, p_normal_slices, *copy_effects, settings);
 }

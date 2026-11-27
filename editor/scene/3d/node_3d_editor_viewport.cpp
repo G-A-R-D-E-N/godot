@@ -7112,18 +7112,18 @@ Node3DEditorViewport::Node3DEditorViewport(Node3DEditor *p_spatial_editor, int p
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Scene Luminance"), VIEW_DISPLAY_DEBUG_SCENE_LUMINANCE, SupportedRenderingMethods::FORWARD_PLUS_MOBILE,
 			TTRC("Displays the scene luminance computed from the 3D buffer. This is used for Auto Exposure calculation.\nRequires Auto Exposure to be enabled in CameraAttributes to have a visible effect."));
 	display_submenu->add_separator();
-	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("SSAO"), VIEW_DISPLAY_DEBUG_SSAO, SupportedRenderingMethods::FORWARD_PLUS,
-			TTRC("Displays the screen-space ambient occlusion buffer. Requires SSAO to be enabled in Environment to have a visible effect."));
-	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("SSIL"), VIEW_DISPLAY_DEBUG_SSIL, SupportedRenderingMethods::FORWARD_PLUS,
-			TTRC("Displays the screen-space indirect lighting buffer. Requires SSIL to be enabled in Environment to have a visible effect."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("GTAO"), VIEW_DISPLAY_DEBUG_SSAO, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays the ground-truth ambient occlusion buffer. Requires GTAO to be enabled in Environment to have a visible effect."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("SSGI"), VIEW_DISPLAY_DEBUG_SSIL, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Displays the screen-space global illumination buffer. Requires SSGI to be enabled in Environment to have a visible effect."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Bent Normals"), VIEW_DISPLAY_DEBUG_BENT_NORMALS, SupportedRenderingMethods::FORWARD_PLUS,
-			TTRC("Displays the GTAO bent normal buffer. Requires SSAO with the GTAO backend and bent normals enabled in the project settings."));
+			TTRC("Displays the GTAO bent normal buffer. Requires GTAO with the GTAO backend and bent normals enabled in the project settings."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Contact Shadows"), VIEW_DISPLAY_DEBUG_CONTACT_SHADOWS, SupportedRenderingMethods::FORWARD_PLUS,
 			TTRC("Displays the combined screen-space contact shadow visibility of all lights. Requires contact shadows to be enabled in the project settings."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("SSR Confidence"), VIEW_DISPLAY_DEBUG_SSR_CONFIDENCE, SupportedRenderingMethods::FORWARD_PLUS,
 			TTRC("Displays the confidence of the screen-space reflection hit at each pixel, the alpha of the SSR buffer (white = the hit replaces the probe or sky reflection). Requires SSR to be enabled in Environment to have a visible effect."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Bounce Source"), VIEW_DISPLAY_DEBUG_BOUNCE_SOURCE, SupportedRenderingMethods::FORWARD_PLUS,
-			TTRC("Displays the radiance SSIL gathers in the next frame: direct diffuse light plus emission weighted by EMISSION_BOUNCE_WEIGHT. Requires SSIL to be enabled in Environment."));
+			TTRC("Displays the radiance SSGI gathers in the next frame: direct diffuse light plus emission weighted by EMISSION_BOUNCE_WEIGHT. Requires SSGI to be enabled in Environment."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Reflection Source"), VIEW_DISPLAY_DEBUG_REFLECTION_SOURCE, SupportedRenderingMethods::FORWARD_PLUS,
 			TTRC("Displays the radiance SSR samples in the next frame: the opaque image without the SSR term and without fog. Requires SSR to be enabled in Environment."));
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("SSR Hit Distance"), VIEW_DISPLAY_DEBUG_SSR_HIT_DISTANCE, SupportedRenderingMethods::FORWARD_PLUS,
