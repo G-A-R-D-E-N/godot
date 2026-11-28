@@ -18,4 +18,4 @@ These come from what the team fixed before merge in recent pull requests (ReSTIR
 
 ## paths: docs/**, doc/**, .github/**
 - Code notes must name the bits, paths and symbols the code now uses.
-- Dependabot must not bump deliberately old Roslyn pins, and its GitHub Actions entry must cover composite actions in `.github/actions`.
+- Dependabot must not bump deliberately old Roslyn pins. If a Dependabot config is added, its GitHub Actions entry must cover composite actions in `.github/actions`.
