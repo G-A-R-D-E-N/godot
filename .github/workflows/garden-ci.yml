@@ -118,18 +118,14 @@ jobs:
           cache: npm
           cache-dependency-path: platform/web/package-lock.json
 
-      # Prints the versions actually installed from the manifest under test, so a Dependabot
-      #  pull request shows the bumped packages in this job's log.
-      - name: Show installed platform/web devDependencies
-        if: steps.web-npm.outputs.changed == 'true'
-        working-directory: platform/web
-        run: npm ls --depth=0
-
       - name: platform/web npm lint
         if: steps.web-npm.outputs.changed == 'true'
         working-directory: platform/web
         run: |
           npm ci
+          # Prints the versions actually installed from the manifest under test, so a Dependabot
+          #  pull request shows the bumped packages in this job's log.
+          npm ls --depth=0
           npm run lint
 
   linux-editor:
