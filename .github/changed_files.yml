@@ -13,6 +13,9 @@ sources:
   - platform/web/{package{,-lock}.json,js/**/*.js}
   - tests/**
 
+web-npm:
+  - platform/web/package{,-lock}.json
+
 # Determines which files are appropriate for running clangd-tidy checks on. This is a subset out
 #  of necessity, as we're only evaluating a Linux runner.
 clangd:
