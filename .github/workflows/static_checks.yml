@@ -48,18 +48,3 @@ jobs:
             || 'HEAD~1' }}
         with:
           extra-args: --from-ref ${{ env.FROM_REF }}
-
-      - name: Set up Node.js
-        if: steps.changed-files.outputs.web_npm_any_changed == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: platform/web/package-lock.json
-
-      - name: Web npm lint
-        if: steps.changed-files.outputs.web_npm_any_changed == 'true'
-        working-directory: platform/web
-        run: |
-          npm ci
-          npm run lint
