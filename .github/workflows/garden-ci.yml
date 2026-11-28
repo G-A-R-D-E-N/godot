@@ -87,6 +87,47 @@ jobs:
           fi
           prek run --show-diff-on-failure --color=always --from-ref "$from_ref" --to-ref HEAD
 
+      # Runs whenever the npm tree or the check itself can differ from what was last verified:
+      #  the manifests (Dependabot bumps), the eslint config (rule changes), and this workflow
+      #  (so a change to the gate exercises the gate on its own pull request).
+      - name: Detect platform/web npm lint inputs
+        id: web-npm
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          from_ref="${PR_BASE_SHA:-$PUSH_BEFORE_SHA}"
+          if [ -z "$from_ref" ] || ! git cat-file -e "${from_ref}^{commit}" 2>/dev/null; then
+            from_ref=HEAD~1
+          fi
+          if git diff --name-only "$from_ref" HEAD | grep -qxF \
+            -e platform/web/package.json \
+            -e platform/web/package-lock.json \
+            -e platform/web/eslint.config.cjs \
+            -e .github/workflows/garden-ci.yml; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node.js for platform/web
+        if: steps.web-npm.outputs.changed == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform/web/package-lock.json
+
+      - name: platform/web npm lint
+        if: steps.web-npm.outputs.changed == 'true'
+        working-directory: platform/web
+        run: |
+          npm ci
+          # Prints the versions actually installed from the manifest under test, so a Dependabot
+          #  pull request shows the bumped packages in this job's log.
+          npm ls --depth=0
+          npm run lint
+
   linux-editor:
     name: Linux editor (double, Mono)
     needs: editor-build-scope
